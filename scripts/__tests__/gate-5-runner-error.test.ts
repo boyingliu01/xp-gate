@@ -17,7 +17,7 @@
  * a unit test of the helper alone would pass even if no call site used it.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -29,7 +29,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const REPO_ROOT = process.cwd();
 const HOOK = join(REPO_ROOT, 'githooks', 'pre-commit');
@@ -309,15 +309,20 @@ function spawnFailureMessage(
   return null;
 }
 
-function runHookWithVitestOutput(vitestOutput: string, vitestExit: number): StubResult {
+/** Assemble the sandbox repo + PATH override that makes one end-to-end hook run. */
+function prepareHookSandbox(vitestOutput: string, vitestExit: number): { project: string; bin: string; callsFile: string } {
   const sandbox = mkdtempSync(join(tmpdir(), 'xpgate-454-'));
   tempDirs.push(sandbox);
 
   const bin = join(sandbox, 'bin');
   const callsFile = writeStubNpx(bin, sandbox, vitestOutput, vitestExit);
   const project = createProjectFixture(sandbox, callsFile, vitestOutput, vitestExit);
+  return { project, bin, callsFile };
+}
 
-  const script = [
+/** The shell program that runs the real hook inside a prepared sandbox. */
+function hookScript(project: string, bin: string): string {
+  return [
     `cd "${toBashPath(project)}"`,
     'git init -q -b ci-test',
     'git config user.email t@t.com',
@@ -327,9 +332,25 @@ function runHookWithVitestOutput(vitestOutput: string, vitestExit: number): Stub
     `export PATH="${toPosixPath(bin)}:$PATH"`,
     `bash "${toBashPath(HOOK)}" 2>&1 || echo "__HOOK_EXIT=$?"`,
   ].join(' && ');
+}
 
+/** Turn a finished hook run (or its spawn error) into a StubResult. */
+function hookResult(
+  err: unknown,
+  e: { stdout?: string; status?: number | null; signal?: NodeJS.Signals | null; killed?: boolean; code?: string },
+  callsFile: string
+): StubResult {
+  const failure = spawnFailureMessage(err, e);
+  if (failure) throw new Error(failure);
+  const stdout = e.stdout ?? '';
+  const exitMatch = /__HOOK_EXIT=(\d+)/.exec(stdout);
+  return { stdout, exitCode: exitMatch ? Number(exitMatch[1]) : e.status ?? 1, callsFile };
+}
+
+function runHookWithVitestOutput(vitestOutput: string, vitestExit: number): StubResult {
+  const { project, bin, callsFile } = prepareHookSandbox(vitestOutput, vitestExit);
   try {
-    const stdout = execFileSync(bashPath(), ['-c', script], {
+    const stdout = execFileSync(bashPath(), ['-c', hookScript(project, bin)], {
       encoding: 'utf8',
       timeout: HOOK_TIMEOUT_MS,
       maxBuffer: MAX_BUFFER_BYTES,
@@ -348,6 +369,40 @@ function runHookWithVitestOutput(vitestOutput: string, vitestExit: number): Stub
     if (failure) throw new Error(failure);
     return { stdout: e.stdout ?? '', exitCode: e.status ?? 1, callsFile };
   }
+}
+
+/**
+ * Same end-to-end run, but asynchronous so several can be in flight at once.
+ *
+ * The hook spends its ~36 s in process spawns (Node/bash startup for each gate's
+ * tool probe), which is time the OS can overlap across independent runs. Five
+ * concurrent runs therefore cost about one run's wall time instead of five.
+ */
+function runHookWithVitestOutputAsync(vitestOutput: string, vitestExit: number): Promise<StubResult> {
+  const { project, bin, callsFile } = prepareHookSandbox(vitestOutput, vitestExit);
+  return new Promise<StubResult>((resolve) => {
+    execFile(
+      bashPath(),
+      ['-c', hookScript(project, bin)],
+      { encoding: 'utf8', timeout: HOOK_TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES },
+      (err, stdout, _stderr) => {
+        if (!err) {
+          const exitMatch = /__HOOK_EXIT=(\d+)/.exec(stdout);
+          resolve({ stdout, exitCode: exitMatch ? Number(exitMatch[1]) : 0, callsFile });
+          return;
+        }
+        const e = err as unknown as {
+          code?: string;
+          status?: number | null;
+          signal?: NodeJS.Signals | null;
+          killed?: boolean;
+        };
+        // execFile's callback err carries the exit status but not stdout, which we
+        // already received; hand both through the shared classifier.
+        resolve(hookResult(err, { ...e, stdout }, callsFile));
+      }
+    );
+  });
 }
 
 /** Assert the stub actually ran, so a passing result can never be vacuous. */
@@ -369,13 +424,34 @@ function assertStubRan(callsFile: string, context: string): void {
   }
 }
 
+/**
+ * Every file whose text constitutes "the hook source" for these assertions.
+ *
+ * #798 split pre-commit into a preamble, a driver call and one file per gate
+ * (`githooks/gate-entries/gate-<KEY>-entry.sh`). Gate 5's vitest branches moved
+ * into gate-5-entry.sh, leaving only a handful of mentions in pre-commit -- so
+ * reading pre-commit alone found 0 guarded call sites and this file failed with
+ * "expected 0 to be greater than or equal to 6" on every run.
+ *
+ * Reading the concatenation is what the assertions actually mean: they are
+ * properties of the Gate 5 SOURCE, not of one file that used to contain it. The
+ * order is pre-commit first because the helpers these assertions key off
+ * (`handle_test_failure`) are still defined there.
+ */
+const HOOK_SOURCES = [
+  HOOK,
+  join(REPO_ROOT, 'githooks', 'gate-entries', 'gate-5-entry.sh'),
+];
+
 /** Read the hook source once; several assertions inspect it statically. */
 function readHook(): string {
-  try {
-    return readFileSync(HOOK, 'utf8');
-  } catch (err) {
-    throw new Error(`Cannot read the hook under test at ${HOOK}: ${String(err)}`);
-  }
+  return HOOK_SOURCES.map((sourcePath) => {
+    try {
+      return readFileSync(sourcePath, 'utf8');
+    } catch (err) {
+      throw new Error(`Cannot read the hook source under test at ${sourcePath}: ${String(err)}`);
+    }
+  }).join('\n');
 }
 
 /** Leading-whitespace width of a hook line (tabs counted as two columns). */
@@ -428,7 +504,91 @@ function readLib(): string {
   }
 }
 
+/**
+ * Results of the end-to-end hook runs, keyed by (exit, output), filled in
+ * `beforeAll` by running every case CONCURRENTLY.
+ *
+ * Before this, each `it` ran its own full hook: 360 s measured serially and
+ * 431 s under a full parallel `vitest run`, making this the most expensive test
+ * file in the suite. The hook's cost is process spawning (Node/bash startup for
+ * each gate's tool probe), which the OS overlaps across independent runs — so
+ * five concurrent runs cost about one run's wall time. Semantics are unchanged:
+ * still the real hook, still a real sandbox repo per case, each case still sees
+ * only its own output.
+ */
+const hookRunCache = new Map<string, StubResult>();
+
+/** Stable cache key for one (exit, output) pair. */
+function hookKey(vitestOutput: string, vitestExit: number): string {
+  return `${vitestExit}\u0000${vitestOutput}`;
+}
+
+/** The hook result for this pair; must have been prefilled by `beforeAll`. */
+function hookRun(vitestOutput: string, vitestExit: number): StubResult {
+  const hit = hookRunCache.get(hookKey(vitestOutput, vitestExit));
+  if (!hit) {
+    throw new Error(
+      `Internal fixture error (AC-454): no hook run was prefilled for exit=${vitestExit}. ` +
+        'Add the case to FIXTURE_CASES so beforeAll launches it.'
+    );
+  }
+  return hit;
+}
+
+/**
+ * The exact vitest outputs the Gate 5 end-to-end cases feed the hook.
+ *
+ * Kept as named constants (rather than inline in each `it`) so the five runs can
+ * be kicked off CONCURRENTLY in `beforeAll`: the expensive part is the hook
+ * process tree, and nothing about one case's hook run depends on another's.
+ */
+const FIXTURE_OUTPUTS = {
+  /** vitest exits 1 with an EPERM in "Unhandled Errors" and zero failed tests. */
+  unhandledEperm: [
+    'Test Files  1 passed (1)',
+    '     Tests  14 passed (14)',
+    '    Errors  1 error',
+    '',
+    '\u2500\u2500\u2500\u2500\u2500 Unhandled Errors \u2500\u2500\u2500\u2500\u2500',
+    "Error: EPERM: operation not permitted, open '/tmp/ssr/40b9f1f37d5bd759'",
+  ].join('\n'),
+  /** A genuine test failure: must still BLOCK. */
+  realFailure: ['Test Files  1 failed (1)', '     Tests  1 failed (1)'].join('\n'),
+  /** Both signals present: the real-failure marker must win. */
+  failureAndUnhandled: [
+    '     Tests  1 failed (1)',
+    '\u2500\u2500\u2500\u2500\u2500 Unhandled Errors \u2500\u2500\u2500\u2500\u2500',
+    'Error: EPERM',
+  ].join('\n'),
+  /** #473: a partial run whose coverage can never reach the global threshold. */
+  thresholdOnly: [
+    ' Test Files  1 passed (1)',
+    '      Tests  1 passed (1)',
+    '% Coverage for lines (42.31%)',
+    'ERROR: Coverage for lines (42.31%) does not meet global threshold (80%)',
+  ].join('\n'),
+  /** A fully passing run: PASSES. */
+  allPassed: ['Test Files  1 passed (1)', '     Tests  14 passed (14)'].join('\n'),
+} as const;
+
+/** Every (output, exit) pair a case needs, launched together in `beforeAll`. */
+const FIXTURE_CASES: ReadonlyArray<{ output: string; exit: number }> = [
+  { output: FIXTURE_OUTPUTS.unhandledEperm, exit: 1 },
+  { output: FIXTURE_OUTPUTS.realFailure, exit: 1 },
+  { output: FIXTURE_OUTPUTS.failureAndUnhandled, exit: 1 },
+  { output: FIXTURE_OUTPUTS.thresholdOnly, exit: 1 },
+  { output: FIXTURE_OUTPUTS.allPassed, exit: 0 },
+];
+
 describe('Gate 5 distinguishes runner infrastructure errors from real failures (#454)', () => {
+  // Run every end-to-end hook case CONCURRENTLY, once. See hookRunCache.
+  beforeAll(async () => {
+    const results = await Promise.all(
+      FIXTURE_CASES.map((c) => runHookWithVitestOutputAsync(c.output, c.exit))
+    );
+    FIXTURE_CASES.forEach((c, i) => hookRunCache.set(hookKey(c.output, c.exit), results[i]));
+  }, HOOK_TIMEOUT_MS);
+
   it('AC-454-01: the guard helper is defined in the library the hook sources', () => {
     // #473 moved the judgement into githooks/lib/test-failure.sh so it can be
     // unit-tested without executing the hook. The hook must still load that library;
@@ -526,15 +686,7 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
   });
 
   it('AC-454-02: Unhandled Errors with zero failed tests is SKIPPED, not BLOCKED', () => {
-    const out = [
-      'Test Files  1 passed (1)',
-      '     Tests  14 passed (14)',
-      '    Errors  1 error',
-      '',
-      '\u2500\u2500\u2500\u2500\u2500 Unhandled Errors \u2500\u2500\u2500\u2500\u2500',
-      "Error: EPERM: operation not permitted, open '/tmp/ssr/40b9f1f37d5bd759'",
-    ].join('\n');
-    const { stdout, callsFile } = runHookWithVitestOutput(out, 1);
+    const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.unhandledEperm, 1);
     assertStubRan(callsFile, 'AC-454-02');
     expect(stdout).not.toContain('BLOCKED - Tests FAILED');
     // Positive assertion: the guard's own message must be what we saw, so the
@@ -543,19 +695,13 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
   });
 
   it('AC-454-03: a real test failure still BLOCKS', () => {
-    const out = ['Test Files  1 failed (1)', '     Tests  1 failed (1)'].join('\n');
-    const { stdout, callsFile } = runHookWithVitestOutput(out, 1);
+    const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.realFailure, 1);
     assertStubRan(callsFile, 'AC-454-03');
     expect(stdout).toContain('Tests FAILED');
   });
 
   it('AC-454-04: real-failure markers win when Unhandled Errors are also present', () => {
-    const out = [
-      '     Tests  1 failed (1)',
-      '\u2500\u2500\u2500\u2500\u2500 Unhandled Errors \u2500\u2500\u2500\u2500\u2500',
-      'Error: EPERM',
-    ].join('\n');
-    const { stdout, callsFile } = runHookWithVitestOutput(out, 1);
+    const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.failureAndUnhandled, 1);
     assertStubRan(callsFile, 'AC-454-04');
     expect(stdout).toContain('Tests FAILED');
     expect(stdout).not.toContain('SKIPPED - vitest runner infrastructure error');
@@ -565,21 +711,14 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     // #473: Gate 5 runs only the changed test files, whose coverage can never reach
     // the global threshold, so vitest exits 1 having failed nothing. The fixture
     // stages every file, which is exactly the partial-run condition.
-    const out = [
-      ' Test Files  1 passed (1)',
-      '      Tests  1 passed (1)',
-      '% Coverage for lines (42.31%)',
-      'ERROR: Coverage for lines (42.31%) does not meet global threshold (80%)',
-    ].join('\n');
-    const { stdout, callsFile } = runHookWithVitestOutput(out, 1);
+    const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.thresholdOnly, 1);
     assertStubRan(callsFile, 'AC-473-02');
     expect(stdout).toContain('SKIPPED - coverage threshold judgement');
     expect(stdout).not.toContain('BLOCKED - Tests FAILED');
   });
 
   it('AC-454-05: a fully passing run PASSES (regression)', () => {
-    const out = ['Test Files  1 passed (1)', '     Tests  14 passed (14)'].join('\n');
-    const { stdout, callsFile } = runHookWithVitestOutput(out, 0);
+    const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.allPassed, 0);
     assertStubRan(callsFile, 'AC-454-05');
     // Scope the assertion to Gate 5's own verdict. The sandbox fixture is a bare
     // repo with no .archlint.yaml, so Gate 6 legitimately blocks later; asserting
