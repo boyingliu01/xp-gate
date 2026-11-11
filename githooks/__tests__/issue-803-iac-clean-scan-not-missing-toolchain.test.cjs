@@ -27,6 +27,10 @@
  *         commit. A gate that blocks a clean scan teaches its reader that the gate
  *         is unreliable, which is how the next genuine block gets bypassed.
  * @covers REQ-803
+ * @skip-justified: the behavioural case is skipped, not failed, when checkov or the
+ *                  workflow file is absent on this host. Faking a PASS there would be
+ *                  the exact vacuity #803 is about, and failing would report a missing
+ *                  precondition as a product defect.
  */
 'use strict';
 
@@ -101,19 +105,22 @@ it('REQ-803-03: the executability probe budget exceeds the command it times', ()
       + 'It must be well clear of the real cost.');
 });
 
-it('REQ-803-04: a workflow file is scanned, not reported as unscannable', function () {
-  // Behavioural, and it is the end-to-end claim the issue is about. Skipped rather
-  // than faked when checkov is absent: asserting a PASS without a scanner would be
-  // the vacuous test this whole issue is about.
+it('REQ-803-04: a workflow file is scanned, not reported as unscannable', function (t) {
+  // Behavioural, and it is the end-to-end claim the issue is about.
+  //
+  // Guarded rather than faked when the precondition is absent: asserting a PASS
+  // without a scanner would be exactly the vacuity this issue is about. The guard
+  // uses the runner's own skip where the runner offers one -- `assert.ok(true)`
+  // verifies nothing and is flagged by Gate 5d as a tautology, correctly.
   const hasCheckov = childProcess.spawnSync('bash', ['-c', 'command -v checkov'], { encoding: 'utf8' });
   if (hasCheckov.status !== 0) {
-    assert.ok(true, 'checkov not installed on this host: the probe path cannot be exercised');
+    if (t && typeof t.skip === 'function') t.skip('checkov not installed: the probe path cannot be exercised');
     return;
   }
 
   const workflow = path.join(REPO_ROOT, '.github', 'workflows', 'cross-platform-ci.yml');
   if (!fs.existsSync(workflow)) {
-    assert.ok(true, 'no workflow file at the expected path in this checkout');
+    if (t && typeof t.skip === 'function') t.skip('no workflow file at the expected path in this checkout');
     return;
   }
 

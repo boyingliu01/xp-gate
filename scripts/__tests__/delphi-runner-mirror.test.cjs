@@ -25,26 +25,59 @@ describe('Delphi runner mirror validation', () => {
     return spawnSync(BASH, [script, ...args], { cwd: fixture, env: gitEnv, encoding: 'utf8' });
   }
 
+  /**
+   * Build the committed fixture repository ONCE, then copy it per test.
+   *
+   * Every case needs its own repo -- they mutate tracked files, commit, and
+   * remove paths -- but building one from scratch means six git invocations
+   * (init, two configs, hooksPath, add, commit), measured at 1.8-2.3 s per case
+   * on this machine. With eight cases that was ~16 s of the file's 19.1 s.
+   *
+   * Copying a prepared template costs ~100 ms and preserves `.git` intact,
+   * including the `core.hooksPath=/dev/null` that keeps this machine's global
+   * XP-Gate hooks from running on the seed commit. Verified: after cpSync the
+   * copy reports `git status` clean and `core.hooksPath` still `/dev/null`.
+   */
+  let template;
+
+  beforeAll(() => {
+    template = fs.mkdtempSync(path.join(os.tmpdir(), 'delphi-runner-mirror-tpl-'));
+    fs.mkdirSync(path.join(template, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(template, 'src/npm-package/scripts'), { recursive: true });
+    fs.writeFileSync(path.join(template, 'scripts/delphi-external-review.cjs'), 'canonical\n');
+    fs.writeFileSync(path.join(template, 'src/npm-package/scripts/delphi-external-review.cjs'), 'canonical\n');
+    const templateHome = path.join(template, 'home');
+    fs.mkdirSync(templateHome);
+    const seedEnv = {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: '1',
+      HOME: templateHome,
+      XDG_CONFIG_HOME: path.join(templateHome, '.config'),
+    };
+    const seedGit = (args) => spawnSync('git', args, { cwd: template, env: seedEnv, encoding: 'utf8' });
+    seedGit(['init', '-q']);
+    seedGit(['config', 'user.name', 'Mirror Fixture']);
+    seedGit(['config', 'user.email', 'mirror-fixture@example.invalid']);
+    seedGit(['config', 'core.hooksPath', '/dev/null']);
+    seedGit(['add', '.']);
+    seedGit(['commit', '-qm', 'initial mirror']);
+  });
+
+  afterAll(() => {
+    if (template) fs.rmSync(template, { recursive: true, force: true });
+  });
+
   beforeEach(() => {
     fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'delphi-runner-mirror-'));
-    fs.mkdirSync(path.join(fixture, 'scripts'), { recursive: true });
-    fs.mkdirSync(path.join(fixture, 'src/npm-package/scripts'), { recursive: true });
-    fs.writeFileSync(path.join(fixture, 'scripts/delphi-external-review.cjs'), 'canonical\n');
-    fs.writeFileSync(path.join(fixture, 'src/npm-package/scripts/delphi-external-review.cjs'), 'canonical\n');
+    fs.cpSync(template, fixture, { recursive: true });
+    // HOME lives inside the fixture, so it must be recomputed for the copy.
     const home = path.join(fixture, 'home');
-    fs.mkdirSync(home);
     gitEnv = {
       ...process.env,
       GIT_CONFIG_NOSYSTEM: '1',
       HOME: home,
       XDG_CONFIG_HOME: path.join(home, '.config'),
     };
-    git(['init', '-q']);
-    git(['config', 'user.name', 'Mirror Fixture']);
-    git(['config', 'user.email', 'mirror-fixture@example.invalid']);
-    git(['config', 'core.hooksPath', '/dev/null']);
-    git(['add', '.']);
-    git(['commit', '-qm', 'initial mirror']);
   });
 
   afterEach(() => fs.rmSync(fixture, { recursive: true, force: true }));

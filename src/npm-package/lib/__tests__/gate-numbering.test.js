@@ -17,6 +17,28 @@ const { GATE_REGISTRY, resolveAlias } = require('../gate-runner');
 
 const REPO_ROOT = path.join(__dirname, '../../../..');
 
+/**
+ * Concatenate every file that participates in the pre-commit gate chain: the
+ * entry point, the ordered driver, and one body per gate.
+ *
+ * #798 moved each gate's banner and logic out of pre-commit into
+ * gate-entries/. Assertions about gate NAMES must therefore read the whole
+ * chain, or they pass while the names moved to a file nothing sources.
+ * @returns {string} the chain's source text, newline-joined
+ */
+function readGateChain() {
+  const parts = [fs.readFileSync(path.join(REPO_ROOT, 'githooks/pre-commit'), 'utf8')];
+  const driver = path.join(REPO_ROOT, 'githooks/gate-driver.sh');
+  if (fs.existsSync(driver)) parts.push(fs.readFileSync(driver, 'utf8'));
+  const entriesDir = path.join(REPO_ROOT, 'githooks/gate-entries');
+  if (fs.existsSync(entriesDir)) {
+    for (const f of fs.readdirSync(entriesDir).sort()) {
+      if (f.endsWith('.sh')) parts.push(fs.readFileSync(path.join(entriesDir, f), 'utf8'));
+    }
+  }
+  return parts.join('\n');
+}
+
 describe('gate numbering matches the hook (#677)', () => {
   it('AC-686-01: gate 9 is Build Integrity and gate 10 is SAST Security', () => {
     expect(GATE_REGISTRY['9'].name).toBe('Build Integrity');
@@ -26,7 +48,12 @@ describe('gate numbering matches the hook (#677)', () => {
   it('AC-686-02: the hook agrees — its own output names 9 as Build integrity', () => {
     // Reads the hook rather than restating the constant: if the hook ever
     // renumbers again, this fails and points at which side moved.
-    const hook = fs.readFileSync(path.join(REPO_ROOT, 'githooks/pre-commit'), 'utf8');
+    //
+    // #798 moved each gate's banner into its own gate-entries/ file, so the
+    // assertion reads the whole chain. It deliberately does NOT assert on
+    // pre-commit alone: that would pass while every banner sat in a file no
+    // hook sources -- the exact failure #677 was filed about.
+    const hook = readGateChain();
     expect(hook).toMatch(/→ Gate 9: Build integrity/);
     expect(hook).toMatch(/GATE 10: Semgrep SAST/);
   });

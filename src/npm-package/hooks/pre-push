@@ -81,6 +81,36 @@ write_pre_push_report() {
   commit_hash=$(git rev-parse HEAD 2>/dev/null) || commit_hash=""
   commit_hash=$(printf '%s' "$commit_hash" | tr -d '\r\n'); [ -n "$commit_hash" ] || commit_hash="unknown"
   verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
+  # #798: run-level wall-clock duration, from the shared now_ms clock. Emitted as
+  # Python `None` when unmeasurable so the field is explicitly JSON null rather
+  # than a believable 0 — the same rule pre-commit's duration_ms follows.
+  #
+  # Lower bound: the push cannot have run for less than the slowest gate it
+  # recorded. A value below that means the arithmetic is wrong, and a wrong
+  # number here is acted upon; null is the honest answer.
+  local xp_push_duration_ms="None"
+  if [ -n "${PRE_PUSH_START_MS:-}" ]; then
+    local _xp_push_now _xp_push_floor
+    _xp_push_now="$(now_ms 2>/dev/null || true)"
+    case "$_xp_push_now" in
+      ''|*[!0-9]*) _xp_push_now="" ;;
+    esac
+    _xp_push_floor="${MP_DURATION_MS:-0}"; case "$_xp_push_floor" in ''|*[!0-9]*) _xp_push_floor=0 ;; esac
+    if [ -n "${M_DURATION_MS:-}" ]; then
+      case "$M_DURATION_MS" in
+        ''|*[!0-9]*) : ;;
+        *) [ "$M_DURATION_MS" -gt "$_xp_push_floor" ] && _xp_push_floor="$M_DURATION_MS" ;;
+      esac
+    fi
+    if [ -n "$_xp_push_now" ] && [ "$_xp_push_now" -gt "$PRE_PUSH_START_MS" ]; then
+      local _xp_push_total=$(( _xp_push_now - PRE_PUSH_START_MS ))
+      if [ "$_xp_push_total" -ge "$_xp_push_floor" ]; then
+        xp_push_duration_ms="$_xp_push_total"
+      else
+        echo "   ⚠️  pre-push duration_ms rejected: measured ${_xp_push_total}ms is below the slowest gate (${_xp_push_floor}ms) — recording null." >&2
+      fi
+    fi
+  fi
   mkdir -p "$reports_dir"
   # #544: the survivor detail is a JSON document, so it cannot be interpolated
   # into this heredoc — a single quote in a path would break the Python source.
@@ -182,6 +212,7 @@ write_pre_push_report() {
     printf '%s\n' "  'trigger': 'pre-push',"
     printf '%s\n' "  'branch': '$CURRENT_BRANCH',"
     printf '%s\n' "  'commit': '$commit_hash',"
+    printf '%s\n' "  'duration_ms': $xp_push_duration_ms,"
     printf '%s\n' "  'changed_files': [f for f in pushed_files if f],"
     printf '%s\n' "  'overall': {"
     printf '%s\n' "    'score': None,"
@@ -364,19 +395,48 @@ fi
 # guard runs here (fail-closed) and in CI's mirror-parity job. Read-only:
 # compares bytes and git index modes; heals nothing.
 GATE_MP_STATUS="SKIP"
-# Duration is audited in MILLISECONDS end-to-end (#521 AC-2; the #524 lesson:
-# never mix a seconds timestamp into a ms budget). The output is validated as
-# bare digits before use: BSD/macOS date does not support %3N and prints the
-# literal '...%3N' with exit 0, which would blow up the arithmetic and kill
-# pre-push — a non-numeric read degrades to 0 (walkthrough MJ-01).
+# #798: duration is audited in MILLISECONDS end-to-end (#521 AC-2; the #524
+# lesson: never mix a seconds timestamp into a ms budget).
+#
+# The clock is now the SHARED lib/now-ms.sh helper, not a private `date +%s%3N`.
+# That difference mattered: on Windows Git Bash `date +%s%3N` prints the literal
+# "...%3N" and exits 0, so the `|| true` fallback never fired and the value had
+# to be discarded to 0 — every pre-push gate duration read as 0ms. now_ms()
+# prefers node Date.now() and regex-validates its output on every platform.
+#
+# Resolution order mirrors pre-commit: beside the hook, then hooks/lib/ (older
+# installs), then the repo source.
+for _xp_now_ms_candidate in \
+  "$(dirname "${BASH_SOURCE[0]}")/lib/now-ms.sh" \
+  "$(dirname "${BASH_SOURCE[0]}")/hooks/lib/now-ms.sh" \
+  "$(dirname "${BASH_SOURCE[0]}")/../githooks/lib/now-ms.sh"; do
+  if [ -f "$_xp_now_ms_candidate" ]; then
+    # shellcheck disable=SC1090  # sourcing the resolved lib is the contract here
+    source "$_xp_now_ms_candidate"
+    break
+  fi
+done
+unset _xp_now_ms_candidate
+# Without the helper timing is unmeasurable: emit nothing rather than
+# substituting a different clock, so the report omits the field (#640's rule).
+if ! command -v now_ms >/dev/null 2>&1; then
+  now_ms() { printf ''; }
+fi
 _mp_now_ms() {
   local _t
-  _t="$(date +%s%3N 2>/dev/null || true)"
+  _t="$(now_ms 2>/dev/null || true)"
   case "$_t" in
     ''|*[!0-9]*) echo 0 ;;
     *) echo "$_t" ;;
   esac
 }
+# #798: run-level start, latched before ANY gate. Pre-push reports carried only
+# per-gate timings (M, MP) and no total, so the chain as a whole was never
+# measurable — the issue recorded "pre-push 报告里根本没有耗时字段".
+PRE_PUSH_START_MS="$(now_ms 2>/dev/null || true)"
+case "$PRE_PUSH_START_MS" in
+  ''|*[!0-9]*) PRE_PUSH_START_MS="" ;;
+esac
 MP_START_MS="$(_mp_now_ms)"
 MP_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || MP_ROOT=""
 MP_ROOT=$(printf '%s' "$MP_ROOT" | tr -d '

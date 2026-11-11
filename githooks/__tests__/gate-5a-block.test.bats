@@ -23,6 +23,14 @@
 # Resolve source repo — works whether BATS runs from the worktree or the main checkout
 SOURCE_GITHOOKS="${XP_GATE_GITHOOKS:-$(cd "$BATS_TEST_DIRNAME/.." && pwd)}"
 
+# Installs the complete hook set (pre-commit + gate-driver.sh + gate-entries/ +
+# lib/ + gate-*.sh). Sharing one helper is what keeps every fixture in step with
+# the installed layout: hand-rolled copies went stale three times (#497, #548,
+# and again for gate-driver.sh in #798), each time turning assertions into tests
+# of a crashed hook.
+# shellcheck source=/dev/null
+. "$BATS_TEST_DIRNAME/helpers/install-hook-set.bash"
+
 setup() {
   # Create temp git repo for testing
   export TEST_DIR="$(mktemp -d)"
@@ -71,6 +79,16 @@ MOCK
   for lib_file in "$SOURCE_GITHOOKS"/lib/*.sh; do
     [ -f "$lib_file" ] && cp "$lib_file" .git/hooks/lib/
   done
+  # #798 moved the gate bodies out of pre-commit into githooks/gate-entries/ and
+  # the order into githooks/gate-driver.sh. The installed hook set is four parts
+  # now, so a fixture that copies only pre-commit reproduces the same failure
+  # mode as the two lines above, one refactor later: the hook aborts with
+  # "could not load gate-driver.sh" and every assertion then tests a crash.
+  [ -f "$SOURCE_GITHOOKS/gate-driver.sh" ] && cp "$SOURCE_GITHOOKS/gate-driver.sh" .git/hooks/
+  if [ -d "$SOURCE_GITHOOKS/gate-entries" ]; then
+    mkdir -p .git/hooks/gate-entries
+    cp "$SOURCE_GITHOOKS"/gate-entries/*.sh .git/hooks/gate-entries/ 2>/dev/null || true
+  fi
 
   # Create initial commit so HEAD exists (include a .ts file so hook detects TypeScript project)
   echo "init" > README.md
@@ -111,6 +129,40 @@ MOCK
   chmod +x "$TEST_DIR/bin/coverage"
   # A present .coverage is what makes the hook consult the stub at all.
   echo "stub" > .coverage
+  # #798: the chain now runs Security (Gate 8/10/7) BEFORE Gate 5, so every
+  # case in this suite reaches the SAST scan. Unstubbed, semgrep really runs and
+  # its timeout is 180s, so the suite that used to finish in seconds would hang.
+  # Stub it for the same reason jscpd/pytest/coverage are stubbed: the fixture
+  # exercises Gate 5a, and an unstubbed external tool makes the suite measure the
+  # machine's toolchain instead of the gate. The stub answers the JSON shape
+  # gate-10.sh parses, with zero findings.
+  cat > "$TEST_DIR/bin/semgrep" << 'MOCK'
+#!/bin/bash
+case "$*" in
+  *--version*) echo "1.0.0"; exit 0 ;;
+esac
+echo '{"results":[],"errors":[]}'
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/semgrep"
+  # #798: same reason, one gate earlier. The chain now runs Simian/CCN/Security
+  # before Gate 5, so lizard and gitleaks are reached on every case too. These
+  # stubs keep the suite measuring Gate 5a instead of the host toolchain.
+  cat > "$TEST_DIR/bin/gitleaks" << 'MOCK'
+#!/bin/bash
+case "$*" in
+  *--version*) echo "8.0.0"; exit 0 ;;
+esac
+echo "[]"
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/gitleaks"
+  cat > "$TEST_DIR/bin/lizard" << 'MOCK'
+#!/bin/bash
+# No functions found: nothing over either CCN threshold.
+exit 0
+MOCK
+  chmod +x "$TEST_DIR/bin/lizard"
   git add . && git commit --no-verify -q -m "init"
 }
 
@@ -256,18 +308,11 @@ run_fixture_hook() {
   git -C "$FRESH" config user.email "test@test.com"
   git -C "$FRESH" config user.name "Test"
 
-  # Copy hook + adapter infrastructure
-  mkdir -p "$FRESH/.git/hooks"
-  cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
-  chmod +x "$FRESH/.git/hooks/pre-commit"
-  cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
-  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" "$FRESH/.git/hooks/hook-module-resolution.sh" 2>/dev/null || true
-  # lib/*.sh are sourced at runtime too (#449), and this fixture's hook exits at
-  # the first missing one -- so every assertion below would test a crashed hook.
-  mkdir -p "$FRESH/.git/hooks/lib"
-  for lib_file in "$SOURCE_GITHOOKS"/lib/*.sh; do
-    [ -f "$lib_file" ] && cp "$lib_file" "$FRESH/.git/hooks/lib/"
-  done
+  # Install the COMPLETE hook set. #798 moved the gate bodies into
+  # gate-entries/ and the order into gate-driver.sh, so a fixture that copies
+  # pre-commit alone runs a hook that cannot find its gates and every assertion
+  # below would test a crash (#497's failure mode, one refactor later).
+  install_hook_set "$SOURCE_GITHOOKS" "$FRESH/.git/hooks"
   # Use absolute path — relative ".git/hooks" resolves relative to .git/ dir, not working tree
   git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
 
@@ -375,17 +420,9 @@ MOCK
   git -C "$FRESH" config user.email "test@test.com"
   git -C "$FRESH" config user.name "Test"
 
-  mkdir -p "$FRESH/.git/hooks"
-  cp "$SOURCE_GITHOOKS/pre-commit" "$FRESH/.git/hooks/pre-commit"
-  chmod +x "$FRESH/.git/hooks/pre-commit"
-  cp "$SOURCE_GITHOOKS/adapter-common.sh" "$FRESH/.git/hooks/adapter-common.sh" 2>/dev/null || true
-  cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" "$FRESH/.git/hooks/hook-module-resolution.sh" 2>/dev/null || true
-  # lib/*.sh are sourced at runtime too (#449); without them this hook exits
-  # before reaching Gate 5a and the assertion below tests a crash.
-  mkdir -p "$FRESH/.git/hooks/lib"
-  for lib_file in "$SOURCE_GITHOOKS"/lib/*.sh; do
-    [ -f "$lib_file" ] && cp "$lib_file" "$FRESH/.git/hooks/lib/"
-  done
+  # Complete hook set, including gate-entries/ and gate-driver.sh (#798); see
+  # the comment in the first FRESH fixture for why a partial copy tests a crash.
+  install_hook_set "$SOURCE_GITHOOKS" "$FRESH/.git/hooks"
   # Use absolute path — relative ".git/hooks" resolves relative to .git/ dir, not working tree
   git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
 

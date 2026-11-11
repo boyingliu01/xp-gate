@@ -69,8 +69,19 @@ describe('crap-cli.js - advisory contract', () => {
     // Without coverage every function is unmeasured; printing an empty ranking
     // would read as "nothing to fix", which is the opposite of the truth.
     const missing = path.join(tmpDir, 'does-not-exist.json');
-    const res = await capture(() => handleCrap(['--coverage', missing]));
-    expect(res.code).toBe(1);
-    expect(res.err).toContain('No coverage artifact');
+    // `--paths` is pinned at this empty temp dir on purpose. handleCrap runs
+    // lizard BEFORE it checks for the coverage artifact, so the default
+    // `--paths src` makes this case scan the whole source tree (measured 36.3 s)
+    // to reach an assertion that never looks at the scan. An empty directory
+    // makes lizard return in ~0.9 s with no output, which is all this case
+    // needs: it asserts the exit code and the message, nothing about the scan.
+    const emptyTree = fs.mkdtempSync(path.join(os.tmpdir(), 'crap-cli-empty-'));
+    try {
+      const res = await capture(() => handleCrap(['--coverage', missing, '--paths', emptyTree]));
+      expect(res.code).toBe(1);
+      expect(res.err).toContain('No coverage artifact');
+    } finally {
+      fs.rmSync(emptyTree, { recursive: true, force: true });
+    }
   });
 });

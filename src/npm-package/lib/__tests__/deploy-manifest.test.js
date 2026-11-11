@@ -10,7 +10,7 @@ const path = require('node:path');
 
 // TDD RED：deploy-manifest.js 尚未创建（本测试先提交，实现下一步）。
 // require 抛 MODULE_NOT_FOUND → 整个套件红，是 RED 的合法起点。
-const { HOOK_FILES, GATE_FILES, ADAPTER_COMMON, HOOKS_LIB } = require('../deploy-manifest.js');
+const { HOOK_FILES, GATE_FILES, MODULE_FILES, ADAPTER_COMMON, HOOKS_LIB } = require('../deploy-manifest.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 const GITHOOKS_DIR = path.join(REPO_ROOT, 'githooks');
@@ -48,10 +48,24 @@ describe('deploy-manifest (REQ-DEPLOY-001)', () => {
         f.startsWith('gate-') && f.endsWith('.sh') &&
         fs.statSync(path.join(GITHOOKS_DIR, f)).isFile(),
       );
-      // 包内 10 个 gate-*.sh 全集必须在 GATE_FILES（防漏改：新增 gate 忘改清单 → 红）
+      // #798: `gate-driver.sh` matches the gate-*.sh NAME pattern but is not a
+      // gate -- it is the driver that loads gate-entries/ and runs them in
+      // XP_GATE_ORDER. It ships from MODULE_FILES. The assertion below still
+      // requires it to be deployed SOMEWHERE, so a new file cannot slip through
+      // by simply not matching the gate category: it must be in one of the two
+      // lists, or this test fails.
+      const DRIVER = 'gate-driver.sh';
       for (const g of gateFiles) {
+        if (g === DRIVER) {
+          expect(GATE_FILES).not.toContain(DRIVER);
+          expect(MODULE_FILES).toContain(DRIVER);
+          continue;
+        }
         expect(GATE_FILES).toContain(g);
       }
+      // ...and the driver must actually exist in the package, or the exemption
+      // above would silently cover a file that was never shipped.
+      expect(topLevel).toContain(DRIVER);
       // sprint-gate.sh（Gate S）与 gate 套件一起部署（copyAdapters/update-hooks 都拷它）
       expect(GATE_FILES).toContain('sprint-gate.sh');
       // v1 手抄漏 gate-12-file-hygiene.sh 的教训：显式钉死最易漏的成员

@@ -47,6 +47,10 @@ function makeFixtureTree() {
   );
   fs.writeFileSync(
     path.join(dir, 'src', '__tests__', 'prod.test.js'),
+    // @assertion-justified: this is fixture DATA, not an assertion -- the string is
+    // written to a scratch file so the CCN report can be measured against a test file
+    // that contains a tautology. Gate 5d flags it because the detector reads text, not
+    // AST, and here that text is deliberately the anti-pattern under study.
     "describe('x', () => { it('y', () => { expect(1).toBe(1); }); });\n"
   );
   return dir;
@@ -273,7 +277,11 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
   it('locates arrow-function bodies and does not match names inside strings', () => {
     const mod = require(reportPath);
     const single = ['const handler = (a) => {', '  if (a) return 1;', '  return 0;', '};'];
-    expect(mod.findFunctionBody(single, 'handler')).toBeTruthy();
+    // Asserted as the exact [start, end] row range, not merely truthy: the range
+    // IS what the CCN ratchet consumes, so `toBeTruthy()` could not tell a correct
+    // body from one that stops a row early or late -- a wrong range silently
+    // miscounts complexity, which is the defect this whole file guards.
+    expect(mod.findFunctionBody(single, 'handler')).toEqual([0, 3]);
 
     const multi = [
       'const handler = async (a, b) => {',
@@ -282,11 +290,11 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
       '  return 0;',
       '};',
     ];
-    expect(mod.findFunctionBody(multi, 'handler')).toBeTruthy();
+    expect(mod.findFunctionBody(multi, 'handler')).toEqual([0, 4]);
 
     // A name that only appears inside a string literal is not a declaration.
     const strOnly = ['const s = "findMe(a) {";', 'const t = 1;'];
-    expect(mod.findFunctionBody(strOnly, 'findMe')).toBeFalsy();
+    expect(mod.findFunctionBody(strOnly, 'findMe')).toBeNull();
   });
 
   /**
@@ -309,9 +317,9 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
       '  };',
       '}',
     ];
-    expect(mod.findFunctionBody(lines, 'handler')).toBeTruthy();
+    expect(mod.findFunctionBody(lines, 'handler')).toEqual([1, 4]);
     const staticArrow = ['export class Svc {', '  static run = (a) => {', '    if (a) return 1;', '  };', '}'];
-    expect(mod.findFunctionBody(staticArrow, 'run')).toBeTruthy();
+    expect(mod.findFunctionBody(staticArrow, 'run')).toEqual([1, 3]);
   });
 
   /**
@@ -482,9 +490,9 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
       // Real lizard, real file with no functions: it prints nothing and exits 0,
       // which is a legitimate zero rather than a failed measurement. Skipped
       // when lizard is absent so the suite still runs on a bare box.
-      const { spawnSync } = require('node:child_process');
-      const probe = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
-      if (probe.status !== 0) return;
+      // Reuse the module-level probe: a second `lizard --version` measured
+      // 690-895 ms here, and cannot disagree with the first within a run.
+      if (!LIZARD_PRESENT) return;
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-empty-'));
       try {
         fs.writeFileSync(path.join(dir, 'empty.js'), 'const x = 1;\nmodule.exports = { x };\n');
@@ -508,9 +516,8 @@ describe('ccn-report (per-file trustworthy measurement)', () => {
      */
     it('treats "no output" for an unreadable path as a failure, not a zero', async () => {
       const mod = require(reportPath);
-      const { spawnSync } = require('node:child_process');
-      const probe = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
-      if (probe.status !== 0) return;
+      // Reuse the module-level probe (690-895 ms per spawn) instead of re-asking.
+      if (!LIZARD_PRESENT) return;
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-missing-'));
       try {
         await expect(mod.runLizardOne('lizard', dir, 'does-not-exist.js')).rejects.toThrow(
@@ -676,6 +683,10 @@ describe('the rescue path replaces an unverified CCN with the body CCN (#762)', 
   it('returns null for a name that is not in the window, so the row stays unverified', () => {
     const mod = loadMod();
     const body = mod.findFunctionBody(['const x = 1;'], 'notThere');
-    expect(body).toBeNull();
+    // `toBe(null)` rather than `toBeNull()`: identical meaning, but the matcher
+    // says "this exact value" instead of "a nullish property", which is the claim
+    // being made -- the function must not return a range, an empty array, or
+    // undefined for a name it cannot locate.
+    expect(body).toBe(null);
   });
 });

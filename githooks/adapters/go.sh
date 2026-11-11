@@ -58,6 +58,11 @@ run_tests() {
   return $?
 }
 
+# #798 / #794: run_coverage() below also executes and validates every test
+# (`go test`), so a separate run_tests() pass adds no verdict -- only time.
+# Undeclared adapters keep the safe double-run default.
+coverage_runs_tests() { return 0; }
+
 run_coverage() {
   require_tool go "Go SDK" || return 1
 

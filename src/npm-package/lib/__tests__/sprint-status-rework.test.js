@@ -62,6 +62,7 @@ function repoTemplate() {
   if (_repoTemplate) return _repoTemplate;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rework-template-'));
   git('init', dir);
+  git('config core.hooksPath /dev/null', dir);
   git('config user.email "test@test.com"', dir);
   git('config user.name "Test"', dir);
   _repoTemplate = dir;

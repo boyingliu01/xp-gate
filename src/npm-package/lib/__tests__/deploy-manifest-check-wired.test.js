@@ -19,6 +19,24 @@ const GENERATOR = path.join(ROOT, 'scripts/generate-deploy-manifest.cjs');
 const PROJECTION = path.join(ROOT, 'githooks/deploy-manifest.sh');
 const PRE_COMMIT = path.join(ROOT, 'githooks/pre-commit');
 
+// #798 split the hook: the deploy-manifest freshness check lives in
+// gate-entries/gate-12b-entry.sh, not in pre-commit. These assertions are about
+// "is the detector wired into a gate that can block", so they read the whole
+// gate chain rather than one file -- reading pre-commit alone would report the
+// wiring as missing while it is in fact running on every manifest edit.
+function readGateChain() {
+  const parts = [fs.readFileSync(PRE_COMMIT, 'utf8')];
+  const driver = path.join(ROOT, 'githooks/gate-driver.sh');
+  if (fs.existsSync(driver)) parts.push(fs.readFileSync(driver, 'utf8'));
+  const entriesDir = path.join(ROOT, 'githooks/gate-entries');
+  if (fs.existsSync(entriesDir)) {
+    for (const f of fs.readdirSync(entriesDir).sort()) {
+      if (f.endsWith('.sh')) parts.push(fs.readFileSync(path.join(entriesDir, f), 'utf8'));
+    }
+  }
+  return parts.join('\n');
+}
+
 const backups = [];
 
 afterEach(() => {
@@ -78,7 +96,7 @@ describe('deploy-manifest projection freshness is enforced, not just implemented
   it('AC-DEPLOY-13: pre-commit actually invokes the generator with --check', () => {
     // The detector is only worth the lines it occupies if a gate runs it.
     // This asserts the wiring, which is the half that silently goes missing.
-    const hook = fs.readFileSync(PRE_COMMIT, 'utf8');
+    const hook = readGateChain();
 
     expect(hook).toContain('generate-deploy-manifest.cjs --check');
     // And it must be able to BLOCK: a call whose failure is swallowed would
@@ -93,7 +111,7 @@ describe('deploy-manifest projection freshness is enforced, not just implemented
     // that never runs for a manifest edit (code-walkthrough R2, A3/F2/F-2).
     // This extracts the enclosing guard and proves it is keyed on the manifest,
     // so relocating the call into a dead branch fails the test.
-    const hook = fs.readFileSync(PRE_COMMIT, 'utf8');
+    const hook = readGateChain();
     const callSite = hook.indexOf('generate-deploy-manifest.cjs --check');
 
     expect(callSite).toBeGreaterThan(-1);
@@ -109,7 +127,7 @@ describe('deploy-manifest projection freshness is enforced, not just implemented
     // `exit 1` makes every later line unreachable, so a GATE_12_STATUS=WARN
     // written just before it would be dead -- the same "verdict nobody
     // consumes" defect the mirror half of Gate 12b documents at length.
-    const hook = fs.readFileSync(PRE_COMMIT, 'utf8');
+    const hook = readGateChain();
     const callSite = hook.indexOf('generate-deploy-manifest.cjs --check');
     const block = hook.slice(callSite, callSite + 900);
     const staleBranchEnd = block.indexOf('git add githooks/deploy-manifest.sh');

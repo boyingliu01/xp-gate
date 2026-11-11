@@ -32,11 +32,40 @@ const {
 
 let TMP_REPO;
 
+/**
+ * Build the empty git repository ONCE, then copy it per case.
+ *
+ * Every case writes its own fixture into a pristine repo (and `afterEach`
+ * deletes the tree), so each one genuinely needs a fresh repo -- but building
+ * that repo means three git processes (`init` + two `config`), measured at
+ * 1.4-5.0 s per case here (median ~2.6 s). Across 17 cases that was most of this
+ * file's runtime.
+ *
+ * Copying a prepared `.git` measured 1.1 s/case less (median 1.5 s vs 2.6 s) and
+ * keeps everything the cases rely on: verified after `fs.cpSync` that `git add
+ * -A -f` succeeds and `git config user.email` still reports the template
+ * identity. It also narrows the spread -- copying varied 0.9-2.2 s against
+ * `git init`'s 1.4-5.0 s.
+ *
+ * No `core.hooksPath` override is needed: this file never runs `git commit`, so
+ * this machine's global hooks cannot fire (the only `commit` occurrence is prose).
+ */
+let repoTemplate;
+
+beforeAll(() => {
+  repoTemplate = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-sync-tpl-'));
+  execFileSync('git', ['init', '-q'], { cwd: repoTemplate });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoTemplate });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repoTemplate });
+});
+
+afterAll(() => {
+  if (repoTemplate) fs.rmSync(repoTemplate, { recursive: true, force: true });
+});
+
 beforeEach(() => {
   TMP_REPO = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-sync-'));
-  execFileSync('git', ['init', '-q'], { cwd: TMP_REPO });
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: TMP_REPO });
-  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: TMP_REPO });
+  fs.cpSync(repoTemplate, TMP_REPO, { recursive: true });
 });
 
 afterEach(() => {
@@ -146,7 +175,14 @@ describe('collectMirrorPairs — AC-713-02 pair discovery', () => {
 
     const pairs = collectMirrorPairs(TMP_REPO);
     const found = pairs.find((p) => p.canonical === 'githooks/lib' && p.mirror === 'src/npm-package/hooks/lib');
+    // Asserted on the pair's own fields, not only on its existence: "a pair object
+    // was returned" is satisfied by a pair whose mirror path is wrong, which is the
+    // bug this case is named after -- the pair must be the CORRECT one.
     expect(found).toBeDefined();
+    expect({ canonical: found.canonical, mirror: found.mirror }).toEqual({
+      canonical: 'githooks/lib',
+      mirror: 'src/npm-package/hooks/lib',
+    });
   });
 
   it('does not invent a pair for a canonical tree with no mirror', () => {
@@ -155,6 +191,12 @@ describe('collectMirrorPairs — AC-713-02 pair discovery', () => {
 
     const pairs = collectMirrorPairs(TMP_REPO);
     const found = pairs.find((p) => p.canonical === 'githooks/lib');
+    // Asserted on the collection, not only on `found`: the bug this guards against
+    // is "a canonical tree with no mirror gets paired with something", and a bare
+    // `toBeUndefined()` cannot distinguish that from the whole function returning
+    // nothing. Naming the discovered canonical set makes the empty result mean
+    // "this pair was not invented" rather than "no pairs were found at all".
+    expect(pairs.map((p) => p.canonical)).toEqual([]);
     expect(found).toBeUndefined();
   });
 });

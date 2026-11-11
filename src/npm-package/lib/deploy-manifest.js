@@ -101,6 +101,29 @@ const MODULE_FILES = Object.freeze([
   ADAPTER_COMMON,
   'deploy-manifest.sh',
   'install.sh',
+  // #798: the ordered gate chain. `gate-driver.sh` holds XP_GATE_ORDER and the
+  // loader/runner; `gate-entries/` holds one body per gate. pre-commit FATALs
+  // when either is missing, so a consumer repo that receives hooks without
+  // these has a hook that cannot run a single gate -- the failure #783 kept
+  // producing by adding a new file category nobody had an assertion for.
+  'gate-driver.sh',
+  'gate-entries/gate-0-entry.sh',
+  'gate-entries/gate-1-entry.sh',
+  'gate-entries/gate-2-entry.sh',
+  'gate-entries/gate-3-entry.sh',
+  'gate-entries/gate-4-entry.sh',
+  'gate-entries/gate-5-entry.sh',
+  'gate-entries/gate-6-entry.sh',
+  'gate-entries/gate-7-entry.sh',
+  'gate-entries/gate-8-entry.sh',
+  'gate-entries/gate-9-entry.sh',
+  'gate-entries/gate-10-entry.sh',
+  'gate-entries/gate-11-entry.sh',
+  'gate-entries/gate-12-entry.sh',
+  'gate-entries/gate-12b-entry.sh',
+  'gate-entries/gate-12c-entry.sh',
+  'gate-entries/gate-13-entry.sh',
+  'gate-entries/subdir-restore.sh',
   'lib/Measure-PowerShellComplexity.ps1',
   'lib/assertion-quality.sh',
   'lib/audit-sanitize.sh',
