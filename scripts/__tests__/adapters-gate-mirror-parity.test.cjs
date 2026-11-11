@@ -48,8 +48,15 @@ describe('REQ-720 adapter gate copies are mirrors of the canonical gates', () =>
   it('AC-720-01: the adapter gate copies exist at all (anti-vacuity)', () => {
     // If this list is empty the parity assertions below would pass vacuously —
     // exactly the failure shape #683 is about.
+    //
+    // This used to pin `gate-9.sh`, which P1-B deleted: it carried a "DEAD CODE —
+    // NOT EXECUTED" banner, no hook sourced it, and the real SAST gate is
+    // gate-10.sh. The assertion was not updated then, so it went on naming a file
+    // that no longer existed — an anti-vacuity check that had itself become
+    // vacuous, in the opposite direction from the one it was written to catch.
+    // Pinning the set that actually ships is what makes it an oracle again.
     const names = adaptersGateNames();
-    expect(names).toEqual(expect.arrayContaining(['gate-9.sh']));
+    expect(names).toEqual(['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh']);
   });
 
   it('AC-720-02: every adapter gate copy is byte-identical to githooks/<name>', () => {

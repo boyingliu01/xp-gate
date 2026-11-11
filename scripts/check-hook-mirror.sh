@@ -120,16 +120,52 @@ for rel in $HOOK_MIRROR_FILES; do
 done
 
 [ -d githooks/adapters ] || fail "missing canonical adapters directory: githooks/adapters"
-[ -d src/npm-package/adapters ] || fail "missing mirror adapters directory: src/npm-package/adapters"
+
+# P1-E step 1: `src/npm-package/adapters/` is GENERATED and gitignored, so this
+# check no longer asks "are the two committed trees equal" -- there is only one
+# committed tree now. It asks whether the generator REPRODUCES the canonical tree
+# byte-for-byte, which is the stronger claim: the old check could only ever confirm
+# that two copies happened to agree, and both could be equally wrong.
+#
+# The mirror is regenerated from scratch here rather than trusted as-is. Comparing
+# whatever happens to be on disk would let a stale tree pass, and a stale tree is
+# precisely the failure this check exists to catch (#683: 4953 bytes of stale
+# gate-3.sh; v0.27.3: a mirror-only fix rolled back at the next publish).
+if [ ! -d src/npm-package/adapters ]; then
+  if ! node src/npm-package/scripts/generate-mirrors.cjs --quiet >/dev/null 2>&1; then
+    fail "src/npm-package/adapters is missing and generate-mirrors.cjs could not create it
+  Run: node src/npm-package/scripts/generate-mirrors.cjs"
+  fi
+fi
 
 tree_diff=$(diff -rq githooks/adapters src/npm-package/adapters 2>&1 || true)
-[ -z "$tree_diff" ] || fail "adapter mirror tree drift:
-$tree_diff"
+if [ -n "$tree_diff" ]; then
+  # Distinguish the two cases, because they need different actions. A stale mirror
+  # is repaired by regenerating; a generator that cannot reproduce byte-for-byte is
+  # a defect in the generator and regenerating will not help.
+  regenerated=$(node src/npm-package/scripts/generate-mirrors.cjs --quiet 2>&1 >/dev/null || true)
+  after_regen=$(diff -rq githooks/adapters src/npm-package/adapters 2>&1 || true)
+  if [ -z "$after_regen" ]; then
+    # Repairable: the tree was stale. Still a failure for CI, because a stale tree
+    # is what gets committed if nobody looks.
+    fail "adapter mirror tree was stale and has been regenerated:
+$tree_diff
+  Re-run to confirm, and check the canonical tree was not edited without regenerating."
+  fi
+  fail "adapter mirror tree drift -- the GENERATOR does not reproduce githooks/adapters byte-for-byte:
+$after_regen
+  This is a generator defect, not a stale copy: regenerating does not fix it.
+  ${regenerated}"
+fi
 
+# Modes still matter (adapters must stay executable) and are compared through git,
+# where the canonical tree remains the only tracked side.
 if in_git_repo; then
   canonical_modes=$(git -c core.quotepath=false ls-files -s -- githooks/adapters | sed 's|^\([0-9][0-9]*\) [0-9a-f]* [0-9]*\t|MODE \1 |; s|githooks/adapters/|adapters/|' | LC_ALL=C sort)
-  mirror_modes=$(git -c core.quotepath=false ls-files -s -- src/npm-package/adapters | sed 's|^\([0-9][0-9]*\) [0-9a-f]* [0-9]*\t|MODE \1 |; s|src/npm-package/adapters/|adapters/|' | LC_ALL=C sort)
-  [ "$canonical_modes" = "$mirror_modes" ] || fail "adapter mirror mode drift:
+  mirror_modes=$(find src/npm-package/adapters -type f -print | sed 's|^src/npm-package/adapters/||' | LC_ALL=C sort | while IFS= read -r rel; do
+    if [ -x "src/npm-package/adapters/$rel" ]; then printf 'MODE 100755 %s\n' "$rel"; else printf 'MODE 100644 %s\n' "$rel"; fi
+  done)
+  [ "$canonical_modes" = "$mirror_modes" ] || fail "adapter mirror mode drift (executable bits differ between canonical and generated):
 $(diff <(printf '%s\n' "$canonical_modes") <(printf '%s\n' "$mirror_modes") | sed -n '2,12p')"
 fi
 
