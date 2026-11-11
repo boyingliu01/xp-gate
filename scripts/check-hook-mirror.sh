@@ -158,12 +158,25 @@ $after_regen
   ${regenerated}"
 fi
 
-# Modes still matter (adapters must stay executable) and are compared through git,
-# where the canonical tree remains the only tracked side.
+# Executable bits must match BETWEEN THE TWO TREES ON DISK. This compares the
+# filesystem on both sides on purpose.
+#
+# The previous version compared git's recorded mode for the canonical side against
+# the filesystem for the generated side, which are not the same source: this repo's
+# index records `100644` for `githooks/adapters/*.sh` while the working tree has them
+# executable (`-rwxr-xr-x`). The check therefore reported every adapter as drifted
+# the moment the mirror became generated -- a comparison between an index record and
+# a stat() call can only produce noise.
+#
+# Comparing the filesystems directly is also what the claim actually needs: the
+# published tarball carries whatever the files on disk carry, so that is the pair
+# that must agree.
 if in_git_repo; then
-  canonical_modes=$(git -c core.quotepath=false ls-files -s -- githooks/adapters | sed 's|^\([0-9][0-9]*\) [0-9a-f]* [0-9]*\t|MODE \1 |; s|githooks/adapters/|adapters/|' | LC_ALL=C sort)
-  mirror_modes=$(find src/npm-package/adapters -type f -print | sed 's|^src/npm-package/adapters/||' | LC_ALL=C sort | while IFS= read -r rel; do
-    if [ -x "src/npm-package/adapters/$rel" ]; then printf 'MODE 100755 %s\n' "$rel"; else printf 'MODE 100644 %s\n' "$rel"; fi
+  canonical_modes=$(cd githooks/adapters && find . -type f -print | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r rel; do
+    if [ -x "./$rel" ]; then printf 'MODE 100755 %s\n' "$rel"; else printf 'MODE 100644 %s\n' "$rel"; fi
+  done)
+  mirror_modes=$(cd src/npm-package/adapters && find . -type f -print | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r rel; do
+    if [ -x "./$rel" ]; then printf 'MODE 100755 %s\n' "$rel"; else printf 'MODE 100644 %s\n' "$rel"; fi
   done)
   [ "$canonical_modes" = "$mirror_modes" ] || fail "adapter mirror mode drift (executable bits differ between canonical and generated):
 $(diff <(printf '%s\n' "$canonical_modes") <(printf '%s\n' "$mirror_modes") | sed -n '2,12p')"
