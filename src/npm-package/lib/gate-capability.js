@@ -140,9 +140,15 @@ function deriveCapability(rows, runnerRegistry) {
  * therefore correct, but two sources with no cross-check is how the footnote this
  * module replaces went stale unnoticed.
  *
- * The invariant is narrow and checkable: every gate the registry declares for
- * pre-commit must be known to the runner. A gate added to the registry alone is
- * exactly the drift that would make this report lie.
+ * The invariant runs in BOTH directions. Checking only registry->runner leaves the
+ * opposite rot invisible: a runner gate with no registry row would be offered as a
+ * subcommand, run, and appear nowhere in this report -- so the report would say
+ * "20 gates, 7 runnable" while the binary offers 21. One direction only is the
+ * shape of check that looks thorough and covers half the failure.
+ *
+ * A pre-push registry row deliberately has no runner entry (there is no
+ * subcommand), so that direction is scoped to pre-commit rows; the reverse
+ * direction is scoped to runner ids that the registry does not declare at all.
  *
  * @param {Array<object>} rows registry rows
  * @param {Map<string, object>|null} runnerRegistry
@@ -153,6 +159,10 @@ function detectSourceDrift(rows, runnerRegistry) {
     return [{ gate: '*', slug: '*', problem: 'the runner registry could not be loaded at all' }];
   }
   const problems = [];
+  const declared = new Set(rows.map((row) => String(row.number)));
+
+  // Direction 1: registry says a gate runs at commit time, runner has never heard
+  // of it -> the report cannot describe it, and it would be `unreachable`.
   for (const row of rows) {
     if (row.hook !== 'pre-commit') continue;
     if (!runnerRegistry[String(row.number)]) {
@@ -162,6 +172,31 @@ function detectSourceDrift(rows, runnerRegistry) {
         problem: 'declared in githooks/gate-registry.sh for pre-commit, absent from gate-runner GATE_REGISTRY',
       });
     }
+  }
+
+  // Direction 2: runner offers a gate the registry never declares -> the CLI has a
+  // subcommand for a gate with no identity, so it is missing from this report
+  // while remaining executable.
+  //
+  // SCOPED TO NUMBERED GATES, and measuring is why. The runner also registers
+  // standalone ANALYSERS that are not part of the numbered gate chain --
+  // `python-health`, `test-layers`, `pbt`. They are reached through
+  // `check --gates=<alias>`, they are not gate N of anything, and the registry has
+  // no row to give them because there is no number to give. Counting them as drift
+  // would make this check report three permanent false positives in a healthy
+  // checkout, and a check that always fires teaches its reader to ignore it -- the
+  // same fate as the footnote. A numbered runner id with no registry row is the
+  // real defect: it is `xp-gate gate-N` with no identity behind the N.
+  for (const id of Object.keys(runnerRegistry)) {
+    if (!/^\d+$/.test(String(id))) continue;
+    if (declared.has(String(id))) continue;
+    const runnerGate = runnerRegistry[id] || {};
+    problems.push({
+      gate: String(id),
+      slug: runnerGate.name || String(id),
+      problem: 'numbered gate present in gate-runner GATE_REGISTRY, absent from githooks/gate-registry.sh '
+        + '(the CLI offers a gate-N with no identity behind the number)',
+    });
   }
   return problems;
 }
@@ -191,7 +226,17 @@ function capabilityMatrix(runnerRegistry) {
       identity: 'githooks/gate-registry.sh (owns name, number, hook, impl)',
       runnability: 'src/npm-package/lib/gate-runner.js GATE_REGISTRY.preCommitOnly (owns whether a separate process can run it)',
       note: 'These are orthogonal: gate 2 is `impl:inline` in the registry AND runnable by the CLI. '
-        + 'Neither source is derived from the other; detectSourceDrift cross-checks them.',
+        + 'Neither source is derived from the other; detectSourceDrift cross-checks them in both directions.',
+      // `unreachable` living inside a capability enum needs its justification in
+      // the machine-readable output, not only in a comment: it is the one value
+      // that is a defect report rather than a capability, and it is only tolerable
+      // because it is required to be zero.
+      unreachableMeans: 'A gate declared in the registry with no runner. Always a defect, never a '
+        + 'normal state: a healthy checkout reports 0.',
+      // The sentinel hazard, stated where a consumer of this JSON will read it.
+      sentinel: 'runGate() returns GATE_NOT_RUN (a string) for "did not run" and a number '
+        + 'otherwise. Compare with === against the sentinel or coerce explicitly; arithmetic or '
+        + '`=== 0` on the return value will silently misread it.',
     },
     registry: registry.copies[0],
     summary: {
