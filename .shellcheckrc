@@ -1,0 +1,32 @@
+# ShellCheck configuration for XP-Gate shell scripts.
+#
+# Why this file exists: the gate used to run shellcheck with no configuration
+# at all, so the analyser ran under its defaults wherever it happened to be
+# invoked -- and, more importantly, every invocation had to guess the target
+# dialect from the shebang. Five gate files (gate-7.sh, gate-8.sh,
+# gate-12-file-hygiene.sh and their adapter copies) have no shebang because they
+# are sourced, not executed, and shellcheck answered that with SC2148 "Tips
+# depend on target shell and yours is unknown" instead of analysing them.
+
+# These scripts are bash. Sourced fragments without a shebang are still bash;
+# declaring it once here removes the guessed-dialect noise and lets a
+# shebang-less file be analysed on its merits instead of being rejected.
+shell=bash
+
+# Follow `source`/`.` directives. Measured on this repository: findings are
+# identical with and without this setting (87 warning-level findings either
+# way), so following sources neither hides a problem behind an unresolved
+# include nor manufactures SC2034 noise. It is kept on because a sourced file
+# that shellcheck CAN resolve is analysed instead of skipped, and 16 SC1091
+# ("not following source") findings exist today precisely because sources are
+# not resolved by default.
+external-sources=true
+
+# Fail on the constructs that actually break a script, not on every stylistic
+# preference. The gate decides blocking separately by severity; this list only
+# stops shellcheck from silently accepting a file it could not parse.
+#
+# SC1090/SC1091 are informational: the dynamic and unresolvable `source` lines
+# are deliberate (the hook resolves its modules at runtime through a generated
+# tier table, see githooks/AGENTS.md "EFFECTIVE HOOKS").
+disable=SC1090,SC1091
