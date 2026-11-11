@@ -183,6 +183,42 @@ it('REQ-D2-03: registry and runner disagreement is detected, not silently report
   assert.ok(unloadable.length > 0, 'a runner that cannot be loaded must be reported as drift');
 });
 
+it('REQ-D2-04: drift runs BOTH ways, and does not fire on the runner-only analysers', () => {
+  // One-directional checking is the shape of check that looks thorough and covers
+  // half the failure: a numbered gate present in the runner but absent from the
+  // registry is `xp-gate gate-N` with no identity behind the N, and the report
+  // would omit it while the binary still offered it.
+  const loaded = loadOrSkip(path.join(LIVE_DIR, 'npm-package', 'lib', 'gate-capability.js'));
+  if (loaded.skip) {
+    assert.ok(loaded.skip, loaded.skip);
+    return;
+  }
+  const { detectSourceDrift } = loaded.value;
+
+  const rows = [
+    { name: 'version-consistency', number: '0', impl: 'inline', blocks: 'YES', hook: 'pre-commit' },
+    { name: 'push-gate', number: 'M', impl: 'inline', blocks: 'YES', hook: 'pre-push' },
+  ];
+  const runnerRegistry = {
+    0: { name: 'Version Consistency', preCommitOnly: true },
+    77: { name: 'Runner Orphan' },
+    // Standalone analysers: reached via `check --gates=<alias>`, not gate N of
+    // anything, so the registry has no row to give them and they are NOT drift.
+    // Measured on this repo: python-health, test-layers and pbt are all registered
+    // this way, and treating them as drift would make this check fire permanently
+    // in a healthy checkout -- which teaches its reader to ignore it.
+    'python-health': { name: 'Python Environment Health' },
+    'test-layers': { name: 'Test Layer Analytics' },
+    pbt: { name: 'Property-Based Testing Detection' },
+  };
+
+  const drift = detectSourceDrift(rows, runnerRegistry);
+  assert.strictEqual(drift.length, 1,
+    'exactly the numbered runner gate missing from the registry is drift; the named '
+      + 'analysers must not be reported, got ' + JSON.stringify(drift));
+  assert.strictEqual(drift[0].gate, '77');
+});
+
 it('REQ-D2-02: a hook-only gate exits 2 from the CLI, which never means "passed"', () => {
   const { spawnSync } = require('node:child_process');
   const result = spawnSync(
