@@ -90,9 +90,12 @@ function main(argv = process.argv.slice(2)) {
 
   let sync;
   try {
-    // Required lazily: the module exports functions rather than running at
-    // require-time precisely so that importing it never mutates the work tree.
-    // eslint-disable-next-line global-require
+    // Required lazily: sync-package-content.js runs its own main at require-time
+    // when invoked directly, and the eager import would make every caller pay for
+    // the skills/plugin discovery even when only the adapters mirror is wanted.
+    // No eslint-disable needed: this file is CommonJS and `global-require` does
+    // not fire here (the directive that used to sit on this line was itself the
+    // reported problem -- an unused disable is a warning, and Gate 1 allows zero).
     ({ syncAdapters: sync } = require('./sync-package-content.js'));
   } catch (error) {
     process.stderr.write(`[generate-mirrors] cannot load sync-package-content.js: ${error.message}\n`);

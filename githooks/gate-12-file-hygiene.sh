@@ -15,7 +15,19 @@ GATE_12_START=$(gate_start_ms)
 MAX_FILE_SIZE_BYTES="${XP_GATE_MAX_FILE_SIZE:-1048576}"  # 1MB default
 
 # Get list of staged files (excluding deleted files)
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null)
+#
+# Third-party trees are excluded. In a fresh `git init` fixture the CI's
+# "First Commit Gates" job does `git add -A` before committing, so every
+# node_modules/ file becomes staged — and third-party packages legitimately
+# CONTAIN `<<<<<<<` text as documentation (semver/README.md, various NOTICE.txt).
+# Gate 12 then reported "merge conflict markers detected" for files no author
+# wrote, blocking the fixture commit, on every commit for months. A hygiene check
+# that reads vendored documentation as a conflict is not finding anything.
+#
+# This is the same class as the __pycache__ filter in check-hook-mirror.sh (#587):
+# build/dependency artefacts are not project source and must not be judged as it.
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=d 2>/dev/null \
+  | grep -vE '(^|/)(node_modules|\.stryker-tmp|vendor)/' || true)
 
 if [ -z "$STAGED_FILES" ]; then
   echo "     ℹ️  No staged files — skipping"
