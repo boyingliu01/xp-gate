@@ -582,5 +582,12 @@ if (require.main === module) {
   // Requiring this script must not mutate the work tree: a test that only wants
   // checkDocsDrift/checkAdapterDrift used to trigger a full mirror sync at
   // require-time, which vitest-worktree-guard rightly reported as pollution.
-  module.exports = { checkDocsDrift, checkAdapterDrift, checkPrePushDrift, checkPreCommitDrift, syncHooks };
+  module.exports = {
+    checkDocsDrift,
+    checkAdapterDrift,
+    checkPrePushDrift,
+    checkPreCommitDrift,
+    syncHooks,
+    syncAdapters,
+  };
 }

@@ -60,6 +60,7 @@
     "version": "0.20.0",
     "license-check": "node scripts/check-mattpocock-license.cjs",
     "prepack": "node scripts/check-mattpocock-license.cjs && node scripts/sync-package-content.js",
+    "prepare": "node scripts/generate-mirrors.cjs --quiet",
     "test": "echo \"Run tests\" && exit 0"
   },
   "keywords": [

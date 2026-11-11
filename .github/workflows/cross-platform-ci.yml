@@ -332,6 +332,22 @@ jobs:
         run: |
           (cd plugins/dsh && npm install --no-audit --no-fund && npm run build)
 
+      # P1-E step 1: src/npm-package/adapters/ is generated and gitignored, so a
+      # fresh checkout does not contain it at all. This step is what makes the
+      # parity checks below meaningful -- they now assert that the GENERATOR
+      # reproduces githooks/adapters byte-for-byte, which is a stronger claim than
+      # the old "are the two committed trees equal" (two copies can be equally
+      # wrong; a generator either reproduces the source or it does not).
+      - name: Generate the npm-package mirror trees
+        run: |
+          node src/npm-package/scripts/generate-mirrors.cjs
+          # Anti-vacuity: an empty or absent tree would make the parity checks
+          # pass while the package ships without adapters.
+          test -d src/npm-package/adapters || { echo "adapters tree was not generated"; exit 1; }
+          count=$(find src/npm-package/adapters -type f | wc -l)
+          echo "generated $count adapter files"
+          test "$count" -gt 100 || { echo "generated only $count adapter files"; exit 1; }
+
       - name: Run sync and verify no diff
         run: |
           # Validate committed trees before sync can repair missing or stale files.
