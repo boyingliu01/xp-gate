@@ -35,14 +35,19 @@
 
 const { loadRegistry, parseRegistry, deriveGateTable } = require('./gate-identity');
 
-/** The only two capability values the code can honour. */
+/** The only capability values the code can honour. */
 const CAPABILITY = Object.freeze({
+  /** A separate process can run this gate on its own and produce a verdict. */
   RUNNABLE: 'runnable',
-  HOOK_ONLY: 'hook-only',
+  /** Runs during `git commit` only: needs the staged set, which no other caller has. */
+  COMMIT_ONLY: 'commit-only',
+  /** Runs during `git push`. Executes outside a hook like any gate, but has no subcommand. */
+  PUSH_ONLY: 'push-only',
+  /** Registered nowhere: say so rather than implying a surface can run it. */
+  UNREACHABLE: 'unreachable',
 });
 
-/** Gates with no CLI subcommand exist; say so rather than implying coverage. */
-const UNADDRESSED_REASON = 'no CLI subcommand is registered for pre-push gates yet';
+const ALL_CAPABILITIES = Object.freeze(Object.values(CAPABILITY));
 
 /**
  * Derive one capability row per registry entry.
@@ -69,29 +74,37 @@ function deriveCapability(rows, runnerRegistry) {
   return rows.map((row) => {
     const isPreCommit = row.hook === 'pre-commit';
 
+    // Pre-push gates are NOT "hook-only". They run outside a hook like any gate
+    // -- `git push` invokes them -- they simply have no `xp-gate` subcommand. The
+    // first version of this module called them hook-only and explained the
+    // difference in a reason string, which is exactly the kind of conflation the
+    // module exists to remove: a closed enum whose `--json` output is wrong on six
+    // of twenty entries is worse than no enum, because a machine reads it.
     if (!isPreCommit) {
+      const hasSubcommand = Boolean(runnerRegistry && runnerRegistry[String(row.number)]);
       return {
         gate: row.number,
         slug: row.name,
         hook: row.hook,
         impl: row.impl,
-        capability: CAPABILITY.HOOK_ONLY,
-        reason: UNADDRESSED_REASON,
+        capability: hasSubcommand ? CAPABILITY.RUNNABLE : CAPABILITY.PUSH_ONLY,
+        reason: hasSubcommand ? null : 'runs on git push; no xp-gate subcommand is registered for it',
       };
     }
 
     const runnerGate = runnerRegistry ? runnerRegistry[String(row.number)] : null;
 
     if (!runnerGate) {
-      // A gate the runner does not know at all. Say that, rather than guessing:
-      // silently calling it runnable would promise a subcommand that errors.
+      // Registered in the hook but unknown to the runner: a definition fault, not
+      // a capability. Reporting `commit-only` here would hide a gate that runs at
+      // commit time but that the CLI cannot even name.
       return {
         gate: row.number,
         slug: row.name,
         hook: row.hook,
         impl: row.impl,
-        capability: CAPABILITY.HOOK_ONLY,
-        reason: 'no CLI runner registered for this gate',
+        capability: CAPABILITY.UNREACHABLE,
+        reason: 'declared in the registry with no CLI runner registered for it',
       };
     }
 
@@ -101,8 +114,8 @@ function deriveCapability(rows, runnerRegistry) {
         slug: row.name,
         hook: row.hook,
         impl: row.impl,
-        capability: CAPABILITY.HOOK_ONLY,
-        reason: runnerGate.reason || 'needs git-staged context that only exists inside the hook',
+        capability: CAPABILITY.COMMIT_ONLY,
+        reason: runnerGate.reason || 'needs the git-staged set, which exists only during git commit',
       };
     }
 
@@ -118,6 +131,42 @@ function deriveCapability(rows, runnerRegistry) {
 }
 
 /**
+ * Check the two sources against each other and report disagreement.
+ *
+ * WHY THIS EXISTS. Capability needs two facts: which hook owns a gate (the
+ * registry) and whether a separate process can run it (the runner's
+ * `preCommitOnly`). Reading one and inferring the other was measured wrong --
+ * gate 2 is declared `impl:inline` and the CLI runs it fine. Keeping both is
+ * therefore correct, but two sources with no cross-check is how the footnote this
+ * module replaces went stale unnoticed.
+ *
+ * The invariant is narrow and checkable: every gate the registry declares for
+ * pre-commit must be known to the runner. A gate added to the registry alone is
+ * exactly the drift that would make this report lie.
+ *
+ * @param {Array<object>} rows registry rows
+ * @param {Map<string, object>|null} runnerRegistry
+ * @returns {Array<{gate: string, slug: string, problem: string}>}
+ */
+function detectSourceDrift(rows, runnerRegistry) {
+  if (!runnerRegistry) {
+    return [{ gate: '*', slug: '*', problem: 'the runner registry could not be loaded at all' }];
+  }
+  const problems = [];
+  for (const row of rows) {
+    if (row.hook !== 'pre-commit') continue;
+    if (!runnerRegistry[String(row.number)]) {
+      problems.push({
+        gate: row.number,
+        slug: row.name,
+        problem: 'declared in githooks/gate-registry.sh for pre-commit, absent from gate-runner GATE_REGISTRY',
+      });
+    }
+  }
+  return problems;
+}
+
+/**
  * The full capability matrix for this checkout.
  * @param {Map<string, object>} [runnerRegistry]
  * @returns {{schemaVersion: string, gates: Array<object>, summary: object}}
@@ -125,7 +174,9 @@ function deriveCapability(rows, runnerRegistry) {
 function capabilityMatrix(runnerRegistry) {
   const registry = loadRegistry();
   const rows = parseRegistry(registry.text);
-  const gates = deriveCapability(rows, runnerRegistry || loadRunnerRegistry());
+  const resolvedRunner = runnerRegistry === undefined ? loadRunnerRegistry() : runnerRegistry;
+  const gates = deriveCapability(rows, resolvedRunner);
+  const drift = detectSourceDrift(rows, resolvedRunner);
 
   const summary = gates.reduce((acc, gate) => {
     acc[gate.capability] = (acc[gate.capability] || 0) + 1;
@@ -133,15 +184,26 @@ function capabilityMatrix(runnerRegistry) {
   }, {});
 
   return {
-    schemaVersion: '1.0',
-    // Provenance, so the matrix can be checked against the files it came from
-    // instead of being taken on faith.
+    schemaVersion: '1.1',
+    // Which source answers which question, stated in the output itself so a
+    // reader does not have to infer the authority from the code.
+    sources: {
+      identity: 'githooks/gate-registry.sh (owns name, number, hook, impl)',
+      runnability: 'src/npm-package/lib/gate-runner.js GATE_REGISTRY.preCommitOnly (owns whether a separate process can run it)',
+      note: 'These are orthogonal: gate 2 is `impl:inline` in the registry AND runnable by the CLI. '
+        + 'Neither source is derived from the other; detectSourceDrift cross-checks them.',
+    },
     registry: registry.copies[0],
     summary: {
       total: gates.length,
       runnable: summary[CAPABILITY.RUNNABLE] || 0,
-      hookOnly: summary[CAPABILITY.HOOK_ONLY] || 0,
+      commitOnly: summary[CAPABILITY.COMMIT_ONLY] || 0,
+      pushOnly: summary[CAPABILITY.PUSH_ONLY] || 0,
+      unreachable: summary[CAPABILITY.UNREACHABLE] || 0,
     },
+    // Empty means the two sources agree. Non-empty is a defect report, not a
+    // capability report, and is surfaced first in the rendered output.
+    drift,
     gates,
   };
 }
@@ -175,7 +237,9 @@ function capabilityOf(gateId) {
 
 module.exports = {
   CAPABILITY,
+  ALL_CAPABILITIES,
   deriveCapability,
+  detectSourceDrift,
   capabilityMatrix,
   capabilityOf,
   deriveGateTable,

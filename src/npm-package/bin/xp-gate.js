@@ -399,15 +399,29 @@ const COMMANDS = {
       // command is that "cannot run here" stops being a footnote: a reader sees
       // WHY each gate is unavailable instead of inferring it from silence.
       const width = Math.max(...matrix.gates.map(gate => String(gate.gate).length));
+
+      // Drift first. If the two sources disagree the labels below are not
+      // trustworthy, so saying that comes before showing them.
+      if (matrix.drift.length > 0) {
+        process.stdout.write('\n⚠️  SOURCE DRIFT — these labels are not trustworthy:\n');
+        for (const problem of matrix.drift) {
+          process.stdout.write(`  gate ${problem.gate} (${problem.slug}): ${problem.problem}\n`);
+        }
+      }
+
       process.stdout.write('\n━━━ GATE CAPABILITY ━━━\n\n');
-      process.stdout.write(`  ${matrix.summary.runnable} runnable / ${matrix.summary.hookOnly} hook-only of ${matrix.summary.total}\n`);
-      process.stdout.write('  hook-only = the gate needs context that exists only inside the git hook\n\n');
+      process.stdout.write(`  ${matrix.summary.runnable} runnable / ${matrix.summary.commitOnly} commit-only`);
+      process.stdout.write(` / ${matrix.summary.pushOnly} push-only / ${matrix.summary.unreachable} unreachable`);
+      process.stdout.write(` of ${matrix.summary.total}\n\n`);
+      process.stdout.write('  commit-only = needs the git-staged set, which exists only during git commit\n');
+      process.stdout.write('  push-only   = runs on git push; no xp-gate subcommand is registered\n\n');
       for (const gate of matrix.gates) {
         const id = String(gate.gate).padStart(width);
-        process.stdout.write(`  ${id}  ${gate.capability.padEnd(10)}  ${gate.slug}\n`);
-        if (gate.reason) process.stdout.write(`  ${' '.repeat(width)}  ${' '.repeat(10)}  └─ ${gate.reason}\n`);
+        process.stdout.write(`  ${id}  ${gate.capability.padEnd(12)}  ${gate.slug}\n`);
+        if (gate.reason) process.stdout.write(`  ${' '.repeat(width)}  ${' '.repeat(12)}  └─ ${gate.reason}\n`);
       }
-      process.stdout.write(`\n  registry: ${matrix.registry}\n\n`);
+      process.stdout.write(`\n  registry:    ${matrix.registry}\n`);
+      process.stdout.write('  runnability: gate-runner GATE_REGISTRY.preCommitOnly\n\n');
     },
     usage: 'xp-gate gate-capability [--json]'
   },

@@ -112,23 +112,75 @@ it('REQ-D2-01: the CLI publishes what each path can execute, derived from the re
   assert.ok(Array.isArray(parsed.gates) && parsed.gates.length >= 14,
     'capability must cover every registered gate, got ' + JSON.stringify(parsed.gates && parsed.gates.length));
 
-  // Every gate must state a capability, and the ONLY allowed values are the two
-  // the code can actually honour. An open vocabulary here would let a new gate
-  // appear as "unknown" and be read as "fine".
+  // Every gate must state a capability from a CLOSED vocabulary, and the labels
+  // must not conflate absences. The first version of this module used two values
+  // and reported the six pre-push gates as `hook-only` with the difference hidden
+  // in a reason string -- but they DO run outside a hook, on git push. A closed
+  // enum whose --json output is wrong on six of twenty entries is worse than no
+  // enum, because a machine reads it.
+  const allowed = ['runnable', 'commit-only', 'push-only', 'unreachable'];
   for (const gate of parsed.gates) {
-    assert.ok(['runnable', 'hook-only'].includes(gate.capability),
-      `gate ${gate.gate} has capability "${gate.capability}", expected runnable|hook-only`);
+    assert.ok(allowed.includes(gate.capability),
+      `gate ${gate.gate} has capability "${gate.capability}", expected one of ${JSON.stringify(allowed)}`);
     assert.ok(typeof gate.slug === 'string' && gate.slug.length > 0,
       `gate ${gate.gate} must carry the registry slug, not a number-derived name`);
   }
 
-  // The seven that need git-staged context must be declared hook-only, and the
-  // number must come from the registry rather than from a list in this test.
-  const hookOnly = parsed.gates.filter((gate) => gate.capability === 'hook-only').map((gate) => String(gate.gate));
+  // The seven that need git-staged context are commit-only, taken from the
+  // registry's own list rather than from a hardcoded expectation in this test.
+  const commitOnly = parsed.gates.filter((g) => g.capability === 'commit-only').map((g) => String(g.gate));
   for (const expected of ['0', '1', '5', '9', '11', '12', '13']) {
-    assert.ok(hookOnly.includes(expected),
-      `gate ${expected} needs git-staged context and must be declared hook-only; got ${JSON.stringify(hookOnly)}`);
+    assert.ok(commitOnly.includes(expected),
+      `gate ${expected} needs git-staged context and must be commit-only; got ${JSON.stringify(commitOnly)}`);
   }
+
+  // Every pre-push gate is push-only, NOT hook-only: it runs, just not via a
+  // subcommand. This is the distinction the review rejected the first version for.
+  const pushOnly = parsed.gates.filter((g) => g.capability === 'push-only').map((g) => String(g.gate));
+  for (const expected of ['M', 'M2', 'ML', 'UI', 'MW', 'S']) {
+    assert.ok(pushOnly.includes(expected),
+      `pre-push gate ${expected} runs on git push and must be push-only, got ${JSON.stringify(pushOnly)}`);
+  }
+
+  // No gate may be unreachable in a healthy checkout, and drift must be empty:
+  // a non-empty drift array means the registry and the runner disagree about
+  // which gates exist, which makes every label below it unreliable.
+  assert.deepStrictEqual(parsed.drift, [],
+    'the registry and the runner disagree, so the capability labels cannot be trusted: '
+      + JSON.stringify(parsed.drift));
+  assert.strictEqual(parsed.summary.unreachable, 0,
+    'a gate declared in the registry with no runner means the report cannot describe it honestly');
+});
+
+it('REQ-D2-03: registry and runner disagreement is detected, not silently reported as a capability', () => {
+  // The module reads two sources on purpose: the registry owns identity and hook,
+  // the runner owns runnability. That is correct -- gate 2 is `impl:inline` AND
+  // runnable -- but two sources with no cross-check is how the design-doc footnote
+  // this command replaces went stale. detectSourceDrift is the cross-check, and
+  // this test proves it fires by injecting the drift it is meant to catch.
+  const loaded = loadOrSkip(path.join(LIVE_DIR, 'npm-package', 'lib', 'gate-capability.js'));
+  if (loaded.skip) {
+    assert.ok(loaded.skip, loaded.skip);
+    return;
+  }
+  const { detectSourceDrift } = loaded.value;
+
+  const rows = [
+    { name: 'version-consistency', number: '0', impl: 'inline', blocks: 'YES', hook: 'pre-commit' },
+    { name: 'missing-from-runner', number: '99', impl: 'inline', blocks: 'YES', hook: 'pre-commit' },
+    { name: 'push-gate', number: 'M', impl: 'inline', blocks: 'YES', hook: 'pre-push' },
+  ];
+  const runnerRegistry = { 0: { name: 'Version Consistency', preCommitOnly: true } };
+
+  const drift = detectSourceDrift(rows, runnerRegistry);
+  assert.strictEqual(drift.length, 1,
+    'only the pre-commit gate absent from the runner is drift; a pre-push gate has no '
+      + 'runner by design and must not be reported, got ' + JSON.stringify(drift));
+  assert.strictEqual(drift[0].gate, '99');
+
+  // An unloadable runner is itself drift, not an empty, reassuring result.
+  const unloadable = detectSourceDrift(rows, null);
+  assert.ok(unloadable.length > 0, 'a runner that cannot be loaded must be reported as drift');
 });
 
 it('REQ-D2-02: a hook-only gate exits 2 from the CLI, which never means "passed"', () => {
