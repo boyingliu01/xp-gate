@@ -76,6 +76,11 @@ run_static_analysis() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   
   local exit_code=0
+  # #803: counts scanner/file pairs that actually ran, independent of their
+  # verdict. `exit_code == 0` answers "did anything fail?"; it cannot answer "did
+  # anything run?", and using it for both made a clean scan indistinguishable from
+  # a missing toolchain.
+  local iac_scans_completed=0
   
   # Try checkov first (recommended - supports multiple platforms)
   # Resolve to an executable that actually RUNS, not merely one that exists. On
@@ -99,7 +104,18 @@ run_static_analysis() {
   for _checkov_candidate in checkov checkov.exe checkov.cmd; do
     command -v "$_checkov_candidate" >/dev/null 2>&1 || continue
     if command -v timeout >/dev/null 2>&1; then
-      _checkov_probe="timeout 20 $_checkov_candidate --version"
+      # #803: the budget must exceed the cost of the thing being timed. It was 20 s,
+      # and `checkov --version` measures 22.4 s on Windows with a cold pip cache
+      # (python startup + imports, not network). So the probe timed out, checkov was
+      # screened out as unusable, and the gate spent the commit pretending the tool
+      # was not installed — while checkov 3.3.30 was on PATH and passing the very
+      # file being committed.
+      #
+      # The probe exists to catch a shim that does not answer (#596), which is a
+      # hang, not a slow start. A tool that answers in 25 s is not a broken shim, and
+      # a false "not installed" is the more expensive error here: it silences a
+      # scanner that works. Generous, still bounded.
+      _checkov_probe="timeout 60 $_checkov_candidate --version"
     else
       _checkov_probe="$_checkov_candidate --version"
     fi
@@ -139,6 +155,10 @@ run_static_analysis() {
     record_checkov_run() {
       local status=$1 file=$2
       checkov_scan_count=$((checkov_scan_count + 1))
+      # #803: a checkov run counts as a completed scan even when it reports a
+      # failure — the point of this counter is "a scanner looked", which is what
+      # distinguishes a clean scan from a missing toolchain.
+      iac_scans_completed=$((iac_scans_completed + 1))
       if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
         CHECKOV_CRASHED=1
         echo "     ⚠️  checkov exited $status on $file — the scanner failed, this is not a finding"
@@ -242,6 +262,7 @@ run_static_analysis() {
     for file in $docker_files; do
       if [ -f "$file" ]; then
         hadolint "$file" 2>&1 | tail -20
+        iac_scans_completed=$((iac_scans_completed + 1))
         local hadolint_exit=${PIPESTATUS[0]}
         if [ $hadolint_exit -ne 0 ]; then
           exit_code=$hadolint_exit
@@ -257,6 +278,7 @@ run_static_analysis() {
     for file in $k8s_files; do
       if [ -f "$file" ]; then
         kube-score score "$file" 2>&1 | tail -20
+        iac_scans_completed=$((iac_scans_completed + 1))
         local kube_exit=${PIPESTATUS[0]}
         if [ $kube_exit -ne 0 ]; then
           exit_code=$kube_exit
@@ -272,6 +294,7 @@ run_static_analysis() {
     for file in $tf_files; do
       if [ -f "$file" ]; then
         tflint --chdir "$(dirname "$file")" 2>&1 | tail -20
+        iac_scans_completed=$((iac_scans_completed + 1))
         local tflint_exit=${PIPESTATUS[0]}
         if [ $tflint_exit -ne 0 ]; then
           exit_code=$tflint_exit
@@ -281,7 +304,22 @@ run_static_analysis() {
   fi
   
   # If no tools available but IaC files detected, warn user
-  if [ $exit_code -eq 0 ]; then
+  #
+  # #803: this branch used to test `[ $exit_code -eq 0 ]`, which conflates "every
+  # applicable scanner ran and found nothing" with "no scanner ran at all". They
+  # are opposite statements about the same commit, and only one of them is a
+  # toolchain problem.
+  #
+  # The conflation is not theoretical. On a host where `checkov --version` takes
+  # longer than the probe's own `timeout 20` (measured 22.4 s on Windows with a
+  # cold pip cache), checkov is screened out as unusable and the gate falls back
+  # to hadolint / kube-score / tflint -- none of which inspects a GitHub Actions
+  # workflow. All three iterate zero files, exit_code stays 0, and a workflow that
+  # checkov passes with 116 checks reported PASSED was reported as "no scanning
+  # tools available" and BLOCKED, with an install hint for a tool already working.
+  #
+  # So track "did any scanner actually run" separately, and say which scanners ran.
+  if [ "$iac_scans_completed" -eq 0 ]; then
     echo "⚠ IaC files detected but no scanning tools available."
     echo "  Install checkov (recommended) or individual tools:"
     echo "  - checkov: pip install checkov"
@@ -292,7 +330,12 @@ run_static_analysis() {
     echo "  Per QUALITY-GATES-CODE-OF-CONDUCT.md: tool unavailable = BLOCK, not SKIP"
     return 1
   fi
-  
+
+  # Scanners ran and none of them found anything. That is a PASS, and it must not
+  # be reported as a missing toolchain: a gate that blocks a clean scan teaches
+  # its reader that the gate is broken, and the next honest commit looks like the
+  # one that needed a bypass.
+  echo "IaC scan completed: $iac_scans_completed scanner file(s) checked, no findings."
   return $exit_code
 }
 
