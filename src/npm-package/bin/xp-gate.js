@@ -384,6 +384,33 @@ const COMMANDS = {
     },
     usage: 'xp-gate gate-coverage [--json] [--debt] [--strict] [--branch <name>]'
   },
+  'gate-capability': {
+    description: 'Publish which execution path can run which gate, derived from the registry (REQ-D2)',
+    run: subargs => {
+      const { capabilityMatrix } = require('../lib/gate-capability.js');
+      const matrix = capabilityMatrix();
+
+      if (subargs.includes('--json')) {
+        process.stdout.write(`${JSON.stringify(matrix, null, 2)}\n`);
+        return;
+      }
+
+      // Rendered as a table with the reason spelled out. The point of this
+      // command is that "cannot run here" stops being a footnote: a reader sees
+      // WHY each gate is unavailable instead of inferring it from silence.
+      const width = Math.max(...matrix.gates.map(gate => String(gate.gate).length));
+      process.stdout.write('\n━━━ GATE CAPABILITY ━━━\n\n');
+      process.stdout.write(`  ${matrix.summary.runnable} runnable / ${matrix.summary.hookOnly} hook-only of ${matrix.summary.total}\n`);
+      process.stdout.write('  hook-only = the gate needs context that exists only inside the git hook\n\n');
+      for (const gate of matrix.gates) {
+        const id = String(gate.gate).padStart(width);
+        process.stdout.write(`  ${id}  ${gate.capability.padEnd(10)}  ${gate.slug}\n`);
+        if (gate.reason) process.stdout.write(`  ${' '.repeat(width)}  ${' '.repeat(10)}  └─ ${gate.reason}\n`);
+      }
+      process.stdout.write(`\n  registry: ${matrix.registry}\n\n`);
+    },
+    usage: 'xp-gate gate-capability [--json]'
+  },
   'gate-rules': {
     description: 'Print the gate limits that can block a commit, generated from the files that define them (#652)',
     run: subargs => {

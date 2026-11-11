@@ -860,7 +860,17 @@ async function runGate(gateId, targetPath, opts = {}) {
     console.log(`⏭️  SKIPPED - ${gate.reason}`);
     console.log('   This gate runs automatically during git commit.');
     console.log('   Run: git commit to trigger all gates.');
-    return 0;
+    // #778: return the sentinel, NOT 0. This branch used to `return 0` while the
+    // branch 340 lines above returns GATE_NOT_RUN for the same meaning ("nothing
+    // ran"). bin/xp-gate.js then maps the sentinel to exit 2 precisely so a gate
+    // that never executed cannot exit like a gate that ran clean -- and this
+    // branch walked straight past that guarantee for seven of the fourteen
+    // pre-commit gates. One file, two opposite answers to one question.
+    //
+    // Callers that legitimately treat "not run" as success (check.js, for a gate
+    // with nothing to analyse) already coerce the sentinel explicitly; making the
+    // coercion visible at each call site is the point, not an inconvenience.
+    return GATE_NOT_RUN;
   }
 
   if (gate.run) {
