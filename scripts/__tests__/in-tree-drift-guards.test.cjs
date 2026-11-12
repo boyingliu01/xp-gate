@@ -150,8 +150,16 @@ describe('AC-433-02: plugin manifest descriptions agree and never regress', () =
   });
 });
 
-describe('AC-433-03: SPRINT_GATE_SCRIPT RESOLUTION markers in both pre-commit copies', () => {
-  const copies = ['githooks/pre-commit', 'src/npm-package/hooks/pre-commit'];
+describe('AC-433-03: SPRINT_GATE_SCRIPT RESOLUTION markers in both gate-11 copies', () => {
+  // #798 moved the Gate 11 body out of pre-commit into gate-entries/gate-11-entry.sh.
+  // The markers moved WITH the body -- they delimit a region INSIDE it, so pinning
+  // them to pre-commit asserted a location rather than the contract. The contract is
+  // that BOTH copies (canonical + mirror) delimit the region, because the awk
+  // extraction in sprint-gate.test.bats reads whichever copy it is pointed at.
+  const copies = [
+    'githooks/gate-entries/gate-11-entry.sh',
+    'src/npm-package/hooks/gate-entries/gate-11-entry.sh',
+  ];
   for (const copy of copies) {
     it(`${copy} carries the extraction markers`, () => {
       const text = fs.readFileSync(path.join(ROOT, copy), 'utf8');
@@ -164,4 +172,13 @@ describe('AC-433-03: SPRINT_GATE_SCRIPT RESOLUTION markers in both pre-commit co
       expect(end).toBeGreaterThan(begin);
     });
   }
+
+  it('the region between the markers is non-empty (anti-vacuity)', () => {
+    // Marker-only assertions stay green if the enclosed script is emptied, which is
+    // precisely the failure the markers exist to surface. Assert something is captured.
+    const text = fs.readFileSync(path.join(ROOT, copies[0]), 'utf8');
+    const begin = text.indexOf('# BEGIN SPRINT_GATE_SCRIPT RESOLUTION');
+    const end = text.indexOf('# END SPRINT_GATE_SCRIPT RESOLUTION');
+    expect(text.slice(begin, end).length).toBeGreaterThan(200);
+  });
 });

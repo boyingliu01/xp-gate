@@ -91,6 +91,11 @@ describe('hook mirror validation', () => {
     fs.mkdirSync(path.join(fixture, 'src/npm-package/hooks/lib'), { recursive: true });
     fs.mkdirSync(path.join(fixture, 'src/npm-package/adapters/typescript'), { recursive: true });
     for (const rel of hookFiles) {
+      // BOTH sides need the parent directory. #798 moved the gate bodies into
+      // gate-entries/ and added them to HOOK_MIRROR_FILES, so `rel` is no longer
+      // always a bare filename; creating only the mirror-side directory made
+      // every fixture write to githooks/gate-entries/... fail ENOENT.
+      fs.mkdirSync(path.join(fixture, 'githooks', path.dirname(rel)), { recursive: true });
       fs.mkdirSync(path.join(fixture, 'src/npm-package/hooks', path.dirname(rel)), { recursive: true });
       fs.writeFileSync(path.join(fixture, 'githooks', rel), `${rel}\n`);
       fs.writeFileSync(path.join(fixture, 'src/npm-package/hooks', rel), `${rel}\n`);
@@ -98,6 +103,7 @@ describe('hook mirror validation', () => {
     fs.writeFileSync(path.join(fixture, 'githooks/adapters/typescript/adapter.sh'), 'adapter\n');
     fs.writeFileSync(path.join(fixture, 'src/npm-package/adapters/typescript/adapter.sh'), 'adapter\n');
     for (const rel of rootMirrorFileList) {
+      fs.mkdirSync(path.join(fixture, 'src/npm-package', path.dirname(rel)), { recursive: true });
       fs.writeFileSync(path.join(fixture, 'src/npm-package', rel), `${rel}\n`);
     }
     // The principles guard requires both tree roots to exist (diff -rq).

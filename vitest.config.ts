@@ -35,6 +35,15 @@ export default defineConfig({
       'src/npm-package/plugins/**', 'src/npm-package/skills/**',
       'src/npm-package/principles/**', 'src/npm-package/mutation/**',
       'src/npm-package/mock-policy/**', 'src/npm-package/build-integrity/**',
+      // Written for `node --test`, and already run by `npm run test:design-evidence`.
+      // Under vitest it collects zero tests ("No test suite found in file") and
+      // fails the run -- a red build caused by a test that never ran, which is the
+      // exact confusion this file's own suite is built to prevent. The other
+      // node:test files here (execution-surface-contract, gate-identity-*,
+      // generated-mirror-reproducibility) DO run correctly under vitest, so they
+      // stay collected; excluding them by pattern would silently drop real
+      // coverage. Only this one is runner-specific.
+      'scripts/__tests__/check-design-evidence.test.cjs',
     ],
     coverage: {
       provider: 'v8',
