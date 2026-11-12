@@ -255,6 +255,7 @@ function createProjectFixture(sandbox: string, callsFile: string, output: string
     writeFileSync(join(project, 'src', '__tests__', 'sample.test.ts'), source, 'utf8');
 
     plantLocalVitest(project, callsFile, output, exit);
+    plantLocalTsc(project);
 
     mkdirSync(coveragePkg, { recursive: true });
     writeFileSync(
@@ -307,6 +308,45 @@ function spawnFailureMessage(
     );
   }
   return null;
+}
+
+/**
+ * Plant a local `node_modules/typescript/bin/tsc` in the sandbox project.
+ *
+ * `githooks/lib/typecheck.sh::_tsc_command` prefers the locally installed
+ * compiler and falls back to `npx tsc`. The fixture had no local install, so the
+ * typecheck half of Gate 1 called the STUB npx with `tsc --version` before Gate 5
+ * ever reached vitest. The stub is single-purpose (it answers `vitest`), so the
+ * anti-vacuity assertion then failed with the recorded call `tsc --version`.
+ *
+ * Whether that happened depended on whether the machine had a hoisted
+ * `node_modules/typescript` above the sandbox -- which CI (fresh `npm ci`) and a
+ * developer checkout answer differently, so this file was green locally and red
+ * on CI. Planting the local compiler makes the resolution deterministic: the
+ * stub is reserved for vitest, which is what the assertions are about.
+ */
+function plantLocalTsc(project: string): void {
+  try {
+    const binDir = join(project, 'node_modules', 'typescript', 'bin');
+    mkdirSync(binDir, { recursive: true });
+    // Answers the `--version` probe AND compiles cleanly (exit 0, no diagnostics),
+    // so the typecheck half of Gate 1 SUCCEEDS and the hook proceeds to Gate 5.
+    // A local compiler that failed would make Gate 1 block before Gate 5 runs --
+    // trading a vacuous pass for a different red, which is not a fix.
+    writeFileSync(
+      join(binDir, 'tsc'),
+      ['#!/bin/bash', 'case "$1" in', '  --version) echo "Version 5.0.0"; exit 0 ;;', 'esac', 'exit 0', ''].join('\n'),
+      'utf8'
+    );
+    chmodSync(join(binDir, 'tsc'), 0o755);
+    writeFileSync(
+      join(project, 'node_modules', 'typescript', 'package.json'),
+      JSON.stringify({ name: 'typescript', version: '5.0.0', bin: { tsc: 'bin/tsc' } }),
+      'utf8'
+    );
+  } catch (err) {
+    throw new Error(`Cannot plant the local tsc into the sandbox project: ${String(err)}`);
+  }
 }
 
 /** Assemble the sandbox repo + PATH override that makes one end-to-end hook run. */
