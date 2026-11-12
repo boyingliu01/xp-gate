@@ -74,68 +74,64 @@ function sh(cwd, cmd, args, env) {
   }
 }
 
-// Build a throwaway repo that mirrors gate-5a-block.test.bats' fixture, since
-// that suite is what caught the silent regression.
-function makeFixture(hookPath, dir) {
-  rmrf(dir);
-  fs.mkdirSync(dir, { recursive: true });
-  sh(dir, 'git', ['init', '-q', '-b', 'test-branch']);
-  sh(dir, 'git', ['config', 'user.email', 'test@test.com']);
-  sh(dir, 'git', ['config', 'user.name', 'Test']);
-  sh(dir, 'git', ['config', 'core.hooksPath', '.git/hooks']);
-
-  fs.mkdirSync(path.join(dir, '.git', 'hooks', 'lib'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.copyFileSync(hookPath, path.join(dir, '.git', 'hooks', 'pre-commit'));
-  fs.chmodSync(path.join(dir, '.git', 'hooks', 'pre-commit'), 0o755);
-  for (const f of ['adapter-common.sh', 'hook-module-resolution.sh', 'gate-registry.sh']) {
+// Copy the complete installed hook set into <hooksDir>: the entry point, the
+// ordered driver, the per-gate entry bodies, the startup modules and lib/*.sh.
+// A fixture that copies only SOME of these runs a hook that cannot find its
+// gates, which is exactly the failure this recorder exists to detect.
+function copyHookSet(hookPath, hooksDir) {
+  for (const f of ['adapter-common.sh', 'hook-module-resolution.sh', 'gate-registry.sh', 'gate-driver.sh']) {
     const src = path.join(SRC_GITHOOKS, f);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, '.git', 'hooks', f));
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(hooksDir, f));
   }
+
   const libDir = path.join(SRC_GITHOOKS, 'lib');
   if (fs.existsSync(libDir)) {
+    fs.mkdirSync(path.join(hooksDir, 'lib'), { recursive: true });
     for (const f of fs.readdirSync(libDir)) {
-      if (f.endsWith('.sh')) fs.copyFileSync(path.join(libDir, f), path.join(dir, '.git', 'hooks', 'lib', f));
+      if (f.endsWith('.sh')) fs.copyFileSync(path.join(libDir, f), path.join(hooksDir, 'lib', f));
     }
   }
+
   // gate-*.sh scripts are sourced by path, so the fixture needs them too.
   for (const f of fs.readdirSync(SRC_GITHOOKS)) {
     if (/^gate-\d+.*\.sh$/.test(f) || /^sprint-gate.*\.sh$/.test(f)) {
-      try {
-        fs.copyFileSync(path.join(SRC_GITHOOKS, f), path.join(dir, '.git', 'hooks', f));
-      } catch {
-        /* ignore */
-      }
+      fs.copyFileSync(path.join(SRC_GITHOOKS, f), path.join(hooksDir, f));
     }
   }
-  // #798: the ordered driver and the per-gate entry bodies are part of the
-  // installed hook set now. A fixture that copies only pre-commit runs a hook
-  // that cannot find its gates, which is exactly the failure this recorder is
-  // meant to detect - so mirror the real installation layout instead.
-  for (const f of ['gate-driver.sh']) {
-    const src = path.join(SRC_GITHOOKS, f);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, '.git', 'hooks', f));
-  }
+
+  // #798: the gate bodies live in gate-entries/, one file per gate. Mirroring
+  // the real installation layout is what keeps this fixture honest.
   const entriesSrc = path.join(SRC_GITHOOKS, 'gate-entries');
   if (fs.existsSync(entriesSrc)) {
-    const dest = path.join(dir, '.git', 'hooks', 'gate-entries');
+    const dest = path.join(hooksDir, 'gate-entries');
     fs.mkdirSync(dest, { recursive: true });
     for (const f of fs.readdirSync(entriesSrc)) {
       if (f.endsWith('.sh')) fs.copyFileSync(path.join(entriesSrc, f), path.join(dest, f));
     }
   }
 
-  const stubs = {
-    jscpd: '#!/bin/bash\necho \'{"duplicates":[]}\'\nexit 0\n',
-    pytest: '#!/bin/bash\necho "3 passed in 0.01s"\nexit 0\n',
-    coverage: '#!/bin/bash\necho "90"\nexit 0\n',
-  };
-  for (const [n, body] of Object.entries(stubs)) {
-    const p = path.join(dir, 'bin', n);
+  fs.copyFileSync(hookPath, path.join(hooksDir, 'pre-commit'));
+  fs.chmodSync(path.join(hooksDir, 'pre-commit'), 0o755);
+}
+
+// Tool stubs, so the fingerprint records the HOOK's behaviour rather than this
+// machine's tool inventory.
+const TOOL_STUBS = {
+  jscpd: '#!/bin/bash\necho \'{"duplicates":[]}\'\nexit 0\n',
+  pytest: '#!/bin/bash\necho "3 passed in 0.01s"\nexit 0\n',
+  coverage: '#!/bin/bash\necho "90"\nexit 0\n',
+};
+
+function writeToolStubs(binDir) {
+  fs.mkdirSync(binDir, { recursive: true });
+  for (const [n, body] of Object.entries(TOOL_STUBS)) {
+    const p = path.join(binDir, n);
     fs.writeFileSync(p, body);
     fs.chmodSync(p, 0o755);
   }
+}
 
+function writeProjectFiles(dir) {
   fs.writeFileSync(path.join(dir, 'README.md'), 'init\n');
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
   fs.writeFileSync(
@@ -155,6 +151,24 @@ function makeFixture(hookPath, dir) {
       },
     })
   );
+}
+
+// Build a throwaway repo that mirrors gate-5a-block.test.bats' fixture, since
+// that suite is what caught the silent regression.
+function makeFixture(hookPath, dir) {
+  rmrf(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  sh(dir, 'git', ['init', '-q', '-b', 'test-branch']);
+  sh(dir, 'git', ['config', 'user.email', 'test@test.com']);
+  sh(dir, 'git', ['config', 'user.name', 'Test']);
+  sh(dir, 'git', ['config', 'core.hooksPath', '.git/hooks']);
+
+  const hooksDir = path.join(dir, '.git', 'hooks');
+  fs.mkdirSync(hooksDir, { recursive: true });
+  copyHookSet(hookPath, hooksDir);
+  writeToolStubs(path.join(dir, 'bin'));
+  writeProjectFiles(dir);
+
   sh(dir, 'git', ['add', '.']);
   sh(dir, 'git', ['commit', '--no-verify', '-q', '-m', 'init']);
 }
