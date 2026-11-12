@@ -1,5 +1,90 @@
 # Changelog
 
+## [0.38.0.0] - 2026-11-12
+
+**主轴：门禁必须能区分「通过了」和「没看」。** 这一版收口了三条并行任务线，共同点是
+**沉默的失效**——一个门禁没运行、没识别文件、或者答不出来时，都长得很像成功。
+
+### Fixed
+
+- **#798 清单补全：C# 及其它主流语言不再被当作「非源码」。** `SOURCE_EXTENSIONS` 与
+  pre-commit 内各个门禁的扩展名列表**各自独立**地决定「这算不算源码」，于是缺一种语言
+  不会失败——而是**通过**。在一个真实 C# 仓库（27 个 `.cs` 文件）上实测：
+
+  ```
+  pre-commit Gate 1:  ✅ PASSED - No code files changed, skipping lint.
+  pre-push:           ✅ No code review required. Proceeding with push...
+  ```
+
+  两次提交的唯一改动都是一个 `.cs` 文件，而**一个门禁都没有运行**。本版补入
+  `cs, csx, fs, vb, rs, php, rb, lua, pl`，并把这条不变量固化成测试：
+  **各列表之间必须一致**（只补一处是不够的，漂移在运行时不可见）。
+
+- **「没有匹配文件」不再报告为 PASSED，而是 SKIPPED。** Gate 1 的 skip 分支原本打印
+  `✅ PASSED - No code files changed`。读者在一屏绿色里无法分辨「查过且通过」与
+  「没查」。这与 Gate 3 已有的措辞对齐（`⏭️ SKIPPED`）。
+
+- **pre-push 的文档分支不再给出肯定结论。** 原本打印
+  `✅ No code review required. Proceeding with push...`——一个由**刚刚误判了文件类型
+  的那次检查**产出的肯定结论。现在改为陈述发生了什么以及**哪些门禁没有运行**。
+
+- **门禁顺序重构（#798）。** `pre-commit` 从 6341 行单文件变为
+  **前言 + 一次驱动调用 + 尾声**；门禁体在 `gate-entries/gate-<KEY>-entry.sh`，
+  顺序是**数据**（`gate-driver.sh` 的 `XP_GATE_ORDER`）。
+  - **要调顺序就改 `XP_GATE_ORDER`，不要搬代码。** 早前一次物理重排把尾声一起搬走，
+    之后**所有在它之后的门禁都静默停止运行**，而 `bash -n`、行数校验和五个顺序测试
+    **全部通过**；Gate 5a 因此不再阻断提交，只有行为指纹发现了它。
+  - **门禁体用 `return` 而非 `exit`**，驱动把非零返回值转成钩子的退出码，EXIT trap
+    仍以同一状态触发。子 shell 里的 `exit` 刻意保留。
+
+- **`gate-9` / `python-health` 先判断有无输入、再探测工具**（承接 0.37.3.0 的
+  REQ-GATE-PROBE-SHORTCUT）：实测 python-health 3802 ms → 1607 ms（−57.7%），
+  gate-9 789 ms → 624 ms（−21.0%），均为 12 轮 ABBA 负载合规测量。
+
+### Added
+
+- **Gate 10 可选常驻 sastd 守护进程（E3）。** semgrep 每次都要重付 Python 导入税
+  （`--version` 2.4–2.8 s，一次 `scan` 3.8–4.0 s）。守护进程通过行分隔 JSON 协议应答，
+  把这笔税摊到进程生命周期：**4.0 s → 2.2 s**。
+  **默认路径未改变**——`XP_GATE_SASTD` 未设置时仍走直跑（由 E1-02 固定）。
+  设计要点：守护进程**不是**稳定依赖，任何失败都**降级为真实直跑**，绝不能被读作
+  「扫描通过」——**一个答不出的守护进程必须隐形，而不是变绿**。
+
+- **REQ-SASTD + AC-SASTD-01..06** 登记进 `specification.yaml`（这批 AC 原先只存在于测试
+  文件里，`ac-reference-guard` 因此无法解析，导致该分支的每次提交都被拦下）。
+
+- **`gate-chain-source.bash` 测试助手**：把
+  `pre-commit + gate-driver.sh + gate-registry.sh + gate-entries/*.sh` 拼成一条链，
+  每段带来源注释，使断言可以针对「整条链」而不是「某个文件」。
+
+- **#798 迁移工具链保留入库**（`scripts/`）：`extract-gates`、`verify-gate-extraction`
+  （按**行多重集**证明每一行恰好移动一次）、`classify-exits`（TOPLEVEL vs SUBSHELL）、
+  `splice-driver`、`record-hook-behaviour` / `compare-hook-behaviour`
+  （记录钩子**做了什么**，而不只是它**包含什么**）。理由见上：`bash -n` 不是证据。
+
+### Changed
+
+- **33 个测试套件改为断言整条链。** 拆分本身让 `gate9-architecture.bats` 出现
+  **15 个失败**（改后 1 个，且与拆分无关）——因为「移动后 grep 不到」被写成了失败。
+  更危险的是镜像情形：`! grep -q ...` 在代码移走后**因为「找不到」而通过**。
+  两种方向都由同一个助手修正。
+
+- **两处测试原本在空断言上运行**（`gate-registry.test.bats`）：它只读了五字段注册表行的
+  **四个**字段，于是 `blocks` 持有 `"NO|pre-commit"`，永不等于 `"NO"`，循环体一次都没运行。
+  现已改为断言其所声称的内容。
+
+### Note on process
+
+本版合并的两个分支都基于**拆分前**的 main，因此冲突不是简单取舍而是**移植**：
+`fix/798-cs-extension` 的四处改动被搬到 `gate-entries/` 中现在拥有该代码的文件，
+冲突以**保留拆分**方式解决；`specification.yaml` 两侧各自追加了**不相交**的需求集合，
+按并集合并。`pre-push` 的改动本身自动合并成功。
+
+合并后的验证（相对合并前的 `08a3c893` 基线）：**零回归**，`tsc --noEmit` 与
+`eslint src` 均通过，且修复了 1 个原基线失败的测试文件。剩余失败均为**环境性**
+（`plugins/dsh` 需单独 `npm install`、`src/npm-package/adapters/` 是发布期生成的
+未跟踪产物），在干净检出并生成镜像后消失。
+
 ## [0.37.3.0] - 2026-11-09
 
 **主轴：门禁别再为「没有东西可查」付钱。** 上一版把版本同步统一成单一实现；这一版处理
