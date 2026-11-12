@@ -40,10 +40,11 @@ GATE_10_SCANNED_FILES=0
 # GATE_10_SEMGREP_PATH records what actually happened, so a reader of the report
 # can tell a fast run from a degraded one without timing it.
 #
-# The daemon does not exist yet (that is E2/E3). Until it does, EVERY value of
-# XP_GATE_SASTD resolves to "direct", which is what makes shipping E1 a no-op:
-# the switch, the degrade flag and the tests land first so the fast path is added
-# onto a base that is already proven to behave exactly as today.
+# The daemon exists but is NOT the default. It is opt-in via XP_GATE_SASTD=on,
+# and `auto` resolves to direct on purpose -- see the `auto` case below, which
+# records the measurement that made the default a direct scan. Everything here is
+# a switch plus a report field; with the default settings the gate behaves exactly
+# as it did before the daemon was written.
 # ---------------------------------------------------------------------------
 # Consumed by the sourcing parent (pre-commit report JSON), not here.
 # shellcheck disable=SC2034
@@ -62,28 +63,24 @@ case "${XP_GATE_SASTD:-direct}" in
     GATE_10_SEMGREP_PATH="direct"
     ;;
   auto)
-    # "Use the daemon if one is available, otherwise just scan." Absence of a
-    # daemon is the normal state for most users, not a fault, so `auto` does NOT
-    # set the degraded flag -- marking it would make every ordinary run look
-    # degraded the moment E2 lands and train readers to ignore the flag.
-    # E2 MUST add a probe INSIDE this branch rather than flipping the value:
-    # a daemon that is ABSENT keeps degraded=0 (normal), but a daemon that is
-    # PRESENT BUT UNUSABLE must set degraded=1 -- otherwise `auto` silently
-    # swallows the same failure `on` reports. Get that distinction right here;
-    # it is the whole reason the two branches are separate.
+    # `auto` deliberately does NOT select the daemon. It was meant to mean "use one
+    # if available", but measurement killed that default: with Gate 10's real
+    # ruleset (p/security-audit, 225 rules) the daemon saves ~20% in steady state
+    # (6.6-6.9s -> 5.2-5.4s) and is SLOWER end to end (10.5s -> 14.6s), because each
+    # gate run is a fresh process that pays the daemon's own startup without
+    # amortising it over a second call. Making that the automatic choice would tax
+    # every user for a benefit most of them never see.
+    #
+    # `auto` therefore behaves as "off" but says so through the `path` field, and it
+    # never sets degraded -- a plain direct run is not a degraded run.
     GATE_10_SEMGREP_PATH="direct"
     ;;
   on|1|true)
-    # The user asserted a daemon SHOULD be here. If it is not, that is a
-    # degradation worth reporting: their configuration is not being honoured.
+    # Opt-in only. The user asserted a daemon SHOULD be here; whether one actually
+    # answers can only be known after the probe, so the degrade flag is set there.
+    # Setting it at parse time would report a failure before anything has failed.
     # This is the branch that must never become "skip the scan and call it a pass".
-    GATE_10_SEMGREP_PATH="direct"
-    GATE_10_SASTD_DEGRADED=1
-    # stderr, not stdout: this file is SOURCED by pre-commit, so stdout belongs to
-    # the parent's report stream. A notice written there would land inside output
-    # that another consumer may parse. stderr still reaches the developer's
-    # terminal, which is the only audience a notice needs.
-    echo "     ℹ️  sastd requested but not available — using direct semgrep (degraded)" >&2
+    GATE_10_SEMGREP_PATH="daemon"
     ;;
   *)
     # An unrecognised value is a configuration mistake, not a reason to scan
@@ -251,8 +248,85 @@ EOF
     fi
     SEMGREP_TIMEOUT_S="${XP_GATE_SEMGREP_TIMEOUT:-180}"
     SEMGREP_TIMED_OUT=false
-    if command -v timeout >/dev/null 2>&1; then
-      SEMGREP_STDOUT_FILE=$(mktemp)
+    SEMGREP_STDOUT_FILE=$(mktemp)
+    SEMGREP_EXIT=0
+    SEMGREP_OUTPUT=""
+
+    # Daemon path (E3). One long-lived semgrep process, so its ~2.5s import tax is
+    # paid once per machine instead of once per gate run: direct 3.8-4.0s vs daemon
+    # hot 2.1-2.3s measured on this repo.
+    #
+    # A SWITCHED path, never a replacement: every failure below falls through to
+    # the direct scan. The daemon may make this gate SLOWER; it must never make it
+    # greener (#518/#559).
+    if [ "$GATE_10_SEMGREP_PATH" = "daemon" ] && command -v node >/dev/null 2>&1; then
+      # The protocol carries exactly ONE config. Counting rather than overwriting
+      # matters: the previous loop kept only the last --config, so a repo with two
+      # would have been scanned with one and reported on as if fully checked.
+      rules_for_daemon=""
+      config_count=0
+      for _arg in "${SEMGREP_RULES[@]}"; do
+        case "$_arg" in
+          --config=*)
+            rules_for_daemon="${_arg#--config=}"
+            config_count=$((config_count + 1))
+            ;;
+        esac
+      done
+      # Anything the protocol cannot express exactly is left to the direct path
+      # rather than approximated:
+      #  - more than one config (nothing would report the dropped one);
+      #  - p/csharp (Gate 10 adds it for C# repos);
+      #  - "auto" (semgrep's own rule selection, not a spec we can pass through);
+      #  - anything with a comma, which is semgrep's multi-config shorthand;
+      #  - a remote URL, which the daemon would resolve against its own cwd and
+      #    registry cache instead of the one the CLI would have used.
+      if [ "$config_count" -ne 1 ]; then
+        rules_for_daemon=""
+      fi
+      case "$rules_for_daemon" in
+        *p/csharp*|*","*|*"://"*|auto|"") rules_for_daemon="" ;;
+      esac
+      if [ -n "$rules_for_daemon" ]; then
+        daemon_roots=$(printf '%s\n' "${SEMGREP_ARGS[@]}" | grep -v '^--include=' || true)
+        # ARGV TRAP: under `node -e` there is NO script path in argv, so the first
+        # user argument is argv[1]. Indexing it as argv[2] passes undefined as the
+        # config, semgrep raises a python TypeError, and the gate "degrades" for a
+        # reason unrelated to the daemon -- which is how this looked like a flaky
+        # integration instead of an off-by-one.
+        # shellcheck disable=SC2086  # one argv entry per scanning root: word splitting is intended
+        if DAEMON_JSON=$(XP_GATE_SASTD=on node -e 'const NL = String.fromCharCode(10);
+const { requestScan } = require(process.argv[1]);
+requestScan({ config: process.argv[2], roots: process.argv.slice(3) }).then((r) => {
+  if (!r.ok) { process.stderr.write("SASTD_UNAVAILABLE: " + r.error + NL); process.exit(3); }
+  process.stdout.write(JSON.stringify(r.payload));
+}).catch((e) => { process.stderr.write("SASTD_UNAVAILABLE: " + e.message + NL); process.exit(3); });' "$(cd "$GATE_DIR/../src/npm-package/lib" 2>/dev/null && pwd -W)/sastd-client.js" "$rules_for_daemon" $daemon_roots 2>"$SEMGREP_STDOUT_FILE.stderr"); then
+          printf '%s' "$DAEMON_JSON" > "$SEMGREP_STDOUT_FILE"
+          SEMGREP_OUTPUT=$(cat "$SEMGREP_STDOUT_FILE.stderr" 2>/dev/null || true)
+          rm -f "$SEMGREP_STDOUT_FILE.stderr"
+        else
+          SEMGREP_EXIT=$?
+          rm -f "$SEMGREP_STDOUT_FILE.stderr"
+          : > "$SEMGREP_STDOUT_FILE"
+          case "${XP_GATE_SASTD:-direct}" in
+            on|1|true)
+              # Consumed by the sourcing parent (pre-commit report JSON), not here.
+              # shellcheck disable=SC2034
+              GATE_10_SASTD_DEGRADED=1
+              echo "     ⚠️  sastd requested but unavailable — using direct semgrep (degraded)" >&2
+              ;;
+            *)
+              echo "     ℹ️  sastd unavailable — using direct semgrep" >&2
+              ;;
+          esac
+          GATE_10_SEMGREP_PATH="direct"
+        fi
+      else
+        GATE_10_SEMGREP_PATH="direct"
+      fi
+    fi
+
+    if [ "$GATE_10_SEMGREP_PATH" = "direct" ] && command -v timeout >/dev/null 2>&1; then
       SEMGREP_OUTPUT=$(timeout -k 10 "$SEMGREP_TIMEOUT_S" \
         "$SEMGREP_CMD" scan "${SEMGREP_RULES[@]}" --json --disable-version-check \
         "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
@@ -266,13 +340,12 @@ EOF
       case "$SEMGREP_EXIT" in
         124|137) SEMGREP_TIMED_OUT=true ;;
       esac
-    else
+    elif [ "$GATE_10_SEMGREP_PATH" = "direct" ]; then
       # No `timeout` on this platform (stock macOS). Say so: an unbounded run
       # nobody mentioned is exactly how #559 stayed invisible for a whole
       # release. The scan still runs -- refusing to scan would be a worse
       # trade -- but the unbounded window is now stated.
       echo "     ⚠️  'timeout' command not available — semgrep runs UNBOUNDED (install coreutils or set up gtimeout)"
-      SEMGREP_STDOUT_FILE=$(mktemp)
       SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan "${SEMGREP_RULES[@]}" --json --disable-version-check \
         "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
       SEMGREP_EXIT=$?
