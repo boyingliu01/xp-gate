@@ -24,6 +24,16 @@ paths = [
   '''(?:^|/)test(?:s)?/(?:fixtures?|data|mock)(?:/.*)?$''',
   '''(?:^|/)__tests__/(?:fixtures?|data)(?:/.*)?$''',
 
+  # The hook-behaviour recorder must WRITE a secret-shaped fixture into a temp
+  # repo, because its whole job is to record that Gate 8 blocks on it. This is
+  # a path-scoped exemption for that ONE generator, not for scripts/ generally:
+  # a real credential pasted into any other script is still caught.
+  #
+  # Scope it no wider than this. If this entry ever grows to a directory, the
+  # fixture stops proving anything -- the scenario would record "no secrets
+  # detected" and the blocking path would go untested while staying green.
+  '''^scripts/record-hook-behaviour\.cjs$''',
+
   # Documentation
   '''\.md$''',
   '''docs/(?:.*)$''',
