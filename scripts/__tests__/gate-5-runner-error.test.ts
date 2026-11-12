@@ -251,6 +251,15 @@ function createProjectFixture(sandbox: string, callsFile: string, output: string
       JSON.stringify({ name: 'x', version: '1.0.0' }),
       'utf8'
     );
+    // Gate 6 runs AFTER Gate 5 in XP_GATE_ORDER, so it cannot stop Gate 5 from
+    // running -- but it does decide the hook's exit status, and an architecture
+    // config is required. The sandbox has none, so Gate 6 blocked and the run
+    // ended with a non-zero exit that says nothing about the Gate 5 behaviour
+    // under test. `.architecture-skip` is the hook's own documented exemption
+    // (gate-6-entry.sh:509), so the fixture uses that rather than editing the
+    // gate. Note the blocking gate we actually had to clear to REACH Gate 5 was
+    // Gate 8 -- see writeStubGitleaks.
+    writeFileSync(join(project, '.architecture-skip'), 'sandbox fixture: not an architecture test\n', 'utf8');
     writeFileSync(join(project, 'src', 'index.ts'), source, 'utf8');
     writeFileSync(join(project, 'src', '__tests__', 'sample.test.ts'), source, 'utf8');
 
@@ -356,8 +365,38 @@ function prepareHookSandbox(vitestOutput: string, vitestExit: number): { project
 
   const bin = join(sandbox, 'bin');
   const callsFile = writeStubNpx(bin, sandbox, vitestOutput, vitestExit);
+  writeStubGitleaks(bin);
   const project = createProjectFixture(sandbox, callsFile, vitestOutput, vitestExit);
   return { project, bin, callsFile };
+}
+
+/**
+ * Provide a `gitleaks` in the sandbox so Gate 8 can pass.
+ *
+ * Gate 8 (secret scanning) is FAIL-CLOSED since #499: a missing gitleaks BLOCKS
+ * rather than SKIPs, because a security gate that cannot run must not report
+ * success. That is correct behaviour, and it is also why this file was red on
+ * CI while green locally: a developer machine routinely has gitleaks installed
+ * by the hooks themselves, a fresh CI runner does not. The hook then stopped at
+ * Gate 8 and never reached Gate 5, so the vitest stub was never invoked and the
+ * anti-vacuity assertion fired -- correctly, but about the wrong cause.
+ *
+ * This is a fixture, not a relaxation: these tests are about Gate 5, and the
+ * sandbox is a throwaway repo whose only content is one source file and one test
+ * file. Stubbing the scanner lets Gate 8 take its normal "nothing found" path so
+ * execution arrives where the assertions live.
+ */
+function writeStubGitleaks(bin: string): void {
+  const stub = join(bin, 'gitleaks');
+  try {
+    mkdirSync(bin, { recursive: true });
+    // `gitleaks detect` exits 0 when no leaks are found; the hook treats only a
+    // non-0/1 exit as an infrastructure failure (#499), so 0 is the clean path.
+    writeFileSync(stub, ['#!/bin/bash', 'exit 0', ''].join('\n'), 'utf8');
+    chmodSync(stub, 0o755);
+  } catch (err) {
+    throw new Error(`Cannot write the gitleaks stub fixture at ${stub}: ${String(err)}`);
+  }
 }
 
 /** The shell program that runs the real hook inside a prepared sandbox. */
