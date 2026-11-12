@@ -2,12 +2,21 @@
 
 setup() {
   TEST_DIR=$(mktemp -d)
-  HOOK_PATH="$BATS_TEST_DIRNAME/../pre-commit"
 
   cd "$TEST_DIR"
   git init -q
   git config user.email "test@example.com"
   git config user.name "Test User"
+
+  # #798: pre-commit is now an entry point that sources gate-driver.sh and
+  # gate-entries/*.sh, so running the repo's pre-commit from inside a temp
+  # project needs the whole set installed next to it. Install into the fixture's
+  # own hook directory and run THAT copy -- which is also closer to what a user
+  # actually executes.
+  # shellcheck source=/dev/null
+  . "$BATS_TEST_DIRNAME/helpers/install-hook-set.bash"
+  install_hook_set "$BATS_TEST_DIRNAME/.." "$TEST_DIR/.git/hooks"
+  HOOK_PATH="$TEST_DIR/.git/hooks/pre-commit"
 }
 
 teardown() {

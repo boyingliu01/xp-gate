@@ -21,6 +21,9 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # #798: these message strings live in gate-entries/, so grep the whole chain.
+  GATE_CHAIN="$(mktemp)"
+  cat "$GATE_CHAIN"       "$REPO_ROOT/githooks/gate-driver.sh"       "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null > "$GATE_CHAIN"
 }
 
 # --- helper unit tests -------------------------------------------------------
@@ -67,18 +70,18 @@ setup() {
 @test "AC-668-02: the hook distinguishes introduced from pre-existing in its messages" {
   # The whole point of #668 is the LABEL. A fix that blocks silently, or that warns
   # without saying "not yours", leaves the false attribution intact.
-  run grep -c 'PRE-EXISTING' "$REPO_ROOT/githooks/pre-commit"
+  run grep -c 'PRE-EXISTING' "$GATE_CHAIN"
   [ "$status" -eq 0 ]
   [ "$output" -ge 2 ]
 
-  run grep -c 'added by this change' "$REPO_ROOT/githooks/pre-commit"
+  run grep -c 'added by this change' "$GATE_CHAIN"
   [ "$status" -eq 0 ]
   [ "$output" -ge 2 ]
 }
 
 @test "AC-668-02: the pre-existing path points at the batch-cleanup command" {
   # Without a pointer to `audit assertions`, a WARN is just noise with a nicer word.
-  run grep -c 'xp-gate audit assertions' "$REPO_ROOT/githooks/pre-commit"
+  run grep -c 'xp-gate audit assertions' "$GATE_CHAIN"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }

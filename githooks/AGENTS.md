@@ -107,10 +107,38 @@ Code-walkthrough has no hard file-count or LOC threshold. Large diffs must be re
 - Do NOT edit adapters here without resyncing `src/npm-package/adapters/`. Source-of-truth is this directory.
 
 ## UNIQUE STYLES
-- **Monolithic pre-commit** (~2084 lines) intentionally — single bash file keeps the trust boundary auditable.
+- **The ordered gate chain (#798).** `pre-commit` is now a PREAMBLE, one driver
+  call, and an EPILOGUE. Gate bodies live in `gate-entries/gate-<KEY>-entry.sh`
+  (one file per gate, each wrapping its body in `gate_<KEY>_run()`), and their
+  ORDER is data: `XP_GATE_ORDER` in `gate-driver.sh`.
+  - **To reorder gates, edit `XP_GATE_ORDER`.** Do not move code. Ordering used
+    to BE the physical order of 16 inline blocks in a 6341-line file, and an
+    attempt to reorder also moved the epilogue — after which every gate past it
+    silently stopped running while `bash -n`, a line count and five ordering
+    tests all passed. Gate 5a stopped blocking commits and only a behavioural
+    fingerprint caught it (`scripts/record-hook-behaviour.cjs`).
+  - **`gate_enabled()`/`XP_GATE_ONLY_GATE`, report keys, doctor and
+    gate-coverage all key off the gate NUMBER**, which is why the number is a
+    label bound by `gate-registry.sh` and never a position in the list.
+  - **Gate bodies return, they do not exit.** A top-level `exit N` inside a
+    `gate_N_run()` body becomes `return N`; the driver turns a non-zero return
+    into the hook's exit status, so the EXIT trap still fires on the same status.
+    Sub-shell exits (`( ... )`, `$( ... )`) are deliberately left as `exit`.
+  - **The report writer lives with Gate 13.** `generate_quality_report()` is
+    defined in `gate-entries/gate-13-entry.sh` and called by the epilogue, which
+    is why that file must stay loadable even when Gate 13 itself is disabled. It
+    is registered as a TOP-LEVEL function, not nested inside `gate_13_run()`, so
+    a skipped Gate 13 cannot leave the report writer undefined.
 - **Pre-push is a thin validator** — heavy lifting (mutation, mock policy, Delphi) lives in `src/` modules invoked via `npx tsx`.
 - **Graceful adapter degradation**: SKIP semantics keep the hook useful in mixed-language repos.
 - **JSON journal**: every pre-push writes `.xp-gate/reports/pre-push/*.json` for audit / `xp-gate audit --tail`.
+- **A gate must never wait on the network.** `run_tsx` falls back to `npx tsx`,
+  which DOWNLOADS the package when it is absent locally. `record_gate_audit` ran
+  once per gate through that fallback, so a repo without a local `tsx` spent its
+  whole budget on the network (measured: 180 s per blocked commit in a fixture)
+  and the gate-order work looked like it had made the hook slower. Audit calls
+  now resolve `node_modules/.bin/tsx` only and skip the record when absent — a
+  missing journal entry is recoverable, a frozen commit is not.
 
 ## COMMANDS
 ```bash

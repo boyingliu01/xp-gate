@@ -21,7 +21,12 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  # #798: the code these cases extract/scan lives in gate-entries/, so
+  # PRE_COMMIT holds the CONCATENATED chain in one temp file. Anchored to
+  # pre-commit alone the slices are empty and the cases fail on an
+  # anti-vacuity guard rather than on real behaviour.
+  PRE_COMMIT="$(mktemp)"
+  cat "$REPO_ROOT/githooks/pre-commit"       "$REPO_ROOT/githooks/gate-driver.sh"       "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null > "$PRE_COMMIT"
   TEST_DIR="$(mktemp -d)"
 }
 

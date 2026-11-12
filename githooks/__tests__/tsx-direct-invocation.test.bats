@@ -11,7 +11,13 @@
 
 setup() {
   TEST_DIR=$(mktemp -d)
-  HOOK_PATH="$BATS_TEST_DIRNAME/../pre-commit"
+  # #798: the gate bodies live in gate-entries/. HOOK_PATH is a single file so the
+  # sed/grep helpers below keep working; it holds the CONCATENATED chain. Note the
+  # 'must NOT contain npx tsx' assertions especially: run against pre-commit alone
+  # they pass trivially once the code has moved, i.e. they would stop checking
+  # anything at all while still looking green.
+  HOOK_PATH="$TEST_DIR/gate-chain.sh"
+  { cat "$BATS_TEST_DIRNAME/../pre-commit" "$BATS_TEST_DIRNAME/../gate-driver.sh"         "$BATS_TEST_DIRNAME"/../gate-entries/*.sh 2>/dev/null; } > "$HOOK_PATH"
   PREPUSH_PATH="$BATS_TEST_DIRNAME/../pre-push"
   GATE4_PATH="$BATS_TEST_DIRNAME/../gate-4.sh"
   mkdir -p "$TEST_DIR/bin"

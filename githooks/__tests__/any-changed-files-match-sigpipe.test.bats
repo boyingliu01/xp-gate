@@ -9,7 +9,13 @@
 # @covers AC-649-03c, AC-649-08, AC-649-09, AC-649-10
 
 setup() {
-  HOOK="$BATS_TEST_DIRNAME/../pre-commit"
+  # #798 moved the gate helpers into gate-entries/. The chain is concatenated into
+  # ONE temp file so `extract_fn`'s line-oriented sed still finds the function, and
+  # so AC-649-10 greps the code that actually ships instead of pre-commit alone
+  # (where nothing matches, which would pass for the wrong reason).
+  local root="$BATS_TEST_DIRNAME/.."
+  HOOK="$BATS_TEST_TMPDIR/gate-chain.sh"
+  cat "$root/pre-commit" "$root/gate-driver.sh" "$root"/gate-entries/*.sh 2>/dev/null > "$HOOK"
 }
 
 extract_fn() {

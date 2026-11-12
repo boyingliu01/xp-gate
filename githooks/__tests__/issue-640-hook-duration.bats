@@ -25,7 +25,17 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798 split the chain: the report writer, and with it the duration
+  # arithmetic, now lives in gate-entries/gate-13-entry.sh while the hook
+  # epilogue calls it. Assertions about that code read the whole chain.
+  CHAIN="$HOOK"
+  [ -f "$REPO_ROOT/githooks/gate-driver.sh" ] && CHAIN="$CHAIN $REPO_ROOT/githooks/gate-driver.sh"
+  [ -d "$REPO_ROOT/githooks/gate-entries" ] && CHAIN="$CHAIN $REPO_ROOT/githooks/gate-entries/*.sh"
 }
+
+# grep across the whole gate chain (shellcheck: splitting the glob list is intended).
+# shellcheck disable=SC2086
+_chain_grep() { grep -q "$@" $CHAIN; }
 
 @test "AC-640-01: pre-commit records a hook-entry start timestamp" {
   grep -q '_XP_HOOK_START_MS' "$HOOK"
@@ -57,7 +67,11 @@ setup() {
   # the hook. It was matching nothing and passing only because grep -c returns 0
   # on no match, which the `-ge 1` then caught -- so the test was red, not green,
   # and had been reported as a hook regression rather than a stale assertion.)
-  grep -q '\$_XP_NOW_MS.*-gt.*\$_XP_HOOK_START_MS' "$HOOK"
+  #
+  # #798 moved this comparison into gate-entries/gate-13-entry.sh, so it is read
+  # from the whole chain. Keeping it pointed at pre-commit alone would make the
+  # assertion fail for a reason that has nothing to do with the guard's logic.
+  _chain_grep '\$_XP_NOW_MS.*-gt.*\$_XP_HOOK_START_MS'
 }
 
 @test "AC-640-01: the CRLF self-check is still the first executable line" {

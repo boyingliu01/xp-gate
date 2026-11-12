@@ -12,7 +12,11 @@
 # `PROJECT_SUBDIR=""` up to the subdirectory-fallback comment) and execute it in
 # a sandbox, so they lock the hook's behaviour rather than a re-implementation.
 
-HOOK="$BATS_TEST_DIRNAME/../pre-commit"
+# #798: the PROJECT_SUBDIR derivation and its two anchors now live in
+# gate-entries/gate-0-entry.sh. Pointing at pre-commit leaves both anchors
+# unmatched, the extraction empty, and every functional case fails with
+# "anchors moved" -- which reads like a real regression in the derivation logic.
+HOOK="$BATS_TEST_DIRNAME/../gate-entries/gate-0-entry.sh"
 
 # Extract the derivation block into $1 (sandbox file). Fails if the anchors move.
 _extract_section() {

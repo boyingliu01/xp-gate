@@ -126,12 +126,14 @@ setup() {
 }
 
 @test "#717 AC-717-09: pre-commit records .cs in PROJECT_LANGS so the adapter is reachable" {
-  run grep -E '_detect_ext_lang "cs"' "$REPO_ROOT/githooks/pre-commit"
+  # #798: the .cs language detection lives in gate-entries/gate-0-entry.sh.
+  run bash -c "cat \"$REPO_ROOT/githooks/pre-commit\" \"$REPO_ROOT/githooks/gate-driver.sh\" \"$REPO_ROOT\"/githooks/gate-entries/*.sh 2>/dev/null | grep -E '_detect_ext_lang \"cs\"'"
   [ "$status" -eq 0 ]
 }
 
 @test "#717 AC-717-09: pre-commit distinguishes rc=2 (could not execute) from rc=1" {
-  run grep -F 'could not execute — NOT a pass' "$REPO_ROOT/githooks/pre-commit"
+  # #798: the rc=2 diagnostic lives in gate-entries/. Read the whole chain.
+  run bash -c "cat \"$REPO_ROOT/githooks/pre-commit\" \"$REPO_ROOT/githooks/gate-driver.sh\" \"$REPO_ROOT\"/githooks/gate-entries/*.sh 2>/dev/null | grep -F 'could not execute — NOT a pass'"
   [ "$status" -eq 0 ]
 }
 
@@ -264,7 +266,15 @@ Tests  2 failed | 1 passed (3)'
 @test "#717 AC-717-13b: pre-commit routes every gate through a PROJECT_LANGS loop" {
   # Three loops, one per gate group. If a future edit replaces one with a
   # single-language assumption, a dual-language repo silently loses that gate.
-  run grep -c 'for CURRENT_LANG in \$PROJECT_LANGS' "$REPO_ROOT/githooks/pre-commit"
+  #
+  # #798: the loops live in the gate bodies under gate-entries/, so count across
+  # the whole chain. Counting pre-commit alone returns 0 and would read as "the
+  # loops were replaced" -- the opposite of the truth.
+  local chain
+  chain=$(cat "$REPO_ROOT/githooks/pre-commit" \
+              "$REPO_ROOT/githooks/gate-driver.sh" \
+              "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)
+  run grep -c 'for CURRENT_LANG in \$PROJECT_LANGS' <<< "$chain"
   [ "$output" -ge 3 ]
 }
 

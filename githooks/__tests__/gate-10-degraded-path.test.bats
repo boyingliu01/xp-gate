@@ -94,13 +94,16 @@ teardown() {
   # input and proved nothing about visibility. The real claim is end-to-end --
   # a reader of the report JSON can tell a degraded run from a normal one.
   #
-  # Check the two links that make that true: pre-commit must interpolate the
-  # field, and gate-10 must have set it.
+  # Check the two links that make that true: the report writer must interpolate
+  # the field, and gate-10 must have set it.
   XP_GATE_SASTD=on
   source "$BATS_TEST_DIRNAME/../gate-10.sh"
   [ "$GATE_10_SASTD_DEGRADED" = "1" ]
 
-  run grep -c '"degraded": ${GATE_10_SASTD_DEGRADED:-0}' "$BATS_TEST_DIRNAME/../pre-commit"
+  # #798: the report writer moved into gate-entries/gate-13-entry.sh alongside
+  # Gate 13, so the chain is searched rather than pre-commit alone.
+  local root="$BATS_TEST_DIRNAME/.."
+  run bash -c "cat \"$root/pre-commit\" \"$root\"/gate-entries/*.sh 2>/dev/null | grep -c '\"degraded\": \${GATE_10_SASTD_DEGRADED:-0}'"
   [ "$output" = "1" ]
 }
 

@@ -22,7 +22,14 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
-  PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
+  # #798: the code these cases extract lives in gate-entries/, so PRE_COMMIT is a
+  # temp file holding the CONCATENATED chain (pre-commit + driver + entries).
+  # Anchored to pre-commit alone the slice is empty and every case fails an
+  # anti-vacuity guard rather than a real behaviour assertion.
+  PRE_COMMIT="$BATS_TEST_TMPDIR/gate-chain.sh"
+  cat "$BATS_TEST_DIRNAME/../pre-commit" \
+      "$BATS_TEST_DIRNAME/../gate-driver.sh" \
+      "$BATS_TEST_DIRNAME"/../gate-entries/*.sh 2>/dev/null > "$PRE_COMMIT"
   TEST_DIR="$BATS_TEST_TMPDIR/work"
   mkdir -p "$TEST_DIR"
   cd "$TEST_DIR" || return 1
@@ -58,6 +65,12 @@ report_lines() {
 # nothing else, so no gate body runs.
 build_report_fn() {
   {
+    # The helper functions all still live in pre-commit itself -- #798 moved only
+    # the gate BODIES into gate-entries/ -- so this reads pre-commit, not the
+    # chain. Reading the chain here would also sweep in every gate_N_run(), a
+    # whole gate body per file, which is far slower and does not parse as
+    # extracted.
+    #
     # Every helper ABOVE the report. generate_quality_report is skipped here
     # because its here-doc body contains a lone `}` that closes a brace-anchored
     # function early; it gets the dedicated range extraction below.
@@ -67,7 +80,7 @@ build_report_fn() {
       !skip && /^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{/ { in_fn = 1 }
       !skip && in_fn { print }
       !skip && in_fn && /^\}$/ { in_fn = 0 }
-    ' "$PRE_COMMIT"
+    ' "$BATS_TEST_DIRNAME/../pre-commit"
     # #605 made the threshold `COVERAGE_THRESHOLD="$_rct_value"`, with the value
     # produced by an earlier in-shell call to _resolve_coverage_threshold. Copying
     # the assignment alone leaves `_rct_value` undefined and `set -u` aborts the

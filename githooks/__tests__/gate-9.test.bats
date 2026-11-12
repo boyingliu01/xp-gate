@@ -32,7 +32,13 @@ setup() {
 
 @test "sast: pre-commit sources gate-10.sh, and that file exists" {
   [ -f "$BATS_TEST_DIRNAME/../gate-10.sh" ]
-  grep -q 'gate-10.sh' "$BATS_TEST_DIRNAME/../pre-commit"
+  # #798: the `source "$GATE_DIR/gate-10.sh"` call now lives in
+  # gate-entries/gate-10-entry.sh, so the assertion reads the whole chain. The
+  # property is unchanged -- the SAST gate must be sourced by the code the hook
+  # actually runs -- and pointing at pre-commit alone would report a false
+  # regression now that the call has moved.
+  local root="$BATS_TEST_DIRNAME/.."
+  { cat "$root/pre-commit" "$root/gate-driver.sh" "$root"/gate-entries/*.sh 2>/dev/null; } | grep -q 'gate-10.sh'
 }
 
 @test "sast: the dead gate-9.sh is gone, because editing it changes nothing" {

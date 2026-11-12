@@ -12,14 +12,20 @@
 
 setup() {
   TEST_DIR=$(mktemp -d)
+  # #798: pre-commit only sources the chain; the gate bodies live in
+  # gate-entries/ next to a gate-driver.sh. Install the complete set into the
+  # fixture and point HOOK_PATH at that copy, so these end-to-end cases exercise
+  # the same file layout a user gets.
+  # shellcheck source=/dev/null
+  . "$BATS_TEST_DIRNAME/helpers/install-hook-set.bash"
+  install_hook_set "$BATS_TEST_DIRNAME/.." "$TEST_DIR/hooks"
+  export HOOK_PATH="$TEST_DIR/hooks/pre-commit"
 }
 
 teardown() {
   cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$TEST_DIR"
 }
-
-HOOK_PATH="$BATS_TEST_DIRNAME/../pre-commit"
 
 create_ts_project() {
   cd "$TEST_DIR"

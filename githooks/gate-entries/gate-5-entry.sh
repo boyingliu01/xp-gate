@@ -1474,7 +1474,7 @@ else
               echo "    Run the full Pester suite for a complete PowerShell coverage check."
             else
               echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
-              exit 1
+              return 1
             fi
           else
             echo "PowerShell coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
@@ -1486,7 +1486,7 @@ else
           else
             echo "❌ BLOCKED - Could not parse PowerShell coverage from coverage.xml,"
             echo "   so the ${COVERAGE_THRESHOLD:-80}% floor cannot be verified."
-            exit 1
+            return 1
           fi
         fi
       else
@@ -1496,7 +1496,7 @@ else
         else
           echo "❌ BLOCKED - coverage.xml not found, so the ${COVERAGE_THRESHOLD:-80}% PowerShell"
           echo "   coverage floor cannot be verified. Ensure Pester coverage was run."
-          exit 1
+          return 1
         fi
       fi
       ;;
@@ -1593,7 +1593,7 @@ else
             echo "    Run the full test suite for a complete ${CURRENT_LANG} coverage check."
           else
             echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
-            exit 1
+            return 1
           fi
         else
           echo "${CURRENT_LANG} coverage: ${COVERAGE_PERCENT}% ✅ (≥ ${COVERAGE_THRESHOLD:-80}%)"
@@ -1611,7 +1611,7 @@ else
           echo "❌ BLOCKED - Could not determine ${CURRENT_LANG} coverage percentage."
           echo "   No standard coverage report file was found, so the ${COVERAGE_THRESHOLD:-80}% floor"
           echo "   could not be checked. Produce coverage data or run a subset test run."
-          exit 1
+          return 1
         fi
       fi
       ;;
@@ -1620,7 +1620,7 @@ else
   if [ "$COV_EXIT" -ne 0 ]; then
     echo ""
     echo "❌ BLOCKED - Coverage check FAILED"
-    exit 1
+    return 1
   fi
   if [ "$COVERAGE_ENFORCED" = false ]; then
     echo "ℹ️  Coverage enforcement not applicable for ${CURRENT_LANG}"
@@ -1672,7 +1672,7 @@ else
         echo ""
         echo "❌ BLOCKED - New file(s) below 80% coverage threshold"
         echo "Add tests to cover the new files before committing."
-        exit 1
+        return 1
       fi
     fi
   fi
