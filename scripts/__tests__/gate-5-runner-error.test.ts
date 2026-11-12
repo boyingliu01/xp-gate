@@ -446,20 +446,36 @@ function runHookWithVitestOutputAsync(vitestOutput: string, vitestExit: number):
 }
 
 /** Assert the stub actually ran, so a passing result can never be vacuous. */
-function assertStubRan(callsFile: string, context: string): void {
+/**
+ * Last lines of the hook run, for the anti-vacuity failure message.
+ *
+ * Without this the failure says only that the stub was not reached, which is
+ * the SYMPTOM; the hook output above it is what says WHY (a gate that blocked,
+ * a SKIP that fired, a command that was not found). It cost a round trip through
+ * CI logs to learn that the first time, so the reason is now captured where the
+ * failure is raised.
+ */
+function HOOK_STDOUT_TAIL(hookStdout: string): string {
+  if (!hookStdout) return '';
+  const lines = hookStdout.trimEnd().split(/\r?\n/);
+  return `\n--- hook output (last 25 lines) ---\n${lines.slice(-25).join('\n')}`;
+}
+function assertStubRan(callsFile: string, context: string, hookStdout = ""): void {
   let calls: string;
   try {
     calls = readFileSync(callsFile, 'utf8');
   } catch {
     throw new Error(
       `Anti-vacuity failure (${context}): the stub npx was never invoked, so the ` +
-        'assertion would have passed for the wrong reason.'
+        'assertion would have passed for the wrong reason.' +
+        HOOK_STDOUT_TAIL(hookStdout)
     );
   }
   if (!/vitest/.test(calls)) {
     throw new Error(
       `Anti-vacuity failure (${context}): the stub npx ran but was never asked to ` +
-        `run vitest. Recorded calls:\n${calls}`
+        `run vitest. Recorded calls:\n${calls}` +
+        HOOK_STDOUT_TAIL(hookStdout)
     );
   }
 }
@@ -727,7 +743,7 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
 
   it('AC-454-02: Unhandled Errors with zero failed tests is SKIPPED, not BLOCKED', () => {
     const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.unhandledEperm, 1);
-    assertStubRan(callsFile, 'AC-454-02');
+    assertStubRan(callsFile, 'AC-454-02', stdout);
     expect(stdout).not.toContain('BLOCKED - Tests FAILED');
     // Positive assertion: the guard's own message must be what we saw, so the
     // test cannot pass merely because the hook bailed out earlier.
@@ -736,13 +752,13 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
 
   it('AC-454-03: a real test failure still BLOCKS', () => {
     const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.realFailure, 1);
-    assertStubRan(callsFile, 'AC-454-03');
+    assertStubRan(callsFile, 'AC-454-03', stdout);
     expect(stdout).toContain('Tests FAILED');
   });
 
   it('AC-454-04: real-failure markers win when Unhandled Errors are also present', () => {
     const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.failureAndUnhandled, 1);
-    assertStubRan(callsFile, 'AC-454-04');
+    assertStubRan(callsFile, 'AC-454-04', stdout);
     expect(stdout).toContain('Tests FAILED');
     expect(stdout).not.toContain('SKIPPED - vitest runner infrastructure error');
   });
@@ -752,14 +768,14 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     // the global threshold, so vitest exits 1 having failed nothing. The fixture
     // stages every file, which is exactly the partial-run condition.
     const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.thresholdOnly, 1);
-    assertStubRan(callsFile, 'AC-473-02');
+    assertStubRan(callsFile, 'AC-473-02', stdout);
     expect(stdout).toContain('SKIPPED - coverage threshold judgement');
     expect(stdout).not.toContain('BLOCKED - Tests FAILED');
   });
 
   it('AC-454-05: a fully passing run PASSES (regression)', () => {
     const { stdout, callsFile } = hookRun(FIXTURE_OUTPUTS.allPassed, 0);
-    assertStubRan(callsFile, 'AC-454-05');
+    assertStubRan(callsFile, 'AC-454-05', stdout);
     // Scope the assertion to Gate 5's own verdict. The sandbox fixture is a bare
     // repo with no .archlint.yaml, so Gate 6 legitimately blocks later; asserting
     // on the whole hook output would make this test about Gate 6, not Gate 5.
