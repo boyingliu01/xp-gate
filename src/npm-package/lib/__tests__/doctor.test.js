@@ -181,6 +181,25 @@ describe('doctor', () => {
     return path.join(tmpProject, 'githooks', 'adapters');
   }
 
+  /**
+   * Make sure the generated adapters mirror exists under src/npm-package/.
+   *
+   * It is gitignored and produced by `scripts/sync-package-content.js` at
+   * prepack time, so a clean checkout has no source for `--fix` to restore
+   * from. Runs the real generator (not a copy) so the fixture cannot drift from
+   * what actually ships.
+   */
+  function ensureAdapterSourceGenerated() {
+    const pkgRoot = path.join(__dirname, '..', '..');
+    const mirror = path.join(pkgRoot, 'adapters');
+    if (fs.existsSync(path.join(mirror, 'typescript.sh'))) return;
+    require('node:child_process').execFileSync(
+      process.execPath,
+      [path.join(pkgRoot, 'scripts', 'sync-package-content.js')],
+      { cwd: pkgRoot, stdio: 'ignore' }
+    );
+  }
+
   function createXpGatePreCommit(dir) {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -571,6 +590,15 @@ describe('doctor', () => {
   it('AC-10: doctor --fix reinstall adapters when mode is active and adapters missing', async () => {
     setupLocalInstall();
     seedVersionCache();
+    // `src/npm-package/adapters/` is a GENERATED mirror since ccfc22f3 (P1-E): it
+    // is gitignored, so a fresh CI checkout does not have it. `--fix` restores
+    // adapters FROM that directory, so without it the restore is impossible,
+    // the issue survives, and doctor correctly returns 1. Locally the directory
+    // existed from an earlier build, which is why this only failed on CI.
+    //
+    // Generate it through the same prepack step that creates it in production,
+    // rather than committing copies back or skipping the case.
+    ensureAdapterSourceGenerated();
     // Remove adapters
     fs.rmSync(projectAdaptersDir(), { recursive: true, force: true });
     mockExecSuccess();
