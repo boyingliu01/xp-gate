@@ -551,11 +551,18 @@ function gitLfsHookSource(filePath) {
  */
 const HOOK_SUPPORT_FILES = [
   'hook-module-resolution.sh',
-  // #798: the driver, its gate entries, and the lib/ helpers they source
-  // (now-ms.sh is required by both hooks for the single-clock duration rule).
+  // #798: the driver and its gate entries are support files, so they are
+  // refreshed unconditionally like the hooks themselves.
   // Derived from the deploy manifest so this list cannot fall behind it.
+  //
+  // `lib/` is deliberately EXCLUDED even though the driver sources it: the lib/
+  // branch below carries the #488 refusal, which refuses to overwrite a shared
+  // library that holds machine-only lines. Listing lib/* here made that guard
+  // unreachable -- the unconditional copy in this loop ran first, `refused` stayed
+  // empty, and a sync silently destroyed local hardening. Two writers for one
+  // file, and the less careful one won.
   ...require('./deploy-manifest.js').MODULE_FILES.filter(
-    (rel) => rel === 'gate-driver.sh' || rel.startsWith('gate-entries/') || rel.startsWith('lib/'),
+    (rel) => rel === 'gate-driver.sh' || rel.startsWith('gate-entries/'),
   ),
 ];
 

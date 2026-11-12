@@ -6016,3 +6016,139 @@ specification:
             一次性调用方（如 shell 命令替换中的 node -e）不得因为守护进程而挂起：
             进程必须能自然退出，同时不得在扫描完成前退出导致输出为空。
           test_type: unit
+        - id: AC-SASTD-07
+          criteria: >-
+            守护进程不得把「更薄的扫描」报成「更干净的结果」：扫描实际覆盖的根目录
+            少于请求的根目录时，结果必须带 Coverage 类错误标记，绝不能被读作一次
+            通过的扫描；同时完全覆盖的扫描不得被误标（否则每次扫描都会退回直跑，
+            守护进程永久失效却看起来「安全」）。
+          test_type: unit
+
+    # ============================================================
+    # REQ-GATEID: 门禁编号是位置标签，名称才是身份（#717 的教训）
+    # ============================================================
+    # #717 的根因不是某个表写错了，而是「同一个事实被手抄了四份」。
+    # 四份里三份一致、gate-coverage.js 单独把 9/10 写反了；于是本该落在
+    # githooks/gate-9.sh 的 C# SAST 修复进了一个没有任何钩子 source 的文件
+    # —— 改动「看起来落地了」而实际什么也没改。
+    #
+    # 删掉那一份抄写只解决了今天这一次，没有解决「抄写」这个动作本身。
+    # 因此这些需求要求每一面都从 githooks/gate-registry.sh 派生，
+    # 并让「新增一份手写副本」在测试里红，而不是等下一个读者被误导。
+    # ============================================================
+    - id: REQ-GATEID-001
+      description: >-
+        生产代码不得声明「号码 → 名称」映射。门禁编号是位置标签，名称才是身份；
+        任何需要名称的地方都从 githooks/gate-registry.sh 派生，而不是手抄一张表。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-GATEID-001-01
+          criteria: >-
+            gate-coverage.js 不再自带号码→名称表，其渲染结果与 registry 一致。
+          test_type: unit
+        - id: AC-GATEID-001-03
+          criteria: >-
+            gate-coverage 的每一行名称都能在 registry 中找到同名声明（无孤儿名称）。
+          test_type: unit
+        - id: AC-GATEID-001-05
+          criteria: >-
+            生产代码（非测试、非生成物）中不存在硬编码的号码→名称映射；
+            出现即测试失败。
+          test_type: unit
+        - id: AC-GATEID-001-06
+          criteria: >-
+            每一处 report-key override 都必须指向 registry 真实声明的门禁，
+            不得指向一个不存在的名字。
+          test_type: unit
+        - id: AC-GATEID-001-07
+          criteria: >-
+            override 区块在有、无 export 关键字两种写法下都能被解析——
+            解析器不能依赖某一种拼写，否则下一次写法变化会静默关掉检查。
+          test_type: unit
+
+    - id: REQ-GATEID-002
+      description: >-
+        registry 是门禁身份的单一声明。每个「面」（钩子实际执行的、registry 声明的、
+        gate-coverage 渲染的、pre-push 消费的）都从它派生并相互比对，
+        使新增一份手写副本当场失败。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-GATEID-002-01
+          criteria: >-
+            registry 解析出的门禁集合与钩子实际执行的门禁集合一致。
+          test_type: integration
+        - id: AC-GATEID-002-02
+          criteria: >-
+            registry 中每个声明的实现文件都真实存在于磁盘上。
+          test_type: unit
+        - id: AC-GATEID-002-03
+          criteria: >-
+            gate-coverage 不再自带号码→名称表（与 AC-GATEID-001-01 同一事实的
+            跨面表述：删除了一份副本，也删除了「抄写」这个动作）。
+          test_type: unit
+        - id: AC-GATEID-002-04
+          criteria: >-
+            跨面校验器可注入：注入一个被倒置的 registry 时必须报出该倒置行，
+            使「永远返回 [] 的校验器」无法冒充通过。
+          test_type: unit
+        - id: AC-GATEID-002-05
+          criteria: >-
+            在真实 registry 上跨面校验必须干净（无倒置、无缺失），
+            与 AC-GATEID-002-04 一起构成双向断言：既不能漏报，也不能恒报。
+          test_type: integration
+        - id: AC-GATEID-002-06
+          criteria: >-
+            跨面比对发现的不一致必须指名具体门禁号码与两面各自的名称，
+            而不是只给一个「不一致」的总判。
+          test_type: unit
+        - id: AC-GATEID-002-07
+          criteria: >-
+            发现逻辑只统计本 checkout 的副本，不得把另一个 worktree 的副本
+            当作本 checkout 的门禁实现（否则并行 worktree 会互相污染结论）。
+          test_type: unit
+
+    - id: REQ-GATEID-003
+      description: >-
+        pre-push 消费同一份 registry：门禁身份在推前闸门上与提交前闸门同源，
+        且「消费」是纯记账，不改执行策略。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-GATEID-003-03
+          criteria: >-
+            pre-push 顶部 source gate-registry.sh，取得门禁身份。
+          test_type: integration
+        - id: AC-GATEID-003-04
+          criteria: >-
+            source 受存在性保护：消费方仓库尚未安装 registry 时，
+            pre-push 仍能正常运行（降级而非崩溃）。
+          test_type: integration
+        - id: AC-GATEID-003-05
+          criteria: >-
+            source registry 只做插入，不改变执行策略——不得因为引入 registry
+            而让原本执行的闸门被跳过，或让原本跳过的闸门被执行。
+          test_type: integration
+
+    - id: REQ-GATEID-007
+      description: >-
+        gate-coverage 读取的多份 gate 报告 artifact 必须可确定地选择：
+        存在多份时不得按目录遍历顺序挑选，否则同一命令在不同机器上读出不同结论。
+      priority: high
+      acceptance_criteria:
+        - id: AC-GATEID-007-01
+          criteria: >-
+            当存在多份 artifact 时，拒绝按目录顺序静默挑选，必须报错或要求显式指定。
+          test_type: unit
+        - id: AC-GATEID-007-02
+          criteria: >-
+            只有一份 artifact 时仍然正常工作（防过度收紧导致常规路径失效）。
+          test_type: unit
+        - id: AC-GATEID-007-03
+          criteria: >-
+            显式 --branch 指向不存在的 artifact 时报错，而不是静默回退到另一份；
+            指向存在的那一份时读取的正是该份。
+          test_type: unit
+        - id: AC-GATEID-007-04
+          criteria: >-
+            多个 artifact 同时存在时同样不得按目录顺序挑选（与 -01 同一事实的
+            另一触发路径）。
+          test_type: unit

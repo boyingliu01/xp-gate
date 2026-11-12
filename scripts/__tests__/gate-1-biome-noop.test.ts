@@ -12,7 +12,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const REPO_ROOT = resolve(__dirname, '..', '..');
-const PRE_COMMIT = join(REPO_ROOT, 'githooks', 'pre-commit');
+// #798 split pre-commit into gate-driver.sh + gate-entries/*.sh. Gate 1's body
+// (including the Biome branch this file extracts) now lives in the entry file,
+// so reading pre-commit found no marker, produced an empty fragment, and every
+// case failed with "the npx stub never executed" -- the anti-vacuity assertion
+// doing exactly its job: the run proved nothing. Point at the file that
+// actually holds the branch rather than the hook that calls it.
+const GATE_1_ENTRY = join(REPO_ROOT, 'githooks', 'gate-entries', 'gate-1-entry.sh');
 
 /** Find the bash to use for running an extracted hook fragment. */
 function bashPath(): string | null {
@@ -72,9 +78,16 @@ function runBiomeBranch(testCase: Case): { status: number; stdout: string } {
   writeFileSync(join(dir, 'biome-output.txt'), `${testCase.output}\n`);
   const callsFile = join(dir, STUB_CALLS_FILE);
 
-  // Extract only the Biome branch; `exit 1` inside it must end the script, so
-  // this is run as a file rather than sourced.
-  const hook = execFileSync('node', ['-e', SED_SCRIPT, PRE_COMMIT], { encoding: 'utf8' });
+  // Extract only the Biome branch and run it as a standalone script.
+  //
+  // #798 changed the gate body's `exit N` to `return N` (the bodies are now
+  // sourced functions, not top-level hook code). Run verbatim as a script,
+  // `return` outside a function is a bash error: it exits 2 instead of 1, so the
+  // two blocking cases read 2-vs-1 and failed while the pass cases were fine.
+  // Rewriting the fragment's `return N` back to `exit N` restores standalone
+  // semantics without touching the shipped hook.
+  const hook = execFileSync('node', ['-e', SED_SCRIPT, GATE_1_ENTRY], { encoding: 'utf8' })
+    .replace(/^(\s*)return (\d+)\s*$/gm, '$1exit $2');
   writeFileSync(join(dir, 'gate1-biome.sh'), hook);
 
   // The stub must be executable. Doing this through the same bash we run the

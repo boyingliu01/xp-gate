@@ -33,7 +33,22 @@ const TEST_GLOBS = [
   'githooks/__tests__',
 ];
 const EXTS = new Set(['.ts', '.js', '.cjs', '.mjs', '.bats']);
-const AC_PATTERN = /\bAC-[A-Za-z0-9]+-\d{2,}\b/g;
+// Matches BOTH id shapes the specification actually uses: two-part numeric
+// (AC-483-01, AC-DEPLOY-01) and three-part (AC-DSH-001-01, AC-GATEID-002-04).
+//
+// The tail is `-<digits>` followed by any number of `-<digits>`. With a single
+// trailing group the regex matched only the first two numeric segments, so
+// `AC-GATEID-002-04` was read as `AC-GATEID-002` and `AC-DSH-001-01` as
+// `AC-DSH-001`. That truncation did NOT surface as an error, because the
+// baseline had been generated with the same truncated ids -- the guard and its
+// own baseline were wrong in the same direction and therefore agreed. It only
+// showed up once a file cited a three-part id, and then the citation was
+// reported as unregistered while the real id never entered `observed` at all.
+//
+// Keeping the family segment as [A-Za-z0-9]+ and extending only the numeric
+// tail confines the change to strings that actually look like ids: prose such
+// as "AC-A" or "AC-TODO" does not match.
+const AC_PATTERN = /\bAC-[A-Za-z0-9]+-\d{2,}(?:-\d{2,})*\b/g;
 
 function walkTests(dir, out) {
   if (!fs.existsSync(dir)) return out;
