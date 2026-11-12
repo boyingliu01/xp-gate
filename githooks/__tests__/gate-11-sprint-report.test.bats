@@ -10,7 +10,12 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$REPO_ROOT/githooks/lib/sprint-gate-report.sh"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798: Gate 11's body moved to gate-entries/gate-11-entry.sh.
+  # #798: Gate 11's body moved to gate-entries/gate-11-entry.sh, but the report
+  # library is still loaded once in pre-commit's PREAMBLE (before the driver
+  # dispatches), so the load assertion reads that file instead.
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-11-entry.sh"
+  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
   TEST_DIR="$(mktemp -d)"
 }
 
@@ -135,7 +140,7 @@ prepare_repo() {
   # made this case red on correct code once the wrapper was introduced. What the
   # invariant needs is: the report library is loaded, from a path under
   # $AUDIT_SCRIPT_DIR — how it is loaded is an implementation detail.
-  awk '/^[[:space:]]*#/ {next} /sprint-gate-report\.sh/ && /AUDIT_SCRIPT_DIR/ {found=1} END {exit !found}' "$HOOK" || {
+  awk '/^[[:space:]]*#/ {next} /sprint-gate-report\.sh/ && /AUDIT_SCRIPT_DIR/ {found=1} END {exit !found}' "$PRE_COMMIT" || {
     echo "pre-commit no longer loads lib/sprint-gate-report.sh from AUDIT_SCRIPT_DIR"
     return 1
   }

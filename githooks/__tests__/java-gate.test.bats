@@ -24,6 +24,15 @@ setup() {
   mkdir -p "${TEST_DIR}/lib" "${TEST_DIR}/adapters"
   cp -R "${BATS_TEST_DIRNAME}/../lib/." "${TEST_DIR}/lib/"
   cp -R "${BATS_TEST_DIRNAME}/../adapters/." "${TEST_DIR}/adapters/"
+  # #798: pre-commit is now a preamble + one driver call + an epilogue, and the
+  # gate bodies live in gate-entries/gate-<KEY>-entry.sh, sourced from
+  # SCRIPT_DIR. Copying only pre-commit produced a hook that ran the preamble and
+  # then had no gate bodies at all -- the same fixture drift the #593 note above
+  # describes, one directory later.
+  cp "${BATS_TEST_DIRNAME}/../gate-driver.sh" "${TEST_DIR}/gate-driver.sh"
+  cp "${BATS_TEST_DIRNAME}/../gate-registry.sh" "${TEST_DIR}/gate-registry.sh"
+  mkdir -p "${TEST_DIR}/gate-entries"
+  cp -R "${BATS_TEST_DIRNAME}/../gate-entries/." "${TEST_DIR}/gate-entries/"
   chmod +x "${TEST_DIR}/pre-commit"
 
   # Initialize git repo

@@ -107,6 +107,16 @@ MOCK
   # directory, exactly like a real `xp-gate init` installation does.
   mkdir -p .git/hooks/lib
   cp -R "$SOURCE_GITHOOKS/lib/." .git/hooks/lib/ 2>/dev/null || true
+  # #798: the gate bodies live in gate-entries/ and are sourced from SCRIPT_DIR,
+  # one file per gate, driven by gate-driver.sh. Without them the copied
+  # pre-commit runs its preamble and then has no gates to run at all -- the
+  # fixture would assert against a hook that never reaches Gate 5a.
+  cp "$SOURCE_GITHOOKS/gate-driver.sh" .git/hooks/gate-driver.sh 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/gate-registry.sh" .git/hooks/gate-registry.sh 2>/dev/null || true
+  mkdir -p .git/hooks/gate-entries
+  cp -R "$SOURCE_GITHOOKS/gate-entries/." .git/hooks/gate-entries/ 2>/dev/null || true
+  # Keep the gate entry points executable in the same way the installer does.
+  chmod -R +x .git/hooks/gate-entries 2>/dev/null || true
 
   # Multi-language monorepo fixture: TS project under web/, Python under backend/
   mkdir -p web/src/modules/training/stores backend

@@ -10,6 +10,9 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # #798: the Gate 4/6 per-language arms moved into gate-entries/. Gate 6 owns
+  # the csharp arm, so these assertions read that entry file.
+  GATE_6="$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh"
 }
 
 # --- Gate 4: the analyzer must resolve .cs to a real adapter -----------------
@@ -45,13 +48,13 @@ setup() {
 # --- Gate 6: a real csharp arm, not the *) default --------------------------
 
 @test "Gate 6 has a dedicated csharp case arm" {
-  run grep -n '"csharp")' "$REPO_ROOT/githooks/pre-commit"
+  run grep -n '"csharp")' "$GATE_6"
   [ "$status" -eq 0 ]
 }
 
 @test "the Gate 6 csharp arm is inside the per-language loop, not the fallback" {
-  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
-  CS_LINE=$(grep -n '"csharp")' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
+  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$GATE_6" | tail -1 | cut -d: -f1)
+  CS_LINE=$(grep -n '"csharp")' "$GATE_6" | tail -1 | cut -d: -f1)
   [ -n "$LOOP_LINE" ]
   [ -n "$CS_LINE" ]
   [ "$CS_LINE" -gt "$LOOP_LINE" ]
@@ -60,30 +63,32 @@ setup() {
 @test "the Gate 6 csharp arm reads PIPESTATUS so it cannot fail open" {
   # #630/#602 removed the shape where `cmd | tail` yields tail's status and the
   # arm printed "completed" unconditionally. The C# arm must not reintroduce it.
-  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
+  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$GATE_6" | tail -1 | cut -d: -f1)
   START=$LOOP_LINE
-  END_LINE=$(grep -n 'cs_arch_rc=' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
+  END_LINE=$(grep -n 'cs_arch_rc=' "$GATE_6" | tail -1 | cut -d: -f1)
   [ -n "$END_LINE" ]
-  sed -n "${START},$((END_LINE+3))p" "$REPO_ROOT/githooks/pre-commit" | grep -q 'PIPESTATUS\[0\]'
+  sed -n "${START},$((END_LINE+3))p" "$GATE_6" | grep -q 'PIPESTATUS\[0\]'
 }
 
 @test "the Gate 6 csharp arm blocks on failure rather than only printing" {
-  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
-  END_LINE=$(grep -n 'C# architecture validation completed' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
+  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$GATE_6" | tail -1 | cut -d: -f1)
+  END_LINE=$(grep -n 'C# architecture validation completed' "$GATE_6" | tail -1 | cut -d: -f1)
   [ -n "$END_LINE" ]
-  sed -n "${LOOP_LINE},$((END_LINE+1))p" "$REPO_ROOT/githooks/pre-commit" | grep -q 'exit 1'
+  # #798: a gate body RETURNS its verdict (the driver maps a non-zero return
+  # to the hook exit status), so blocking is spelled `return 1` here.
+  sed -n "${LOOP_LINE},$((END_LINE+1))p" "$GATE_6" | grep -qE '(^|[[:space:]])return 1'
 }
 
 @test "the Gate 6 csharp arm leaves a skip reason when it cannot measure" {
   # #537: a language that was NOT measured must carry a reason, otherwise the
   # gate cannot tell "validated and passed" from "never ran".
-  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
-  END_LINE=$(grep -n 'C# architecture validation completed' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
-  sed -n "${LOOP_LINE},$((END_LINE+1))p" "$REPO_ROOT/githooks/pre-commit" \
+  LOOP_LINE=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$GATE_6" | tail -1 | cut -d: -f1)
+  END_LINE=$(grep -n 'C# architecture validation completed' "$GATE_6" | tail -1 | cut -d: -f1)
+  sed -n "${LOOP_LINE},$((END_LINE+1))p" "$GATE_6" \
     | grep -q 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"'
 }
 
 @test "pre-commit still parses after the csharp arm was added" {
-  run bash -n "$REPO_ROOT/githooks/pre-commit"
+  run bash -n "$GATE_6"
   [ "$status" -eq 0 ]
 }

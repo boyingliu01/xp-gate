@@ -11,7 +11,13 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # #798: pre-commit is now preamble + driver + epilogue. The report writer is
+  # defined in gate-13-entry.sh (registered top-level so a skipped Gate 13 cannot
+  # leave it undefined), and the SAST no-code path lives in gate-10-entry.sh.
+  # Each assertion reads the file that actually holds its subject.
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  REPORT_FN_SRC="$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
+  SAST_SRC="$REPO_ROOT/githooks/gate-entries/gate-10-entry.sh"
   TEST_DIR="$(mktemp -d)"
 }
 
@@ -25,7 +31,7 @@ teardown() {
 extract_report_fn() {
   # Stop at the ENDJSON terminator, not the first column-0 '}': the heredoc's
   # JSON body contains a column-0 '}' that would truncate the extraction.
-  sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$PRE_COMMIT" > "$TEST_DIR/report-fn.sh"
+  sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$REPORT_FN_SRC" > "$TEST_DIR/report-fn.sh"
   printf '}\n' >> "$TEST_DIR/report-fn.sh"
   cat > "$TEST_DIR/run-report.sh" << 'RUNNER'
 set -u
@@ -72,13 +78,13 @@ init_repo() {
 }
 
 @test "#536 pre-commit no-code-changed path records SKIP with a reason, not bare PASS" {
-  grep -E 'No code files changed, skipping SAST scan' "$PRE_COMMIT" >/dev/null
+  grep -E 'No code files changed, skipping SAST scan' "$SAST_SRC" >/dev/null
   # The branch that prints that banner must NOT set GATE_10_STATUS="PASS";
   # it must record SKIP plus an explicit reason for the report.
-  run awk '/No code files changed, skipping SAST scan/{found=NR} found && NR>=found && NR<=found+3 && /GATE_10_STATUS=/{print; exit}' "$PRE_COMMIT"
+  run awk '/No code files changed, skipping SAST scan/{found=NR} found && NR>=found && NR<=found+3 && /GATE_10_STATUS=/{print; exit}' "$SAST_SRC"
   [ "$status" -eq 0 ]
   [[ "$output" == *SKIP* ]]
-  grep -E 'GATE_10_REASON=' "$PRE_COMMIT" >/dev/null
+  grep -E 'GATE_10_REASON=' "$SAST_SRC" >/dev/null
 }
 
 @test "#536 gate-10 sets a degrade reason when semgrep is unavailable" {

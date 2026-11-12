@@ -1,14 +1,14 @@
 #!/usr/bin/env bats
 # @test REQ-A-02
 # @intent #532: the #518 SAST fix (v0.21.0) landed on gate-10.sh and the TS entry
-#         (src/gates/gate-9.ts), but the legacy gate-9.sh fallback copies
+#         (src/gates/gate-9.ts), but the legacy gate-10.sh fallback copies
 #         still carried both root causes: (1) semgrep exit 0 is treated as "no
 #         findings" although semgrep exits 0 even with ERROR-severity findings
 #         unless --error is passed; (2) the CRITICAL/HIGH-only vocabulary never
 #         intersects semgrep's own ERROR/WARNING/INFO scale. Two copies are
-#         reachable: resolveGateScript(9) hits githooks/gate-9.sh in a TS-less
+#         reachable: resolveGateScript(9) hits githooks/gate-10.sh in a TS-less
 #         repo checkout, and the globally installed
-#         ~/.config/xp-gate/adapters/gate-9.sh for npm deployments. (This file
+#         ~/.config/xp-gate/adapters/gate-10.sh for npm deployments. (This file
 #         used to list a third, githooks/gates/gate-9-sast-security.sh, as
 #         "hit FIRST". That was wrong: the npm package ships no gates/
 #         directory and `xp-gate init` never installs one, so the candidate
@@ -26,8 +26,8 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  GATE="$REPO_ROOT/githooks/gate-9.sh"
-  GATE_ADAPTERS="$REPO_ROOT/githooks/adapters/gate-9.sh"
+  GATE="$REPO_ROOT/githooks/gate-10.sh"
+  GATE_ADAPTERS="$REPO_ROOT/githooks/adapters/gate-10.sh"
   TEST_DIR="$(mktemp -d)"
 
   mkdir -p "$TEST_DIR/bin"
@@ -103,7 +103,7 @@ JSON
     [ "$status" -eq 1 ] || { echo "$gate: expected exit 1, got $status — output: $output"; return 1; }
     [[ "$output" == *"BLOCKED"* ]] || { echo "$gate: no BLOCKED banner"; return 1; }
     [[ "$output" == *"subprocess-shell-true"* ]] || { echo "$gate: finding not shown"; return 1; }
-    [[ "$output" != *"STATUS_9=[PASS]"* ]] || { echo "$gate: silent PASS on ERROR finding"; return 1; }
+    [[ "$output" != *"STATUS_10=[PASS]"* ]] || { echo "$gate: silent PASS on ERROR finding"; return 1; }
   done < <(all_gate_copies)
 }
 
@@ -144,8 +144,8 @@ JSON
   while IFS= read -r gate; do
     run run_gate_with_json_stub "$gate"
     [ "$status" -eq 0 ] || { echo "$gate: expected exit 0 (SKIP), got $status"; return 1; }
-    [[ "$output" == *"STATUS_9=[SKIP]"* ]] || { echo "$gate: expected SKIP — output: $output"; return 1; }
-    [[ "$output" != *"STATUS_9=[PASS]"* ]] || { echo "$gate: silent PASS on unparseable output"; return 1; }
+    [[ "$output" == *"STATUS_10=[SKIP]"* ]] || { echo "$gate: expected SKIP — output: $output"; return 1; }
+    [[ "$output" != *"STATUS_10=[PASS]"* ]] || { echo "$gate: silent PASS on unparseable output"; return 1; }
   done < <(all_gate_copies)
 }
 
@@ -159,8 +159,8 @@ JSON
   while IFS= read -r gate; do
     run run_gate_with_json_stub "$gate"
     [ "$status" -eq 0 ] || { echo "$gate: expected exit 0 (SKIP), got $status"; return 1; }
-    [[ "$output" == *"STATUS_9=[SKIP]"* ]] || { echo "$gate: expected SKIP — output: $output"; return 1; }
-    [[ "$output" != *"STATUS_9=[PASS]"* ]] || { echo "$gate: silent PASS with only scan errors"; return 1; }
+    [[ "$output" == *"STATUS_10=[SKIP]"* ]] || { echo "$gate: expected SKIP — output: $output"; return 1; }
+    [[ "$output" != *"STATUS_10=[PASS]"* ]] || { echo "$gate: silent PASS with only scan errors"; return 1; }
   done < <(all_gate_copies)
 }
 
@@ -190,13 +190,13 @@ JSON
       printf "STATUS_9=[%s] STATUS_10=[%s]" "$GATE_9_STATUS" "$GATE_10_STATUS"
     ' _ "$TEST_DIR" "$TEST_DIR" "$gate"
     [ "$status" -eq 0 ] || { echo "$gate: expected exit 0 (SKIP), got $status — output: $output"; return 1; }
-    [[ "$output" == *"STATUS_9=[SKIP]"* ]] || { echo "$gate: expected SKIP without node — output: $output"; return 1; }
+    [[ "$output" == *"STATUS_10=[SKIP]"* ]] || { echo "$gate: expected SKIP without node — output: $output"; return 1; }
     [[ "$output" == *"node is not installed"* ]] || { echo "$gate: no actionable node message"; return 1; }
-    [[ "$output" != *"STATUS_9=[PASS]"* ]] || { echo "$gate: silent PASS without node"; return 1; }
+    [[ "$output" != *"STATUS_10=[PASS]"* ]] || { echo "$gate: silent PASS without node"; return 1; }
   done < <(all_gate_copies)
 }
 
-@test "kept contract: exit 0 with no findings still PASSes in all three copies (AC-475-03); gates copy writes GATE_9_STATUS, never GATE_10_STATUS" {
+@test "kept contract: exit 0 with no findings still PASSes in all three copies (AC-475-03); the SAST gate writes GATE_10_STATUS, never GATE_9_STATUS" {
   cat > "$TEST_DIR/clean.json" << 'JSON'
 {"results":[],"errors":[],"paths":{"scanned":["app.ts"]}}
 JSON
@@ -204,8 +204,8 @@ JSON
   while IFS= read -r gate; do
     run run_gate_with_json_stub "$gate"
     [ "$status" -eq 0 ] || { echo "$gate: expected exit 0, got $status"; return 1; }
-    [[ "$output" == *"STATUS_9=[PASS]"* ]] || { echo "$gate: expected STATUS_9=[PASS] — output: $output"; return 1; }
-    [[ "$output" == *"STATUS_10=[]"* ]] || { echo "$gate: wrote GATE_10_STATUS (copy-paste artifact)"; return 1; }
+    [[ "$output" == *"STATUS_10=[PASS]"* ]] || { echo "$gate: expected STATUS_10=[PASS] — output: $output"; return 1; }
+    [[ "$output" == *"STATUS_9=[]"* ]] || { echo "$gate: wrote GATE_9_STATUS (copy-paste artifact)"; return 1; }
   done < <(all_gate_copies)
 }
 
@@ -229,7 +229,7 @@ JSON
   while IFS= read -r gate; do
     run run_gate_with_json_stub "$gate"
     [ "$status" -eq 0 ] || { echo "$gate: expected exit 0, got $status"; return 1; }
-    [[ "$output" == *"STATUS_9=[PASS]"* ]] || { echo "$gate: expected PASS — output: $output"; return 1; }
+    [[ "$output" == *"STATUS_10=[PASS]"* ]] || { echo "$gate: expected PASS — output: $output"; return 1; }
     [[ "$output" == *"warnings only"* ]] || { echo "$gate: warnings not surfaced"; return 1; }
     [[ "$output" == *"rule.a"* ]] || { echo "$gate: warning finding not shown"; return 1; }
   done < <(all_gate_copies)
@@ -275,7 +275,7 @@ verdict_block_of() {
 
 @test "AC-A-02-04a: the verdict block is byte-identical across the two reachable repo copies" {
   verdict_block_of "$GATE" > "$TEST_DIR/vb-canonical" || {
-    echo "githooks/gate-9.sh: verdict block markers missing"
+    echo "githooks/gate-10.sh: verdict block markers missing"
     return 1
   }
   [ -s "$TEST_DIR/vb-canonical" ] || { echo "empty verdict block"; return 1; }
@@ -285,7 +285,7 @@ verdict_block_of() {
       return 1
     fi
     if ! diff -u "$TEST_DIR/vb-canonical" "$TEST_DIR/vb-other"; then
-      echo "$f: verdict block drifted from githooks/gate-9.sh"
+      echo "$f: verdict block drifted from githooks/gate-10.sh"
       return 1
     fi
   done
@@ -293,8 +293,8 @@ verdict_block_of() {
 
 @test "AC-A-02-04b: all five shipped copies carry the invariant markers and no --error flag" {
   # The two reachable repo sources plus the three npm mirrors (sync-package-content.js
-  # copies githooks/gate-9.sh to package root AND hooks/, and
-  # githooks/adapters/gate-9.sh to adapters/).
+  # copies githooks/gate-10.sh to package root AND hooks/, and
+  # githooks/adapters/gate-10.sh to adapters/).
   #
   # githooks/gates/gate-9-sast-security.sh used to be a sixth entry. It was
   # REMOVED, and the count corrected from six to five, because it was never
@@ -305,11 +305,11 @@ verdict_block_of() {
   # copy and still carried the GATE_10_STATUS copy-paste artifact this test
   # file documents. See AC-A-02-05 for the guard against its return.
   local copies=(
-    "$REPO_ROOT/githooks/gate-9.sh"
-    "$REPO_ROOT/githooks/adapters/gate-9.sh"
-    "$REPO_ROOT/src/npm-package/gate-9.sh"
-    "$REPO_ROOT/src/npm-package/hooks/gate-9.sh"
-    "$REPO_ROOT/src/npm-package/adapters/gate-9.sh"
+    "$REPO_ROOT/githooks/gate-10.sh"
+    "$REPO_ROOT/githooks/adapters/gate-10.sh"
+    "$REPO_ROOT/src/npm-package/gate-10.sh"
+    "$REPO_ROOT/src/npm-package/hooks/gate-10.sh"
+    "$REPO_ROOT/src/npm-package/adapters/gate-10.sh"
   )
   for f in "${copies[@]}"; do
     [ -f "$f" ] || { echo "$f: missing"; return 1; }

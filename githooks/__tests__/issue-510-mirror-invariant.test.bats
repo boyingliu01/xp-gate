@@ -9,7 +9,11 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  PRE_COMMIT_COPY="$REPO_ROOT/githooks/pre-commit"
+  # #798: MIRROR_PATH_FILTER is still defined and consumed in Gate 0's body,
+  # while the MIRROR_EXCLUDE consumer lives in Gate 6's. Both moved out of
+  # pre-commit, so each assertion reads the entry that holds its subject.
+  PRE_COMMIT_COPY="$REPO_ROOT/githooks/gate-entries/gate-0-entry.sh"
+  GATE_6_ENTRY="$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh"
   # /tmp (POSIX-style): a Windows drive-letter mktemp path trips the sandboxed
   # rm shim in teardown (same workaround as gate-8.test.bats).
   export TMPDIR=/tmp
@@ -79,7 +83,7 @@ run_changed_lists() {
   fi
   # ...and both consumers must reference the hoisted variable.
   grep -q 'grep -v "$MIRROR_PATH_FILTER"' "$PRE_COMMIT_COPY"
-  grep -q 'MIRROR_EXCLUDE="$MIRROR_PATH_FILTER"' "$PRE_COMMIT_COPY"
+  grep -q 'MIRROR_EXCLUDE="$MIRROR_PATH_FILTER"' "$GATE_6_ENTRY"
 }
 
 @test "AC-510-02: mirror-only commit keeps RAW list non-empty (gates still run)" {
@@ -119,7 +123,11 @@ run_changed_lists() {
   printf '%s\n' "$block" | grep -q '^MIRROR_PATH_FILTER='
   printf '%s\n' "$block" | grep -q '^RAW_CHANGED_FILES='
   printf '%s\n' "$block" | grep -q '^CHANGED_FILES='
-  printf '%s\n' "$block" | grep -q 'exit 0'
+  # #798: a gate body RETURNS its verdict and the driver maps a non-zero return
+  # to the hook's exit status, so the early exit is `return 0` here. Accept
+  # either keyword -- what this guard asserts is that the block still CONTAINS
+  # the early exit, not which spelling it uses.
+  printf '%s\n' "$block" | grep -qE '^[[:space:]]*(exit|return) 0'
 }
 
 @test "AC-510-04: gate-8 scans unconditionally -- no gate-8 copy reads the filtered list" {

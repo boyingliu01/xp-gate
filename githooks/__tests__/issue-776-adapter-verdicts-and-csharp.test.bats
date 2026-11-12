@@ -9,7 +9,12 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798: Gate 5's body (CODE_EXTENSIONS, TESTS_RAN_ANY, the coverage verdict arms)
+  # moved to gate-entries/gate-5-entry.sh.
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
+  # The generic Gate 1 adapter arm (#776) is a different gate body, so it reads
+  # its own entry file rather than riding on HOOK.
+  GATE_1_ENTRY="$REPO_ROOT/githooks/gate-entries/gate-1-entry.sh"
 }
 
 # ---------------------------------------------------------------------------
@@ -230,15 +235,19 @@ XML
   # Extract the generic adapter arm and assert it can block. Matching the whole
   # file would pass on the java/powershell arms alone, which always could.
   local arm
-  arm=$(awk '/^    \*\)$/{flag=1} flag{print} /^      ;;$/{if(flag){exit}}' "$HOOK")
+  arm=$(awk '/^    \*\)$/{flag=1} flag{print} /^      ;;$/{if(flag){exit}}' "$GATE_1_ENTRY")
   [ -n "$arm" ]
   printf '%s\n' "$arm" | grep -q 'GATE_1_STATUS="BLOCK"'
-  printf '%s\n' "$arm" | grep -q 'exit 1'
+  # #798: a gate body RETURNS its verdict; the driver turns a non-zero return
+  # into the hook's exit status so the EXIT trap still fires on the same code.
+  # A top-level `exit 1` inside gate_1_run() would kill the hook before the
+  # driver could decide, so `return 1` is what blocking looks like now.
+  printf '%s\n' "$arm" | grep -qE '(^|[[:space:]])return 1'
 }
 
 @test "#776: the generic Gate 1 arm treats a 2 verdict as fail-closed, not a skip" {
   local arm
-  arm=$(awk '/^    \*\)$/{flag=1} flag{print} /^      ;;$/{if(flag){exit}}' "$HOOK")
+  arm=$(awk '/^    \*\)$/{flag=1} flag{print} /^      ;;$/{if(flag){exit}}' "$GATE_1_ENTRY")
   # Asserts the rc=2 arm blocks AND keeps the #717 wording contract ("could not
   # execute — NOT a pass"), which issue-717-*.test.bats also pins. One string
   # satisfies both meanings; a rewrite must preserve it, not rephrase it.
@@ -248,7 +257,7 @@ XML
 
 @test "#776: the generic Gate 1 arm captures the verdict instead of piping to head" {
   local arm
-  arm=$(awk '/^    \*\)$/{flag=1} flag{print} /^      ;;$/{if(flag){exit}}' "$HOOK")
+  arm=$(awk '/^    \*\)$/{flag=1} flag{print} /^      ;;$/{if(flag){exit}}' "$GATE_1_ENTRY")
   # `run_static_analysis | head` makes the status head's (#706) and can kill the
   # writer with SIGPIPE, making the verdict depend on output length.
   ! printf '%s\n' "$arm" | grep -qE 'run_static_analysis \| head'

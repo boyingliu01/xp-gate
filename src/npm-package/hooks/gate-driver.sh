@@ -47,7 +47,18 @@ XP_GATE_ORDER="0 11 12 12b 12c 13 9 1 2 3 8 10 7 5 6 4"
 # directory is emitted after the LAST of these in the order above; deriving it
 # (instead of leaving the restore inside gate 8's block) is what makes the
 # restore survive a reorder.
-XP_GATE_SUBDIR_GATES="${XP_GATE_SUBDIR_GATES:-0 11 12 12b 12c 13 9 1 2 3 8}"
+#
+# Gate 5 is the last gate that actually READS the subdirectory state: it is the
+# only body that consults PROJECT_SUBDIR / IN_PROJECT_SUBDIR (15 references;
+# gates 4/6/7/10 have none), because Gate 5a strips that prefix from the staged
+# paths before probing for a paired test file. The list used to stop at 8, so the
+# `cd` back to the repo root fired after Gate 8 -- and gates 10, 7 and 5 ran
+# OUTSIDE the subdirectory while still stripping the prefix from their paths.
+# Gate 5 then probed `src/...test.ts` from the repo root, where the file is
+# `web/src/...test.ts`, and blocked a correctly paired commit. It only ever bit
+# single-language subdirectory projects, which is the narrower of the two shapes
+# this hook supports, so the multi-language cases stayed green.
+XP_GATE_SUBDIR_GATES="${XP_GATE_SUBDIR_GATES:-0 11 12 12b 12c 13 9 1 2 3 8 10 7 5}"
 
 # Source every gate body once, before the chain runs. Sourcing defines the
 # gate_NN_run functions; it does not execute them.
