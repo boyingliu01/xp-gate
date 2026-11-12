@@ -10,7 +10,13 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$REPO_ROOT/githooks/lib/jscpd-run.sh"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798 split pre-commit into a driver plus one file per gate, so Gate 2's body
+  # now lives in gate-entries/gate-2-entry.sh and pre-commit carries none of it
+  # (`grep -c resolve_jscpd_config pre-commit` == 0). HOOK keeps its name -- it is
+  # still the hook source these assertions are about -- but points at the file
+  # that actually holds the branch.
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-2-entry.sh"
+  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
   TEST_DIR="$(mktemp -d)"
 }
 
@@ -84,8 +90,12 @@ Found 0 clones.'
   # loaded — the assertion follows the shipped form rather than pinning the old
   # one, and additionally requires the hardened wrapper, so a regression back to
   # a silent bare `source` fails here.
-  grep -q 'source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"' "$HOOK"
-  ! grep -q '^[[:space:]]*source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"' "$HOOK"
+  #
+  # The load stayed in pre-commit's PREAMBLE after #798 (it happens once, before
+  # the driver dispatches), while the helpers that USE it moved into the Gate 2
+  # entry. Each assertion therefore reads the file that actually holds it.
+  grep -q 'source_gate_lib "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"' "$PRE_COMMIT"
+  ! grep -q '^[[:space:]]*source "${AUDIT_SCRIPT_DIR}/lib/jscpd-run.sh"' "$PRE_COMMIT"
 }
 
 @test "AC-477-08 anti-vacuity: no unconditional --config jscpd.conf.json remains anywhere" {

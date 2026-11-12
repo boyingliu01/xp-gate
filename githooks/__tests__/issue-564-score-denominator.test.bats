@@ -25,6 +25,7 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  REPORT_FN_SRC="$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
   TEST_DIR="$(mktemp -d)"
 }
 
@@ -37,7 +38,9 @@ teardown() {
 # terminator (the heredoc body contains a column-0 '}' that would truncate a
 # naive extraction).
 extract_report_fn() {
-  sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$PRE_COMMIT" > "$TEST_DIR/report-fn.sh"
+  # #798: the report writer moved to gate-13-entry.sh (registered top-level so a
+  # skipped Gate 13 cannot leave it undefined).
+  sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$REPORT_FN_SRC" > "$TEST_DIR/report-fn.sh"
   printf '}\n' >> "$TEST_DIR/report-fn.sh"
   cat > "$TEST_DIR/run-report.sh" << 'RUNNER'
 set -u

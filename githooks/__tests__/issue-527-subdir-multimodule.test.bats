@@ -14,7 +14,7 @@
 #         for repos that depended on it (FC-08 migration).
 # @covers AC-A-04-01, AC-A-04-02
 
-HOOK="$BATS_TEST_DIRNAME/../pre-commit"
+HOOK="$BATS_TEST_DIRNAME/../gate-entries/gate-0-entry.sh"
 
 setup() {
   sandbox="$(mktemp -d)"
