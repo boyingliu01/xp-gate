@@ -50,6 +50,33 @@ describe('normaliseResultPaths — AC-SASTD-02', () => {
     expect(out[0].path).toBe('t.js');
   });
 
+  // AC-SASTD-02, cross-platform half. `path.isAbsolute`/`path.basename` answer
+  // for the HOST only, so the original implementation passed on Windows and
+  // failed on Linux CI: 'C:/repo/sub/t.js' is not absolute to a POSIX host, so
+  // the path was left absolute and the report showed a different-looking
+  // finding. A scan's paths arrive from whichever machine ran semgrep, so BOTH
+  // conventions must reduce to the same basename no matter which host runs this.
+  const BACKSLASH = String.fromCharCode(92);
+  const ABSOLUTE_FORMS = [
+    ['posix', ['/', 'repo', 'sub', 't.js'].join('/')],
+    ['windows forward-slash', ['C:', 'repo', 'sub', 't.js'].join('/')],
+    ['windows backslash', ['C:', 'repo', 'sub', 't.js'].join(BACKSLASH)],
+    ['windows UNC', [BACKSLASH + BACKSLASH, 'server', 'share', 't.js'].join(BACKSLASH)],
+  ];
+
+  for (const [label, p] of ABSOLUTE_FORMS) {
+    it(`rewrites an absolute ${label} path to its basename on every host`, () => {
+      const out = normaliseResultPaths([{ path: p }]);
+      expect(out[0].path).toBe('t.js');
+    });
+  }
+
+  it('never basenames a relative path, in either separator style', () => {
+    for (const p of ['sub/t.js', 'sub' + BACKSLASH + 't.js', './t.js']) {
+      expect(normaliseResultPaths([{ path: p }])[0].path).toBe(p);
+    }
+  });
+
   it('leaves an already-relative path untouched', () => {
     // Rewriting this would silently drop the "sub/" prefix and make two distinct
     // findings look like the same file.
