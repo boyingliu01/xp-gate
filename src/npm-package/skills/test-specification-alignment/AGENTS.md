@@ -3,7 +3,7 @@
 **Generated:** 2026-11-04
 **Commit:** eb2097b0
 **Branch:** sprint/2026-11-03-02
-**Version:** 0.37.3.0
+**Version:** 0.38.0.0
 
 ## OVERVIEW
 Test-Specification Alignment Engine — two-stage validation ensuring tests accurately reflect requirements and design specs.
