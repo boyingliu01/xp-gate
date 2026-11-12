@@ -27,7 +27,7 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_10_run() {
-if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh|ps1|psm1)$"; then
+if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh|ps1|psm1|cs|csx|fs|vb|rs|php|rb|lua|pl)$"; then
   if [ -f "$GATE_DIR/gate-10.sh" ]; then
     source "$GATE_DIR/gate-10.sh"
   else

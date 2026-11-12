@@ -184,7 +184,7 @@ else
           # violation cannot be introduced by a commit that touches no source file.
           # Gating on "did any source change" removes the single largest fixed cost
           # from docs/config-only commits without weakening the check at all.
-          if ! printf '%s\n' "${XP_STAGED_ACM:-}" | grep -qE '\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rs|cpp|cc|cxx|c|h|hpp|swift|dart)$'; then
+          if ! printf '%s\n' "${XP_STAGED_ACM:-}" | grep -qE '\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rs|cpp|cc|cxx|c|h|hpp|swift|dart|cs|csx|fs|vb)$'; then
             echo "     ⏭️  SKIPPED - Architecture validation (no source files changed)"
             ARCHLINT_OUTPUT=""
             ARCHLINT_EXIT=0

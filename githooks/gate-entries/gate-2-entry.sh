@@ -150,7 +150,7 @@ EOF_CHANGED
     ;;
     
     *)
-  SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift)$' || true)
+  SOURCE_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|scala|kt|cpp|c|h|rs|php|dart|swift|cs|csx|fs|vb)$' || true)
   if [ -n "$SOURCE_FILES" ]; then
     if ! require_tool "jscpd" "Gate 2" "npm install -D jscpd"; then
       return 1

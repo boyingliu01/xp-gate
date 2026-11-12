@@ -40,8 +40,14 @@ if ! gate_enabled 1; then
   echo "⏭️  SKIPPED - Gate 1: Code quality (not selected by XP_GATE_ONLY_GATE)"
   GATE_1_STATUS="SKIP"
   GATE_1_DETAIL="not_selected"
-elif ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh|ps1|psm1)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
-  echo "✅ PASSED - No code files changed, skipping lint."
+elif ! any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|mm|dart|sh|ps1|psm1|cs|csx|fs|vb|rs|php|rb|lua|pl)$" "\.ya?ml$" "\.json$" "Dockerfile" "\.tf$"; then
+  # #798: this branch did NOT run a lint check, so it must not report PASSED.
+  # "No code files changed" is a SKIP: the same wording Gate 3 already uses
+  # ("⏭️  SKIPPED - Complexity: no changed source files in this run"). Reporting
+  # ✅ PASSED here meant a project whose main language was missing from the
+  # extension list got a green Gate 1 on every single commit, having analysed
+  # nothing. C# was exactly that case before `.cs` was added below.
+  echo "⏭️  SKIPPED - Code quality: no changed code files in this run (scope: diff)."
   GATE_1_STATUS="SKIP"
   GATE_1_DETAIL="no_matching_files"
 else
