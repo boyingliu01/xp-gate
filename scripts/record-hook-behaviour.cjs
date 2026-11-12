@@ -78,37 +78,49 @@ function sh(cwd, cmd, args, env) {
 // ordered driver, the per-gate entry bodies, the startup modules and lib/*.sh.
 // A fixture that copies only SOME of these runs a hook that cannot find its
 // gates, which is exactly the failure this recorder exists to detect.
+// Copy every .sh in <srcDir> into <destDir>, creating <destDir> first. Returns
+// silently when the source directory does not exist, so a fixture built against
+// a checkout that predates a directory is a no-op rather than a crash.
+function copyShDir(srcDir, destDir) {
+  if (!fs.existsSync(srcDir)) return;
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const f of fs.readdirSync(srcDir)) {
+    if (f.endsWith('.sh')) fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));
+  }
+}
+
+// Copy the named files from <srcDir> into <destDir>, skipping any that are
+// absent (a checkout may legitimately lack an optional module).
+function copyNamed(srcDir, destDir, names) {
+  for (const f of names) {
+    const src = path.join(srcDir, f);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(destDir, f));
+  }
+}
+
+// Copy the complete installed hook set into <hooksDir>: the entry point, the
+// ordered driver, the per-gate entry bodies, the startup modules and lib/*.sh.
+// A fixture that copies only SOME of these runs a hook that cannot find its
+// gates, which is exactly the failure this recorder exists to detect.
 function copyHookSet(hookPath, hooksDir) {
-  for (const f of ['adapter-common.sh', 'hook-module-resolution.sh', 'gate-registry.sh', 'gate-driver.sh']) {
-    const src = path.join(SRC_GITHOOKS, f);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(hooksDir, f));
-  }
+  copyNamed(SRC_GITHOOKS, hooksDir, [
+    'adapter-common.sh',
+    'hook-module-resolution.sh',
+    'gate-registry.sh',
+    'gate-driver.sh',
+  ]);
+  copyShDir(path.join(SRC_GITHOOKS, 'lib'), path.join(hooksDir, 'lib'));
 
-  const libDir = path.join(SRC_GITHOOKS, 'lib');
-  if (fs.existsSync(libDir)) {
-    fs.mkdirSync(path.join(hooksDir, 'lib'), { recursive: true });
-    for (const f of fs.readdirSync(libDir)) {
-      if (f.endsWith('.sh')) fs.copyFileSync(path.join(libDir, f), path.join(hooksDir, 'lib', f));
-    }
-  }
-
-  // gate-*.sh scripts are sourced by path, so the fixture needs them too.
+  // gate-*.sh / sprint-gate*.sh scripts are sourced by path, so the fixture
+  // needs them too.
   for (const f of fs.readdirSync(SRC_GITHOOKS)) {
-    if (/^gate-\d+.*\.sh$/.test(f) || /^sprint-gate.*\.sh$/.test(f)) {
-      fs.copyFileSync(path.join(SRC_GITHOOKS, f), path.join(hooksDir, f));
-    }
+    if (/^gate-\d+.*\.sh$/.test(f)) fs.copyFileSync(path.join(SRC_GITHOOKS, f), path.join(hooksDir, f));
   }
+  copyNamed(SRC_GITHOOKS, hooksDir, ['sprint-gate.sh']);
 
   // #798: the gate bodies live in gate-entries/, one file per gate. Mirroring
   // the real installation layout is what keeps this fixture honest.
-  const entriesSrc = path.join(SRC_GITHOOKS, 'gate-entries');
-  if (fs.existsSync(entriesSrc)) {
-    const dest = path.join(hooksDir, 'gate-entries');
-    fs.mkdirSync(dest, { recursive: true });
-    for (const f of fs.readdirSync(entriesSrc)) {
-      if (f.endsWith('.sh')) fs.copyFileSync(path.join(entriesSrc, f), path.join(dest, f));
-    }
-  }
+  copyShDir(path.join(SRC_GITHOOKS, 'gate-entries'), path.join(hooksDir, 'gate-entries'));
 
   fs.copyFileSync(hookPath, path.join(hooksDir, 'pre-commit'));
   fs.chmodSync(path.join(hooksDir, 'pre-commit'), 0o755);
