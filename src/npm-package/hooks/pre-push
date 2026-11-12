@@ -360,7 +360,7 @@ fi
 
 # Determine if pushed files contain ONLY documentation/non-source files
 DOC_ONLY=true
-SOURCE_EXTENSIONS="\.py$|\.js$|\.cjs$|\.mjs$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.c$|\.swift$|\.kt$|\.sh$|\.dart$|\.ps1$|\.m$|\.mm$|\.h$|\.hpp$"
+SOURCE_EXTENSIONS="\.py$|\.js$|\.cjs$|\.mjs$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.cc$|\.cxx$|\.c$|\.h$|\.hpp$|\.swift$|\.kt$|\.kts$|\.sh$|\.dart$|\.ps1$|\.psm1$|\.m$|\.mm$|\.cs$|\.csx$|\.fs$|\.fsx$|\.vb$|\.php$|\.rb$|\.lua$|\.pl$"
 
 # Extensionless hook scripts and test files are CODE, not documentation.
 # Measured consequence of the old list: a commit touching githooks/pre-push and
@@ -376,11 +376,21 @@ for file in $PUSHED_FILES; do
   fi
 done
 
-# Documentation-only changes (no source code) → skip walkthrough
+# Documentation-only changes (no source code) -> skip walkthrough
+#
+# #798: this branch used to print an affirmative "No code review required.
+# Proceeding with push..." - an AFFIRMATIVE conclusion produced by the very
+# check that just failed to recognise the files as source. A C# project (.cs
+# missing from SOURCE_EXTENSIONS) got that green line on every push, having run
+# zero gates. "Not applicable" and "passed" must not read the same, so the
+# message now states what actually happened and what was NOT checked.
 if [ "$DOC_ONLY" = "true" ]; then
-  echo "📚 Documentation-only push (no source code files)."
-  echo "   Files: $(echo "$PUSHED_FILES" | tr '\n' ', ' | sed 's/,$//')"
-  echo "   ✅ No code review required. Proceeding with push..."
+  echo "No source code files in this push - pre-push gates NOT applicable."
+  echo "   Files: $(echo "$PUSHED_FILES" | tr '
+' ', ' | sed 's/,$//')"
+  echo "   SKIPPED - code walkthrough and mutation gates did not run."
+  echo "   If this project has a source language missing from SOURCE_EXTENSIONS,"
+  echo "   these gates are silently inert. Check the list near the top of this hook."
   exit 0
 fi
 
