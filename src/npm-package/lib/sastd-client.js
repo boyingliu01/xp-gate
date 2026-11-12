@@ -38,6 +38,44 @@ function resolveDaemonPolicy(env = process.env) {
 }
 
 /**
+ * True when <p> is absolute in EITHER POSIX or Windows form.
+ *
+ * `path.isAbsolute` answers for the HOST platform only, which is the wrong
+ * question here: a scan's paths come from whichever machine semgrep ran on, and
+ * they cross a process boundary (the daemon) and sometimes a platform boundary
+ * (a reported path can be pasted between OSes). On Linux, `C:/repo/t.js` is not
+ * absolute, so the old check left it as-is and the report kept a full path --
+ * the exact "suddenly absolute path looks like a different finding" problem
+ * this function exists to prevent (#SASTD-02).
+ *
+ * @param {string} p
+ * @returns {boolean}
+ */
+function isAnyAbsolute(p) {
+  if (path.isAbsolute(p)) return true;
+  // Windows drive-absolute: "C:\x" or "C:/x".
+  if (/^[A-Za-z]:[\\/]/.test(p)) return true;
+  // Windows UNC: "\\server\share" or the forward-slash form of it.
+  return /^[\\/]{2}[^\\/]/.test(p);
+}
+
+/**
+ * Basename of <p> under either path convention.
+ *
+ * `path.basename` is host-dependent too: on POSIX, `path.basename('C:/a/b.js')`
+ * returns `'b.js'` only by luck (the last separator happens to be '/'), while
+ * `path.basename('C:\\a\\b.js')` returns the whole string. Splitting on both
+ * separators is what makes the result the same whichever host runs it.
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function anyBasename(p) {
+  const parts = p.split(/[\\/]+/).filter((s) => s.length > 0);
+  return parts.length > 0 ? parts[parts.length - 1] : p;
+}
+
+/**
  * Normalise one semgrep result so the daemon's output matches the CLI's.
  *
  * Measured difference (verified byte-for-byte against `semgrep scan --json`):
@@ -51,9 +89,9 @@ function resolveDaemonPolicy(env = process.env) {
  * report prints the path, and a suddenly-absolute path would look like a
  * different finding to anyone reading it or diffing two runs.
  *
- * `path.basename` is used rather than a repo-relative computation: gate-10
- * already passes one directory per staged file and the CLI's own "relative"
- * path is the basename for those targets, confirmed equal on the same fixture.
+ * Basename is used rather than a repo-relative computation: gate-10 already
+ * passes one directory per staged file and the CLI's own "relative" path is the
+ * basename for those targets, confirmed equal on the same fixture.
  *
  * @param {Array<Record<string, unknown>>} results
  * @returns {Array<Record<string, unknown>>}
@@ -64,8 +102,8 @@ function normaliseResultPaths(results) {
     if (!r || typeof r.path !== 'string') return r;
     // Only rewrite absolute paths. A relative path is already what we want, and
     // basename-ing it would silently destroy a subdirectory prefix.
-    if (!path.isAbsolute(r.path)) return r;
-    return { ...r, path: path.basename(r.path) };
+    if (!isAnyAbsolute(r.path)) return r;
+    return { ...r, path: anyBasename(r.path) };
   });
 }
 
