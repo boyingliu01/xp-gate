@@ -17,6 +17,37 @@ fail() {
   exit 1
 }
 
+# Is a human at the keyboard? A stale adapter mirror is repairable by regenerating,
+# and the repair is complete and deterministic -- but it is still a failure, because
+# "the tree was stale" is exactly what gets committed when nobody looks (see the
+# adapters block below). Those two facts used to be reported identically: the run
+# that DID the repair failed with the same message as a run on a broken repository,
+# so the only way to learn the repair had worked was to run the check again by hand.
+#
+# This distinguishes them by CONSEQUENCE, not by fixing anything differently:
+#   - non-interactive (CI, cron, a hook with no TTY): keep the hard failure. CI must
+#     never conclude "green" from a repository that arrived dirty.
+#   - interactive: the repair has already happened and the tree is now consistent,
+#     so report the repair and succeed. The next reader of the working tree sees a
+#     correct tree; nothing is hidden from them.
+# XP_GATE_MIRROR_AUTOFIX forces either mode: 1/true/yes = interactive, 0/no = CI.
+is_interactive_mirror_run() {
+  case "${XP_GATE_MIRROR_AUTOFIX:-}" in
+    1|true|yes) return 0 ;;
+    0|false|no) return 1 ;;
+    '')
+      # No override: a TTY is the only trustworthy signal. `-t 0` is false in a
+      # pipeline, which is the conservative answer -- CI runs piped.
+      [ -t 0 ] && [ -t 1 ]
+      ;;
+    *)
+      # An unrecognised value must not silently grant the interactive allowance.
+      printf '%s\n' "NOTE: XP_GATE_MIRROR_AUTOFIX='$XP_GATE_MIRROR_AUTOFIX' is not a recognised value (use 1 or 0); treating it as non-interactive." >&2
+      return 1
+      ;;
+  esac
+}
+
 # install.sh is repo-side tooling rather than a published hook, but Gate 12b
 # (pre-commit) requires a package mirror for every githooks/* file a diff
 # touches, so syncHooks() now copies it and this list must expect it (REQ-DEPLOY-001).
@@ -146,8 +177,14 @@ if [ -n "$tree_diff" ]; then
   regenerated=$(node src/npm-package/scripts/generate-mirrors.cjs --quiet 2>&1 >/dev/null || true)
   after_regen=$(diff -rq githooks/adapters src/npm-package/adapters 2>&1 || true)
   if [ -z "$after_regen" ]; then
-    # Repairable: the tree was stale. Still a failure for CI, because a stale tree
-    # is what gets committed if nobody looks.
+    # Repairable: the tree was stale, and regenerating fixed it. What happens next
+    # depends on who is reading the result -- see is_interactive_mirror_run().
+    if is_interactive_mirror_run; then
+      printf '%s\n' "REGENERATED: adapter mirror tree was stale and has been regenerated from githooks/adapters." >&2
+      printf '%s\n' "  The tree is consistent again; re-run to confirm." >&2
+      printf '%s\n' "  To make this a hard failure (as CI runs it), set XP_GATE_MIRROR_AUTOFIX=0." >&2
+      exit 0
+    fi
     fail "adapter mirror tree was stale and has been regenerated:
 $tree_diff
   Re-run to confirm, and check the canonical tree was not edited without regenerating."
