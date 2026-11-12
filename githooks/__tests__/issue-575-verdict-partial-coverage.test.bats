@@ -16,7 +16,13 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
-  PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
+  # #798: the verdict writer moved into gate-entries/gate-13-entry.sh, so
+  # PRE_COMMIT holds the CONCATENATED chain. Anchored to pre-commit alone the
+  # extraction is empty and every case fails an anti-vacuity guard.
+  PRE_COMMIT="$BATS_TEST_TMPDIR/gate-chain.sh"
+  cat "$BATS_TEST_DIRNAME/../pre-commit" \
+      "$BATS_TEST_DIRNAME/../gate-driver.sh" \
+      "$BATS_TEST_DIRNAME"/../gate-entries/*.sh 2>/dev/null > "$PRE_COMMIT"
   TEST_DIR="$BATS_TEST_TMPDIR/work"
   mkdir -p "$TEST_DIR"
   cd "$TEST_DIR" || return 1

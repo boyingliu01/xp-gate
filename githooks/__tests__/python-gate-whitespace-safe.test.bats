@@ -17,9 +17,23 @@
 # BOTH shipped copies of the hook.
 # ============================================================================
 
+# Concatenate a hook directory's whole chain into one temp file.
+# #798: the Python arms live in gate-entries/gate-5-entry.sh, not pre-commit. The
+#   `grep ... ; [ "$status" -ne 0 ]` assertions below are the dangerous kind --
+#   "the buggy form is gone" is trivially TRUE once the code moves elsewhere, so
+#   pointing at pre-commit alone would keep these cases green while checking
+#   nothing. Reading the full chain keeps both the "is present" and the "is
+#   gone" halves honest for both shipped copies.
+_chain_file() {
+  local dir="$1" out="$2"
+  { cat "$dir/pre-commit" "$dir/gate-driver.sh" "$dir"/gate-entries/*.sh 2>/dev/null; } > "$out"
+}
+
 setup() {
-  GITHOOKS_HOOK="$BATS_TEST_DIRNAME/../pre-commit"
-  NPM_HOOK="$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"
+  GITHOOKS_HOOK="$BATS_TEST_TMPDIR/githooks-chain.sh"
+  NPM_HOOK="$BATS_TEST_TMPDIR/npm-chain.sh"
+  _chain_file "$BATS_TEST_DIRNAME/.." "$GITHOOKS_HOOK"
+  _chain_file "$BATS_TEST_DIRNAME/../../src/npm-package/hooks" "$NPM_HOOK"
   MYPY_LIB="$BATS_TEST_DIRNAME/../lib/python-incremental-typecheck.sh"
 }
 

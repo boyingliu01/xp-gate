@@ -19,7 +19,14 @@
 
 HELPER="$BATS_TEST_DIRNAME/../lib/python-incremental-typecheck.sh"
 PYTHON_ADAPTER="$BATS_TEST_DIRNAME/../adapters/python.sh"
-PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
+# #798: the Python arm these cases extract lives in gate-entries/gate-5-entry.sh,
+# so PRE_COMMIT holds the CONCATENATED chain (pre-commit + driver + entries) in
+# one temp file. Pointing at pre-commit alone yields an empty slice, and every
+# case then fails an anti-vacuity guard rather than a real behaviour check.
+PRE_COMMIT="$(mktemp)"
+cat "$BATS_TEST_DIRNAME/../pre-commit" \
+    "$BATS_TEST_DIRNAME/../gate-driver.sh" \
+    "$BATS_TEST_DIRNAME"/../gate-entries/*.sh 2>/dev/null > "$PRE_COMMIT"
 
 # ============================================================================
 # python_staged_py_files — extraction from mixed CHANGED_FILES

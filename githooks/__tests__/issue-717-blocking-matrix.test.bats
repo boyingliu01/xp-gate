@@ -17,6 +17,13 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+# #798: Gate 5's and Gate 13's blocking messages now live in
+# gate-entries/gate-5-entry.sh and gate-13-entry.sh. These assertions ask "can
+# this gate reject?", so they read the whole chain rather than pre-commit alone.
+_gate_chain() {
+  cat "$REPO_ROOT/githooks/pre-commit"       "$REPO_ROOT/githooks/gate-driver.sh"       "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null
+}
+
 @test "#717 AC-717-21: Gate 4 blocks a commit (exit 1 in its script)" {
   run grep -E '^\s*exit 1' "$REPO_ROOT/githooks/adapters/gate-4.sh"
   [ "$status" -eq 0 ]
@@ -24,12 +31,12 @@ setup() {
 
 @test "#717 AC-717-21: Gate 5 blocks a non-TypeScript test failure" {
   # The non-TS adapter branch exits 1 on a non-zero run_tests status.
-  run grep -F 'BLOCKED - Tests FAILED' "$REPO_ROOT/githooks/pre-commit"
+  run bash -c "_gate_chain() { cat \"$REPO_ROOT/githooks/pre-commit\" \"$REPO_ROOT/githooks/gate-driver.sh\" \"$REPO_ROOT\"/githooks/gate-entries/*.sh 2>/dev/null; }; _gate_chain | grep -F 'BLOCKED - Tests FAILED'"
   [ "$status" -eq 0 ]
 }
 
 @test "#717 AC-717-21: Gate 13 blocks on FAIL or BLOCK status" {
-  run grep -F 'BLOCKED - Gate 13: Compiler Strictness' "$REPO_ROOT/githooks/pre-commit"
+  run bash -c "_gate_chain() { cat \"$REPO_ROOT/githooks/pre-commit\" \"$REPO_ROOT/githooks/gate-driver.sh\" \"$REPO_ROOT\"/githooks/gate-entries/*.sh 2>/dev/null; }; _gate_chain | grep -F 'BLOCKED - Gate 13: Compiler Strictness'"
   [ "$status" -eq 0 ]
 }
 

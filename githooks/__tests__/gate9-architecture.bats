@@ -7,27 +7,20 @@ setup() {
   export TEST_DIR
   export HOME="$TEST_DIR/home"
   mkdir -p "$HOME" "$TEST_DIR/lib" "$TEST_DIR/adapters" "$TEST_DIR/bin"
-  cp "${BATS_TEST_DIRNAME}/../pre-commit" "${TEST_DIR}/pre-commit"
-  cp "${BATS_TEST_DIRNAME}/../adapter-common.sh" "${TEST_DIR}/adapter-common.sh"
-  cp "${BATS_TEST_DIRNAME}/../hook-module-resolution.sh" "${TEST_DIR}/hook-module-resolution.sh"
-  # #592: copy the WHOLE lib/ directory, not just now-ms.sh.
+
+  # #798: pre-commit is now an entry point that sources gate-driver.sh and
+  # gate-entries/*.sh. Copying pre-commit alone made this fixture's hook abort
+  # before any gate ran, so every verdict assertion below saw empty output.
   #
-  # `pre-commit` sources ten helpers from lib/ (audit-sanitize, coverage-total,
-  # docs-only, jscpd-run, now-ms, python-incremental-typecheck,
-  # python-test-selection, sprint-gate-report, test-failure, typecheck). This
-  # fixture copied only now-ms.sh, so the hook died before Gate 9 with
-  #     FATAL: cannot load .../lib/audit-sanitize.sh (missing)
-  # produced no gate output at all, and every verdict assertion failed.
-  #
-  # Copying the directory keeps the fixture working when a helper is added —
-  # listing files by name is what let it drift nine helpers behind.
-  cp -R "${BATS_TEST_DIRNAME}/../lib/." "${TEST_DIR}/lib/"
-  # Same lesson as lib/ above, one directory later: copying only typescript.sh
-  # left the Java fixture with no java adapter, so Gate 9 reported
-  #     ⚠️  WARN - Java adapter not found (code quality NOT verified)
-  # and the ArchUnit case found none of the words it asserts. Locally the hook's
-  # fallback lookup found ../githooks/adapters/ by luck of the checkout layout;
-  # on a CI runner it does not, so the case failed only there.
+  # This fixture has now been patched for the same class of drift three times
+  # (#592 lib/, the adapters/, and now the gate bodies). Rather than list yet
+  # another directory by hand, use the shared helper that copies the complete
+  # set -- a future file addition then cannot silently break these cases.
+  # shellcheck source=/dev/null
+  . "${BATS_TEST_DIRNAME}/helpers/install-hook-set.bash"
+  install_hook_set "${BATS_TEST_DIRNAME}/.." "$TEST_DIR"
+  # adapters/ is not part of the hook set (the hook resolves it at runtime), so
+  # it stays an explicit copy.
   cp -R "${BATS_TEST_DIRNAME}/../adapters/." "${TEST_DIR}/adapters/"
   chmod +x "${TEST_DIR}/pre-commit"
   cat > "$TEST_DIR/bin/npx" <<'EOF'
@@ -135,10 +128,10 @@ teardown() {
 }
 
 @test "local archlint resolves to a project-root binary" {
-  run grep -F 'if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then' "$BATS_TEST_DIRNAME/../pre-commit"
+  run grep -F 'if [ -x "$PROJECT_ROOT/node_modules/.bin/archlint" ]; then' "$TEST_DIR/pre-commit" "$TEST_DIR"/gate-entries/*.sh
   [ "$status" -eq 0 ]
 
-  run grep -F 'ARCHLINT_BIN="$PROJECT_ROOT/node_modules/.bin/archlint"' "$BATS_TEST_DIRNAME/../pre-commit"
+  run grep -F 'ARCHLINT_BIN="$PROJECT_ROOT/node_modules/.bin/archlint"' "$TEST_DIR/pre-commit" "$TEST_DIR"/gate-entries/*.sh
   [ "$status" -eq 0 ]
 }
 

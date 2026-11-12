@@ -17,7 +17,11 @@
 
 setup() {
   TEST_DIR=$(mktemp -d)
-  HOOK_PATH="$BATS_TEST_DIRNAME/../pre-commit"
+  # #798: the Stage-2 coverage arms live in gate-entries/gate-5-entry.sh now, so
+  # the sed/awk extraction below reads THAT file. Pointing HOOK_PATH at
+  # pre-commit extracts nothing (the block is no longer there) and every case
+  # then fails against an empty harness rather than a coverage verdict.
+  HOOK_PATH="$BATS_TEST_DIRNAME/../gate-entries/gate-5-entry.sh"
   cd "$TEST_DIR" || return 1
 }
 
@@ -35,8 +39,17 @@ extract_stage2_harness() {
     printf '%s\n' 'CURRENT_LANG=java'
     printf '%s\n' 'COV_EXIT=0'
     printf '%s\n' 'COVERAGE_ENFORCED=false'
-    # shellcheck disable=SC2016
+    # #798: the gate bodies return rather than exit, so the extracted arm is
+    # wrapped in a function and CALLED. Running it as a bare script makes
+    # `return 1` a bash error that exits 0, which would silently turn every
+    # BLOCK assertion below into a pass.
+    printf '%s
+' 'stage2_arm() {'
     sed -n '/^  case "$CURRENT_LANG" in$/,/^  esac$/p' "$HOOK_PATH"
+    printf '%s
+' '}'
+    printf '%s
+' 'stage2_arm'
   } > "$harness"
   chmod +x "$harness"
   printf '%s\n' "$harness"
@@ -188,7 +201,10 @@ CSV
 }
 
 @test "canonical and npm Java coverage enforcement hooks remain byte-identical" {
-  run cmp "$HOOK_PATH" "$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"
+  # #798: HOOK_PATH now points at gate-entries/gate-5-entry.sh, so compare THAT
+  # pair. Comparing it against the npm pre-commit compares two different files
+  # and reports drift that does not exist.
+  run cmp "$HOOK_PATH" "$BATS_TEST_DIRNAME/../../src/npm-package/hooks/gate-entries/gate-5-entry.sh"
 
   [ "$status" -eq 0 ]
 }

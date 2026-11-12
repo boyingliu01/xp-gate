@@ -34,7 +34,11 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798: the coverage predicate lives in gate-entries/gate-5-entry.sh, so HOOK
+  # points at a temp file holding the CONCATENATED chain. Anchored to pre-commit
+  # alone the anchor-drift error below fires on correct code.
+  HOOK="$(mktemp)"
+  cat "$REPO_ROOT/githooks/pre-commit"       "$REPO_ROOT/githooks/gate-driver.sh"       "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null > "$HOOK"
   # The coverage decision is one inline `if` inside a large case arm. There are
   # TWO guards on COVERAGE_PERCENT in this hook (an earlier, unrelated one at
   # ~2965); the one under test is the one that compares against a literal, so

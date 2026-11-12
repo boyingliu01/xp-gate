@@ -15,9 +15,21 @@
 # behaviour in BOTH shipped copies of the hook.
 # ============================================================================
 
+# Concatenate a hook directory's whole chain into one temp file (#798).
+# The Python Gate 6 arm lives in gate-entries/gate-6-entry.sh. The
+# `[ "$status" -ne 0 ]` assertion below ("the non-blocking form is GONE") would
+# pass trivially once the code left pre-commit -- green while checking nothing --
+# so both shipped copies are read as full chains.
+_chain_file() {
+  local dir="$1" out="$2"
+  { cat "$dir/pre-commit" "$dir/gate-driver.sh" "$dir"/gate-entries/*.sh 2>/dev/null; } > "$out"
+}
+
 setup() {
-  GITHOOKS_HOOK="$BATS_TEST_DIRNAME/../pre-commit"
-  NPM_HOOK="$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"
+  GITHOOKS_HOOK="$BATS_TEST_TMPDIR/githooks-chain.sh"
+  NPM_HOOK="$BATS_TEST_TMPDIR/npm-chain.sh"
+  _chain_file "$BATS_TEST_DIRNAME/.." "$GITHOOKS_HOOK"
+  _chain_file "$BATS_TEST_DIRNAME/../../src/npm-package/hooks" "$NPM_HOOK"
 }
 
 check_hook() {

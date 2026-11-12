@@ -13,9 +13,20 @@
 # guard).
 # ============================================================================
 
+# Concatenate a hook directory's whole chain into one temp file (#798).
+# The Gate 11 arm lives in gate-entries/gate-11-entry.sh, so reading pre-commit
+# alone would find none of the four tier strings and fail for a layout reason
+# rather than a resolution reason.
+_chain_file() {
+  local dir="$1" out="$2"
+  { cat "$dir/pre-commit" "$dir/gate-driver.sh" "$dir"/gate-entries/*.sh 2>/dev/null; } > "$out"
+}
+
 setup() {
-  GITHOOKS_HOOK="$BATS_TEST_DIRNAME/../pre-commit"
-  NPM_HOOK="$BATS_TEST_DIRNAME/../../src/npm-package/hooks/pre-commit"
+  GITHOOKS_HOOK="$BATS_TEST_TMPDIR/githooks-chain.sh"
+  NPM_HOOK="$BATS_TEST_TMPDIR/npm-chain.sh"
+  _chain_file "$BATS_TEST_DIRNAME/.." "$GITHOOKS_HOOK"
+  _chain_file "$BATS_TEST_DIRNAME/../../src/npm-package/hooks" "$NPM_HOOK"
 }
 
 check_resolution_chain() {

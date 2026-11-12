@@ -88,8 +88,13 @@ setup() {
 # --- the registry must cover every gate the hook reports -------------------
 
 @test "the registry covers all 14 numbered gates with unique numbers" {
+  # The registry also carries the pre-push gates, whose "numbers" are labels
+  # (M, M2, ML, MW, S, UI). Those have their own assertions; this one is about
+  # the NUMBERED pre-commit gates, so it filters to pure digits instead of
+  # assuming the dump contains nothing else -- an assumption that would turn
+  # every added pre-push gate into a false failure here.
   local nums
-  nums=$(gate_registry_dump | awk '{print $1}' | sort -n | tr '\n' ' ')
+  nums=$(gate_registry_dump | awk '{print $1}' | grep -E '^[0-9]+$' | sort -n | tr '\n' ' ')
   [ "$nums" = "0 1 2 3 4 5 6 7 8 9 10 11 12 13 " ]
 }
 
@@ -181,7 +186,7 @@ setup() {
   # read over it parses nothing and the loop silently passes without testing
   # a single gate. That is the same vacuous-assertion shape this file exists
   # to prevent.
-  local row name num impl blocks statusvar chain
+  local row name num impl blocks hook statusvar chain
   local checked=0
   # #798 moved the gate bodies into gate-entries/, so the status assignments and
   # their terminal statements live there, not in pre-commit. Reading the whole
@@ -191,7 +196,10 @@ setup() {
             "$REPO_ROOT/githooks/gate-driver.sh" \
             "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)
   for row in "${GATE_REGISTRY_ROWS[@]}"; do
-    IFS='|' read -r name num impl blocks <<< "$row"
+    # FIVE fields, not four: the row is name|number|impl|blocks|hook. Reading
+    # only four leaves `blocks` holding "NO|pre-commit", which is never equal to
+    # "NO", so the loop body never runs and the assertion is vacuous.
+    IFS='|' read -r name num impl blocks hook <<< "$row"
     [ "$blocks" = "NO" ] || continue
     checked=$((checked + 1))
     statusvar="GATE_${num}_STATUS"

@@ -103,8 +103,13 @@ EOF
 }
 
 @test "pre-commit uses project-root package metadata from nested directories" {
-  run grep -F 'if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then' "$BATS_TEST_DIRNAME/../pre-commit"
-  [ "$status" -eq 0 ]
+  # #798 moved this line into gate-entries/gate-5-entry.sh, so the assertion reads
+  # the whole chain rather than pre-commit alone (where it now lives nowhere and
+  # the grep would fail for a reason unrelated to the behaviour under test).
+  local root="$BATS_TEST_DIRNAME/.."
+  local text
+  text=$(cat "$root/pre-commit" "$root/gate-driver.sh" "$root"/gate-entries/*.sh 2>/dev/null)
+  grep -qF 'if [ "$CURRENT_LANG" = "typescript" ] && { [ -f "package.json" ] || [ -f "$PROJECT_ROOT/package.json" ]; }; then' <<< "$text"
 }
 
 @test "pre-commit provides Git context fallback for stale global adapters" {
