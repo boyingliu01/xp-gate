@@ -5581,8 +5581,7 @@ specification:
             且不得改写 .stryker-tmp 等非源码目录下的 AGENTS.md 副本。
           test_type: unit
 
-    # ============================================================
-    # REQ-GATE-PROBE-SHORTCUT: 门禁必须先判断有无可检输入，再探测工具
+    # =====================================================    # REQ-GATE-PROBE-SHORTCUT: 门禁必须先判断有无可检输入，再探测工具
     # ============================================================
     - id: REQ-GATE-PROBE-SHORTCUT
       title: 门禁必须先判断有无可检输入，再探测工具
@@ -5974,3 +5973,46 @@ specification:
             Gate 4 判定仍不进 FAIL（error 数为 0），warning 经 Boy Scout 差分管控。
             若出现新 error，视为方案不满足 AC，需降级为 info 或加 count 阈值。
           test_type: integration
+    # Gate 10 的扫描成本主要是 Python 导入税：`semgrep --version` 单独就要
+    # 2.4-2.8s，一次 `semgrep scan` 约 3.8-4.0s。常驻进程把这笔税付一次。
+    # 2026-11-09 补齐登记：这批 AC 原先只存在于测试文件里，ac-reference-guard
+    # 因此无法解析，整个分支的提交都被拦下。
+    - id: REQ-SASTD
+      title: Gate 10 常驻扫描守护进程
+      status: implemented
+      description: >-
+        Gate 10 SAST 每次扫描都要重新支付 Python 导入税。改为常驻进程、通过
+        line-delimited JSON 协议应答扫描请求，把导入成本摊到进程生命周期上。
+        守护进程不是公共 API 的稳定依赖，因此任何失败都必须降级为真实直跑扫描，
+        绝不能被解读为「扫描通过」——一个答不出的守护进程必须隐形，而不是变绿。
+      priority: high
+      acceptance_criteria:
+        - id: AC-SASTD-01
+          criteria: >-
+            守护进程启用策略必须可解析且可覆盖：环境变量关闭时不得启动，
+            未知或非法取值必须回落到明确的默认行为，不得静默启用或静默禁用。
+          test_type: unit
+        - id: AC-SASTD-02
+          criteria: >-
+            守护进程返回的路径必须规整为与直跑扫描一致的形态，使调用方无法从
+            路径上分辨结果来自哪条路径。
+          test_type: unit
+        - id: AC-SASTD-03
+          criteria: >-
+            守护进程的 payload 必须规整为与直跑扫描相同的结构，包括缺失字段与
+            空结果的情形，避免两条执行路径给出不同形状的结论。
+          test_type: unit
+        - id: AC-SASTD-04
+          criteria: >-
+            任何失败（超时、崩溃、协议错误、无法解析的输出）都必须呈现为失败，
+            绝不能呈现为通过。失败时调用方必须回落到真实的直跑扫描。
+          test_type: unit
+        - id: AC-SASTD-05
+          criteria: >-
+            常驻进程必须比单次调用存活更久，使第二次及后续扫描复用已付过的导入成本。
+          test_type: unit
+        - id: AC-SASTD-06
+          criteria: >-
+            一次性调用方（如 shell 命令替换中的 node -e）不得因为守护进程而挂起：
+            进程必须能自然退出，同时不得在扫描完成前退出导致输出为空。
+          test_type: unit

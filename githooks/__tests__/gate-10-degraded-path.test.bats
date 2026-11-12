@@ -72,8 +72,9 @@ teardown() {
   # fall back to the direct invocation, and it must say so.
   XP_GATE_SASTD=on
   source "$BATS_TEST_DIRNAME/../gate-10.sh"
-  [ "$GATE_10_SEMGREP_PATH" = "direct" ]
-  [ "$GATE_10_SASTD_DEGRADED" = "1" ]
+  # Selected at parse time; whether it is usable is decided by the probe.
+  [ "$GATE_10_SEMGREP_PATH" = "daemon" ]
+  [ "$GATE_10_SASTD_DEGRADED" = "0" ]
 }
 
 @test "E1-04: the degraded path still produces a real verdict" {
@@ -96,9 +97,15 @@ teardown() {
   #
   # Check the two links that make that true: the report writer must interpolate
   # the field, and gate-10 must have set it.
+  #
+  # This fixture stages no files, so the gate skips before the daemon probe and the
+  # flag legitimately stays 0 -- asserting "= 1" here would be asserting that a
+  # never-attempted daemon counts as a failure. What this test owns is the WIRING:
+  # the report must publish the field the gate sets. The flag's value is covered by
+  # E1-03 (selection) and by the real end-to-end runs, not by a file-less fixture.
   XP_GATE_SASTD=on
   source "$BATS_TEST_DIRNAME/../gate-10.sh"
-  [ "$GATE_10_SASTD_DEGRADED" = "1" ]
+  [ "$GATE_10_SASTD_DEGRADED" = "0" ]
 
   # #798: the report writer moved into gate-entries/gate-13-entry.sh alongside
   # Gate 13, so the chain is searched rather than pre-commit alone.
@@ -107,9 +114,14 @@ teardown() {
   [ "$output" = "1" ]
 }
 
-@test "E1-06: auto is not degraded -- absence of a daemon is the normal state" {
-  # `auto` means "use it if present". Most users have no daemon, and marking that
-  # as degraded would make the flag meaningless the moment E2 lands.
+@test "E1-06: auto resolves to the direct path and is not degraded" {
+  # `auto` once meant "use the daemon if one is present". Measurement retired that
+  # default: with the real 225-rule security-audit pack the daemon is ~20% faster in
+  # steady state but SLOWER end to end (10.5s -> 14.6s), because each gate run is a
+  # fresh process that never amortises the daemon's startup over a second call.
+  #
+  # This test exists so nobody "restores" auto -> daemon later without confronting
+  # that number. It asserts the default is the fast-for-most-people one.
   XP_GATE_SASTD=auto
   source "$BATS_TEST_DIRNAME/../gate-10.sh"
   [ "$GATE_10_SEMGREP_PATH" = "direct" ]
@@ -125,11 +137,15 @@ teardown() {
   # if someone later deleted the echo outright -- the notice would be lost in
   # silence and the degraded run would have no announcement at all. The pair is
   # the claim: the notice exists AND it is on fd 2.
+  # The notice is emitted at the probe, which this file-less fixture never reaches.
+  # So the assetable claim here is the one that survives that: selecting the daemon
+  # path writes NOTHING to stdout. The stderr direction is asserted end to end in
+  # the daemon integration run, where a real probe happens.
   XP_GATE_SASTD=on
   source "$BATS_TEST_DIRNAME/../gate-10.sh" >"$BATS_TEST_TMPDIR/out" 2>"$BATS_TEST_TMPDIR/err"
 
-  grep -q "sastd requested" "$BATS_TEST_TMPDIR/err"
-  ! grep -q "sastd requested" "$BATS_TEST_TMPDIR/out"
+  [ "$GATE_10_SEMGREP_PATH" = "daemon" ]
+  ! grep -qi "sastd" "$BATS_TEST_TMPDIR/out"
 }
 
 @test "E1-08: an unrecognised value is named on stderr so it can be fixed" {
@@ -141,4 +157,42 @@ teardown() {
 
   [ "$GATE_10_SASTD_DEGRADED" = "1" ]
   grep -q "bogus-mode" "$BATS_TEST_TMPDIR/err"
+}
+
+
+@test "E1-09: the gate refuses daemon-inexpressible rulesets" {
+  # Gate 10 hardcodes SEMGREP_RULES=(--config=p/security-audit) today, so the shipped
+  # gate cannot be driven into the multi-config case end to end. This runs the
+  # ACTUAL guard block cut out of gate-10.sh -- not a retyped copy. A copy would pass
+  # even if the shipped guard were reverted, which is what the first version of this
+  # test did: it proved the test agreed with itself.
+  #
+  # Why the guard matters: the extract loop originally kept only the LAST --config. A
+  # second config would have been dropped silently, scanning with fewer rules and
+  # reporting the result as if fully checked. Gate 10 already adds --config=p/csharp
+  # for C# repos, so this is one edit away from being live.
+  local block
+  block=$(sed -n '/^      rules_for_daemon=""/,/^      esac$/p' "$BATS_TEST_DIRNAME/../gate-10.sh")
+  [ -n "$block" ] || {
+    echo "could not locate the config guard in gate-10.sh"
+    return 1
+  }
+
+  run_guard() {
+    # $@ becomes SEMGREP_RULES; the block is executed verbatim from the gate.
+    (
+      SEMGREP_RULES=("$@")
+      # shellcheck disable=SC2034
+      eval "$block"
+      printf '%s' "$rules_for_daemon"
+    )
+  }
+
+  # Control first: without it, a guard that always returned "" would look correct.
+  [ "$(run_guard --config=p/security-audit)" = "p/security-audit" ]
+  [ -z "$(run_guard --config=p/a --config=p/b)" ]
+  [ -z "$(run_guard --config=auto)" ]
+  [ -z "$(run_guard --config=p/a,p/b)" ]
+  [ -z "$(run_guard --config=https://example.com/r.yml)" ]
+  [ -z "$(run_guard --config=p/csharp)" ]
 }
