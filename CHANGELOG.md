@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.38.1.0] - 2026-11-12
+
+**主轴：0.38.0 发布后 CI 抓到的四个问题。** 全部是**我自己在 0.38.0 里引入的**，
+且全部属于「本地绿了，Linux CI 上红」——恰恰是 0.38.0 那版的主题。
+
+### Fixed
+
+- **Gate 3 复杂度闸门被自己的迁移工具拦住。** 0.38.0 把 #798 的迁移工具链
+  （`scripts/record-hook-behaviour.cjs` 等）入库，其中 `makeFixture` 的
+  分支数随「钩子集里要复制什么」一路增长到 **CCN=16**（阈值 10）。
+  第一次拆分把复杂度搬进 `copyHookSet`(12)，**被同一个闸门再拦一次**——
+  说明拆得不够到底。最终按真正的重复抽成 `copyShDir` / `copyNamed` 两个助手，
+  `copyHookSet` 变成一份「装好的钩子集包含什么」的清单。
+  验证方式不是「看起来合理」，而是在**基线工作树（08a3c893）**上跑同一个命令，
+  逐条比对违规集合：**11 / 11 完全一致，本次新增 0 条**。
+  那 11 条是既有债务（`ccn-report.cjs`、`wrap-gate-entries.cjs`、
+  `common-process.ts`、java 适配器），**本次未触碰，主干 Gate 3 仍为红**。
+
+- **sastd 路径归一化只在 Windows 上成立。** CI 在 Linux 上报
+  `expected 'C:/repo/sub/t.js' to be 't.js'`。
+  `normaliseResultPaths` 用 `path.isAbsolute` / `path.basename` 判断与截取，
+  而这两个 API **只回答宿主平台**：`C:/repo/t.js` 在 POSIX 眼里不是绝对路径，
+  于是 Linux 上原样放行，报告里留下一条绝对路径——
+  正是这个函数存在的意义（「突然变成绝对路径会看起来像另一条发现」）要防的事。
+  扫描结果的路径本来就跨进程（守护进程）、有时还跨平台，所以改为识别
+  **POSIX 绝对 / 盘符绝对（`C:/x` 与 `C:\x`）/ UNC（`\\server\share`）** 三种形式，
+  分隔符两种都按边界处理。
+
+- **测试夹具本身的 UNC 前缀拼错了（我的 bug）。** 用
+  `[BACKSLASH + BACKSLASH, 'server', ...].join(BACKSLASH)` 拼前缀会**多出一个分隔符**，
+  得到 **3 个**反斜杠。3 个反斜杠的串在 POSIX 眼里以 `/` 开头（`isAbsolute` 为真）、
+  却过不了实现里的 UNC 分支——**只在 Linux 上红**，Windows 上侥幸绿。
+  前缀改为直接拼接，不再 join。
+
+- **未安装 semgrep 时三条用例硬失败。** CI 不装 semgrep，本机装了，
+  于是 `ModuleNotFoundError: No module named 'semgrep'` 变成红灯。
+  这三条用例**故意**驱动真实的 `semgrep.run_scan.run_scan_and_return_json`
+  （它们要钉的性质是「守护进程与被替换的 CLI 行为一致」，打桩等于什么都没证明），
+  所以确实需要该工具。缺可选工具应当**具名 SKIP**，而不是让构建变红——
+  红灯常态化会训练人忽略红灯，比一个说明白的 skip 更糟。
+  该文件原本只对常驻测试这么做了，现在收敛成一个 `hasSemgrep()`，
+  四处调用点统一用它。
+
+- **给 Windows 路径的回归测试补上跨平台用例。** 原用例用
+  `path.join('C:', 'repo', 'sub', 't.js')` 造夹具——它在 Windows 上是真绝对路径、
+  在 Linux 上却是相对路径，**夹具在不同宿主下含义不同**，这正是漏检的根源。
+  新增四种显式绝对形式（posix / 盘符正斜杠 / 盘符反斜杠 / UNC）与一条
+  「相对路径在两种分隔符下都保持相对」的用例，全部用显式分隔符构造，
+  任何宿主都无法重新解释。
+
+### Verification
+
+- `ccn-report --check --baseline`：违规集合与基线**完全一致**（11 条，均为既有）。
+- `sastd-client.test.js`：装了 semgrep 时 **23/23 通过**；用一个无法
+  `import semgrep` 的 python 桩模拟 CI，同样 **23/23 通过**且三条工具相关用例具名 skip。
+- 跨平台逻辑在**模拟 POSIX 宿主**（`path.posix`）下逐条验证，
+  而不是拿本机 Windows 的结果当结论。
+- 发布后 CI 的失败集合与 0.38.0 之前**完全相同**（8 个既有环境性失败），
+  通过数 **338 → 339**。
+
+### Note
+
+主干 XP-Gate Quality Gates 仍为红，但那 8 个失败是既有环境问题
+（`plugins/dsh` 需单独 `npm install`；`src/npm-package/adapters/` 是发布期生成的
+未跟踪产物），与本次改动无关，建议单独开 issue 处理。
+
 ## [0.38.0.0] - 2026-11-12
 
 **主轴：门禁必须能区分「通过了」和「没看」。** 这一版收口了三条并行任务线，共同点是
