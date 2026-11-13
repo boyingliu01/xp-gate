@@ -56,15 +56,34 @@ run_static_analysis() {
     ktlint_out=$(ktlint "**/*.kt" 2>&1)
     lint_rc=$?
     printf '%s\n' "$ktlint_out" | sed -n '1,20p'
-    # Only an EXECUTED ktlint counts as having delivered a verdict. Three ways it
-    # can fail to: the binary cannot run (127/126), it reports "No files matched"
-    # (ktlint 1.8.0 no longer resolves `**/*.kt`), or it printed nothing at all.
-    # In every one of those cases detekt should speak instead of ktlint's silence
-    # being read as "clean".
+    # Only an EXECUTED ktlint counts as having delivered a verdict. Four ways it
+    # can fail to: the binary cannot run (127/126), the glob matches nothing
+    # (ktlint 1.x: "No files matched"), it printed nothing at all, or everything
+    # it printed was JVM NOISE rather than a finding.
+    #
+    # That last case is what CI hit. ktlint is a JVM launcher, so a modern JDK
+    # prepends startup warnings to stderr:
+    #   WARNING: A restricted method in java.lang.System has been called
+    #   WARNING: sun.misc.Unsafe::objectFieldOffset has been called by ...
+    # `2>&1` captured them, so `[ -n "$ktlint_out" ]` was true and ktlint was
+    # credited with a verdict it never produced -- detekt never ran, and the gate
+    # blocked on the warnings as if they were code-quality findings. Measured on
+    # run 43404316674, where those four lines were the ENTIRE lint output.
+    #
+    # So judge ktlint by its output with those lines removed.
     if [ "$lint_rc" -ne 127 ] && [ "$lint_rc" -ne 126 ] \
-       && [ -n "$ktlint_out" ] \
        && ! printf '%s\n' "$ktlint_out" | grep -q 'No files matched'; then
-      linted=1
+      if [ "$lint_rc" -ne 0 ]; then
+        # Non-zero means ktlint actually rejected something: that is a verdict.
+        linted=1
+      else
+        # Zero exit: only a verdict if real output survives removing JVM noise.
+        if printf '%s\n' "$ktlint_out" \
+             | grep -v -e '^WARNING:' -e '^warning:' -e '^[[:space:]]*$' \
+             | grep -q .; then
+          linted=1
+        fi
+      fi
     fi
   fi
   if [ "$linted" -eq 0 ] && command -v detekt &>/dev/null; then
