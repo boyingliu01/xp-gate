@@ -30,6 +30,13 @@ setup() {
   cp "${BATS_TEST_DIRNAME}/../hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh
   mkdir -p .git/hooks/lib
   cp -R "${BATS_TEST_DIRNAME}/../lib/." .git/hooks/lib/
+  # #798: pre-commit is an entry point now -- it sources gate-driver.sh and one
+  # body per gate from gate-entries/. Without them the copied hook prints its
+  # banner and stops, so the detekt findings this suite asserts on never appear
+  # and the case reads as "detekt reported nothing" when detekt never ran.
+  cp "${BATS_TEST_DIRNAME}/../gate-driver.sh" .git/hooks/gate-driver.sh
+  cp "${BATS_TEST_DIRNAME}/../gate-registry.sh" .git/hooks/gate-registry.sh 2>/dev/null || true
+  cp -R "${BATS_TEST_DIRNAME}/../gate-entries" .git/hooks/gate-entries
 }
 
 teardown() {

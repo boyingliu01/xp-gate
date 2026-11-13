@@ -32,6 +32,12 @@ setup() {
   printf '\n' > "$WORK/githooks/post-merge"
   printf '\n' > "$WORK/githooks/adapters/typescript.sh"
   printf '\n' > "$WORK/githooks/lib/typecheck.sh"
+  # #798: the guard now also requires githooks/gate-entries, because the gate
+  # bodies that can contain an npx probe live there. Without the directory the
+  # guard (correctly) reports "missing expected hook source: githooks/gate-entries"
+  # and every case in this file fails for a reason unrelated to what it asserts.
+  mkdir -p "$WORK/githooks/gate-entries"
+  printf '\n' > "$WORK/githooks/gate-entries/gate-1-entry.sh"
   # toolchain-path.sh is required by the guard's final assertion (it owns the
   # gated opt-in), so the sandbox must carry it even in "clean" cases.
   printf '\n' > "$WORK/githooks/lib/toolchain-path.sh"

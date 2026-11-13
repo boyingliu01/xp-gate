@@ -62,7 +62,8 @@ probe_gate4_source() {
 }
 
 @test "AC-489-02: FAIL_LINES extraction in every shipped pre-commit copy is errexit-safe and head-free" {
-  for f in githooks/pre-commit src/npm-package/hooks/pre-commit; do
+  # #798: the FAIL_LINES extraction lives in Gate 13's body now.
+  for f in githooks/gate-entries/gate-13-entry.sh src/npm-package/hooks/gate-entries/gate-13-entry.sh; do
     grep -A1 'FAIL_LINES=\$(' "$REPO_ROOT/$f" | grep -q '|| true' || {
       echo "$f: FAIL_LINES assignment is not || true-terminated" >&2
       return 1
