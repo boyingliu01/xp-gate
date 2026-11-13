@@ -1047,37 +1047,45 @@ jobs:
             echo "❌ .lizard-version is empty — Gate 3 fixtures would run an unpinned analyzer."
             exit 1
           fi
-          # `python -m pip --user` is used deliberately instead of bare `pip`.
-          # On this runner the system site-packages is not writable, so pip falls
-          # back with "Defaulting to user installation..." -- that is fine, but it
-          # means the console script and the package must agree about WHICH python
-          # owns them. Driving the install through the interpreter we then check
-          # keeps script and site-packages in the same environment.
+          # The install must REPAIR a pre-existing broken console_script, not just
+          # add a package. Measured twice on this runner:
+          #
+          #   run 43387253796  pip installed semgrep-1.185.0, `command -v semgrep`
+          #                    passed, every call died with
+          #                    ModuleNotFoundError: No module named 'semgrep'
+          #   run 43396352932  `--user` + GITHUB_PATH did not help: the BATS step
+          #                    still ran /home/runner/.local/bin/semgrep (line-5
+          #                    import failure). The export cannot cross a step
+          #                    boundary, so it only ever vouched for itself.
+          #
+          # The runner's system site-packages is read-only, so --user is required.
+          # That fixes the PACKAGE; it does not fix the SCRIPT, because the image's
+          # existing ~/.local/bin entry keeps whatever shebang it was built with.
+          # Removing the stale script first is what makes pip regenerate one bound
+          # to the interpreter that actually has semgrep importable.
+          rm -f "$(python -m site --user-base)/bin/semgrep"
           python -m pip install --user --upgrade \
             "lizard==$PINNED_LIZARD" semgrep pytest pytest-cov
-          # The user-base bin dir must be ahead of everything else: an image can
-          # ship an older console_script there, and pip will overwrite it only if
-          # it targets the same directory. Prepending is what makes the freshly
-          # installed copy the one the fixtures execute.
-          export PATH="$(python -m site --user-base)/bin:$PATH"
-          echo "$(python -m site --user-base)/bin" >> "$GITHUB_PATH"
-          # `command -v` is NOT proof a tool works. Measured on run 43387253796:
-          # pip reported "Successfully installed ... semgrep-1.185.0" and
-          # `command -v semgrep` passed, yet every invocation died with
-          #   ModuleNotFoundError: No module named 'semgrep'
-          # The suites that had been skipping then RAN, read that traceback as an
-          # unparseable verdict, and failed on it -- while THIS step reported
-          # success. Executing each tool is the only check that separates
-          # "installed" from "importable".
+          # Reinstall is not enough on its own: pip skips regenerating a script it
+          # believes is already current. Force the entry points back into place.
+          python -m pip install --user --force-reinstall --no-deps semgrep
+          # `command -v` is NOT proof a tool works -- executing it is the only
+          # check that separates "installed" from "importable". Verified in the
+          # SAME step that installs, because GITHUB_PATH only takes effect for
+          # LATER steps; anything checked here is a claim about this shell.
+          # ~/.local/bin is already on the runner's default PATH, which is why the
+          # BATS job sees the same interpreter without any export.
           for tool in lizard semgrep pytest; do
             if ! "$tool" --version >/dev/null 2>&1; then
               echo "❌ $tool is on PATH but cannot run:"
               echo "   resolved to: $(command -v "$tool" || echo '<not found>')"
-              "$tool" --version 2>&1 | tail -3
+              echo "   python:      $(command -v python)"
+              "$tool" --version 2>&1 | tail -5
               echo "   A present-but-broken tool is worse than a missing one: the"
               echo "   fixtures stop skipping and then fail on its error output."
               exit 1
             fi
+            echo "  ✓ $tool $(command -v "$tool")"
           done
           GOT_LIZARD="$(lizard --version 2>/dev/null | tr -d ' \t\r\n')"
           if [ "$GOT_LIZARD" != "$PINNED_LIZARD" ]; then

@@ -184,6 +184,35 @@ xp-gate doctor --sync-hooks   # make this directory effective, then commit as no
 hook files here (i.e. this repo, or a fork). Consumer projects get only
 `githooks/adapters/` from `xp-gate init`, which is not a hook source of truth.
 
+### The adapters drift the same way — and it hides behind a plausible story
+
+`githooks/adapters/*.sh` are resolved through the same 3-tier chain, so a stale
+`~/.config/xp-gate/adapters/<lang>.sh` **overrides this directory**. Diagnosis
+symptom, measured 2026-11-13: the Kotlin adapter ran through a hook, reported
+`❌ Gradle compilation failed` and nothing else, while `source adapters/kotlin.sh;
+run_static_analysis` on the same tree printed two real `MagicNumber` findings.
+
+The stale copy was 77 lines; the tracked one 128. It still had the old
+`elif [ -n "$ktlint_out" ]` / `elif command -v detekt` shape, so a silent ktlint
+(empty output, exit 0) consumed the branch and detekt — which worked — never ran.
+
+**A wrong cross-boundary path makes this look like a product defect, and it was
+diagnosed as one for several rounds.** The trap is specific and worth spelling
+out: the probe ran under WSL, so `$HOME` was `/home/boyingliu01`, while the
+"fix" copied with the Git Bash path `~/.config/...` → `C:\Users\think\.config\...`.
+Both ended in `/xp-gate/adapters/kotlin.sh`; only one of them is read. `cp`
+succeeded, the md5 stayed unchanged, and the probe kept reproducing "the bug".
+Check the md5 of the file the process ACTUALLY reads before concluding anything:
+
+```bash
+bash -c 'md5sum "$HOME/.config/xp-gate/adapters/kotlin.sh" githooks/adapters/kotlin.sh'
+```
+
+Rule: an adapter is stale until proven otherwise; `md5sum` both copies and
+compare against a known-good commit before believing a hook-vs-direct-call
+difference. CI is unaffected (fresh checkout, no global copy), which is a useful
+control — **if CI disagrees with local, suspect the local install first.**
+
 ## NOTES
 - See repo root `AGENTS.md` → "Known Drift" for the canonical list of doc-vs-reality gaps (gate count, C-adapter claim, etc).
 - Pre-push reads `.code-walkthrough-result.json` and compares `commit_hash` to `git rev-parse HEAD`.
