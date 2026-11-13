@@ -1018,6 +1018,74 @@ jobs:
               exit 1
             fi
           done
+
+          # The comment above says "same set as gate-check installs, deliberately",
+          # and that is right about WHICH tools the two jobs share — but only the
+          # npm half was actually copied. The Python half stayed behind in
+          # gate-check, which has its own filesystem, so 19 fixture cases skipped
+          # themselves with "tool not installed" while the pipeline read green.
+          #
+          # The two jobs do NOT install the same SCOPE, though, and the difference
+          # is worth stating: gate-check grades THIS repo's own code, so it only
+          # needs this repo's languages (TypeScript, JavaScript, Shell, Python).
+          # bats-contracts grades the PRODUCT, and its fixtures construct throwaway
+          # projects in any supported language to prove the adapters route
+          # correctly — so it needs the analyzers of every language it exercises,
+          # regardless of what this repo is written in.
+          #
+          # That is still not a licence to install everything. A tool goes here
+          # only if a fixture RUNS it. A tool an adapter merely probes stays out:
+          # the "tool missing" cases below deliberately assert the degraded path,
+          # and installing the tool turns a real assertion into a skip.
+          #
+          # lizard is PINNED for the same reason gate-check pins it (#584): the
+          # .ccn-baseline.json ratchet is keyed by `file::function` and valued by
+          # CCN, so two lizard releases that disagree about what counts as a
+          # function grade the tree against a baseline it never produced.
+          PINNED_LIZARD="$(tr -d ' \t\r\n' < .lizard-version)"
+          if [ -z "$PINNED_LIZARD" ]; then
+            echo "❌ .lizard-version is empty — Gate 3 fixtures would run an unpinned analyzer."
+            exit 1
+          fi
+          pip install "lizard==$PINNED_LIZARD" semgrep pytest pytest-cov
+          for tool in lizard semgrep pytest; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "❌ $tool did not install; fixtures that run it would skip themselves"
+              exit 1
+            fi
+          done
+          GOT_LIZARD="$(lizard --version 2>/dev/null | tr -d ' \t\r\n')"
+          if [ "$GOT_LIZARD" != "$PINNED_LIZARD" ]; then
+            echo "❌ installed lizard '$GOT_LIZARD' != pinned '$PINNED_LIZARD'."
+            exit 1
+          fi
+
+          # Kotlin analyzers are JVM artefacts, not Python or npm packages.
+          # Checked rather than assumed: PyPI has no `ktlint` and no
+          # `detekt-cli`, and the npm packages under those names are unrelated
+          # third-party wrappers (`ktlint@0.0.5`). Fetch the official standalone
+          # releases instead; ubuntu-latest already ships a JRE.
+          #
+          # Only the two suites that RUN these tools need them. The adapter
+          # already handles a present-but-silent ktlint by falling through to
+          # detekt, so a stub would be worse than nothing: it would let the suite
+          # pass without ever linting.
+          KTLINT_VERSION=1.3.1
+          DETEKT_VERSION=1.23.7
+          sudo curl -fsSL -o /usr/local/bin/ktlint \
+            "https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint"
+          sudo chmod 0755 /usr/local/bin/ktlint
+          sudo curl -fsSL -o /usr/local/lib/detekt-cli.jar \
+            "https://github.com/detekt/detekt/releases/download/v${DETEKT_VERSION}/detekt-cli-${DETEKT_VERSION}-all.jar"
+          printf '#!/bin/sh\nexec java -jar /usr/local/lib/detekt-cli.jar "$@"\n' \
+            | sudo tee /usr/local/bin/detekt >/dev/null
+          sudo chmod 0755 /usr/local/bin/detekt
+          for tool in ktlint detekt; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "❌ $tool did not install; its Kotlin fixtures would skip themselves"
+              exit 1
+            fi
+          done
           # Put node_modules/.bin on PATH for the remaining steps.
           #
           # Installing is not enough: the gates resolve a tool with
