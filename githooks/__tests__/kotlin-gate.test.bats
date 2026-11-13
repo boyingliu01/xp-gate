@@ -30,6 +30,12 @@ setup() {
   cp "${BATS_TEST_DIRNAME}/../hook-module-resolution.sh" .git/hooks/hook-module-resolution.sh
   mkdir -p .git/hooks/lib
   cp -R "${BATS_TEST_DIRNAME}/../lib/." .git/hooks/lib/
+  # adapter-common.sh is the one file the list above still omitted. It stayed
+  # invisible while detekt was absent: the affected cases skipped themselves, so
+  # nobody ever saw "Error: Cannot source adapter-common.sh from .../.git/hooks".
+  # Once the BATS job started installing detekt the cases RAN and failed on the
+  # missing dependency -- i.e. on this fixture, not on the behaviour under test.
+  cp "${BATS_TEST_DIRNAME}/../adapter-common.sh" .git/hooks/adapter-common.sh
   # #798: pre-commit is an entry point now -- it sources gate-driver.sh and one
   # body per gate from gate-entries/. Without them the copied hook prints its
   # banner and stops, so the detekt findings this suite asserts on never appear
