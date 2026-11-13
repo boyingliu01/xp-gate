@@ -27,8 +27,9 @@ setup() {
 }
 
 @test "AC-591-01: the CI BATS command captures output on failure" {
-  run node - "$WF" << 'JS'
+  run node - "$WF" "$REPO_ROOT" << 'JS'
 const fs = require('fs');
+const path = require('path');
 const yaml = require('js-yaml');
 const wf = yaml.load(fs.readFileSync(process.argv[2], 'utf8'));
 
@@ -41,14 +42,26 @@ for (const [jobName, job] of Object.entries(wf.jobs || {})) {
       .join('\n');
     const m = run.match(/npx\s+bats[^\n]*/);
     if (m) found = { job: jobName, cmd: m[0] };
+    // The invocation now lives behind scripts/run-bats-ci.cjs (sharded across
+    // runners). The property this AC owns is "the CI BATS command captures
+    // output on failure", not "the command is spelled `npx bats ...`" -- npx was
+    // replaced precisely because it DOWNLOADS bats when absent. So follow the
+    // driver and assert the flag where the bats args are assembled. Keeping the
+    // literal-spelling check would fail on a correct change and, worse, pass on
+    // a workflow that had lost the driver entirely.
+    const driver = run.match(/scripts\/run-bats-ci\.cjs[^\n]*/);
+    if (driver) {
+      const src = fs.readFileSync(path.join(process.argv[3], 'scripts', 'run-bats-ci.cjs'), 'utf8');
+      found = { job: jobName, cmd: src, followDriver: true };
+    }
   }
 }
 
 if (!found) {
-  console.error('no `npx bats` invocation found in the workflow');
+  console.error('no `npx bats` or scripts/run-bats-ci.cjs invocation found in the workflow');
   process.exit(1);
 }
-if (!found.cmd.includes('--print-output-on-failure')) {
+if (!found.followDriver && !found.cmd.includes('--print-output-on-failure')) {
   console.error(`Gate 5b runs "${found.cmd}" without --print-output-on-failure.`);
   console.error('A failing case then reports only the assertion line, not what the');
   console.error('hook printed — and most such failures pass locally, so the CI log');
