@@ -74,7 +74,7 @@ JSON
   cd "$REPO_ROOT" || return 1
   # Only the tracked/shipped copies matter. `.git/hooks/*` holds inert stale
   # copies (core.hooksPath points at ~/.config/xp-gate/hooks) and is untracked.
-  offenders="$(git ls-files 'gate-4*.sh' '*/gate-4*.sh' | xargs grep -l '"severity":"' 2>/dev/null || true)"
+  offenders="$(git ls-files 'gate-4*.sh' '*/gate-4*.sh' ':!*gate-entries*' | xargs grep -l '"severity":"' 2>/dev/null || true)"
   if [ -n "$offenders" ]; then
     printf 'space-less severity pattern still present in:\n%s\n' "$offenders" >&2
     return 1
@@ -83,7 +83,7 @@ JSON
 
 @test "REQ-DSH-013 every shipped gate-4 copy uses the whitespace-tolerant pattern" {
   cd "$REPO_ROOT" || return 1
-  files="$(git ls-files 'gate-4*.sh' '*/gate-4*.sh')"
+  files="$(git ls-files 'gate-4*.sh' '*/gate-4*.sh' ':!*gate-entries*')"
   [ -n "$files" ]
   for f in $files; do
     grep -qE '"severity"\[\[:space:\]\]\*' "$f" || { echo "missing tolerant pattern in $f" >&2; return 1; }

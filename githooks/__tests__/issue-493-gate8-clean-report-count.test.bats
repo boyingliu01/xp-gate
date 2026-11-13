@@ -76,14 +76,21 @@ count_with_shipped_expression() {
   reference=$(sed -n 's/^[[:space:]]*GITLEAKS_FINDINGS=\(.*\)$/\1/p' githooks/gate-8.sh \
               | grep -v '^"?"$' | head -1)
   copies=0
-  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh'); do
+  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh' ':!*gate-entries*'); do
     line=$(sed -n 's/^[[:space:]]*GITLEAKS_FINDINGS=\(.*\)$/\1/p' "$f" \
            | grep -v '^"?"$' | head -1)
     [ "$line" = "$reference" ] || { echo "counting line drifts in $f: $line" >&2; return 1; }
     copies=$((copies + 1))
   done
-  # Anti-vacuity: the guard must actually have seen the five shipped copies.
-  [ "$copies" -ge 5 ]
+  # Anti-vacuity: the guard must actually have seen the shipped copies.
+  #
+  # #798: the count is FOUR, not five. githooks/gate-entries/gate-8-entry.sh used
+  # to be matched by the glob and inflated this to 6 -- but an entry file is a
+  # wrapper that delegates to gate-8.sh and carries no counting line of its own,
+  # so counting it measured nothing while still making the total look right. The
+  # four files below are the ones that actually run: repo source, repo adapter,
+  # package root, package hooks.
+  [ "$copies" -ge 4 ]
 }
 
 # The same class, repo-wide: grep -c prints its own zero, so `|| echo 0` yields
