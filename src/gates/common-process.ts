@@ -69,6 +69,20 @@ function npxProbeEnabled(): boolean {
 /** Tier 2: npx fallback. No-op unless `XP_GATE_NPX_PROBE=1` (see npxProbeEnabled). */
 function probeToolNpx(tool: string, cwd?: string): ToolAvailability {
   if (!npxProbeEnabled()) return { available: false, path: '', via: 'none' };
+  return npxVersionSucceeds(tool, cwd)
+    ? { available: true, path: `npx ${tool}`, via: 'npx' }
+    : { available: false, path: '', via: 'none' };
+}
+
+/**
+ * Run `npx --yes <tool> --version` and report whether it exited 0.
+ *
+ * Split out of probeToolNpx so the spawn options and the exit-status rule are not
+ * three nesting levels inside a function whose real question is one boolean. A
+ * throw is not an error here: npx being unreachable IS the answer to "is this
+ * tool available via npx", so it reads as `false` rather than propagating.
+ */
+function npxVersionSucceeds(tool: string, cwd?: string): boolean {
   try {
     const npxCheck = spawnSync('npx', ['--yes', tool, '--version'], {
       encoding: 'utf-8',
@@ -76,11 +90,10 @@ function probeToolNpx(tool: string, cwd?: string): ToolAvailability {
       shell: process.platform === 'win32',
       cwd,
     });
-    if (npxCheck.status === 0) {
-      return { available: true, path: `npx ${tool}`, via: 'npx' };
-    }
-  } catch { /* probe failed → not reachable via npx */ }
-  return { available: false, path: '', via: 'none' };
+    return npxCheck.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

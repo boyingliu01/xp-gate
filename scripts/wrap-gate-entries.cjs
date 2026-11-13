@@ -72,41 +72,46 @@ function fnNameFor(file) {
   return null;
 }
 
+// The two statement shapes a top-level `exit N` can take. A subshell exit is
+// deliberately NOT rewritten: `( ... exit 1 )` already terminates only the
+// subshell, and `return` there would unwind the gate body instead.
+const EXIT_PATTERNS = [
+  // `exit N` as a whole statement.
+  /^(\s*)exit\s+([0-9]+)\s*$/,
+  // `cmd || exit N` / `cmd && exit N` -- both legal with `return`.
+  /^(\s*.*(?:&&|\|\|)\s*)exit\s+([0-9]+)\s*$/,
+];
+
+/** The `return N` replacement for one body line, or null when it stays as-is. */
+function rewriteExitLine(raw, atTopLevel) {
+  if (!atTopLevel) return null;
+  for (const pattern of EXIT_PATTERNS) {
+    const m = raw.match(pattern);
+    if (m) return m[1] + 'return ' + m[2];
+  }
+  return null;
+}
+
+/** Net paren balance of a line, so `depth` tracks whether we are inside `( )`. */
+function parenDelta(line) {
+  let delta = 0;
+  for (const ch of scrub(line)) {
+    if (ch === '(') delta += 1;
+    else if (ch === ')') delta -= 1;
+  }
+  return delta;
+}
+
 function rewriteExits(bodyLines) {
   const out = [];
   let depth = 0;
   const changes = [];
   for (let i = 0; i < bodyLines.length; i++) {
     const raw = bodyLines[i];
-    const s = scrub(raw);
-    let newLine = raw;
-
-    if (depth === 0) {
-      // `exit N` as a whole statement.
-      const whole = raw.match(/^(\s*)exit\s+([0-9]+)\s*$/);
-      if (whole) {
-        newLine = whole[1] + 'return ' + whole[2];
-        changes.push({ line: i + 1, from: raw.trim(), to: newLine.trim() });
-      } else {
-        // `cmd || exit N` / `cmd && exit N` — both legal with `return`.
-        const cond = raw.match(/^(\s*.*(?:&&|\|\|)\s*)exit\s+([0-9]+)\s*$/);
-        if (cond) {
-          newLine = cond[1] + 'return ' + cond[2];
-          changes.push({ line: i + 1, from: raw.trim(), to: newLine.trim() });
-        }
-      }
-    }
+    const newLine = rewriteExitLine(raw, depth === 0) ?? raw;
+    if (newLine !== raw) changes.push({ line: i + 1, from: raw.trim(), to: newLine.trim() });
     out.push(newLine);
-
-    const d = scrub(raw);
-    let open = 0;
-    let close = 0;
-    for (const ch of d) {
-      if (ch === '(') open++;
-      else if (ch === ')') close++;
-    }
-    depth += open - close;
-    if (depth < 0) depth = 0;
+    depth = Math.max(0, depth + parenDelta(raw));
   }
   return { lines: out, changes };
 }

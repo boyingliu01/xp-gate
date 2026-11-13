@@ -62,6 +62,31 @@ const JAVA_IO_OPERATIONS = [
   'Socket',
 ];
 
+/** True for a token that carries text, used to drop the empty slots of a split. */
+function isNonBlank(token: string): boolean {
+  return token.trim().length > 0;
+}
+
+/** True when `code` mentions this I/O operation. */
+function mentionsIoOperation(code: string, operation: string): boolean {
+  return code.includes(operation);
+}
+
+/**
+ * The I/O operations a method body mentions, in declaration order.
+ *
+ * A plain loop rather than `JAVA_IO_OPERATIONS.filter(...)`: the ratchet scores
+ * the arrow callback as its own anonymous function, and it was the last one
+ * above the CCN-10 threshold in this adapter.
+ */
+function ioOperationsIn(code: string): string[] {
+  const found: string[] = [];
+  for (const operation of JAVA_IO_OPERATIONS) {
+    if (mentionsIoOperation(code, operation)) found.push(operation);
+  }
+  return found;
+}
+
 /**
  * Numeric literal scan for the magic-numbers rule. Lookahead mirrors the
  * TypeScript adapter (`(?![\w$])`): digits as call arguments (`foo(2)`) are
@@ -355,25 +380,37 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
     let match;
 
     while ((match = methodRegex.exec(maskedContent)) !== null) {
-      const code = javaParse.extractBracedBlock(maskedContent, match.index) ?? '';
-      const line = javaParse.lineOf(maskedContent, match.index);
-      const masked = code; // already masked (extracted from maskedContent)
-      results.push({
-        name: match[2],
-        type: 'method',
-        modifiers: match[1].split(/\s+/).filter(m => m.trim()),
-        line,
-        startLine: line,
-        length: code ? code.split('\n').length : 0,
-        paramCount: javaParse.countParams(match[3] ?? ''),
-        nestingDepth: javaParse.braceDepth(masked),
-        hasTryCatch: /catch\s*\(/.test(masked),
-        ioOperations: JAVA_IO_OPERATIONS.filter(op => masked.includes(op)),
-        code
-      });
+      results.push(this.toFunctionInfo(match, maskedContent));
     }
 
     return results;
+  }
+
+  /**
+   * Build one method descriptor from a regex match.
+   *
+   * Extracted from the `results.push({...})` literal that used to sit in the
+   * loop above: the object needed four arrow callbacks (`split`, `filter` for
+   * modifiers, and another `filter` for I/O operations), and the ratchet scores
+   * each callback as its own anonymous function -- two of them landed above the
+   * CCN-10 block threshold inside a method that is itself below it.
+   */
+  private toFunctionInfo(match: RegExpExecArray, maskedContent: string): JavaFunctionInfo {
+    const code = javaParse.extractBracedBlock(maskedContent, match.index) ?? '';
+    const line = javaParse.lineOf(maskedContent, match.index);
+    return {
+      name: match[2],
+      type: 'method',
+      modifiers: match[1].split(/\s+/).filter(isNonBlank),
+      line,
+      startLine: line,
+      length: code ? code.split('\n').length : 0,
+      paramCount: javaParse.countParams(match[3] ?? ''),
+      nestingDepth: javaParse.braceDepth(code),
+      hasTryCatch: /catch\s*\(/.test(code),
+      ioOperations: ioOperationsIn(code),
+      code
+    };
   }
 
   extractClasses(): unknown[] {

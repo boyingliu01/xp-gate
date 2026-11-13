@@ -139,6 +139,28 @@ function parseCsvLine(line) {
   return fields;
 }
 
+// long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name: field 8
+// is only trustworthy when it carries no '@'. A C operator function
+// ("operator,@12-18@f.cpp") would otherwise be keyed as "@12" and vanish from the
+// baseline -- every later change then reads as a new function. The ratchet lib
+// parses names the same way; keep in sync.
+//
+// Named so the three-branch precedence has one home and processSourceFile() does
+// not carry it inline (see the ratchet note on that function).
+function parseLongName(fields) {
+  const fieldName = (fields[7] || '').trim();
+  const loc = fields[5] || '';
+  // No '@' in long_name: field 8 is the name, and an empty one is anonymous.
+  if (!loc.includes('@')) return { name: fieldName || '(anon)', lineNo: '', endNo: 0 };
+  const [rawName, rawSpan] = loc.split('@');
+  const span = (rawSpan || '').split('-');
+  // A C operator function ("operator,@12-18@f.cpp") yields "@12" as its name, so
+  // a remaining '@' means the split hit the wrong delimiter -- fall back to
+  // field 8, which carries no '@'.
+  const name = !rawName || rawName.includes('@') ? fieldName || '(anon)' : rawName;
+  return { name, lineNo: span[0], endNo: parseInt(span[1], 10) || 0 };
+}
+
 // Decide whether a lizard run's stdout is a measurement to trust. Shared by the
 // execFile callback so the failure rules live in one place instead of nesting
 // four conditions inside it (which the ratchet caught as CCN 9 for a callback
@@ -739,6 +761,129 @@ function resolveLizard() {
   throw new Error('lizard not found (pip install lizard)');
 }
 
+// A row that names a real declaration and above threshold must verify. Rows lizard
+// emits for non-declarations (a `String`/`clearTimeout`/`CCN` identifier, an
+// anonymous callback) cannot be located by name at all and are a separate, older
+// problem -- flagging them here would block the baseline on noise. What must never
+// happen is a row that CLAIMS a named function and carries an unverified number
+// into the baseline.
+function noteUnverifiedRow({ verified, bucket, name, srcLines, lineNo, ccn, rel, unverifiedRows }) {
+  const namesDeclaration = name && name !== '(anonymous)' && name !== '(anon)';
+  if (!verified.unlocatable || bucket !== 'production' || !namesDeclaration || !srcLines) return;
+  const from = Math.max(0, lineNo - 1);
+  const pattern = new RegExp('function\\s+' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[(<]');
+  const declLine = srcLines.slice(from, from + 400).find((l) => pattern.test(l));
+  if (declLine !== undefined) unverifiedRows.push(`${rel}:${lineNo} ${name} CCN=${ccn}`);
+}
+
+// Parse one file's lizard CSV into rows, verifying each span before its CCN is
+// trusted (REQ-A: trust but verify lizard). Extracted from run()'s loop body:
+// the per-file work is 90 lines of brace-matched parsing that has nothing to do
+// with discovery or resolution, and inlining it pushed run() past the very
+// threshold this tool reports. Behaviour is unchanged -- it still mutates the
+// shared `functions`/`byRowKey`/`unverifiedRows` accumulators in place, because
+// de-duplication is per (file, name, start line) across the whole run.
+/** The file's lines, or null when it cannot be read -- null means "cannot verify". */
+function readSourceLinesOrNull(root, rel) {
+  try {
+    return fs.readFileSync(path.join(root, rel), 'utf8').split(/\r?\n/);
+  } catch {
+    return null;
+  }
+}
+
+/** Count a function twice under the same identity? Keep the widest span. */
+function mergeDuplicateRow({ functions, byRowKey, rowKey, ccn, nloc }) {
+  const prior = byRowKey.get(rowKey);
+  if (prior === undefined) return false;
+  if (functions[prior].ccn < ccn) {
+    functions[prior] = { ...functions[prior], ccn, nloc };
+  }
+  return true;
+}
+
+// Turn one file's lizard CSV into rows, recording the two facts that separate
+// "no functions here" from "nothing ran": whether any data row was seen and
+// whether lizard printed its header at all.
+//
+// Split out of processSourceFile so the per-line parsing lives on its own; the
+// two flags it reports back are the caller's silent-zero guard.
+// What a raw CSV line is, before any parsing.
+//   'skip'   -- blank or not a data row
+//   'header' -- lizard's column header (`NLOC,CCN,...`); printed once per file
+//               WITH function rows, and on its own when a file yields none, so it
+//               is what separates "empty spawn output" from "no functions here"
+//               -- silent zeros are exactly the failure this tool exists to kill
+//   'data'   -- a row to parse
+function classifyCsvLine(line) {
+  if (!line) return 'skip';
+  if (/^NLOC\b/.test(line)) return 'header';
+  return /^\d+,/.test(line) ? 'data' : 'skip';
+}
+
+function collectCsvRows({ csv, rel, bucket, srcLines, functions, byRowKey, unverifiedRows }) {
+  let dataRows = 0;
+  let sawHeader = false;
+  for (const line of csv.split(/\r?\n/)) {
+    const kind = classifyCsvLine(line);
+    if (kind === 'header') { sawHeader = true; continue; }
+    if (kind === 'skip') continue;
+    dataRows++;
+    const f = parseCsvLine(line);
+    // Field 1 is CCN; field 4 is location_size. See the column map in csvRows.
+    let ccn = parseInt(f[1], 10);
+    if (!Number.isFinite(ccn)) continue;
+    const { name, lineNo, endNo } = parseLongName(f);
+    let inflated = false;
+    // Verify lizard's span before trusting its CCN. Lizard's TS parser can
+    // lose brace balance (see the BRANCH_RE comment) and charge a function
+    // its neighbours' branches. Proof of damage: locate the real body from
+    // the reported START line — when it is shorter than the reported END,
+    // lizard swallowed following functions into this span. Recompute over
+    // the balanced extent. Honest rows have no such gap and pass untouched.
+    // Shared with the Gate 3 csv path so gate and baseline cannot drift.
+    const verified = verifyRowCcn({ srcLines, name, ccn, lineNo, endNo });
+    // A row that names a real declaration and above threshold must verify.
+    // Rows lizard emits for non-declarations (a `String`/`clearTimeout`/`CCN`
+    // identifier, an anonymous callback) cannot be located by name at all and
+    // are a separate, older problem — flagging them here would block the
+    // baseline on noise. What must never happen is a row that CLAIMS a named
+    // function and carrying an unverified number into the baseline.
+    noteUnverifiedRow({ verified, bucket, name, srcLines, lineNo, ccn, rel, unverifiedRows });
+    inflated = verified.inflated;
+    ccn = verified.ccn;
+    // lizard can emit the SAME function twice with different end offsets — an
+    // object-literal arrow member such as `check: (a, b) => {...}` shows up as
+    // both `check@71-76` and `check@71-77` — and the two rows disagree about
+    // CCN. Keeping both makes the baseline record whichever was parsed last
+    // while the ratchet compares every copy, so a function "regresses" against
+    // its own sibling. One row per (file, name, start line) is the identity a
+    // declaration actually has; keep the widest span, which is the row whose
+    // body the verifier measured.
+    const rowKey = `${rel.replace(/\\/g, '/')}::${name}::${lineNo}`;
+    const nloc = parseInt(f[0], 10) || 0;
+    if (mergeDuplicateRow({ functions, byRowKey, rowKey, ccn, nloc })) continue;
+    byRowKey.set(rowKey, functions.length);
+    functions.push({ _rowKey: rowKey, file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
+  }
+  return { dataRows, sawHeader };
+}
+
+async function processSourceFile({ rel, lizard, root, functions, byRowKey, unverifiedRows }) {
+  const csv = await runLizardOne(lizard, root, rel);
+  const bucket = bucketFor(rel);
+  const srcLines = readSourceLinesOrNull(root, rel);
+  const { dataRows, sawHeader } = collectCsvRows({
+    csv, rel, bucket, srcLines, functions, byRowKey, unverifiedRows,
+  });
+  if (!dataRows && !sawHeader) {
+    // Not a silent-zero risk: lizard emits NO header at all for files with
+    // no parsable functions (empty config shims, type-only modules). Record
+    // them so the report can prove coverage instead of hiding gaps.
+    functions.push({ file: rel.replace(/\\/g, '/'), bucket, name: '(no parsable output)', ccn: 0, nloc: 0, line: 0 });
+  }
+}
+
 async function run(options = {}) {
   const root = path.resolve(options.root || process.cwd());
   // "No evidence" must never look like "clean tree" (issue #737). A scan that
@@ -781,96 +926,7 @@ async function run(options = {}) {
   const byRowKey = new Map();
   const unverifiedRows = [];
   for (const rel of files) {
-    const csv = await runLizardOne(lizard, root, rel);
-    const bucket = bucketFor(rel);
-    // Source lines for span verification (REQ-A: trust but verify lizard).
-    let srcLines = null;
-    try {
-      srcLines = fs.readFileSync(path.join(root, rel), 'utf8').split(/\r?\n/);
-    } catch { srcLines = null; }
-    let dataRows = 0;
-    let sawHeader = false;
-    for (const line of csv.split(/\r?\n/)) {
-      if (!line) continue;
-      // CSV header (`NLOC,CCN,...`): printed once per file WITH function rows,
-      // and also on its own when a file yields none. Track it so an empty
-      // spawn output can be told apart from a genuinely function-less file —
-      // silent zeros are exactly the failure mode this tool exists to kill.
-      if (/^NLOC\b/.test(line)) { sawHeader = true; continue; }
-      if (!/^\d+,/.test(line)) continue;
-      dataRows++;
-      const f = parseCsvLine(line);
-      // Field 1 is CCN; field 4 is location_size. See the column map in csvRows.
-      let ccn = parseInt(f[1], 10);
-      if (!Number.isFinite(ccn)) continue;
-      const nameField = f[7] || '(anon)';
-      // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name:
-      // field 8 is only trustworthy when it carries no '@'. A C operator
-      // function ("operator,@12-18@f.cpp") would otherwise be keyed as "@12"
-      // and vanish from the baseline — every later change then reads as a new
-      // function. The ratchet lib parses names the same way; keep in sync.
-      const loc = f[5] || '';
-      let name = (nameField || '').trim();
-      let lineNo = '';
-      let endNo = 0;
-      if (loc.includes('@')) {
-        const at = loc.split('@');
-        name = at[0];
-        const span = (at[1] || '').split('-');
-        lineNo = span[0];
-        endNo = parseInt(span[1], 10) || 0;
-        if (!name || /@/.test(name)) name = (nameField || '(anon)').trim();
-      } else if (!name) {
-        name = '(anon)';
-      }
-      let inflated = false;
-      // Verify lizard's span before trusting its CCN. Lizard's TS parser can
-      // lose brace balance (see the BRANCH_RE comment) and charge a function
-      // its neighbours' branches. Proof of damage: locate the real body from
-      // the reported START line — when it is shorter than the reported END,
-      // lizard swallowed following functions into this span. Recompute over
-      // the balanced extent. Honest rows have no such gap and pass untouched.
-      // Shared with the Gate 3 csv path so gate and baseline cannot drift.
-      const verified = verifyRowCcn({ srcLines, name, ccn, lineNo, endNo });
-      // A row that names a real declaration and above threshold must verify.
-      // Rows lizard emits for non-declarations (a `String`/`clearTimeout`/`CCN`
-      // identifier, an anonymous callback) cannot be located by name at all and
-      // are a separate, older problem — flagging them here would block the
-      // baseline on noise. What must never happen is a row that CLAIMS a named
-      // function and carrying an unverified number into the baseline.
-      const namesDeclaration = name && name !== '(anonymous)' && name !== '(anon)';
-      if (verified.unlocatable && bucket === 'production' && namesDeclaration && srcLines) {
-        const declLine = srcLines.slice(Math.max(0, lineNo - 1), Math.max(0, lineNo - 1) + 400).find((l) =>
-          new RegExp('function\\s+' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[(<]').test(l));
-        if (declLine !== undefined) {
-          unverifiedRows.push(`${rel}:${lineNo} ${name} CCN=${ccn}`);
-        }
-      }
-      inflated = verified.inflated;
-      ccn = verified.ccn;
-      // lizard can emit the SAME function twice with different end offsets — an
-      // object-literal arrow member such as `check: (a, b) => {...}` shows up as
-      // both `check@71-76` and `check@71-77` — and the two rows disagree about
-      // CCN. Keeping both makes the baseline record whichever was parsed last
-      // while the ratchet compares every copy, so a function "regresses" against
-      // its own sibling. One row per (file, name, start line) is the identity a
-      // declaration actually has; keep the widest span, which is the row whose
-      // body the verifier measured.
-      const rowKey = `${rel.replace(/\\/g, '/')}::${name}::${lineNo}`;
-      const prior = byRowKey.get(rowKey);
-      if (prior !== undefined) {
-        if (functions[prior].ccn < ccn) functions[prior] = { ...functions[prior], ccn, nloc: parseInt(f[0], 10) || 0 };
-        continue;
-      }
-      byRowKey.set(rowKey, functions.length);
-      functions.push({ _rowKey: rowKey, file: rel.replace(/\\/g, '/'), bucket, name, ccn, nloc: parseInt(f[0], 10) || 0, line: parseInt(lineNo, 10) || 0, span_inflated: inflated || undefined });
-    }
-    if (!dataRows && !sawHeader) {
-      // Not a silent-zero risk: lizard emits NO header at all for files with
-      // no parsable functions (empty config shims, type-only modules). Record
-      // them so the report can prove coverage instead of hiding gaps.
-      functions.push({ file: rel.replace(/\\/g, '/'), bucket, name: '(no parsable output)', ccn: 0, nloc: 0, line: 0 });
-    }
+    await processSourceFile({ rel, lizard, root, functions, byRowKey, unverifiedRows });
   }
   return { root, filesScanned: files.length, functions, unverified_rows: unverifiedRows, lizardVersion };
 }
@@ -970,6 +1026,201 @@ function ratchetFindings(report, baseline, warnThreshold = 5, blockThreshold = 1
   return findings;
 }
 
+// What set of sources this baseline was written from, so the gate can grade the
+// same population instead of assuming one (#617). Without it, a repo that scans
+// fewer roots/extensions than Gate 3 recognises gets pre-existing code graded as
+// "new" -- a false BLOCK with no repair, because the file has no entry to ratchet.
+//
+// Sorted + de-duplicated so a re-run on unchanged inputs produces a
+// byte-identical file; an unordered declaration would churn the diff on every
+// refresh and make "did the population change?" unreadable.
+//
+// Both axes are derived from f.file, NOT from the baseline KEY: keys embed `::`
+// and `@line` (baselineKey), so path.extname() on a key would read the suffix of
+// a symbol name as an extension.
+//
+// Named rather than inlined: the two chains used to sit directly in main() as
+// four arrow callbacks, and lizard scores each callback as its own anonymous
+// function -- six of them above the CCN-10 block threshold, in the tool whose job
+// is to report exactly that. A named helper is also where the "which functions
+// count" predicate belongs; it now has one definition instead of two copies that
+// could drift apart.
+// Sorted + de-duplicated: a re-run on unchanged inputs must produce a
+// byte-identical file, or the diff churns on every refresh and "did the
+// population change?" becomes unreadable.
+function uniqueSorted(values) {
+  return [...new Set(values)].sort();
+}
+
+/** False for the repo root ('.') and for empty strings: neither is a real root. */
+function isRealRootDir(dir) {
+  return Boolean(dir) && dir !== '.';
+}
+
+function baselinePopulation(functions) {
+  const scored = functions.filter((f) => f.bucket === 'production' && f.name !== '(no parsable output)');
+  const dirs = scored.map((f) => path.dirname(f.file).replace(/\\/g, '/')).filter(isRealRootDir);
+  const exts = scored.map((f) => path.extname(f.file).toLowerCase()).filter(Boolean);
+  return { roots: uniqueSorted(dirs), extensions: uniqueSorted(exts) };
+}
+
+// CI / local enforcement mode (slice E). Without this the report only ever
+// printed numbers; nothing in the pipeline could fail a build for complexity.
+//
+// Extracted from main() so this command has one exit path and main() keeps only
+// the mode dispatch. It ends the process on failure and returns on success,
+// which is why the call site reads `return checkAgainstBaseline(...)`.
+// Baseline refresh (REQ-D): record every production function's CURRENT CCN keyed
+// by path::name. Gate 3 then blocks only regressions past these ceilings.
+// Renames/moves intentionally fall out of the key space and are treated as new
+// code -- moving debt around must not launder it.
+//
+// Extracted from main() alongside checkAgainstBaseline(): both modes had grown
+// into 60-line blocks inside a single dispatch function, which is what pushed
+// main()'s own CCN past the threshold this file exists to report.
+function writeBaseline(report) {
+  if (report.unverified_rows.length) {
+    console.error(`FAIL - ${report.unverified_rows.length} function(s) above CCN 10 could not be span-verified; refusing to write a baseline that would record an unverified complexity as its ceiling:`);
+    for (const row of report.unverified_rows.slice(0, 20)) console.error(`  ${row}`);
+    process.exit(1);
+  }
+  const baseline = {};
+  const nameCounts = countNames(report.functions);
+  for (const f of report.functions) {
+    if (f.bucket !== 'production' || f.name === '(no parsable output)') continue;
+    // Key identity lives in baselineKey() so the ratchet cannot disagree with
+    // the writer about which entry a row belongs to.
+    baseline[baselineKey(f, nameCounts)] = f.ccn;
+  }
+  const target = path.join(report.root, '.ccn-baseline.json');
+  // #617: declare the population this baseline was actually written from, so the
+  // gate can grade the same set instead of assuming one. Without this, a repo that
+  // scans fewer roots/extensions than Gate 3 recognises gets pre-existing code
+  // graded as "new" -- a false BLOCK with no repair, because the file has no
+  // baseline entry to ratchet.
+  //
+  // Sorted + de-duplicated so a re-run on unchanged inputs produces a
+  // byte-identical file; an unordered declaration would churn the diff on every
+  // refresh and make "did the population change?" unreadable.
+  //
+  // Both axes are derived from f.file, NOT from the baseline KEY: keys embed
+  // `::` and `@line` (baselineKey), so path.extname() on a key would read the
+  // suffix of a symbol name as an extension.
+  const population = baselinePopulation(report.functions);
+  // Which analyzer produced these numbers. Without it a baseline is
+  // indistinguishable from one written by any other lizard release, and the
+  // ratchet happily compares across versions that disagree about the same
+  // functions (see checkLizardVersion). Recorded as `null` when the version
+  // probe is unsupported; the reader treats null as "unknown, compare anyway"
+  // rather than as a mismatch, so an older toolchain still works.
+  const document = { analyzer: { tool: 'lizard', version: report.lizardVersion ?? null }, population, entries: baseline };
+  fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
+  console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
+  console.log(`  analyzer: lizard ${report.lizardVersion ?? '(version unknown)'}`);
+  // The reader accepts both shapes (see ccn-ratchet.sh), so an older gate can
+  // still load this file: a flat map and {population, entries} both parse.
+}
+
+// A ratchet is only sound if the same analyzer wrote the ceiling and took today's
+// measurement. lizard releases inside the supported 1.x series disagree about the
+// same functions -- measured on this repo, 1.21.3 calls `csharp.extractFunctions`
+// 18 where 1.25.0 calls it 9 -- so comparing across versions produces violations
+// no code change caused, and the only way to clear them is to inflate the ceiling
+// to whichever analyzer ran last. Refuse the comparison and say how to repair it.
+//
+// A baseline with no `analyzer` block predates this record; it is compared anyway
+// with a warning rather than rejected, so an older file is not a hard outage.
+// `null` means the writer could not probe a version, which is unknown rather than
+// a mismatch.
+// The version the baseline was written with, or null when the file predates the
+// record or the writer could not probe one. Kept separate from the comparison so
+// the shape-handling (three nested optional reads) is not folded into it.
+function recordedLizardVersion(baselineRaw) {
+  if (!baselineRaw || typeof baselineRaw !== 'object') return null;
+  const recordedAnalyzer = baselineRaw.analyzer;
+  if (!recordedAnalyzer || typeof recordedAnalyzer !== 'object') return null;
+  return recordedAnalyzer.version ?? null;
+}
+
+function assertAnalyzerMatches(baselineRaw, baselinePath, report) {
+  const recordedVersion = recordedLizardVersion(baselineRaw);
+  const currentVersion = report.lizardVersion ?? null;
+  if (recordedVersion && currentVersion && recordedVersion !== currentVersion) {
+    console.error(`FAIL — ${path.basename(baselinePath)} was written by lizard ${recordedVersion}, but this run measured with lizard ${currentVersion}.`);
+    console.error('Different lizard releases disagree about the same functions, so this comparison would report debt that no change caused.');
+    console.error(`Fix: install the pinned analyzer (\`pip install lizard==${recordedVersion}\`, see .lizard-version), or refresh the baseline deliberately with --write-baseline.`);
+    process.exit(1);
+  }
+  if (!recordedVersion && currentVersion) {
+    console.error(`WARN — ${path.basename(baselinePath)} does not record which lizard wrote it; comparing against lizard ${currentVersion}. Run --write-baseline to record it.`);
+  }
+}
+
+// Read the baseline and normalise it to the flat `key -> ceiling` map the ratchet
+// consumes. Ends the process when the file is missing or unparseable: a ratchet
+// with no readable baseline grades every function as new code, which is a hard
+// failure rather than something to defer to the caller.
+function loadBaseline(baselinePath) {
+  if (!fs.existsSync(baselinePath)) {
+    console.error(`FAIL — baseline not found: ${baselinePath}`);
+    console.error('A ratchet with no baseline grades every function as new code. Run --write-baseline first.');
+    process.exit(1);
+  }
+  let baselineRaw;
+  try {
+    baselineRaw = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+  } catch (e) {
+    console.error(`FAIL — cannot parse baseline ${baselinePath}: ${String(e.message || e)}`);
+    process.exit(1);
+  }
+  return baselineRaw;
+}
+
+function checkAgainstBaseline(report, get) {
+  const baselinePath = path.resolve(get('--baseline') || path.join(report.root, '.ccn-baseline.json'));
+  const baselineRaw = loadBaseline(baselinePath);
+  // #617 turned the baseline file into `{ population, entries }` so it could
+  // declare what it covers, but this call was never updated: the whole document
+  // was handed to the ratchet, so `baseline["<file>::<fn>"]` was ALWAYS undefined
+  // and every function above the block threshold was reported as new code.
+  //
+  // The failure mode is the bad one: the ratchet kept a 976-entry record of
+  // accepted debt and could not read a single one of them, so it failed the build
+  // on eight functions that were all recorded at exactly their current CCN.
+  // A baseline that is never consulted is indistinguishable from no baseline --
+  // except that it looks like one.
+  //
+  // Accept both shapes: `entries` when present, otherwise the legacy flat map
+  // (a hand-edited or pre-#617 file).
+  const baseline = baselineRaw && typeof baselineRaw === 'object' && baselineRaw.entries
+    ? baselineRaw.entries
+    : baselineRaw;
+
+  // A ratchet is only sound if the same analyzer wrote the ceiling and took
+  // today's measurement. lizard releases inside the supported 1.x series
+  // disagree about the same functions -- measured on this repo, 1.21.3 calls
+  // `csharp.extractFunctions` 18 where 1.25.0 calls it 9 -- so comparing
+  // across versions produces violations no code change caused, and the only
+  // way to clear them is to inflate the ceiling to whichever analyzer ran
+  // last. Refuse the comparison and say how to repair it.
+  //
+  // A baseline with no `analyzer` block predates this record; it is compared
+  // anyway with a warning rather than rejected, so an older file is not a hard
+  // outage. `null` means the writer could not probe a version, which is
+  // unknown rather than a mismatch.
+  assertAnalyzerMatches(baselineRaw, baselinePath, report);
+  const warnThreshold = parseInt(get('--warn') || '5', 10);
+  const blockThreshold = parseInt(get('--block') || '10', 10);
+  const findings = ratchetFindings(report, baseline, warnThreshold, blockThreshold);
+  const blocked = findings.filter((line) => line.startsWith('BLOCK'));
+  for (const line of findings) console.log(line);
+  if (blocked.length) {
+    console.error(`\nFAIL — ${blocked.length} complexity violation(s) against ${path.basename(baselinePath)}`);
+    process.exit(1);
+  }
+  console.log(`OK — ${report.functions.filter((f) => f.bucket === 'production').length} production function(s) within the ratchet`);
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
@@ -993,130 +1244,15 @@ async function main() {
 
   // CI / local enforcement mode (slice E). Without this the report only ever
   // printed numbers; nothing in the pipeline could fail a build for complexity.
-  if (argv.includes('--check')) {
-    const baselinePath = path.resolve(get('--baseline') || path.join(report.root, '.ccn-baseline.json'));
-    if (!fs.existsSync(baselinePath)) {
-      console.error(`FAIL — baseline not found: ${baselinePath}`);
-      console.error('A ratchet with no baseline grades every function as new code. Run --write-baseline first.');
-      process.exit(1);
-    }
-    let baselineRaw;
-    try {
-      baselineRaw = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
-    } catch (e) {
-      console.error(`FAIL — cannot parse baseline ${baselinePath}: ${String(e.message || e)}`);
-      process.exit(1);
-    }
-    // #617 turned the baseline file into `{ population, entries }` so it could
-    // declare what it covers, but this call was never updated: the whole document
-    // was handed to the ratchet, so `baseline["<file>::<fn>"]` was ALWAYS undefined
-    // and every function above the block threshold was reported as new code.
-    //
-    // The failure mode is the bad one: the ratchet kept a 976-entry record of
-    // accepted debt and could not read a single one of them, so it failed the build
-    // on eight functions that were all recorded at exactly their current CCN.
-    // A baseline that is never consulted is indistinguishable from no baseline --
-    // except that it looks like one.
-    //
-    // Accept both shapes: `entries` when present, otherwise the legacy flat map
-    // (a hand-edited or pre-#617 file).
-    const baseline = baselineRaw && typeof baselineRaw === 'object' && baselineRaw.entries
-      ? baselineRaw.entries
-      : baselineRaw;
-
-    // A ratchet is only sound if the same analyzer wrote the ceiling and took
-    // today's measurement. lizard releases inside the supported 1.x series
-    // disagree about the same functions -- measured on this repo, 1.21.3 calls
-    // `csharp.extractFunctions` 18 where 1.25.0 calls it 9 -- so comparing
-    // across versions produces violations no code change caused, and the only
-    // way to clear them is to inflate the ceiling to whichever analyzer ran
-    // last. Refuse the comparison and say how to repair it.
-    //
-    // A baseline with no `analyzer` block predates this record; it is compared
-    // anyway with a warning rather than rejected, so an older file is not a hard
-    // outage. `null` means the writer could not probe a version, which is
-    // unknown rather than a mismatch.
-    const recordedAnalyzer = baselineRaw && typeof baselineRaw === 'object' ? baselineRaw.analyzer : null;
-    const recordedVersion = recordedAnalyzer && typeof recordedAnalyzer === 'object' ? recordedAnalyzer.version : null;
-    const currentVersion = report.lizardVersion ?? null;
-    if (recordedVersion && currentVersion && recordedVersion !== currentVersion) {
-      console.error(`FAIL — ${path.basename(baselinePath)} was written by lizard ${recordedVersion}, but this run measured with lizard ${currentVersion}.`);
-      console.error('Different lizard releases disagree about the same functions, so this comparison would report debt that no change caused.');
-      console.error(`Fix: install the pinned analyzer (\`pip install lizard==${recordedVersion}\`, see .lizard-version), or refresh the baseline deliberately with --write-baseline.`);
-      process.exit(1);
-    }
-    if (!recordedVersion && currentVersion) {
-      console.error(`WARN — ${path.basename(baselinePath)} does not record which lizard wrote it; comparing against lizard ${currentVersion}. Run --write-baseline to record it.`);
-    }
-    const warnThreshold = parseInt(get('--warn') || '5', 10);
-    const blockThreshold = parseInt(get('--block') || '10', 10);
-    const findings = ratchetFindings(report, baseline, warnThreshold, blockThreshold);
-    const blocked = findings.filter((line) => line.startsWith('BLOCK'));
-    for (const line of findings) console.log(line);
-    if (blocked.length) {
-      console.error(`\nFAIL — ${blocked.length} complexity violation(s) against ${path.basename(baselinePath)}`);
-      process.exit(1);
-    }
-    console.log(`OK — ${report.functions.filter((f) => f.bucket === 'production').length} production function(s) within the ratchet`);
-    return;
-  }
+  // CI / local enforcement mode (slice E). Without this the report only ever
+  // printed numbers; nothing in the pipeline could fail a build for complexity.
+  if (argv.includes('--check')) return checkAgainstBaseline(report, get);
 
   // Baseline refresh (REQ-D): record every production function's CURRENT CCN
   // keyed by path::name. Gate 3 then blocks only regressions past these
   // ceilings. Renames/moves intentionally fall out of the key space and are
   // treated as new code — moving debt around must not launder it.
-  if (argv.includes('--write-baseline')) {
-    if (report.unverified_rows.length) {
-      console.error(`FAIL - ${report.unverified_rows.length} function(s) above CCN 10 could not be span-verified; refusing to write a baseline that would record an unverified complexity as its ceiling:`);
-      for (const row of report.unverified_rows.slice(0, 20)) console.error(`  ${row}`);
-      process.exit(1);
-    }
-    const baseline = {};
-    const nameCounts = countNames(report.functions);
-    for (const f of report.functions) {
-      if (f.bucket !== 'production' || f.name === '(no parsable output)') continue;
-      // Key identity lives in baselineKey() so the ratchet cannot disagree with
-      // the writer about which entry a row belongs to.
-      baseline[baselineKey(f, nameCounts)] = f.ccn;
-    }
-    const target = path.join(report.root, '.ccn-baseline.json');
-    // #617: declare the population this baseline was actually written from, so the
-    // gate can grade the same set instead of assuming one. Without this, a repo that
-    // scans fewer roots/extensions than Gate 3 recognises gets pre-existing code
-    // graded as "new" -- a false BLOCK with no repair, because the file has no
-    // baseline entry to ratchet.
-    //
-    // Sorted + de-duplicated so a re-run on unchanged inputs produces a
-    // byte-identical file; an unordered declaration would churn the diff on every
-    // refresh and make "did the population change?" unreadable.
-    //
-    // Both axes are derived from f.file, NOT from the baseline KEY: keys embed
-    // `::` and `@line` (baselineKey), so path.extname() on a key would read the
-    // suffix of a symbol name as an extension.
-    const population = {
-      roots: [...new Set(report.functions
-        .filter((f) => f.bucket === 'production' && f.name !== '(no parsable output)')
-        .map((f) => path.dirname(f.file).replace(/\\/g, '/'))
-        .filter((d) => d && d !== '.'))].sort(),
-      extensions: [...new Set(report.functions
-        .filter((f) => f.bucket === 'production' && f.name !== '(no parsable output)')
-        .map((f) => path.extname(f.file).toLowerCase())
-        .filter(Boolean))].sort(),
-    };
-    // Which analyzer produced these numbers. Without it a baseline is
-    // indistinguishable from one written by any other lizard release, and the
-    // ratchet happily compares across versions that disagree about the same
-    // functions (see checkLizardVersion). Recorded as `null` when the version
-    // probe is unsupported; the reader treats null as "unknown, compare anyway"
-    // rather than as a mismatch, so an older toolchain still works.
-    const document = { analyzer: { tool: 'lizard', version: report.lizardVersion ?? null }, population, entries: baseline };
-    fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
-    console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
-    console.log(`  analyzer: lizard ${report.lizardVersion ?? '(version unknown)'}`);
-    // The reader accepts both shapes (see ccn-ratchet.sh), so an older gate can
-    // still load this file: a flat map and {population, entries} both parse.
-    return;
-  }
+  if (argv.includes('--write-baseline')) return writeBaseline(report);
 
   const audit = readAuditRows(path.join(report.root, '.xp-gate', 'audit.jsonl'));
   const byGate = {};
