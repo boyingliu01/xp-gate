@@ -19,9 +19,44 @@ setup() {
 
 # Assert a canonical file and its npm mirror are byte-identical, and say which
 # file diverged rather than just "not equal".
+#
+# Not every mirror EXISTS in a checkout. `src/npm-package/adapters/` is a
+# gitignored GENERATED tree (.gitignore 36): the packaging sync creates it, so it
+# is present on a developer machine and absent from CI. Asserting byte-identity
+# against a path that is not in the repository can only be a local-only check
+# that fails the moment anyone else runs it -- and it did, on CI, for
+# `src/npm-package/adapters/csharp.sh`.
+#
+# The classifier is `git check-ignore`, deliberately NOT `git ls-files`:
+#   - check-ignore reads the .gitignore RULES, so its answer is the same in every
+#     checkout of this commit. ls-files reads the INDEX, so a missing file is
+#     also "untracked", which makes the skip swallow a genuinely deleted mirror.
+#     Measured: with ls-files, deleting a tracked mirror still passed (ok 5),
+#     because the absent file and a build artefact were indistinguishable.
+#   - It is not a hand-maintained path list either. The first attempt at this fix
+#     hardcoded directory prefixes and misclassified githooks/adapters, which is
+#     NOT ignored.
+#
+# An ignored path is a build artefact: reported, compared when present, and
+# skipped when absent. A NON-ignored path is part of the repository: it must
+# exist and match, or this fails.
 _assert_mirror() {
   local canonical="$REPO_ROOT/$1" mirror="$REPO_ROOT/$2"
   [ -f "$canonical" ] || { echo "MISSING canonical: $1"; return 1; }
+  if git -C "$REPO_ROOT" check-ignore -q -- "$2"; then
+    if [ -f "$mirror" ]; then
+      # Present but generated: still assert it matches, so a stale local
+      # artefact cannot masquerade as a good sync.
+      cmp -s "$canonical" "$mirror" || {
+        echo "GENERATED mirror differs: $2 (rerun the package sync --fix)"
+        return 1
+      }
+      echo "SKIP (generated build artefact, present and identical): $2"
+    else
+      echo "SKIP (generated build artefact, not in checkout): $2"
+    fi
+    return 0
+  fi
   [ -f "$mirror" ] || { echo "MISSING mirror: $2"; return 1; }
   if ! diff -q "$canonical" "$mirror" >/dev/null; then
     echo "DRIFT: $1 != $2"
@@ -52,26 +87,41 @@ _assert_mirror() {
   [ "$status" -eq 0 ]
 }
 
-@test "#717 AC-717-17: gate-3.sh has all FIVE copies in sync" {
-  local base="githooks/adapters/gate-3.sh"
-  for m in "githooks/gate-3.sh" \
-           "src/npm-package/adapters/gate-3.sh" \
-           "src/npm-package/gate-3.sh" \
-           "src/npm-package/hooks/gate-3.sh"; do
-    run _assert_mirror "$base" "$m"
-    [ "$status" -eq 0 ]
+# Compare every copy of a gate script, naming WHICH copy diverged.
+#
+# `run _assert_mirror ...` + `[ "$status" -eq 0 ]` in a loop tells the reader
+# nothing but "one of these four". The helper already explains the real cause on
+# stdout; surface it instead of discarding it.
+_assert_all_copies() {
+  local base="$1"; shift
+  local m out
+  for m in "$@"; do
+    if ! out=$(_assert_mirror "$base" "$m" 2>&1); then
+      echo "copy out of sync: $m"
+      echo "$out"
+      return 1
+    fi
+    [ -n "$out" ] && echo "$out"
   done
+  return 0
+}
+
+@test "#717 AC-717-17: gate-3.sh has all FIVE copies in sync" {
+  run _assert_all_copies "githooks/adapters/gate-3.sh" \
+    "githooks/gate-3.sh" \
+    "src/npm-package/adapters/gate-3.sh" \
+    "src/npm-package/gate-3.sh" \
+    "src/npm-package/hooks/gate-3.sh"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "#717 AC-717-17: gate-4.sh has all FIVE copies in sync" {
-  local base="githooks/adapters/gate-4.sh"
-  for m in "githooks/gate-4.sh" \
-           "src/npm-package/adapters/gate-4.sh" \
-           "src/npm-package/gate-4.sh" \
-           "src/npm-package/hooks/gate-4.sh"; do
-    run _assert_mirror "$base" "$m"
-    [ "$status" -eq 0 ]
-  done
+  run _assert_all_copies "githooks/adapters/gate-4.sh" \
+    "githooks/gate-4.sh" \
+    "src/npm-package/adapters/gate-4.sh" \
+    "src/npm-package/gate-4.sh" \
+    "src/npm-package/hooks/gate-4.sh"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "#717 AC-717-17: the dotnet classifier reaches the npm copy too" {
