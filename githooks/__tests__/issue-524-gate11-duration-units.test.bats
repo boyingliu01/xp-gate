@@ -11,8 +11,8 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
-  MIRROR_HOOK="$REPO_ROOT/src/npm-package/hooks/pre-commit"
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-11-entry.sh"
+  MIRROR_HOOK="$REPO_ROOT/src/npm-package/hooks/gate-entries/gate-11-entry.sh"
   LIB="$REPO_ROOT/githooks/lib/now-ms.sh"
   TEST_DIR="$(mktemp -d)"
 }

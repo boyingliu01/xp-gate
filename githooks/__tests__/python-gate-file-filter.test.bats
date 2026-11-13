@@ -32,8 +32,8 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  GITHOOKS_HOOK="$REPO_ROOT/githooks/pre-commit"
-  NPM_HOOK="$REPO_ROOT/src/npm-package/hooks/pre-commit"
+  GITHOOKS_HOOK="$REPO_ROOT/githooks/gate-entries/gate-1-entry.sh"
+  NPM_HOOK="$REPO_ROOT/src/npm-package/hooks/gate-entries/gate-1-entry.sh"
   LIB="$REPO_ROOT/githooks/lib/python-incremental-typecheck.sh"
 }
 

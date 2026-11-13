@@ -20,6 +20,10 @@
 # @covers AC-554-01 AC-554-02
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+# #798: two different subjects. GATE_5 is the entry body this suite greps;
+# HOOK is the whole hook that run_hook() actually executes (a gate entry alone
+# is not runnable -- it only defines gate_5_run()).
+GATE_5="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 HOOK="$REPO_ROOT/githooks/pre-commit"
 
 setup() {
@@ -50,8 +54,8 @@ run_hook() {
 
 @test "anti-vacuity: the no-source-file early-skip path still exists in the hook" {
   # If this path is ever removed the cases below would pass for the wrong reason.
-  grep -q 'TESTS_SKIPPED=true' "$HOOK"
-  grep -q 'No code files changed' "$HOOK"
+  grep -q 'TESTS_SKIPPED=true' "$GATE_5"
+  grep -q 'No code files changed' "$GATE_5"
 }
 
 @test "a commit that changes no source file does NOT record Gate 5 as PASS" {

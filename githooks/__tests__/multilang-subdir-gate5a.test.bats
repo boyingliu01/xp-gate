@@ -94,6 +94,20 @@ MOCK
   chmod +x "$TEST_DIR/bin/jscpd" "$TEST_DIR/bin/lizard" "$TEST_DIR/bin/gitleaks" \
            "$TEST_DIR/bin/pytest" "$TEST_DIR/bin/coverage" "$TEST_DIR/bin/ruff" \
            "$TEST_DIR/bin/mypy" "$TEST_DIR/bin/npx"
+
+  # Biome is resolved LOCALLY first: <project>/node_modules/.bin/biome, then
+  # `command -v biome`, then `npx biome` -- so a commit hook never downloads it
+  # from the registry. A stub on `npx` alone is therefore UNREACHABLE on any host
+  # that has biome installed globally, and this fixture would then run the REAL
+  # biome against a toy project and BLOCK the commit it is trying to observe.
+  # Stub the highest rung: the sub-project the gate will cd into.
+  mkdir -p web/node_modules/.bin
+  cat > web/node_modules/.bin/biome <<'MOCK'
+#!/bin/bash
+echo "Checked 2 files in 3ms. No fixes applied."
+exit 0
+MOCK
+  chmod +x web/node_modules/.bin/biome
   export PATH="$TEST_DIR/bin:$PATH"
   export NPX_LOG="$TEST_DIR/npx.log"
 

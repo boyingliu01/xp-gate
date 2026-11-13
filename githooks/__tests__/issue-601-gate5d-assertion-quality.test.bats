@@ -20,7 +20,7 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$REPO_ROOT/githooks/lib/assertion-quality.sh"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
   ANTI="$REPO_ROOT/skills/test-driven-development/testing-anti-patterns.md"
 }
 

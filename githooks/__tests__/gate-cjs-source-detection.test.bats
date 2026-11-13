@@ -135,6 +135,13 @@ MOCK
   cp -R "$SOURCE_GITHOOKS/lib/." .git/hooks/lib/ 2>/dev/null || true
   mkdir -p .git/hooks/adapters
   cp -R "$SOURCE_GITHOOKS/adapters/." .git/hooks/adapters/ 2>/dev/null || true
+  # #798: pre-commit is an entry point now; every gate body -- Gate 5c included --
+  # is sourced from gate-entries/ through gate-driver.sh. Without these the copied
+  # hook runs its preamble and never reaches any gate, so the Gate 5c assertions
+  # below would be inspecting a hook that executed nothing.
+  cp "$SOURCE_GITHOOKS/gate-driver.sh" .git/hooks/gate-driver.sh 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/gate-registry.sh" .git/hooks/gate-registry.sh 2>/dev/null || true
+  cp -R "$SOURCE_GITHOOKS/gate-entries" .git/hooks/gate-entries 2>/dev/null || true
 
   # Docs/config only: the setup commit must not look like a code change, otherwise
   # Gate 5 resolves vitest from the ambient PATH and blocks the fixture itself.
@@ -181,7 +188,13 @@ teardown() {
   setup_push_fixture
   run_pre_push_with_files "docs/notes.md"
 
-  [[ "$output" =~ "Documentation-only push" ]]
+  # #798 renamed this message. The old wording ("Documentation-only push") was
+  # retired deliberately: the branch now says what actually happened and what
+  # was NOT checked, because "not applicable" and "passed" must not read the
+  # same. Assert the classification plus the honest skip notice, not the
+  # retired phrasing.
+  [[ "$output" =~ "pre-push gates NOT applicable" ]]
+  [[ "$output" =~ "SKIPPED - code walkthrough and mutation gates did not run" ]]
 }
 
 # ── Gate 5c: annotation regex covers .test.cjs ───────────────────────

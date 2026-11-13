@@ -136,7 +136,7 @@ EOF
 
 @test "both TS call sites route through the shared resolver" {
   # The two places that used to hardcode the checker must now share one decision.
-  run grep -n "run_typescript_typecheck" "$REPO_ROOT/githooks/pre-commit"
+  run grep -n "run_typescript_typecheck" "$REPO_ROOT/githooks/gate-entries/gate-1-entry.sh"
   [ "$status" -eq 0 ]
   run grep -n "run_typescript_typecheck" "$REPO_ROOT/githooks/adapters/typescript.sh"
   [ "$status" -eq 0 ]

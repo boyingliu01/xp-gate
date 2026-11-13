@@ -17,7 +17,10 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$REPO_ROOT/githooks/lib/assertion-quality.sh"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798: Gate 5's body (where the library is CALLED) is the entry file; the
+  # top-level  line stayed in pre-commit's preamble.
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
+  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
   MIRROR_LIB="$REPO_ROOT/src/npm-package/hooks/lib/assertion-quality.sh"
 }
 
@@ -86,7 +89,7 @@ setup() {
 # exemption requires a reason. This is the anti-vacuity link: a library nobody
 # calls is dead code, which is how the "no detector at all" state persists.
 @test "AC-670-18: pre-commit sources the library and blocks on .only" {
-  run grep -q 'assertion-quality.sh' "$HOOK"
+  run grep -q 'assertion-quality.sh' "$PRE_COMMIT"
   [ "$status" -eq 0 ]
   run grep -q 'classify_test_focus' "$HOOK"
   [ "$status" -eq 0 ]

@@ -287,7 +287,7 @@ run_java_adapter() {
     /^[[:space:]]*java\)[[:space:]]*$/ { inside = 1; next }
     inside && /^[[:space:]]*(kotlin|go|python|typescript|cpp|swift|dart|flutter|shell|powershell|objectivec|iac)\)[[:space:]]*$/ { exit }
     inside { print }
-  ' "$REPO_ROOT/githooks/pre-commit")
+  ' "$REPO_ROOT/githooks/gate-entries/gate-1-entry.sh")
 
   [ -n "$block" ] || {
     echo "could not locate the java case arm in pre-commit (extraction empty)"

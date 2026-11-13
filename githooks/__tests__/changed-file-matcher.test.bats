@@ -41,7 +41,11 @@ assert_matcher_available() {
   run_hook_for "docs/policy notes.md"
 
   assert_matcher_available
-  [[ "$output" =~ "No code files changed, skipping lint" ]]
+  # #798 reworded Gate 1's doc-only branch: it used to say "No code files
+  # changed, skipping lint" and report PASSED, which read as "linted and clean"
+  # for a commit where lint never ran. "Not applicable" and "passed" must not
+  # read the same, so the branch now says SKIPPED and names its scope.
+  [[ "$output" =~ "SKIPPED - Code quality: no changed code files in this run" ]]
   [[ "$output" =~ "No IaC files changed, skipping Gate 7" ]]
   [[ "$output" =~ "No code files changed, skipping SAST scan" ]]
 }

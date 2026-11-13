@@ -12,7 +12,11 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798: the two subjects live in different files now. The threshold RESOLVER
+  # (_resolve_coverage_threshold, fail_under) never left pre-commit's preamble;
+  # generate_quality_report() is defined in Gate 13's body.
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
+  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
   WORK="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$WORK"
 }
@@ -41,8 +45,8 @@ resolved() { # cwd = WORK; prints "threshold=NN source=..."
 }
 
 @test "the hook resolves the threshold from pyproject rather than hardcoding 80" {
-  grep -q '_resolve_coverage_threshold' "$HOOK"
-  grep -q 'fail_under' "$HOOK"
+  grep -q '_resolve_coverage_threshold' "$PRE_COMMIT"
+  grep -q 'fail_under' "$PRE_COMMIT"
 }
 
 @test "no project-level coverage comparison uses a literal 80" {

@@ -14,7 +14,7 @@ setup() {
 # Ignore comments: the fix documents the old flag in an explanatory note.
 @test "REQ-SEC-001 no shipped gate-8 copy invokes git --pre-commit" {
   cd "$REPO_ROOT" || return 1
-  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh'); do
+  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh' ':!*gate-entries*'); do
     # Strip comment lines, then look for a real invocation.
     if grep -v '^[[:space:]]*#' "$f" | grep -q 'git --pre-commit'; then
       echo "git --pre-commit still invoked in $f" >&2
@@ -25,7 +25,7 @@ setup() {
 
 @test "REQ-SEC-001 every shipped gate-8 copy invokes git --staged" {
   cd "$REPO_ROOT" || return 1
-  files="$(git ls-files 'gate-8*.sh' '*/gate-8*.sh')"
+  files="$(git ls-files 'gate-8*.sh' '*/gate-8*.sh' ':!*gate-entries*')"
   [ -n "$files" ]
   for f in $files; do
     grep -q 'git --staged' "$f" || { echo "missing --staged in $f" >&2; return 1; }
@@ -34,7 +34,7 @@ setup() {
 
 @test "REQ-SEC-001 gate-8 copies are syntactically valid" {
   cd "$REPO_ROOT" || return 1
-  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh'); do
+  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh' ':!*gate-entries*'); do
     run bash -n "$f"
     [ "$status" -eq 0 ] || { echo "syntax error in $f" >&2; return 1; }
   done
@@ -96,7 +96,7 @@ setup() {
 
 @test "REQ-SEC-001 gate-8 decides verdict from the report artifact, not log wording" {
   cd "$REPO_ROOT" || return 1
-  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh'); do
+  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh' ':!*gate-entries*'); do
     # Must inspect the report file...
     grep -q 'GITLEAKS_REPORT' "$f" || { echo "no report check in $f" >&2; return 1; }
     grep -q '"RuleID"' "$f" || { echo "no RuleID count in $f" >&2; return 1; }
@@ -105,7 +105,7 @@ setup() {
 
 @test "REQ-SEC-001 gate-8 no longer gates on gitleaks stdout strings" {
   cd "$REPO_ROOT" || return 1
-  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh'); do
+  for f in $(git ls-files 'gate-8*.sh' '*/gate-8*.sh' ':!*gate-entries*'); do
     if grep -v '^[[:space:]]*#' "$f" | grep -q '0 commits scanned'; then
       echo "still parsing stdout wording in $f" >&2
       return 1

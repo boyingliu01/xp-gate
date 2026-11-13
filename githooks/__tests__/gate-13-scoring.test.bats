@@ -13,7 +13,7 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  PRE_COMMIT="$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
 }
 
 @test "AC-687-01: the gate list is defined once and includes 13" {

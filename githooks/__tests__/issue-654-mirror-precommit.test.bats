@@ -18,7 +18,7 @@ setup() {
 }
 
 @test "AC-654-01: pre-commit carries a mirror parity gate scoped to touched files" {
-  run grep -c 'GATE 12b' "$REPO_ROOT/githooks/pre-commit"
+  run grep -c 'GATE 12b' "$REPO_ROOT/githooks/gate-entries/gate-12b-entry.sh"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
@@ -30,14 +30,14 @@ setup() {
   # edit is the dangerous direction (see AC-654-03), so the earlier "only
   # githooks/ and plugins/*/src/" title described a filter that no longer
   # exists.
-  run grep -cF "MIRROR_STAGED" "$REPO_ROOT/githooks/pre-commit"
+  run grep -cF "MIRROR_STAGED" "$REPO_ROOT/githooks/gate-entries/gate-12b-entry.sh"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
 
 @test "AC-654-02: the block message names the fix command" {
   # A block that does not say how to fix it teaches people to reach for --no-verify.
-  run grep -c 'sync-package-content.js --fix' "$REPO_ROOT/githooks/pre-commit"
+  run grep -c 'sync-package-content.js --fix' "$REPO_ROOT/githooks/gate-entries/gate-12b-entry.sh"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }
@@ -63,6 +63,6 @@ setup() {
   #
   # Asserted structurally: the gate's path filter must also accept the mirror
   # roots, otherwise no mirror-only edit can ever reach the comparison.
-  run grep -E 'MIRROR_STAGED.*grep -qE.*src/npm-package|MIRROR_STAGED.*src/npm-package' "$REPO_ROOT/githooks/pre-commit"
+  run grep -E 'MIRROR_STAGED.*grep -qE.*src/npm-package|MIRROR_STAGED.*src/npm-package' "$REPO_ROOT/githooks/gate-entries/gate-12b-entry.sh"
   [ "$status" -eq 0 ]
 }

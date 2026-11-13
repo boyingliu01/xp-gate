@@ -113,25 +113,45 @@ EOF
 
 # ------------------------------------------- AC-008-01 registration
 
-@test "AC-008-01: githooks/pre-commit invokes Gate 13" {
-  run grep -n 'gate-13-compiler-strictness' "$REPO_ROOT/githooks/pre-commit"
+@test "AC-008-01: the gate chain includes Gate 13 and binds it to its script" {
+  # #798: "pre-commit invokes Gate 13" is now two facts in two places, because
+  # the chain's ORDER became data and the number became a LABEL bound by the
+  # registry. Asserting a line in pre-commit would pin the pre-refactor shape
+  # rather than the property this AC is about.
+  #   1. gate-driver.sh lists 13 in XP_GATE_ORDER  -> it actually runs
+  #   2. gate-registry.sh binds 13 to its script   -> it runs the right code
+  run grep -qE '^XP_GATE_ORDER=.*(\s)13(\s)' "$REPO_ROOT/githooks/gate-driver.sh"
+  [ "$status" -eq 0 ]
+  run grep -q 'compiler-strictness|13|gate-13-compiler-strictness.sh' \
+    "$REPO_ROOT/githooks/gate-registry.sh"
   [ "$status" -eq 0 ]
 }
 
-@test "AC-008-01: the pre-commit Gate 13 execution block appears AFTER Gate 12's" {
-  # Anchor on EXECUTION lines only: Gate 12 sources its script, Gate 13 prints
-  # the check banner. The summary/JSON lines that also mention Gate 12 come later
-  # in the file for both gates and would give a meaningless answer.
-  local l12 l13
-  l12=$(grep -n 'source .*gate-12-file-hygiene\.sh' "$REPO_ROOT/githooks/pre-commit" | head -1 | cut -d: -f1)
-  l13=$(grep -n 'Gate 13: Compiler Strictness Check\.\.\.' "$REPO_ROOT/githooks/pre-commit" | head -1 | cut -d: -f1)
-  [ -n "$l12" ]
-  [ -n "$l13" ]
-  [ "$l13" -gt "$l12" ]
+@test "AC-008-01: the Gate 13 execution position comes AFTER Gate 12's" {
+  # #798: ordering is DATA (XP_GATE_ORDER in gate-driver.sh), not the physical
+  # order of blocks in a file. Compare positions IN THAT LIST -- which is exactly
+  # the sequence the driver walks. Position 12b/12c must not be mistaken for 12,
+  # hence the exact-match grep rather than a substring test.
+  local order pos12 pos13
+  order=$(grep -E '^XP_GATE_ORDER=' "$REPO_ROOT/githooks/gate-driver.sh" \
+    | head -1 | sed 's/^XP_GATE_ORDER=//; s/"//g')
+  [ -n "$order" ]
+  pos12=$(printf '%s\n' "$order" | tr ' ' '\n' | grep -n '^12$' | cut -d: -f1)
+  pos13=$(printf '%s\n' "$order" | tr ' ' '\n' | grep -n '^13$' | cut -d: -f1)
+  [ -n "$pos12" ]
+  [ -n "$pos13" ]
+  [ "$pos13" -gt "$pos12" ]
 }
 
-@test "AC-008-01: githooks/install.sh registers the gate script" {
-  run grep -n 'gate-13-compiler-strictness' "$REPO_ROOT/githooks/install.sh"
+@test "AC-008-01: the deploy manifest registers the gate script" {
+  # install.sh no longer names each gate script inline: it sources
+  # githooks/deploy-manifest.sh (REQ-DEPLOY-001) and installs DEPLOY_GATE_FILES.
+  # The manifest IS the registration now, so this AC has to read it there --
+  # grepping install.sh would assert against a list that moved on purpose.
+  run grep -q "'gate-13-compiler-strictness.sh'" "$REPO_ROOT/githooks/deploy-manifest.sh"
+  [ "$status" -eq 0 ]
+  # Anti-vacuity: the manifest must still be what install.sh installs from.
+  run grep -q 'DEPLOY_GATE_FILES' "$REPO_ROOT/githooks/install.sh"
   [ "$status" -eq 0 ]
 }
 

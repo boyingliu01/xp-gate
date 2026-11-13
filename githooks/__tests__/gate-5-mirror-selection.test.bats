@@ -16,7 +16,9 @@ setup() {
 # Pull the function definition out of a shipped pre-commit and define it here,
 # so the test runs production text rather than a transcription of it.
 load_selector() {
-  local src="${1:-$REPO_ROOT/githooks/pre-commit}"
+  # #798: select_root_suite_targets() lives in Gate 0's body (gate-entries/
+  # gate-0-entry.sh), not in pre-commit any more.
+  local src="${1:-$REPO_ROOT/githooks/gate-entries/gate-0-entry.sh}"
   local body
   body=$(awk '/^select_root_suite_targets\(\)[[:space:]]*\{/{flag=1} flag{print} flag&&/^\}$/{exit}' "$src")
   if [ -z "$body" ]; then
@@ -104,12 +106,20 @@ load_selector() {
 
 @test "AC-494-05: anti-vacuity -- every shipped copy defines the selector and Gate 5 calls it" {
   cd "$REPO_ROOT" || return 1
+  # #798: the selector is DEFINED in Gate 0's body and APPLIED in Gate 5's, so
+  # the two facts live in different files now. Each shipped tree is checked as a
+  # pair rather than file by file -- what must hold is that a shipped copy
+  # defines the selector and that the same copy applies it at both sites.
   copies=0
-  for f in $(git ls-files 'githooks/pre-commit' 'src/npm-package/hooks/pre-commit'); do
-    grep -q '^select_root_suite_targets()' "$f" || { echo "no selector in $f" >&2; return 1; }
+  for dir in githooks src/npm-package/hooks; do
+    def="$dir/gate-entries/gate-0-entry.sh"
+    use="$dir/gate-entries/gate-5-entry.sh"
+    [ -f "$def" ] || { echo "no Gate 0 entry under $dir" >&2; return 1; }
+    [ -f "$use" ] || { echo "no Gate 5 entry under $dir" >&2; return 1; }
+    grep -q '^select_root_suite_targets()' "$def" || { echo "no selector in $def" >&2; return 1; }
     # Defining it is not enough: both selection sites must route through it.
-    [ "$(grep -c 'select_root_suite_targets "$CHANGED_TEST_FILES"\|select_root_suite_targets "$CHANGED_SRC_FILES"' "$f")" -ge 2 ] \
-      || { echo "selector defined but never applied in $f" >&2; return 1; }
+    [ "$(grep -c 'select_root_suite_targets "$CHANGED_TEST_FILES"\|select_root_suite_targets "$CHANGED_SRC_FILES"' "$use")" -ge 2 ] \
+      || { echo "selector defined but never applied in $use" >&2; return 1; }
     copies=$((copies + 1))
   done
   [ "$copies" -ge 2 ]

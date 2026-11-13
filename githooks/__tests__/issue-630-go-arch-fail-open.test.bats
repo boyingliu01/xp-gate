@@ -17,7 +17,7 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh"
 }
 
 # AC-630-01: the Go arm takes arch-go's own exit status.
@@ -33,7 +33,9 @@ setup() {
   local arm
   arm=$(awk '/"go"\)/{f=1} f&&/^      "java"\)/{exit} f' "$HOOK")
   printf '%s\n' "$arm" | grep -q 'BLOCKED'
-  printf '%s\n' "$arm" | grep -q 'exit 1'
+  # #798: a gate body RETURNS its verdict; the driver maps a non-zero return to
+  # the hook's exit status, so blocking reads `return 1` in the entry body.
+  printf '%s\n' "$arm" | grep -qE '(^|[[:space:]])return 1'
 }
 
 # AC-670-04: the unconditional success line must be gone from the Go arm. This is

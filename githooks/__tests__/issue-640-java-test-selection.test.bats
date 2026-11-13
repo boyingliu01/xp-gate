@@ -314,6 +314,11 @@ _precommit_path() {
   local libdir
   libdir="$(dirname "$SEL")"
   local candidate
+  # #798: GATE_CHANGED_FILES is exported from Gate 5's body. Look there first,
+  # then fall back to the entry point so a future move surfaces as a failure
+  # of the assertion rather than of this resolver.
+  candidate="$(cd "$libdir/.." && pwd)/gate-entries/gate-5-entry.sh"
+  [ -f "$candidate" ] && { printf '%s' "$candidate"; return 0; }
   candidate="$(cd "$libdir/.." && pwd)/pre-commit"
   [ -f "$candidate" ] && { printf '%s' "$candidate"; return 0; }
   return 1
@@ -375,7 +380,9 @@ _precommit_path() {
   # The fix hands the adapter a file to write and raises the flag in the caller.
   # These assertions pin both halves, so neither can be dropped silently.
   adapter="$REPO_ROOT/githooks/adapters/java.sh"
-  precommit="$REPO_ROOT/githooks/pre-commit"
+  # #798: the CALLER side of this contract (exporting the file, raising the
+  # flag) is Gate 5's body now, not pre-commit's.
+  precommit="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 
   # 1. The adapter writes the chosen strategy to the caller-named file.
   run grep -q 'XP_GATE_PARTIAL_RUN_FILE' "$adapter"

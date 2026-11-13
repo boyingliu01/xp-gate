@@ -12,7 +12,7 @@
 # @covers AC-556-01
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-HOOK="$REPO_ROOT/githooks/pre-commit"
+HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 
 @test "anti-vacuity: the subset run path still exists" {
   grep -q 'PARTIAL_TEST_RUN=true' "$HOOK"

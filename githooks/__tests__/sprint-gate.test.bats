@@ -274,7 +274,7 @@ extract_sprint_gate_resolution() {
 /^# BEGIN SPRINT_GATE_SCRIPT RESOLUTION$/ { capture = 1; next }
 /^# END SPRINT_GATE_SCRIPT RESOLUTION$/ { capture = 0 }
     capture
-  ' "$BATS_TEST_DIRNAME/../pre-commit"
+  ' "$BATS_TEST_DIRNAME/../gate-entries/gate-11-entry.sh"
 }
 
 @test "pre-commit resolution: GATE_DIR wins when sprint-gate.sh exists everywhere" {
