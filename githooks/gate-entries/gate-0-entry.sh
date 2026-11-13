@@ -151,10 +151,28 @@ if [ "$is_protected" = "true" ]; then
     echo "✅ PASSED - Gate 0: Version Consistency Check (VERSION/CHANGELOG staged)"
   else
     # Check for doc-only changes (no source code files)
-    has_source=false
+    #
+    # The extension list must cover every language an adapter supports, not just
+    # the C-family languages this repo happens to be written in. It previously
+    # stopped at `*.java`, so a staged .kt/.cs/.swift/.dart/.sh/.ps1 file made
+    # Gate 0 report "doc-only changes" — and the doc-only path skips the REST OF
+    # THE CHAIN. A Kotlin-only commit therefore ran no code gate at all, while
+    # reading green. Found once the Kotlin fixtures stopped skipping themselves
+    # (the skips had hidden it): kotlin-gate reported Gate 0 "doc-only" for a
+    # fixture whose only staged file was BadCode.kt.
+    #
+    # Keep this identical to gate-5-entry.sh's CODE_EXTENSIONS, which is the list
+    # the coverage gate already trusts. A second hand-maintained copy is exactly
+    # how these two drifted apart.
     for file in $STAGED_FILES; do
       case "$file" in
-        *.ts|*.js|*.tsx|*.jsx|*.py|*.go|*.java|*.rs|*.c|*.cpp|*.h|*.css|*.scss)
+        *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.java|*.kt|*.kts|*.cs|*.csx)
+          has_source=true
+          ;;
+        *.cpp|*.cc|*.cxx|*.c|*.h|*.hpp|*.swift|*.m|*.mm|*.dart|*.sh|*.ps1)
+          has_source=true
+          ;;
+        *.css|*.scss|*.rs)
           has_source=true
           ;;
       esac
@@ -166,7 +184,13 @@ if [ "$is_protected" = "true" ]; then
       case "$file" in
         src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*)
           continue ;;
-        *.ts|*.js|*.tsx|*.jsx|*.py|*.go|*.java|*.rs|*.c|*.cpp|*.h|*.css|*.scss)
+        *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.java|*.kt|*.kts|*.cs|*.csx)
+          has_real_source=true
+          ;;
+        *.cpp|*.cc|*.cxx|*.c|*.h|*.hpp|*.swift|*.m|*.mm|*.dart|*.sh|*.ps1)
+          has_real_source=true
+          ;;
+        *.css|*.scss|*.rs)
           has_real_source=true
           ;;
       esac
