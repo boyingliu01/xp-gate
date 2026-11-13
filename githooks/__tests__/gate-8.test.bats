@@ -19,7 +19,17 @@
 # under ${TMPDIR:-/tmp}, and a Windows drive-letter TMPDIR is valid for real
 # git-hook runs but trips sandboxed rm shims inside BATS.
 
-INNER_SCRIPT="$BATS_TEST_DIRNAME/_gate8-inner.sh"
+# One file PER TEST, not per suite. CI runs the suite with `--jobs N`, which
+# executes cases concurrently in the same directory; a shared path meant two
+# cases wrote and ran the same file at once. The symptom was a torn file --
+# `_gate8-inner.sh: line 8: ntf: command not found`, the `pr` of `printf`
+# vanishing because another writer truncated mid-line -- and it only appeared
+# under the sharded CI runner, never when the suite ran alone.
+#
+# $BATS_TEST_NAME is unique per case. The fallback keeps this working on bats
+# versions that do not export it (serial runs, where a shared path is harmless).
+_suite_bats_unique() { printf '%s' "${BATS_TEST_NAME:-shared}" | tr -c 'A-Za-z0-9_' '_'; }
+INNER_SCRIPT="$BATS_TEST_DIRNAME/_gate8-inner-$(_suite_bats_unique).sh"
 
 teardown() {
   # `|| true`: sandboxed environments may shim rm into rejecting this path;
