@@ -672,34 +672,22 @@ jobs:
             | tar -xz -C /usr/local/bin gitleaks
           gitleaks version
 
-      # Gate 5b: BATS hook behavior contracts (#484)
-      # The .bats suites are the executable contracts of the gate scripts
-      # (exit codes, verdict JSON, anti-bypass properties). Before #484 they
-      # had NO automatic execution path — guards existed but never ran (the
-      # 6ebbd5a failure mode). The bats devDependency ships a working runner
-      # on Linux; a failure here must red the pipeline.
-      - name: 'Gate 5b: BATS hook behavior contracts'
-        run: |
-          if compgen -G "githooks/__tests__/*.bats" > /dev/null; then
-            echo "Running BATS suites (githooks/__tests__)..."
-            # #591: `--print-output-on-failure` is not a convenience.
-            #
-            # This gate first executed on 2026-10-22 (203 commits after #484 wired
-            # it in) and reported 67 failures. Without this flag a failing case
-            # shows only the line that failed, e.g.
-            #     `[[ "$output" =~ "No code files changed, skipping SAST scan" ]]' failed
-            # with no output to say WHAT the hook actually printed — and those cases
-            # pass locally, so the evidence existed only inside the CI runner and
-            # was thrown away. The result is an unfalsifiable failure: you cannot
-            # tell "the hook changed" from "this runner differs".
-            #
-            # The same applies to a passing-then-flaky case: the printed output is
-            # the only artifact.
-            npx bats --print-output-on-failure githooks/__tests__/
-            echo "✅ Gate 5b: BATS hook behavior contracts passed"
-          else
-            echo "ℹ️ No .bats suites found — skipping Gate 5b"
-          fi
+      # Gate 5b (BATS hook behaviour contracts) MOVED OUT of this job.
+      #
+      # Measured on the 2026-11-12 run: this single step was 18m47s of a 22m24s
+      # Gate Checks job -- 81% of the whole pipeline, while every other gate
+      # together cost under 2 minutes. It then had to be made non-blocking just
+      # to keep the pipeline usable, which cost the contracts their power to
+      # stop a merge.
+      #
+      # It is now the `bats-contracts` job, driven by scripts/run-bats-ci.cjs:
+      # sharded across runners, each shard parallel inside itself, and BLOCKING
+      # again (the `continue-on-error` is gone together with the step). Keeping
+      # it in this job would have kept it serial: everything here shares one
+      # filesystem, so the 18x48s of suite time could only ever run end to end.
+      #
+      # If you are looking for the suite, look at the bats-contracts job below --
+      # do not re-add a silent copy here.
 
       # Gate 5c: audit ledger health (P0). Fails the build if any gate-timing
       # or attribution anomaly appears at/after the fix date. The ledger is
@@ -941,6 +929,96 @@ jobs:
 
           # Save SARIF reports for upload
           tar -cJf sarif-reports.tar.xz sarif-reports/ || echo "No SARIF reports generated"
+
+  # Job 2b: BATS hook behaviour contracts (#484) — Gate 5b, now a real gate.
+  #
+  # WHY IT MOVED HERE
+  #   As a step inside `gate-check` this was 18m47s of a 22m24s job on
+  #   2026-11-12: 81% of the pipeline, and it only ran because it had been made
+  #   `continue-on-error` — a green build while 1300+ executable contracts were
+  #   red. Both halves of that are fixed here:
+  #
+  #   1. The suites are split across RUNNERS instead of sharing one filesystem.
+  #      scripts/run-bats-ci.cjs holds a measured per-file cost table and splits
+  #      the list by cost (longest-processing-time-first), so no shard is a
+  #      "grep-only" shard while another carries every hook-running suite.
+  #   2. Nothing is suppressed. A failing suite fails the job, and the job is in
+  #      the `quality-report` needs chain, so the pipeline goes red.
+  #
+  #   3. `--jobs` (parallel suites INSIDE a shard) is enabled only when the
+  #      runner actually carries a parallel implementation. Bats's `-j` shells
+  #      out to GNU parallel or rush and errors when neither exists: an
+  #      unconditional `-j 4` would turn "no parallel" into "no tests", which is
+  #      the 6ebbd5a failure mode again. The probe decides, and the decision is
+  #      printed, so the log says which mode produced the result.
+  #
+  # WHY A SHARD'S SETUP IS SO THIN
+  #   The suites stub the tools they need (`bin/npx`, `bin/jscpd`, ...) and run
+  #   the hook against their own `mktemp -d` fixture. They need bash, git, node
+  #   and the bats devDependency — not the 300MB of lint/scan toolchains the
+  #   other jobs install. Only two things are installed here:
+  #     - gitleaks: Gate 8 is fail-closed since #499, so without it every suite
+  #       that runs the real hook stops at Gate 8 and asserts on later gates
+  #       that never ran (measured: "❌ BLOCKED - gitleaks not installed",
+  #       followed by no Gate 9/10/11/12 output at all);
+  #     - the generated adapter mirror: it is gitignored and produced by
+  #       `npm ci`'s prepare hook, and several suites diff the canonical hook
+  #       tree against it.
+  bats-contracts:
+    name: Gate 5b · BATS contracts (shard ${{ matrix.shard }})
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # 4 shards of ~200s of measured suite cost per shard. Raising this
+        # shortens wall-clock linearly until the per-runner SETUP cost (checkout,
+        # npm ci, gitleaks) dominates — that floor is ~1 minute.
+        shard: ['1/4', '2/4', '3/4', '4/4']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install gitleaks (Gate 8 is fail-closed)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Verify the shard plan before running it
+        run: |
+          # Two ways for a shard to lie about coverage: run nothing, or miss the
+          # files the other shards assume it took. The driver refuses both (exit
+          # 2) and this step prints the assignment so the log names the files.
+          node scripts/run-bats-ci.cjs --shard ${{ matrix.shard }} --print-only
+
+      - name: 'Gate 5b: BATS hook behavior contracts (shard ${{ matrix.shard }})'
+        run: |
+          # Pin the parallel job count to the runner's core count. Bats needs
+          # GNU parallel or rush for ANY -j value; without one it exits with an
+          # error, so the probe comes first and the fallback is serial (slower,
+          # never wrong). See the job comment.
+          JOBS=1
+          if command -v parallel >/dev/null 2>&1 || command -v rush >/dev/null 2>&1; then
+            JOBS="$(nproc)"
+          else
+            echo "ℹ️ No GNU parallel/rush on this runner: running the suites serially inside the shard."
+          fi
+          if [ "$JOBS" -gt 4 ]; then JOBS=4; fi
+          node scripts/run-bats-ci.cjs --shard ${{ matrix.shard }} --jobs "$JOBS"
+          echo "✅ Gate 5b: BATS contracts passed for shard ${{ matrix.shard }}"
 
   # Job 3: AI-based review using delphi-review or test-specification-alignment
   ai-review:

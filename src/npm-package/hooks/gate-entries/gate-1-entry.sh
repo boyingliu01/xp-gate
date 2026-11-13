@@ -194,8 +194,59 @@ else
       # scopes --staged to that subdirectory (mirrors the single-language subdir
       # mode, which executes after cd "$PROJECT_SUBDIR"). Empirically verified:
       # `biome check --staged .` from the subdir checks the staged files under it.
-      BIOME_OUT=$(cd "$TS_PROJECT_DIR" && npx biome check --staged . 2>&1)
+      #
+      # The binary is resolved LOCALLY (`npx biome` DOWNLOADS biome when the
+      # project has a config but no dependency — a registry fetch inside a
+      # commit hook). Prefer the hoisted roots, then PATH, then the original npx
+      # call so a consumer's npx-provided biome keeps working.
+      #
+      # NOT a bare `npx biome` in PATH order either: the gate-1-biome-noop suite
+      # stubs `npx` on PATH and asserts Biome actually ran, so PATH must be the
+      # rung that decides -- local bin first, then `command -v`, then npx. Putting
+      # npx before the command -v check would make the stub unreachable and the
+      # suite would prove nothing.
+      BIOME_ARGV=()
+      for _biome_root in "$TS_PROJECT_DIR" "${PROJECT_ROOT:-.}" "."; do
+        if [ -x "$_biome_root/node_modules/.bin/biome" ]; then
+          BIOME_ARGV=("$_biome_root/node_modules/.bin/biome")
+          break
+        fi
+      done
+      if [ ${#BIOME_ARGV[@]} -eq 0 ]; then
+        if command -v biome >/dev/null 2>&1; then
+          BIOME_ARGV=(biome)
+        fi
+      fi
+      if [ ${#BIOME_ARGV[@]} -eq 0 ]; then
+        # Deliberately NO `npx biome` rung. npx's contract is to INSTALL the
+        # package when it is missing, so that rung did not degrade gracefully --
+        # it made every commit in a project without a local biome pay a registry
+        # round trip plus a download. Measured on a fixture holding only
+        # biome.json + package.json + src/: `npx biome check .` was still running
+        # after 60 s, killed.
+        #
+        # The replacement is a plain PATH word, NOT a skip. `biome` on PATH is
+        # resolved by the shell at call time and cannot install anything, so this
+        # keeps the old rung's reach (a CI image or global install still works)
+        # while dropping its install contract. Skipping here instead was tried and
+        # is wrong for two reasons: it changes the gate's verdict for a consumer
+        # that deliberately provides biome on PATH, and it made this branch
+        # unreachable-in-practice by returning before the tool was ever invoked.
+        # scripts/check-no-npx-probe.sh fails the build if the npx rung returns.
+        BIOME_ARGV=(biome)
+      fi
+      # shellcheck disable=SC2086 # BIOME_ARGV may hold a multi-token form on purpose
+      BIOME_OUT=$(cd "$TS_PROJECT_DIR" && ${BIOME_ARGV[@]} check --staged . 2>&1)
       BIOME_STATUS=$?
+      if [ "$BIOME_STATUS" -eq 127 ]; then
+        # 127 is the shell's own "command not found": biome is genuinely absent.
+        # That is a SKIP (AGENTS.md: "Tool missing -> SKIP, not BLOCK"), and it is
+        # detected from the invocation's own exit status rather than from a
+        # resolver probe, so there is exactly one place that decides it.
+        echo "ℹ️  Biome config found but biome is not installed — SKIP Gate 1 Biome."
+        echo "   Install it with: npm install --save-dev @biomejs/biome"
+        return 0
+      fi
       if [ "$BIOME_STATUS" -ne 0 ]; then
         # Biome exits 1 with `internalError/io - No files were processed` when the
         # staged set yields nothing lintable (docs-only / config-only commit, or

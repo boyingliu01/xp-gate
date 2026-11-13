@@ -50,12 +50,22 @@ echo "src/a.ts:1:1 lint/suspicious/noDoubleEquals"
 echo "Found 1 error."
 exit 1
 STUB
-  chmod +x "$work/bin/npx"
+  # The adapter resolves biome as local node_modules/.bin -> PATH -> npx. Give
+  # PATH a `biome` that reaches this stub, otherwise a developer machine with a
+  # global biome (npm i -g @biomejs/biome) satisfies the middle rung and the run
+  # measures the developer's toolchain instead of the adapter.
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'exec npx biome "$@"'
+  } > "$work/bin/biome"
+  chmod +x "$work/bin/npx" "$work/bin/biome"
 
-  run bash -c "
+  run env REPO_ROOT="$REPO_ROOT" bash -c "
     cd '$work' || exit 9
     PATH='$work/bin:$PATH'
     export PATH
+    # shellcheck source=/dev/null
+    . '$REPO_ROOT/githooks/adapter-common.sh'
     # shellcheck source=/dev/null
     . '$ADAPTER'
     run_lint
@@ -79,12 +89,19 @@ STUB
 echo "Checked 3 files in 12ms. No fixes applied."
 exit 0
 STUB
-  chmod +x "$work/bin/npx"
+  # Same reason as the failure case above: pin the PATH rung to the stub.
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'exec npx biome "$@"'
+  } > "$work/bin/biome"
+  chmod +x "$work/bin/npx" "$work/bin/biome"
 
-  run bash -c "
+  run env REPO_ROOT="$REPO_ROOT" bash -c "
     cd '$work' || exit 9
     PATH='$work/bin:$PATH'
     export PATH
+    # shellcheck source=/dev/null
+    . '$REPO_ROOT/githooks/adapter-common.sh'
     # shellcheck source=/dev/null
     . '$ADAPTER'
     run_lint

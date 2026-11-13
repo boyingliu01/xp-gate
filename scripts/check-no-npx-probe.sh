@@ -42,6 +42,7 @@ scan_roots=(
   "githooks/post-merge"
   "githooks/adapter-common.sh"
   "githooks/adapters"
+  "githooks/gate-entries"
   "githooks/lib"
 )
 
@@ -56,7 +57,66 @@ done
 # escape hatch; it must keep it GATED.
 allowed_file='githooks/lib/toolchain-path.sh'
 
-# What counts as a probe: an `npx` invocation whose arguments include
+# A SECOND defect shape, and the expensive one: RUNNING a tool through npx.
+#
+# `npx <tool> --version` costs a registry round trip. `npx <tool> check .` costs a
+# DOWNLOAD: npx's contract is to install the package when it is missing. Measured
+# on a fixture holding only biome.json + package.json + src/ (no node_modules):
+#   npx biome check .   -> still running after 60 s, killed
+# That is why Gate 5b (BATS) was 18m47s of a 22m24s CI job -- one install attempt
+# per fixture -- and why the lint arms of the adapters were the single most
+# expensive thing in the pipeline. The probe guard above could not see it: there
+# is no `--version` on the line.
+#
+# The rule is the project's existing policy (AGENTS.md: "npx is never used to
+# probe a tool by default", and "npx --no-install is NOT an exception"): resolve
+# the tool yourself. `--no-install` is rejected too -- it prevents the install but
+# still queries the registry on every commit.
+#
+# Scope is the lint call sites only, not every file. A suggested-command echo
+# ("Run 'npx biome check --write .' to auto-fix") is guidance for a HUMAN and must
+# never start costing runtime; the guard has to tell that apart from an actual
+# invocation, which is why it is a separate predicate rather than a wider grep.
+npx_runs_tool() {
+  local line="$1" code
+  code="${line%%\#*}"
+  case "$code" in
+    *npx*) ;;
+    *) return 1 ;;
+  esac
+  # The invocation form only: npx followed by whitespace and a word.
+  case "$code" in
+    *npx\ *) ;;
+    *) return 1 ;;
+  esac
+  # A `command -v npx` / `type -P npx` is an existence CHECK on npx itself, not a
+  # tool invocation, and cannot install anything.
+  case "$code" in
+    *"command -v npx"* | *"type -P npx"* | *"which npx"*) return 1 ;;
+  esac
+  # Flags that change npx's own behaviour are fine; what must not appear is a
+  # TOOL name being handed to npx to execute.
+  case "$code" in
+    *"npx --version"* | *"npx --help"*) return 1 ;;
+  esac
+  # Guidance PRINTED for a human ("Run 'npx biome check --write .' to auto-fix")
+  # is not an invocation and must not be flagged: the operator runs it once, by
+  # hand, and it is the documented way to apply Biome's own fixes. Detected by the
+  # line being an echo/printf of a suggestion. This is the ONE shape the guard has
+  # to distinguish by intent rather than syntax, so it is written as tightly as
+  # possible -- an `echo` or `printf` that merely mentions the command.
+  case "$code" in
+    *echo*npx* | *printf*npx*) return 1 ;;
+  esac
+  return 0
+}
+
+lint_call_files=(
+  "githooks/adapters/typescript.sh"
+  "githooks/gate-entries/gate-1-entry.sh"
+)
+
+
 # `--version`. Matched per line, after stripping comments.
 #
 # Why a real parser instead of `grep -v '#'`: the first version of this script
@@ -127,6 +187,41 @@ if [ -n "$violations" ]; then
   printf '%s\n' "" >&2
   printf '%s\n' "npx --no-install is NOT an exception: it prevents the install, not the" >&2
   printf '%s\n' "registry query. See docs/incidents/2026-11-09-command-could-not-run-*." >&2
+  exit 1
+fi
+
+# Anti-vacuity for the second check: if a declared lint call site has gone missing,
+# its half of the guard silently stops looking at anything. Same reasoning as the
+# file count above.
+for lint_file in "${lint_call_files[@]}"; do
+  [ -f "$lint_file" ] || fail "missing expected lint call site: $lint_file"
+done
+
+run_violations=""
+run_files_checked=0
+for lint_file in "${lint_call_files[@]}"; do
+  run_files_checked=$((run_files_checked + 1))
+  lineno=0
+  while IFS= read -r line; do
+    lineno=$((lineno + 1))
+    if npx_runs_tool "$line"; then
+      run_violations="${run_violations}${lint_file}:${lineno}: ${line}
+"
+    fi
+  done <"$lint_file"
+done
+
+if [ -n "$run_violations" ]; then
+  printf '%s\n' "FAIL: a gate RUNS a tool through npx, which installs it when absent:" >&2
+  printf '%s' "$run_violations" >&2
+  printf '%s\n' "" >&2
+  printf '%s\n' "Resolve the tool instead -- node_modules/.bin/<tool>, then PATH:" >&2
+  printf '%s\n' '  BIOME_BIN=$(node_modules/.bin/biome 2>/dev/null || type -P biome)' >&2
+  printf '%s\n' "" >&2
+  printf '%s\n' "Measured: 'npx biome check .' on a fixture with no node_modules was" >&2
+  printf '%s\n' "still running after 60 s (it was downloading). That single shape cost" >&2
+  printf '%s\n' "18m47s of a 22m24s CI job. See" >&2
+  printf '%s\n' "docs/plans/2026-11-12-ci-bats-runtime-optimization.md." >&2
   exit 1
 fi
 

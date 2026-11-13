@@ -75,6 +75,13 @@ function runBiomeBranch(testCase: Case): { status: number; stdout: string } {
   // writing it anywhere else silently lets the real npx run and the assertions
   // pass or fail for the wrong reason.
   writeFileSync(join(bin, 'npx'), npxStub);
+  // The hook resolves biome as: local node_modules/.bin -> `command -v biome`
+  // (PATH) -> npx. A machine with a GLOBAL biome (npm i -g @biomejs/biome — true
+  // on this one, /c/Users/think/AppData/Roaming/npm/biome) satisfies the middle
+  // rung, so the npx stub below never runs and the assertions would be measuring
+  // the developer's toolchain instead of the hook. Pin that rung to the stub with
+  // a `biome` shim next to it, delegating with the same arguments.
+  writeFileSync(join(bin, 'biome'), '#!/usr/bin/env bash\nexec npx biome "$@"\n');
   writeFileSync(join(dir, 'biome-output.txt'), `${testCase.output}\n`);
   const callsFile = join(dir, STUB_CALLS_FILE);
 
@@ -86,7 +93,16 @@ function runBiomeBranch(testCase: Case): { status: number; stdout: string } {
   // two blocking cases read 2-vs-1 and failed while the pass cases were fine.
   // Rewriting the fragment's `return N` back to `exit N` restores standalone
   // semantics without touching the shipped hook.
-  const hook = execFileSync('node', ['-e', SED_SCRIPT, GATE_1_ENTRY], { encoding: 'utf8' })
+  // The input path is passed through the ENVIRONMENT, not argv: this script is
+  // handed to `node -e`, whose argv starts at the SCRIPT FILE, so process.argv[1]
+  // is the extracted entry file itself and the "extraction" silently read its own
+  // source (start index 2, no closing fi). The failure looked like a broken
+  // fixture, not like a broken harness -- it surfaced only because the npx stub
+  // asserts it actually ran.
+  const hook = execFileSync('node', ['-e', SED_SCRIPT], {
+    encoding: 'utf8',
+    env: { ...process.env, XP_GATE_EXTRACT_FROM: GATE_1_ENTRY },
+  })
     .replace(/^(\s*)return (\d+)\s*$/gm, '$1exit $2');
   writeFileSync(join(dir, 'gate1-biome.sh'), hook);
 
@@ -94,13 +110,14 @@ function runBiomeBranch(testCase: Case): { status: number; stdout: string } {
   // hook with keeps the two consistent on every platform (Windows Git Bash
   // honours the mode bit too, and silently falls through to the real npx --
   // or to nothing -- when it is missing).
-  const stubPath = join(bin, 'npx');
-  try {
-    execFileSync(bash as string, ['-c', 'chmod +x "$1"', 'chmod', toBashPath(stubPath)], {
-      stdio: 'ignore',
-    });
-  } catch {
-    // Best effort; the assertion below fails loudly if the stub never ran.
+  for (const stubPath of [join(bin, 'npx'), join(bin, 'biome')]) {
+    try {
+      execFileSync(bash as string, ['-c', 'chmod +x "$1"', 'chmod', toBashPath(stubPath)], {
+        stdio: 'ignore',
+      });
+    } catch {
+      // Best effort; the assertion below fails loudly if the stub never ran.
+    }
   }
 
   try {
@@ -168,17 +185,34 @@ exit 0
 `;
 
 /** Print the Biome branch of the hook (from its marker comment to the next `fi`). */
-const SED_SCRIPT = `
-const fs = require("node:fs");
-const src = fs.readFileSync(process.argv[1], "utf8").split(/\\r?\\n/);
-const start = src.findIndex(l => l.includes("Biome lint/format check"));
-let out = [];
-for (let i = start; i < src.length; i++) {
-  out.push(src[i]);
-  if (/^    fi$/.test(src[i])) break;
-}
-process.stdout.write(out.join("\\n") + "\\n");
-`;
+const SED_SCRIPT = [
+  'const fs = require("node:fs");',
+  'const src = fs.readFileSync(process.env.XP_GATE_EXTRACT_FROM, "utf8").split(/\\r?\\n/);',
+  'const start = src.findIndex((l) => l.includes("Biome lint/format check"));',
+  '// The branch is the WHOLE if-block that opens on biome.json: the invocation',
+  '// inside it is not the end, its own closing fi is. Two wrong anchors were',
+  '// tried first and both made these tests lie or break:',
+  '//   * "first line equal to four spaces + fi" -- stopped at the nested if/fi',
+  '//     that local tool resolution introduced, so the extracted script never',
+  '//     invoked Biome and the npx stub never ran;',
+  '//   * "the line containing BIOME_OUT=" -- cut the closing fi, so bash exited',
+  '//     with "unexpected end of file from if command".',
+  '// The nested blocks are NOT at four spaces, so depth tracking on the branch',
+  '// indent separates the branch own closing fi from theirs.',
+  'let end = -1;',
+  'let depth = 0;',
+  'for (let i = start; i < src.length; i++) {',
+  '  const t = src[i].trim();',
+  '  if (/^if[ \\[]/.test(t)) depth++;',
+  '  if (t === "fi") {',
+  '    depth--;',
+  '    if (depth <= 0) { end = i; break; }',
+  '  }',
+  '}',
+  'if (end < 0) throw new Error("could not find the closing fi of the Biome branch");',
+  'const out = src.slice(start, end + 1);',
+  'process.stdout.write(out.join("\\n") + "\\n");',
+].join('\n');
 
 const bash = bashPath();
 const describeIfBash = bash ? describe : describe.skip;

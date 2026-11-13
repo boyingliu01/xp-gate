@@ -25,8 +25,35 @@ setup() {
 
   # Extract just the Biome branch from the real hook. `exit 1` inside the branch
   # must terminate the script, so it is run as a file rather than sourced.
+  #
+  # The range is the WHOLE `if [ -f biome.json ] ... fi` block, and `^    fi$`
+  # (four spaces) is the right end: the nested if/fi blocks added by local tool
+  # resolution are indented deeper, so they cannot truncate the range. Two wrong
+  # anchors were tried and both broke the suite -- stopping at the invocation
+  # line left the `if` unclosed ("unexpected end of file from `if'") and the
+  # npx stub never ran either way.
   sed -n '/── Biome lint\/format check ──/,/^    fi$/p' \
-    "$BATS_TEST_DIRNAME/../pre-commit" > "$TEST_DIR/gate1-biome.sh"
+    "$BATS_TEST_DIRNAME/../gate-entries/gate-1-entry.sh" > "$TEST_DIR/gate1-biome.sh"
+
+  # The binary is resolved LOCALLY first: <project>/node_modules/.bin/biome, then
+  # `command -v biome`, and only then `npx biome`. That ladder exists so a commit
+  # hook never downloads biome from the registry. It also means a stub on `npx`
+  # alone is UNREACHABLE on a machine that has biome installed globally — which
+  # is the default on this project's own dev/CI images. Stub the highest rung so
+  # the suite proves the gate's behaviour on every host:
+  #   - a local node_modules/.bin/biome (what a real install provides), and
+  #   - npx, kept as a fallback so the assertion still holds if the ladder is
+  #     reordered back to npx-first.
+  mkdir -p "$TEST_DIR/proj/node_modules/.bin"
+  cat > "$TEST_DIR/proj/node_modules/.bin/biome" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "check" ]; then
+  cat "$BIOME_STUB_OUTPUT"
+  exit "$BIOME_STUB_STATUS"
+fi
+exit 0
+STUB
+  chmod +x "$TEST_DIR/proj/node_modules/.bin/biome"
 
   # Stub npx: `biome check` reproduces whatever the test wants to simulate.
   cat > "$TEST_DIR/bin/npx" <<'STUB'
