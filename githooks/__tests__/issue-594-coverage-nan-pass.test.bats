@@ -112,7 +112,20 @@ stage_bad_coverage() {
 // @no-test-required: fixture file, this case asserts the coverage verdict
 export const b = 2;
 EOF
-  git add src/b.ts coverage/coverage-summary.json
+  # `git add` FAILED silently here: the fixture inherits the repo's
+  # `.gitignore` via `init.templateDir`/excludes, and `coverage/` is on it
+  # (.gitignore:127), so the coverage report never reached the index. Gate 5 then
+  # saw no evidence and skipped, and all three verdict cases failed for a reason
+  # that had nothing to do with NaN handling. `-f` stages it deliberately: the
+  # artefact IS the input under test. Verified: without -f, git reports
+  # "The following paths are ignored ... coverage".
+  git add src/b.ts
+  git add -f coverage/coverage-summary.json
+  # Anti-vacuity: the case is meaningless if the input never landed.
+  git diff --cached --name-only | grep -qx 'coverage/coverage-summary.json' || {
+    echo "fixture bug: the coverage report was not staged"
+    return 1
+  }
 }
 
 # Run the hook. The fixture stages no test file, so the hook takes its full-suite

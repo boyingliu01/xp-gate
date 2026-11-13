@@ -15,7 +15,13 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # #798 moved every gate BODY out of pre-commit into githooks/gate-entries/.
+  # The three AC-621 cases slice Gate 6's `"java")` arm out of the hook source;
+  # against pre-commit the slice was empty, so they reported "the java arm no
+  # longer looks for src/test/java at all" about a file that holds none of it.
+  # PRE_COMMIT stays for the cases that run the hook end-to-end.
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  GATE_6="$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh"
   TEST_DIR="$(mktemp -d)"
 }
 
@@ -27,7 +33,7 @@ teardown() {
 # Extract the "java") arm of Gate 6's architecture case statement, so the
 # assertions run against the real code rather than a copy that can drift.
 _java_arm() {
-  sed -n '/^      "java")$/,/^        ;;$/p' "$PRE_COMMIT"
+  sed -n '/^      "java")$/,/^        ;;$/p' "$GATE_6"
 }
 
 @test "#602 AC-621-01: the java arm does not hardcode the repo-root test dir" {
@@ -71,12 +77,22 @@ _java_arm() {
 
 @test "#602 AC-621-03: --no-verify is not the answer; the gate itself blocks" {
   # Regression guard for the tempting wrong fix: silencing Gate 6. The arm must
-  # exit non-zero on failure so the commit is refused.
+  # signal failure so the commit is refused.
+  #
+  # #798: a gate BODY returns, it does not exit. A top-level `exit N` inside
+  # gate_6_run() became `return N`, and the driver turns a non-zero return into
+  # the hook's exit status -- the commit is still refused, which is what this
+  # case is about. Asserting the literal `exit 1` would now demand the shape #798
+  # deliberately removed.
   run _java_arm
   [ "$status" -eq 0 ]
   _code="$(printf '%s\n' "$output" | grep -vE '^[[:space:]]*#')"
-  printf '%s\n' "$_code" | grep -q 'exit 1' || {
-    echo "java arm never exits non-zero on a failing architecture test"; return 1; }
+  printf '%s\n' "$_code" | grep -qE '^[[:space:]]*(return|exit) 1$' || {
+    echo "java arm never signals failure on a failing architecture test"; return 1; }
+  # Anti-vacuity: the slice must contain the java arm's own blocking path, not
+  # just any 'return 1' that happens to sit in the range.
+  printf '%s\n' "$_code" | grep -q 'BLOCKED - Java architecture' || {
+    echo "the slice has no Java architecture blocking message"; return 1; }
 }
 
 @test "#602 a multi-module repo discovers the module that holds the tests" {
@@ -135,7 +151,7 @@ JAVAARCHROOTS
   # verdict was never upgraded to match, so Gate 6 reported SKIP even when every
   # language had been validated and passed -- the mirror image of #537's "SKIP
   # dressed as PASS", and the report could not tell the two apart.
-  _region="$(sed -n '/# #602 (status):/,/^  else$/p' "$PRE_COMMIT")"
+  _region="$(sed -n '/# #602 (status):/,/^  else$/p' "$GATE_6")"
   [ -n "$_region" ] || { echo "#602 status upgrade block is missing"; return 1; }
   printf '%s\n' "$_region" | grep -q 'GATE_6_STATUS="PASS"' || {
     echo "a fully measured gate never becomes PASS"; return 1; }
