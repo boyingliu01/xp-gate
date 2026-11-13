@@ -133,15 +133,25 @@ setup() {
 
 # --- Gate numbering seam: the file that runs is gate-10, not gate-9 --------
 
-@test "gate-9.sh is not sourced by any hook, and says so" {
-  # A future contributor reading gate-9.sh will see C# code and assume it runs.
-  # Both halves are asserted: the fact, and the warning about the fact.
-  # #798: gate binding moved out of pre-commit into the registry, which is now
-  # the single source of truth for "which file runs gate N".
-  run bash -c "grep -c 'gate-9.sh' '$REPO_ROOT/githooks/gate-registry.sh' '$REPO_ROOT/githooks/pre-push'"
+@test "gate-9.sh is gone and nothing sources it" {
+  # A future contributor reading a leftover gate-9.sh would see C# code and
+  # assume it runs. #738 deleted the file outright (2dc97a18) once the registry
+  # became the single source of gate identity, so the fact worth pinning is now
+  # its ABSENCE. Asserting a "DEAD CODE" banner inside a file that no longer
+  # exists can only ever fail, and would say nothing about the risk that actually
+  # matters: someone re-adding the file, or a hook naming it again.
+  [ ! -e "$REPO_ROOT/githooks/gate-9.sh" ] || {
+    echo "githooks/gate-9.sh is back; it must not be — the registry binds the"
+    echo "sast gate to gate-10.sh, and a second script re-splits that identity."
+    return 1
+  }
+  # What must not come back is an ACTIVE binding, not the mention. The registry
+  # explains #717 in its header comment and shows gate-9.sh as a resolution
+  # EXAMPLE, and both of those are the documentation that stops the next person
+  # repeating the mistake. Strip comments before grepping so the test fires on a
+  # real `"build-integrity|9|gate-9.sh|..."` row, not on prose about the bug.
+  run bash -c "sed 's/#.*//' '$REPO_ROOT/githooks/gate-registry.sh' '$REPO_ROOT/githooks/pre-push' | grep -c 'gate-9\.sh'"
   [ "$status" -ne 0 ]
-  run grep -q 'DEAD CODE' "$REPO_ROOT/githooks/gate-9.sh"
-  [ "$status" -eq 0 ]
 }
 
 @test "gate-10.sh is the file pre-commit actually loads for SAST" {

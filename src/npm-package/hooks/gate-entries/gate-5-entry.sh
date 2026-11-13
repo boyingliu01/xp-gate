@@ -922,11 +922,21 @@ else
           # this line had already announced a skip). A message that describes
           # the outer decision while sitting inside an inner branch is how the
           # same output line appeared twice with two different meanings.
-          if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
-            echo "ℹ️  No TypeScript tests were selected — no TS coverage to evaluate."
-            COV_EXIT=$((COV_EXIT || 0))
-          elif [ -f "coverage/coverage-summary.json" ]; then
+          # Evidence FIRST, then the skip flag -- the same precedence the outer
+          # guard at the top of this section already uses. Before this, a staged
+          # coverage artefact was ignored whenever the test run had been skipped
+          # (no changed .ts file), so the artefact the outer guard had just
+          # counted as evidence was never read: Gate 5 printed "no TS coverage
+          # to evaluate" and carried on with COV_EXIT=0. Measured consequence --
+          # a staged coverage-summary.json with `"pct": "Unknown"` (istanbul's
+          # real unusable shape) and a staged 42% BOTH passed, because the
+          # threshold comparison below never ran. "No evidence" and "evidence
+          # says 42%" must not take the same branch.
+          if [ -f "coverage/coverage-summary.json" ] || [ -f "coverage/coverage-final.json" ]; then
             echo "TypeScript coverage collected during test run."
+            COV_EXIT=$((COV_EXIT || 0))
+          elif [ "${TESTS_SKIPPED:-false}" = "true" ]; then
+            echo "ℹ️  No TypeScript tests were selected — no TS coverage to evaluate."
             COV_EXIT=$((COV_EXIT || 0))
           else
             echo "ℹ️  No coverage data produced — test run was skipped (no TS changes)."
@@ -1138,9 +1148,16 @@ else
   case "$CURRENT_LANG" in
     "typescript")
       COVERAGE_ENFORCED=true
-      if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
-        echo "✅ PASSED - Coverage check skipped (no test/source files changed)."
-      elif [ -f "coverage/coverage-summary.json" ]; then
+      # Evidence FIRST, skip flag second -- the same precedence as the outer
+      # guard and the stage-1 arm above. With the order reversed, a staged
+      # coverage artefact was silently discarded whenever no test had been
+      # selected (no changed .ts file), and Gate 5 printed
+      #     ✅ PASSED - Coverage check skipped (no test/source files changed).
+      # The artefact and the changed file were BOTH staged -- only the phrase
+      # "no test/source files changed" was wrong, and it read as a pass. That is
+      # the fail-open shape this whole issue exists to remove, sitting one branch
+      # below a sibling that had already been fixed for it.
+      if [ -f "coverage/coverage-summary.json" ]; then
         # #594: reject NaN at the SOURCE, not after the fact. Math.round() does
         # not fail on a non-numeric input -- it returns NaN and console.log prints
         # "NaN" -- so istanbul's "Unknown" (a file with no executable lines) sailed

@@ -43,7 +43,13 @@ for (const [jobName, job] of Object.entries(wf.jobs || {})) {
       .split('\n')
       .map((l) => l.replace(/(^|\s)#.*$/, ''))
       .join('\n');
-    if (/npx\s+bats/.test(run)) batsJob = jobName;
+    // The suite is no longer launched as `npx bats`. It runs through
+    // scripts/run-bats-ci.cjs, which shards 1300+ contracts across runners and
+    // invokes bats itself. Either entry point means "this job executes BATS",
+    // which is the only condition this guard is about -- matching just the old
+    // spelling made it report "nothing to check" and fail open the instant the
+    // runner changed, which is exactly the drift this file exists to prevent.
+    if (/npx\s+bats|run-bats-ci\.cjs/.test(run)) batsJob = jobName;
   }
 }
 if (!batsJob) {
@@ -59,7 +65,9 @@ steps.forEach((s, i) => {
     .split('\n')
     .map((l) => l.replace(/(^|\s)#.*$/, ''))
     .join('\n');
-  if (batsIdx < 0 && /npx\s+bats/.test(run)) batsIdx = i;
+  // Same two entry points as the job scan above: the shard runner stands in for
+  // a direct `npx bats` invocation.
+  if (batsIdx < 0 && /npx\s+bats|run-bats-ci\.cjs/.test(run)) batsIdx = i;
   if (gitleaksIdx < 0 && /gitleaks/.test(run) && /(curl|wget|apt|brew|npm i|install)/.test(run)) {
     gitleaksIdx = i;
   }

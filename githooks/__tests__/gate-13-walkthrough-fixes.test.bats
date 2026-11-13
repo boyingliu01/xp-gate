@@ -154,8 +154,11 @@ EOF
   [ "$n" -eq 0 ]
 }
 
-@test "MC-01: pre-commit still drives the analyzer stage explicitly" {
-  run grep -c 'gate13_run_analyzer' "$REPO_ROOT/githooks/pre-commit"
+@test "MC-01: Gate 13's body still drives the analyzer stage explicitly" {
+  # #798: the analyzer stage is invoked from Gate 13's own body now. Grepping
+  # pre-commit would only prove something about a file that no longer holds the
+  # call site -- green for the wrong reason.
+  run grep -c 'gate13_run_analyzer' "$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
   [ "$status" -eq 0 ]
   [ "$output" -ge 1 ]
 }

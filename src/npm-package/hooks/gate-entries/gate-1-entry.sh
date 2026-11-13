@@ -208,7 +208,13 @@ else
       BIOME_ARGV=()
       for _biome_root in "$TS_PROJECT_DIR" "${PROJECT_ROOT:-.}" "."; do
         if [ -x "$_biome_root/node_modules/.bin/biome" ]; then
-          BIOME_ARGV=("$_biome_root/node_modules/.bin/biome")
+          # ABSOLUTE, not "$_biome_root/node_modules/.bin/biome": the invocation
+          # below runs after `cd "$TS_PROJECT_DIR"`, so a relative candidate such
+          # as ./node_modules/.bin/biome stops resolving and the shell reports
+          # 127 ("command not found"). The gate then takes the SKIP path and
+          # silently checks nothing on exactly the subdirectory projects this
+          # branch exists for.
+          BIOME_ARGV=("$(cd "$_biome_root" && pwd)/node_modules/.bin/biome")
           break
         fi
       done
