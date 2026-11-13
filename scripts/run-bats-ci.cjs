@@ -300,15 +300,30 @@ function runShard(files, jobs) {
  */
 function parseArgs(argv) {
   const opts = { shard: null, jobs: 1, printOnly: false, printShards: false, all: false, help: false };
+  // Table-driven on purpose. Every flag is an independent decision, and written
+  // as a chain of `else if` each one adds a branch to the same function: the
+  // gate blocked the previous version at CCN=15. A lookup table states the same
+  // mapping without turning "how many flags exist" into "how complex is the
+  // parser". `takesValue` says whether the next argv element is its argument.
+  const FLAGS = {
+    '--shard': { key: 'shard', takesValue: true },
+    '--jobs': { key: 'jobs', takesValue: true, coerce: Number },
+    '--print-only': { key: 'printOnly', value: true },
+    '--print-shards': { key: 'printShards', value: true },
+    '--all': { key: 'all', value: true },
+    '--help': { key: 'help', value: true },
+    '-h': { key: 'help', value: true },
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === '--shard') opts.shard = argv[++i];
-    else if (arg === '--jobs') opts.jobs = Number(argv[++i]);
-    else if (arg === '--print-only') opts.printOnly = true;
-    else if (arg === '--print-shards') opts.printShards = true;
-    else if (arg === '--all') opts.all = true;
-    else if (arg === '--help' || arg === '-h') opts.help = true;
-    else return { error: `Unknown argument: ${arg}` };
+    const flag = FLAGS[arg];
+    if (!flag) return { error: `Unknown argument: ${arg}` };
+    if (!flag.takesValue) {
+      opts[flag.key] = flag.value;
+      continue;
+    }
+    const raw = argv[++i];
+    opts[flag.key] = flag.coerce ? flag.coerce(raw) : raw;
   }
   return { opts };
 }
