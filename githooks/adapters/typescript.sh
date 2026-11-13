@@ -20,14 +20,32 @@
 # AGENTS.md states for XP_GATE_NPX_PROBE, which src/gates/common-process.ts
 # already honours on the TypeScript side.
 #
-# Only the project's own node_modules/.bin is consulted, which is what a real
-# install populates. Nothing outside the project can satisfy this check.
+# The project's own node_modules/.bin is consulted first, which is what a real
+# install populates. Ancestors are then walked (bounded) because npm hoists: a
+# package's tools live at the workspace root, and a gate that ran from the
+# package directory would otherwise report "tool missing" for a tool that is
+# installed. Nothing OUTSIDE the checkout can satisfy this check.
 _local_bin() {
-  local tool="$1"
+  local tool="$1" dir depth=0
   if [ -x "node_modules/.bin/$tool" ]; then
     printf '%s\n' "node_modules/.bin/$tool"
     return 0
   fi
+  # Walk up to the nearest ancestor that declares a local binary, so a source
+  # tree nested inside its own project (repo/components/x/src) still resolves the
+  # project's toolchain instead of reporting SKIP. This is what `npx` did for free
+  # before the call sites stopped using it, so dropping `npx` must not narrow the
+  # search. Bounded at 6 levels: a tool has to be somewhere near the code.
+  dir="$(pwd)"
+  while [ "$depth" -lt 6 ]; do
+    depth=$((depth + 1))
+    [ "$dir" = "/" ] && break
+    dir="$(dirname "$dir")"
+    if [ -x "$dir/node_modules/.bin/$tool" ]; then
+      printf '%s\n' "$dir/node_modules/.bin/$tool"
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -66,6 +84,26 @@ run_static_analysis() {
   return 0
 }
 
+# True when the Biome config in the current directory actually enables linting.
+#
+# "Enabled" is deliberately read from the config, not inferred from the tool:
+# a missing biome.json entirely means "no Biome in this project" and is handled
+# by the caller. Anything unparseable is treated as "rules may exist" so an
+# unreadable config never becomes a silent SKIP.
+_biome_has_lint_rules() {
+  [ -f "biome.json" ] || return 0   # biome.jsonc: no cheap parse, assume rules
+  node -e '
+    const fs = require("fs");
+    const g = (v) => !!v && typeof v === "object";
+    let c;
+    try { c = JSON.parse(fs.readFileSync("biome.json", "utf8") || "{}"); } catch { process.exit(0); }
+    const linting = g(c.linter) && (c.linter.enabled !== false || g(c.linter.rules));
+    const assist = g(c.assist) && (c.assist.enabled !== false || g(c.assist.actions));
+    process.exit(linting || assist ? 0 : 1);
+  ' 2>/dev/null || return 0
+  return 1
+}
+
 run_lint() {
   if ! command -v npx >/dev/null 2>&1; then
     echo "npx not available, skipping TypeScript linting"
@@ -83,8 +121,43 @@ run_lint() {
     # with Biome errors was told "PASSED". Capture the status first, then trim
     # the output. This repo has no biome.json so its own commits never showed it;
     # every downstream project using Biome was affected (#437).
+    #
+    # The tool is resolved LOCALLY, never through `npx biome`. `npx <tool>`
+    # without `--no-install` DOWNLOADS the package when it is missing, so on a
+    # fixture that has biome.json but no biome dependency the call became a
+    # registry fetch with a hanging tail. Measured on Linux with a fixture whose
+    # root holds only biome.json + package.json + src/ (no node_modules):
+    #     npx biome check .   -> still running after 60 s, killed
+    # i.e. the cost landed on anyone measuring or committing, not on lint. Local
+    # resolution finds biome or reports SKIP — the policy `run_biome_lint()`
+    # below and AGENTS.md's "npx is never used to probe a tool by default"
+    # already declare for every other tool in this adapter.
+    #
+    # Resolution is local bin, then PATH. The PATH rung keeps what `npx biome`
+    # used to provide for free -- a biome a CI image or a global install put on
+    # PATH still runs -- without npx's install-on-missing contract. Written as
+    # `type -P biome` rather than `command -v biome` because the latter is the
+    # probe shape scripts/check-no-npx-probe.sh rejects; neither can install.
+    local BIOME_BIN
+    if ! BIOME_BIN=$(_local_bin biome); then
+      BIOME_BIN=$(type -P biome 2>/dev/null) || BIOME_BIN=""
+    fi
+    if [ -z "$BIOME_BIN" ]; then
+      # A decorations-only config (formatter/organize on, every linter rule off)
+      # is a "prettier replacement" setup — the common shape in this repo's own
+      # fixtures. There is nothing to lint, so starting the tool (or failing on
+      # its absence) would be noise on every commit. Decided from the config
+      # alone, with no tool and no network.
+      if _biome_has_lint_rules; then
+        echo "biome.json present but biome is not installed locally — SKIP (npx is never used to install a tool)."
+        echo "Install it with: npm install --save-dev @biomejs/biome"
+      else
+        echo "✅ PASSED - Biome check skipped: config enables no linter rules (format/organize only)."
+      fi
+      return 0
+    fi
     local BIOME_OUTPUT
-    BIOME_OUTPUT=$(npx biome check . --no-errors-on-unmatched 2>&1)
+    BIOME_OUTPUT=$(run_without_git_context "$BIOME_BIN" check . --no-errors-on-unmatched 2>&1)
     local EXIT_CODE=$?
     printf '%s\n' "$BIOME_OUTPUT" | head -50
     if [ $EXIT_CODE -ne 0 ]; then
@@ -113,8 +186,24 @@ run_lint() {
   for _cfg in $_eslint_configs; do
     if [ -f "$_cfg" ]; then
       echo "Running ESLint linting (config: $_cfg)..."
-      npx eslint .
-      return $?
+      # Same rule as the Biome arm above: resolve locally. `npx eslint .` with no
+      # local eslint installs eslint AND a deprecated flat-config shim, then
+      # fails on a fixture rather than reporting anything about the project.
+      #
+      # PATH is the second rung because `command -v` is free and finds an eslint
+      # that a CI image or a global install put there. There is deliberately NO
+      # `npx --no-install` third rung: that shape is exactly what
+      # scripts/check-no-npx-probe.sh rejects — it prevents the INSTALL but still
+      # queries the registry on every commit. A tool in neither the project nor
+      # PATH is reported as a BLOCK with an install hint.
+      local ESLINT_BIN
+      if ESLINT_BIN=$(_local_bin eslint) || ESLINT_BIN="$(type -P eslint 2>/dev/null)"; then
+        run_without_git_context "$ESLINT_BIN" .
+        return $?
+      fi
+      echo "❌ BLOCKED - eslint config found but eslint is not installed."
+      echo "   Install it with: npm install --save-dev eslint   (never via npx)"
+      return 1
     fi
   done
 

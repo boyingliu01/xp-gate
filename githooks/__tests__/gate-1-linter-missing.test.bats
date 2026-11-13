@@ -50,6 +50,8 @@ teardown() {
   [ ! -f ".eslintrc.cjs" ]
   [ ! -f "eslint.config.js" ]
 
+  # #798: adapters call run_without_git_context() from adapter-common.sh.
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh" 2>/dev/null || true
   source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
   run run_lint 2>&1
   echo "run_lint output: $output"
@@ -63,6 +65,8 @@ teardown() {
 EOF
   git add biome.json
 
+  # #798: adapters call run_without_git_context() from adapter-common.sh.
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh" 2>/dev/null || true
   source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
   run run_lint 2>&1
   echo "run_lint output: $output"
@@ -110,7 +114,22 @@ export default [
 EOF
   git add eslint.config.js
 
+  # #798: the adapter calls run_without_git_context(), which a real hook gets
+  # from adapter-common.sh. Source it the way the hook does, or the adapter dies
+  # with "command not found" (exit 127) and the case reads as a lint failure.
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh"
+  # #798: adapters call run_without_git_context() from adapter-common.sh.
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh" 2>/dev/null || true
   source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
+  # The adapter resolves eslint as local node_modules/.bin -> PATH, and NEITHER
+  # rung installs anything (a bare `npx eslint .` would have installed eslint on
+  # demand, which is the registry cost this suite has to stay free of). So this
+  # case needs a real eslint: the repo's own, reached through the node_modules
+  # link created above. Without it the case now correctly reports BLOCK instead of
+  # downloading eslint, and asserting PASS there would demand the install back.
+  [ -x "node_modules/.bin/eslint" ] || {
+    skip "repo has no local eslint; the adapter refuses to install one on demand"
+  }
   run run_lint 2>&1
   echo "run_lint output: $output"
   [ "$status" -eq 0 ] || {
@@ -123,6 +142,8 @@ EOF
   # Temporarily hide npx by using a fake PATH
   local ORIG_PATH="$PATH"
   PATH="/usr/bin:/bin"  # likely no npx here
+  # #798: adapters call run_without_git_context() from adapter-common.sh.
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh" 2>/dev/null || true
   source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
   run run_lint 2>&1
   echo "run_lint output: $output"
@@ -137,6 +158,8 @@ EOF
 EOF
   git add biome.jsonc
 
+  # #798: adapters call run_without_git_context() from adapter-common.sh.
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh" 2>/dev/null || true
   source "$BATS_TEST_DIRNAME/../adapters/typescript.sh"
   run run_lint 2>&1
   echo "run_lint output: $output"

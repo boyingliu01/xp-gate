@@ -148,8 +148,13 @@ bash githooks/install.sh
 # Verify installation integrity
 bash githooks/verify.sh
 
-# Run BATS tests
-cd githooks/__tests__ && bats *.bats
+# Run BATS tests (the whole suite is ~1300 cases; run one file while iterating)
+bash node_modules/bats/bin/bats githooks/__tests__/gate-5a-block.test.bats
+
+# Run the suite the way CI does -- cost-balanced shards, see
+# docs/plans/2026-11-12-ci-bats-runtime-optimization.md
+node scripts/run-bats-ci.cjs --shard 1/4 --print-only   # what would run
+node scripts/run-bats-ci.cjs --shard 1/4 --jobs 4
 
 # Check / repair drift between this directory and the INSTALLED hooks
 xp-gate doctor                # reports hook drift + which copy is in charge
