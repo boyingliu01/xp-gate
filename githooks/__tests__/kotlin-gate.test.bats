@@ -43,6 +43,23 @@ setup() {
   cp "${BATS_TEST_DIRNAME}/../gate-driver.sh" .git/hooks/gate-driver.sh
   cp "${BATS_TEST_DIRNAME}/../gate-registry.sh" .git/hooks/gate-registry.sh 2>/dev/null || true
   cp -R "${BATS_TEST_DIRNAME}/../gate-entries" .git/hooks/gate-entries
+  # The adapters themselves. Adapter resolution is 3-tier -- global
+  # (~/.config/xp-gate/adapters), project, script dir -- and this fixture needs
+  # the SCRIPT-DIR tier to carry them. On a developer machine the global tier
+  # masks the omission: `xp-gate setup-global` put kotlin.sh there, so Gate 1
+  # found its adapter and everything looked fine. On CI there is no global copy,
+  # so Gate 1 printed
+  #     ℹ️  No specific adapter for kotlin — using generic checks if any
+  #     ⏭️  SKIPPED - Code quality (no specific checks for kotlin)
+  # and detekt never ran -- the case failed for a reason that did not exist on
+  # the machine it was written on. A fixture must not depend on this machine's
+  # global install; that is the same class of bug as #583's missing lizard.
+  cp -R "${BATS_TEST_DIRNAME}/../adapters" .git/hooks/adapters
+  # Gate 12/13 resolve their own gate scripts from the same directory.
+  for _g in gate-12-file-hygiene.sh gate-13-compiler-strictness.sh; do
+    [ -f "${BATS_TEST_DIRNAME}/../${_g}" ] \
+      && cp "${BATS_TEST_DIRNAME}/../${_g}" ".git/hooks/${_g}"
+  done
 }
 
 teardown() {
