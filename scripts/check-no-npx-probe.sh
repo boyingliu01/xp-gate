@@ -35,6 +35,17 @@ fail() {
   exit 1
 }
 
+# Every path below is repository-relative, so the guard must not depend on the
+# caller's working directory. It silently did: run from anywhere else it
+# reported `missing expected hook source: githooks/pre-commit` -- a FALSE ALARM
+# that says the hooks are gone when the truth is that the guard looked in the
+# wrong tree. It went unnoticed because interactive use always cds to the repo
+# root first; the CI BATS suite, which runs each case from its own directory,
+# found it immediately. Failing on a wrong-tree read is the safe direction, but
+# it is still the guard accusing the codebase of a defect the guard invented.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT" || fail "cannot enter repository root: $REPO_ROOT"
+
 scan_roots=(
   "githooks/pre-commit"
   "githooks/pre-push"
