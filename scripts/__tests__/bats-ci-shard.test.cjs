@@ -42,6 +42,18 @@ describe('REQ-CI-BATS-01: the shard plan is a partition of the whole suite', () 
     expect(suites.every((f) => f.endsWith('.bats'))).toBe(true);
   });
 
+  it('names suites by a path that RESOLVES from the repo root', () => {
+    // The first real CI run (43345754064) failed all four shards in one second
+    // with:
+    //   ERROR: Test file ".../xp-gate/adapter-shell-scope.test.bats" does not exist.
+    // The driver spawns bats with cwd=ROOT, so a bare basename resolves to the
+    // repository ROOT, not to githooks/__tests__/. This suite missed it because
+    // it only asserted the `.bats` suffix, which a bare name satisfies -- the
+    // plan looked perfect and could not run. Assert resolvability, not spelling.
+    const missing = suites.filter((f) => !fs.existsSync(path.join(ROOT, f)));
+    expect(missing).toEqual([]);
+  });
+
   it('assigns every suite to exactly one shard, for every shard count CI uses', () => {
     for (const total of [1, 2, 3, 4, 6, 8]) {
       const shards = planShards(suites, total);
@@ -81,9 +93,16 @@ describe('REQ-CI-BATS-01: shard balance is by measured cost, not file count', ()
   });
 
   it('spreads the single most expensive suite across a shard boundary', () => {
+    // The table is keyed by basename while the plan carries root-relative paths,
+    // so the heaviest entry has to be matched back to its planned path. Looking
+    // for the basename directly made this assertion vacuous once the plan moved
+    // to paths: `holders` was empty for a reason unrelated to the placement it
+    // claims to test.
     const heaviest = Object.entries(MEASURED_MS).sort((a, b) => b[1] - a[1])[0][0];
+    const heaviestPath = suites.find((f) => path.basename(f) === heaviest);
+    expect(heaviestPath).toBeDefined();
     const shards = planShards(suites, 4);
-    const holders = shards.filter((s) => s.files.includes(heaviest));
+    const holders = shards.filter((s) => s.files.includes(heaviestPath));
     expect(holders).toHaveLength(1);
     // The heaviest file must not land next to the other heavy ones: its shard
     // may be the biggest but must not exceed it by the whole weight of a rival.

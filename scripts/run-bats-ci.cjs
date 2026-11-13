@@ -153,16 +153,50 @@ const MEASURED_MS = {
  */
 const DEFAULT_MS = 3000;
 
+/**
+ * Suite names, WITH the directory they live in.
+ *
+ * Returning bare names broke CI on the first real run: bats is spawned with
+ * `cwd: ROOT`, so `adapter-shell-scope.test.bats` resolved to the repository
+ * root and every shard died on
+ *   ERROR: Test file ".../xp-gate/adapter-shell-scope.test.bats" does not exist.
+ * shard 1..4, all four, in one second. The shard unit tests did not catch it
+ * because they only asserted the `.bats` suffix, which a bare name satisfies.
+ *
+ * The name stays relative to ROOT rather than absolute so the printed plan reads
+ * the same on a developer's machine and on a runner, and so it can be pasted
+ * into a local command unchanged.
+ */
 function listSuites(dir = BATS_DIR) {
   return fs
     .readdirSync(dir)
     .filter((f) => f.endsWith('.bats'))
-    .sort();
+    .sort()
+    .map((f) => path.relative(ROOT, path.join(dir, f)).split(path.sep).join('/'));
+}
+
+/**
+ * Measured cost of one suite.
+ *
+ * The table is keyed by BASENAME (`gate-5a-block.test.bats`) because that is how
+ * the timings were recorded, and a whole directory rename should not silently
+ * throw away every measurement. The planner, meanwhile, has to hand bats paths
+ * that resolve from ROOT. Looking up by basename bridges the two, and using the
+ * `in` check rather than `||` keeps a legitimate 0 out of the fallback.
+ */
+function suiteCost(file) {
+  const base = path.basename(file);
+  return base in MEASURED_MS ? MEASURED_MS[base] : DEFAULT_MS;
 }
 
 /** Sum of the measured cost of the files in `files`. */
 function shardCost(files) {
-  return files.reduce((sum, f) => sum + (MEASURED_MS[f] || DEFAULT_MS), 0);
+  return files.reduce((sum, f) => sum + suiteCost(f), 0);
+}
+
+/** True when this suite carries a real measurement rather than the fallback. */
+function isWeighed(file) {
+  return path.basename(file) in MEASURED_MS;
 }
 
 /**
@@ -182,7 +216,7 @@ function planShards(files, shardCount) {
   }
   const shards = Array.from({ length: shardCount }, () => ({ files: [], cost: 0 }));
   const ordered = [...files].sort((a, b) => {
-    const d = (MEASURED_MS[b] || DEFAULT_MS) - (MEASURED_MS[a] || DEFAULT_MS);
+    const d = suiteCost(b) - suiteCost(a);
     return d !== 0 ? d : a.localeCompare(b);
   });
   for (const file of ordered) {
@@ -192,7 +226,7 @@ function planShards(files, shardCount) {
       if (shard.cost < target.cost) target = shard;
     }
     target.files.push(file);
-    target.cost += MEASURED_MS[file] || DEFAULT_MS;
+    target.cost += suiteCost(file);
   }
   for (const shard of shards) shard.files.sort();
   return shards;
@@ -282,7 +316,7 @@ function main(argv) {
     return 2;
   }
 
-  const unweighed = suites.filter((f) => !MEASURED_MS[f]);
+  const unweighed = suites.filter((f) => !isWeighed(f));
   if (unweighed.length) {
     console.log(
       `ℹ️ ${unweighed.length}/${suites.length} suite(s) have no measured weight and use ${DEFAULT_MS} ms; shard balance is approximate until they are weighed.`,
