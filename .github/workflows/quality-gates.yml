@@ -1018,6 +1018,17 @@ jobs:
               exit 1
             fi
           done
+          # Put node_modules/.bin on PATH for the remaining steps.
+          #
+          # Installing is not enough: the gates resolve a tool with
+          # `command -v <tool>` before falling back, and a repo-local
+          # node_modules/.bin is NOT on PATH on a runner. Gate 6 therefore still
+          # printed "BLOCKED - archlint not installed" with archlint installed and
+          # its --version verified one step earlier -- 9 fixture cases failed on a
+          # tool that was present the whole time. Fix the environment the gates
+          # actually inspect, not the gate.
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+          PATH="$PWD/node_modules/.bin:$PATH" command -v archlint
           echo "✅ gate tools present"
 
       - name: Verify the shard plan before running it

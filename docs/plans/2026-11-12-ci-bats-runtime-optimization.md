@@ -181,3 +181,31 @@ bats-contracts（矩阵作业，4 个分片，每个分片一台 runner）
 
 **没有**给出的结论：改完后 CI 是 X 分钟。那个数只能在真实 runner 上测得，
 本机的 registry 形状与 runner 不同，按全局测量规则这里"宁可说测不出来"。
+
+---
+
+## 6. 分片上线后暴露出的事实：Gate 5b 一直是绿的"假绿"
+
+`continue-on-error: true` 在这条 gate 上挂了很多轮。它的后果不是"跑得慢"，
+而是**44 个套件长时间红着，而流水线一直报绿**。分片一上线、抑制一撤，
+它们立刻全部冒出来——这是 gate 恢复工作，不是分片造成的回归。
+
+上线过程本身就是一次"读日志而不是猜"的练习。每一轮的错误信息都直接说了原因：
+
+| 轮次 | 现象 | 真实原因 | 修法 |
+|------|------|----------|------|
+| 1 | 4 个分片 1 秒内全红：`Test file ".../adapter-shell-scope.test.bats" does not exist` | 计划输出裸文件名，而 bats 以 `cwd=ROOT` 启动 | 计划改输出 root-relative 路径；断言改为"路径可从 ROOT 解析" |
+| 2 | 分片 3：409 ok / 14 not ok | — （已大幅下降） | — |
+| 3 | `gate-5a-block` 11 例红，日志里 Gate 5 是 PASS | `bats-contracts` 没装 gate 工具，fixture 跑到 `BLOCKED - archlint not installed` | 装 `gate-check` 同一套工具，并让 SETUP 步骤失败而不是 11 个 fixture 失败 |
+| 3 | `gate-9-timing-unit` 7 例报"单位不配对" | 它搜的 `pre-commit` 里已没有计时代码（#798 搬进 `gate-entries/`） | 改为搜索解析 + 新增"必须找得到 body"的防真空用例 |
+| 3 | `issue-537-coverage-matrix` 12 例报"契约缺失" | 同上，`languagesSource`/`coverageMatrix` 已随 Gate 6 body 搬走 | 断言改为对 preamble + 全部 entry 文件搜 |
+| 3 | 34 例报 `githooks/adapters/gate-10.sh: No such file or directory` 却算 PASS | 该路径被 `.gitignore` 排除，CI 里本就不存在；`source` 失败后 `STATUS` 不变 → exit 0 | 列表改为三个**被跟踪**的副本，并新增 `AC-A-02-00` 断言每个条目先存在 |
+
+三种"绿得没有依据"的形状，值得单独记住：
+
+1. **搜错文件** —— `grep` 一个不包含被测代码的文件，返回 1，被读成"契约不成立"。
+2. **源不存在** —— `source` 一个不存在的文件，`status` 仍是 0，被读成"gate 通过了"。
+3. **列了不该存在的文件** —— 把 `gitignore` 的构建产物当成受测副本，删掉就静默少测。
+
+第 3 轮之后合计 1612 ok / 69 not ok（第 2 轮 1596/84）。剩下的集中在上面
+已定位、已修但尚未推送的部分，以及 §4 记录的 fixture 成本问题。
