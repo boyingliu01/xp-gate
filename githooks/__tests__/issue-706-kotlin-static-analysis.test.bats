@@ -46,8 +46,15 @@ make_shim() {
 
 # 运行 adapter 的 run_static_analysis，PATH 只含 shim + 基础工具。
 # 用 source 而不是调用 hook：被测的是 adapter 的判定，不是 hook 的编排。
+#
+# PATH 不接 $ORIG_PATH。这组用例的前提是「ktlint 不可用，所以必须轮到 detekt」，
+# 而 $ORIG_PATH 里可能装着真实 ktlint：CI 一旦安装它（2026-11-13 起 BATS job 会装），
+# 真实 ktlint 就抢在问题给定的 shim detekt 之前执行，并靠 JVM 的启动警告制造出
+# 「ktlint 已交付结论」的假象，detekt 永远轮不到 —— 用例是对的，环境假设错了。
+# 收窄到 shim + 系统基础路径，与 AC-706-02 的写法一致：被测的是判定逻辑，
+# 不是本机恰好装了什么。
 run_adapter() {
-  PATH="$WORK/shim:$ORIG_PATH" bash -c "source '$ADAPTER'; run_static_analysis; echo \"__RC=\$?\""
+  PATH="$WORK/shim:/usr/bin:/bin" bash -c "source '$ADAPTER'; run_static_analysis; echo \"__RC=\$?\""
 }
 
 @test "AC-706-01: a failed build does not stop an independent analyzer from running" {

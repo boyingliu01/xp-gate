@@ -1048,9 +1048,21 @@ jobs:
             exit 1
           fi
           pip install "lizard==$PINNED_LIZARD" semgrep pytest pytest-cov
+          # `command -v` is NOT proof a tool works. Measured on run 43387253796:
+          # pip reported "Successfully installed ... semgrep-1.185.0" and
+          # `command -v semgrep` passed, yet every invocation died with
+          #   ModuleNotFoundError: No module named 'semgrep'
+          # because ~/.local/bin/semgrep was a stale console_script left by an
+          # earlier environment and still came first on PATH. The suites that had
+          # been skipping then RAN, read that traceback as an unparseable verdict,
+          # and failed on it -- while this step reported success. Executing each
+          # tool is the only check that separates "installed" from "importable".
           for tool in lizard semgrep pytest; do
-            if ! command -v "$tool" >/dev/null 2>&1; then
-              echo "❌ $tool did not install; fixtures that run it would skip themselves"
+            if ! "$tool" --version >/dev/null 2>&1; then
+              echo "❌ $tool is on PATH but cannot run:"
+              "$tool" --version 2>&1 | tail -3
+              echo "   A present-but-broken tool is worse than a missing one: the"
+              echo "   fixtures stop skipping and then fail on its error output."
               exit 1
             fi
           done
