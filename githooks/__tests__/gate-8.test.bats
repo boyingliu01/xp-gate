@@ -41,7 +41,16 @@ write_inner() {
     printf 'gate_start_ms() { echo "0"; }\n'
     printf 'record_gate_audit() { :; }\n'
     printf 'source "%s" || { echo "SOURCE-FAILED"; exit 3; }\n' "$gate_abs"
-    printf 'printf "GATE8_STATUS=%%s\\n" "$GATE_8_STATUS"\n'
+    # The inner script needs a LITERAL `\n` inside its own printf format so that
+    # printf emits one line ending. Writing `%%s\\n` here does not survive: the
+    # outer printf already turns `\\n` into `\n`, so the generated file held
+    # `printf "GATE8_STATUS=%s` / `" "$GATE_8_STATUS"` across two lines. The
+    # second line then ran as a command, and line 8 reported
+    # `ntf: command not found` -- the `pr` swallowed by the unterminated quote.
+    # Output still showed GATE8_STATUS=PASS, but the script exited non-zero, so
+    # the case failed with `[ "$status" -eq 0 ]` and the cause was invisible.
+    # `%s\n` with the `\n` passed as an argument avoids the double escaping.
+    printf 'printf "GATE8_STATUS=%%s%s" "$GATE_8_STATUS"\n' '\n'
   } > "$INNER_SCRIPT"
 }
 
