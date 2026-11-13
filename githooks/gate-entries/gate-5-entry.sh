@@ -876,7 +876,22 @@ else
   # that has an adapter. Languages that ran nothing fall through to their own
   # adapter's coverage branch, which already distinguishes "no evidence" (a
   # documented failure) from "not applicable" (iac).
-  if [ "${TESTS_SKIPPED:-false}" = "true" ] && [ "${TESTS_RAN_ANY:-false}" != "true" ]; then
+  #
+  # #601: "tests were not run" is not the same as "there is nothing to
+  # evaluate". A repo can carry a coverage report from an earlier run (CI
+  # artifacts, a developer's last npm test) while no runner is selected for this
+  # change set. Skipping then DISCARDS a measurement that exists, and Gate 5
+  # reports PASS on a floor it never applied -- #760's defect one direction over.
+  # Measured on run 43368235868: with coverage/coverage-summary.json staged, the
+  # hook still printed "Test run was skipped — skipping coverage check" and a
+  # staged 42% never reached the threshold. The skip now also requires that no
+  # coverage evidence is present.
+  GATE_5_COVERAGE_EVIDENCE=false
+  if [ -f "coverage/coverage-summary.json" ] || [ -f "coverage/coverage-final.json" ]; then
+    GATE_5_COVERAGE_EVIDENCE=true
+  fi
+  if [ "${TESTS_SKIPPED:-false}" = "true" ] && [ "${TESTS_RAN_ANY:-false}" != "true" ] \
+     && [ "$GATE_5_COVERAGE_EVIDENCE" != "true" ]; then
     echo "ℹ️  Test run was skipped — skipping coverage check."
   else
   echo "Running coverage check..."
