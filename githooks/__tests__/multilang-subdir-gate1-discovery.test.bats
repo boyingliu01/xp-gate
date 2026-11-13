@@ -92,13 +92,19 @@ MOCK
   # Biome is resolved LOCALLY first: <project>/node_modules/.bin/biome, then
   # `command -v biome`, then `npx biome` -- so a commit hook never downloads it
   # from the registry. A stub on `npx` alone is therefore UNREACHABLE on any host
-  # that has biome installed globally, and this fixture would then run the REAL
-  # biome against a toy project. Stub the highest rung: the sub-project the gate
-  # will cd into, which is also what the AC is about (the check must run from
-  # web/, not the root).
+  # that has biome installed globally, and this fixture would then SKIP the check
+  # ("biome is not installed") instead of observing it.
+  #
+  # The stub lives in web/, the sub-project the gate cds into, and it logs to
+  # NPX_LOG in the SAME format the npx mock uses. That keeps the AC's real
+  # assertion -- biome ran with web/ as its cwd, i.e. the config was discovered
+  # in the subdir -- true regardless of which rung of the ladder resolves it.
   mkdir -p web/node_modules/.bin
   cat > web/node_modules/.bin/biome <<'MOCK'
 #!/bin/bash
+# Same log shape as the npx mock below, so the `pwd=...web] biome check --staged`
+# assertion holds whichever rung of the resolver ladder actually ran.
+echo "npx [pwd=$(pwd)] biome $*" >> "${NPX_LOG:-/dev/null}"
 echo "Checked 2 files in 3ms. No fixes applied."
 exit 0
 MOCK
@@ -240,6 +246,11 @@ teardown() {
   cp "$SOURCE_GITHOOKS/hook-module-resolution.sh" "$FRESH/.git/hooks/hook-module-resolution.sh" 2>/dev/null || true
   mkdir -p "$FRESH/.git/hooks/lib"
   cp -R "$SOURCE_GITHOOKS/lib/." "$FRESH/.git/hooks/lib/" 2>/dev/null || true
+  # #798: copying pre-commit alone installs an entry point with no gates to run
+  # ("FATAL: could not load gate-driver.sh"). Copy the ordered chain with it.
+  cp "$SOURCE_GITHOOKS/gate-driver.sh" "$FRESH/.git/hooks/gate-driver.sh" 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/gate-registry.sh" "$FRESH/.git/hooks/gate-registry.sh" 2>/dev/null || true
+  cp -R "$SOURCE_GITHOOKS/gate-entries" "$FRESH/.git/hooks/gate-entries" 2>/dev/null || true
   git -C "$FRESH" config core.hooksPath "$FRESH/.git/hooks"
 
   cat > "$FRESH/tsconfig.json" <<'EOF'

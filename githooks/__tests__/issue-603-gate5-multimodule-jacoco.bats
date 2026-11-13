@@ -14,7 +14,7 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  PRE_COMMIT="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
   TEST_DIR="$(mktemp -d)"
 }
 

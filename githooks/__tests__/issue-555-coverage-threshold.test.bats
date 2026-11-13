@@ -17,6 +17,8 @@ setup() {
   # generate_quality_report() is defined in Gate 13's body.
   HOOK="$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  # The BLOCK messages that quote the threshold are emitted by Gate 5's body.
+  GATE_5="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
   WORK="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$WORK"
 }
@@ -101,11 +103,11 @@ resolved() { # cwd = WORK; prints "threshold=NN source=..."
   # that sources only the case block still compares against a real number (#570);
   # what matters is that the message interpolates the VARIABLE, not a literal.
   local live_block
-  live_block=$(grep -E 'below \$\{COVERAGE_THRESHOLD(:-[0-9]+)?\}% threshold' "$HOOK" | grep -v '^[[:space:]]*#' | wc -l)
+  live_block=$(grep -E 'below \$\{COVERAGE_THRESHOLD(:-[0-9]+)?\}% threshold' "$GATE_5" | grep -v '^[[:space:]]*#' | wc -l)
   [ "$live_block" -gt 0 ]
   # Comments may quote the old wording when explaining the fix; live output
   # must not. Count only non-comment lines.
   local live
-  live=$(grep -E 'below 80% threshold' "$HOOK" | grep -v '^[[:space:]]*#' | wc -l)
+  live=$(grep -E 'below 80% threshold' "$GATE_5" | grep -v '^[[:space:]]*#' | wc -l)
   [ "$live" -eq 0 ]
 }
