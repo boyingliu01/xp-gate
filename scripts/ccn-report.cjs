@@ -1021,7 +1021,15 @@ function ratchetFindings(report, baseline, warnThreshold = 5, blockThreshold = 1
     }
   }
   for (const row of report.unverified_rows) {
-    findings.push(`BLOCK ${row} (CCN could not be span-verified)`);
+    // No parentheses or backticks beyond the message's own delimiters, and none
+    // in this comment either. lizard 1.21.3 -- the analyzer .lizard-version
+    // pins -- loses brace balance on both: it takes a "(" inside a template
+    // literal for the start of a parameter list, and it takes a backtick inside
+    // a comment for the start of a template literal. Either one makes it swallow
+    // every following function into a single phantom node. Measured on this
+    // file: 287 lines and CCN 221 attributed to a "}" node, then to a "`" node
+    // once the first trigger was removed. Same twelve findings either way.
+    findings.push(`BLOCK ${row} - CCN could not be span-verified`);
   }
   return findings;
 }
