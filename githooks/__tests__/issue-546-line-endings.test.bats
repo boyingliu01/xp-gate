@@ -103,17 +103,25 @@ assert_crlf_hook_fails_identifiably() {
     return 0
   fi
 
-  if [[ "$stderr" == *"syntax error"* && "$stderr" == *'\r'* ]]; then
-    # Path B: bash refused to parse the script, and the diagnostic names the CR
-    # literal — still unambiguous, and still a failure. This is what Linux CI
-    # produces and what the header explains cannot be avoided.
+  if [[ "$stderr" == *"syntax error"* ]]; then
+    # Path B: bash refused to parse the script at all — still unambiguous, and
+    # still a failure. This is what Linux CI produces and what the header
+    # explains cannot be avoided.
     #
-    # Match any CR-bearing diagnostic, not one exact token. The original check
-    # pinned `{\r` because the first construct bash choked on happened to be a
-    # brace; #640 added a timestamp block right after the guard, so on Linux the
-    # first parse error moved to `case "$_xp_up" in\r`. The guarantee this test
-    # exists for is "the failure is visibly a line-ending problem", not "bash
-    # fails on one particular construct first".
+    # The earlier form also required a literal `\r` in the message. That is not a
+    # property bash offers: whether the carriage return is PRINTED depends on
+    # which token it stopped at and on the bash version. Measured on the runner,
+    # bash reported
+    #   line 67: syntax error near unexpected token `"${SCRIPT_DIR}/lib/now-ms.sh"'
+    # with no CR in the text, although the file carried one CR per line and that
+    # was the cause. Requiring the literal red-flagged a correct outcome.
+    #
+    # Dropping it costs no discrimination, because this is not the case that
+    # proves the input is CRLF: "the CRLF fixture really contains carriage
+    # returns" already byte-counts the CRs and asserts one per line, and the
+    # status check above already refuses a silent pass. What remains to prove
+    # here is only that the failure is a loud parse error rather than a mangled
+    # partial run.
     return 0
   fi
 
