@@ -202,6 +202,7 @@
     "githooks/__tests__/issue-532-gate9-verdict.test.bats": [
       "AC-475-03",
       "AC-A-02",
+      "AC-A-02-00",
       "AC-A-02-01",
       "AC-A-02-02",
       "AC-A-02-03",
