@@ -134,17 +134,6 @@ run_full_suite_hook() {
   run .git/hooks/pre-commit
 }
 
-  # TEMP DIAGNOSTIC (to be removed): print the decisive facts when this fails.
-  _diag() {
-    echo "DIAG cwd=$PWD"
-    echo "DIAG coverage dir: $(ls -la coverage 2>&1 | head -3)"
-    echo "DIAG summary exists: $([ -f coverage/coverage-summary.json ] && echo YES || echo NO)"
-    echo "DIAG staged: $(git diff --cached --name-only | tr '\n' ' ')"
-    echo "DIAG status: $(git status --porcelain | tr '\n' ' ')"
-    echo "DIAG npx: $(command -v npx)"
-    echo "DIAG langs: ${PROJECT_LANGS:-<unset>}"
-  }
-
 @test "AC-601-01: a NaN coverage percentage is never reported as a pass" {
   # istanbul's real "Unknown" shape, not a hand-made NaN literal: this is the
   # input that produced the bug in the field.
@@ -173,7 +162,6 @@ run_full_suite_hook() {
 
   # The same verdict the #570 "cannot measure" path gives: no evidence, no pass.
   [[ "$out" == *"BLOCKED"* ]] || {
-    _diag
     echo "an unmeasurable coverage did not block:"
     printf '%s\n' "$out" | grep -E 'coverage|Coverage' | head -6
     return 1
@@ -193,7 +181,6 @@ run_full_suite_hook() {
   local out="$output"
 
   [[ "$out" == *"42%"* ]] || {
-    _diag
     echo "the measured 42% never reached the report:"
     printf '%s\n' "$out" | grep -E 'coverage' | head -5
     return 1
