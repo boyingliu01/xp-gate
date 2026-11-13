@@ -194,4 +194,22 @@ describe('REQ-CI-BATS-01: the suite is ONE blocking gate in the workflow', () =>
     expect(npxBats).toHaveLength(0);
     expect(invocations.length).toBeGreaterThan(0);
   });
+
+  it('is inside the needs chain, so a red BATS run cannot leave the pipeline green', () => {
+    // A job that nothing `needs` can fail while the run still reports success.
+    // That is precisely the state Gate 5b was in for 203 commits (#484 -> #591)
+    // and again while it carried `continue-on-error`; the job existing is not
+    // the same as the job mattering. Assert the chain, not the job comment.
+    const yaml = require('js-yaml');
+    const parsed = yaml.load(workflow);
+    const jobs = parsed.jobs;
+    expect(jobs['bats-contracts']).toBeTruthy();
+    // quality-report and summary must both depend on it: the first to report on
+    // it, the second to state the verdict a human reads.
+    expect(jobs['quality-report'].needs).toContain('bats-contracts');
+    expect(jobs['summary'].needs).toContain('bats-contracts');
+    // And the summary must name it explicitly rather than inferring it.
+    const summaryRun = (jobs['summary'].steps || []).map((s) => s.run || '').join('\n');
+    expect(summaryRun).toMatch(/needs\.bats-contracts\.result/);
+  });
 });

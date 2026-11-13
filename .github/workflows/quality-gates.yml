@@ -1114,7 +1114,12 @@ jobs:
   # Job 4: Generate comprehensive quality report
   quality-report:
     name: Quality Report Generation
-    needs: [setup, gate-check, ai-review]
+    # `bats-contracts` is in this list on purpose, and it is not cosmetic: the
+    # checkout below reads the artifacts this job reports on, and a job that is
+    # not in ANY needs chain can fail while the run still shows green -- which is
+    # exactly the prison Gate 5b was in while it carried `continue-on-error`.
+    # Listing it here makes BATS part of the pipeline's verdict, not a side show.
+    needs: [setup, gate-check, bats-contracts, ai-review]
     runs-on: ubuntu-latest
     if: ${{ !cancelled() && needs.setup.result == 'success' }}
     
@@ -1285,7 +1290,7 @@ jobs:
   # Summary job that gives a final assessment
   summary:
     name: Quality Assessment Summary
-    needs: [setup, gate-check, ai-review, quality-report]
+    needs: [setup, gate-check, bats-contracts, ai-review, quality-report]
     runs-on: ubuntu-latest
     if: ${{ always() }}
     
@@ -1294,18 +1299,27 @@ jobs:
         run: |
           # Output a final assessment of quality based on all job statuses
           GATE_STATUS="${{ needs.gate-check.result }}"
+          BATS_STATUS="${{ needs.bats-contracts.result }}"
           AI_REVIEW_STATUS="${{ needs.ai-review.result }}"
           REPORT_STATUS="${{ needs.quality-report.result }}"
 
           echo "Gate Checks Status: $GATE_STATUS"
+          echo "Gate 5b BATS Contracts Status: $BATS_STATUS"
           echo "AI Review Status: $AI_REVIEW_STATUS"
           echo "Quality Report Status: $REPORT_STATUS"
           
-          # Generate overall summary
-          if [[ "$GATE_STATUS" == "success" ]]; then
+          # Generate overall summary.
+          #
+          # BATS is named explicitly rather than inferred through the needs chain.
+          # While Gate 5b was a `continue-on-error` step inside gate-check it could
+          # be red with this summary printing "All gates passed"; its return to a
+          # real gate has to be visible HERE, in the one place a human reads.
+          if [[ "$GATE_STATUS" == "success" && "$BATS_STATUS" == "success" ]]; then
             echo "✅ XP-Gate Quality Gates: All gates passed"
           else
             echo "❌ XP-Gate Quality Gates: Some gates failed or were skipped"
+            [[ "$BATS_STATUS" != "success" ]] && \
+              echo "   ↳ Gate 5b BATS contracts: $BATS_STATUS"
           fi
           
           if [[ "$AI_REVIEW_STATUS" == "success" ]]; then

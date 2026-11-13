@@ -148,11 +148,26 @@ bats-contracts（矩阵作业，4 个分片，每个分片一台 runner）
 第二阶段的正确改法是给这些 fixture 装 stub（`bin/mvn`、`bin/npx`、`bin/tsc`），
 而不是继续调 CI 的并行度。
 
+### 4.1 权重表只覆盖 46/246 —— 这是待办，不是已解决
+
+`MEASURED_MS` 只有 **46 条实测**，其余 **200 个套件退回 `DEFAULT_MS = 3000`**
+（实测中位数）。所以：
+
+- 分片在**已知重套件之间**确实按成本均衡（4 分片 370.4/368.4/371.3/368.3 s，
+  极差 <1%，这部分数字是真的）；
+- 但这 200 个按 3 s 计入，**真实成本没被测过**。一个实际跑 20 s 的套件会被当成
+  3 s 摊派，结果就是"某个分片意外最长"。driver 每次运行都会打印
+  `N/N suite(s) have no measured weight ...`，所以这件事不会被静默吞掉。
+
+补齐办法：在真实 runner 上跑一次 `--all`，把每个套件的耗时回填进 `MEASURED_MS`。
+在那之前，分片的**方向**是对的（重套件已分散），但**最终墙钟仍会被未称重套件支配**。
+这是本 PR 不给 CI 总时长数字的第二个理由（第一个见 §0）。
+
 ---
 
 ## 5. 验证口径（本 PR 实际跑过的）
 
-- `npx vitest run scripts/__tests__/bats-ci-shard.test.cjs` → 13 passed
+- `npx vitest run scripts/__tests__/bats-ci-shard.test.cjs` → 14 passed
 - `npx vitest run scripts/__tests__/` → 618 tests, 3 failed — all three PRE-EXISTING
   (`adapters-gate-mirror-parity` ×2, `dead-plugin-test-script` ×1); confirmed by
   stashing this branch's changes and re-running: same 3 failures
