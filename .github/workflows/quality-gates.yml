@@ -1047,19 +1047,32 @@ jobs:
             echo "❌ .lizard-version is empty — Gate 3 fixtures would run an unpinned analyzer."
             exit 1
           fi
-          pip install "lizard==$PINNED_LIZARD" semgrep pytest pytest-cov
+          # `python -m pip --user` is used deliberately instead of bare `pip`.
+          # On this runner the system site-packages is not writable, so pip falls
+          # back with "Defaulting to user installation..." -- that is fine, but it
+          # means the console script and the package must agree about WHICH python
+          # owns them. Driving the install through the interpreter we then check
+          # keeps script and site-packages in the same environment.
+          python -m pip install --user --upgrade \
+            "lizard==$PINNED_LIZARD" semgrep pytest pytest-cov
+          # The user-base bin dir must be ahead of everything else: an image can
+          # ship an older console_script there, and pip will overwrite it only if
+          # it targets the same directory. Prepending is what makes the freshly
+          # installed copy the one the fixtures execute.
+          export PATH="$(python -m site --user-base)/bin:$PATH"
+          echo "$(python -m site --user-base)/bin" >> "$GITHUB_PATH"
           # `command -v` is NOT proof a tool works. Measured on run 43387253796:
           # pip reported "Successfully installed ... semgrep-1.185.0" and
           # `command -v semgrep` passed, yet every invocation died with
           #   ModuleNotFoundError: No module named 'semgrep'
-          # because ~/.local/bin/semgrep was a stale console_script left by an
-          # earlier environment and still came first on PATH. The suites that had
-          # been skipping then RAN, read that traceback as an unparseable verdict,
-          # and failed on it -- while this step reported success. Executing each
-          # tool is the only check that separates "installed" from "importable".
+          # The suites that had been skipping then RAN, read that traceback as an
+          # unparseable verdict, and failed on it -- while THIS step reported
+          # success. Executing each tool is the only check that separates
+          # "installed" from "importable".
           for tool in lizard semgrep pytest; do
             if ! "$tool" --version >/dev/null 2>&1; then
               echo "❌ $tool is on PATH but cannot run:"
+              echo "   resolved to: $(command -v "$tool" || echo '<not found>')"
               "$tool" --version 2>&1 | tail -3
               echo "   A present-but-broken tool is worse than a missing one: the"
               echo "   fixtures stop skipping and then fail on its error output."
