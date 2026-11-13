@@ -125,13 +125,18 @@ STUB
 @test "AC-615-03: Gate 9 converts the module path before handing it to node" {
   # The specific defect: `$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts`
   # passed straight to node.exe on WSL.
+  #
+  # #798 split this across two files: the library is LOADED by pre-commit's
+  # preamble, but the conversion happens in Gate 9's body. Both halves are
+  # asserted, each against the file that actually carries it.
   local pre="$REPO_ROOT/githooks/pre-commit"
+  local gate9="$REPO_ROOT/githooks/gate-entries/gate-9-entry.sh"
   grep -q 'native-path.sh' "$pre" || {
     echo "pre-commit never loads the native-path library, so Gate 9's path stays POSIX"
     return 1
   }
-  grep -q 'to_native_path' "$pre" || {
-    echo "pre-commit loads the library but never converts anything"
+  grep -q 'to_native_path' "$gate9" || {
+    echo "pre-commit loads the library but Gate 9 never converts anything"
     return 1
   }
 }
@@ -183,9 +188,11 @@ STUB
 
   # And the gate really applies it: the conversion must be reachable from the block that
   # computes GATE_9_SCRIPT, i.e. within the same region of the file.
+  # #798: both lines live in Gate 9's body, so the region check reads that file.
+  local gate9="$REPO_ROOT/githooks/gate-entries/gate-9-entry.sh"
   local conv_line gate_line
-  conv_line=$(grep -n 'to_native_path "\$GATE_9_SCRIPT"' "$pre" | head -1 | cut -d: -f1)
-  gate_line=$(grep -n 'GATE_9_SCRIPT="\$HOME/.config' "$pre" | head -1 | cut -d: -f1)
+  conv_line=$(grep -n 'to_native_path "\$GATE_9_SCRIPT"' "$gate9" | head -1 | cut -d: -f1)
+  gate_line=$(grep -n 'GATE_9_SCRIPT="\$HOME/.config' "$gate9" | head -1 | cut -d: -f1)
   [ -n "$conv_line" ] || { echo "GATE_9_SCRIPT is never converted in pre-commit"; return 1; }
   [ -n "$gate_line" ] || { echo "the \$HOME candidate line is gone"; return 1; }
   [ "$conv_line" -gt "$gate_line" ] || {

@@ -19,7 +19,7 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$REPO_ROOT/githooks/lib/jscpd-run.sh"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-1-entry.sh"
   TEST_DIR="$(mktemp -d)"
 }
 

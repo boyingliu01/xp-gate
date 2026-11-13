@@ -12,8 +12,10 @@
 # @covers AC-450-01, AC-450-02, AC-450-03
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-PRE_COMMIT_COPY="$REPO_ROOT/githooks/pre-commit"
-PRE_COMMIT_MIRROR="$REPO_ROOT/src/npm-package/hooks/pre-commit"
+PRE_COMMIT_COPY="$REPO_ROOT/githooks/gate-entries/gate-0-entry.sh"
+# #798: the hint text lives in Gate 0's body, not in the pre-commit preamble.
+# Both the canonical and the shipped copy are read at their entry path.
+PRE_COMMIT_MIRROR="$REPO_ROOT/src/npm-package/hooks/gate-entries/gate-0-entry.sh"
 
 @test "AC-450-01: the hint names the env var as the escape hatch" {
   local text

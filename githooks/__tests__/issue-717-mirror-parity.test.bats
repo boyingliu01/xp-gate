@@ -82,8 +82,10 @@ _assert_mirror() {
 }
 
 @test "#717 AC-717-17: the .cs routing reaches the npm copy too" {
-  run grep -F '_detect_ext_lang "cs"' "$REPO_ROOT/src/npm-package/hooks/pre-commit"
+  # #798: these two markers moved with their gate bodies, so read the mirror's
+  # entry files -- the thing that actually ships and executes.
+  run grep -F '_detect_ext_lang "cs"' "$REPO_ROOT/src/npm-package/hooks/gate-entries/gate-0-entry.sh"
   [ "$status" -eq 0 ]
-  run grep -F "could not execute — NOT a pass" "$REPO_ROOT/src/npm-package/hooks/pre-commit"
+  run grep -F "could not execute — NOT a pass" "$REPO_ROOT/src/npm-package/hooks/gate-entries/gate-1-entry.sh"
   [ "$status" -eq 0 ]
 }

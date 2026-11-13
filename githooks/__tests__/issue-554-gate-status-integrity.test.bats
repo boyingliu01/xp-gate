@@ -9,7 +9,7 @@
 # @covers AC-554-01
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-HOOK="$REPO_ROOT/githooks/pre-commit"
+HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 
 # Extract a function's body from the hook so the assertions do not depend on
 # absolute line numbers that shift whenever the header changes.

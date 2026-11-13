@@ -26,7 +26,7 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SPRINT_GATE="$REPO_ROOT/githooks/sprint-gate.sh"
   REPORT_LIB="$REPO_ROOT/githooks/lib/sprint-gate-report.sh"
-  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  PRE_COMMIT="$REPO_ROOT/githooks/gate-entries/gate-11-entry.sh"
   WORK="$BATS_TEST_TMPDIR/work"
   mkdir -p "$WORK"
   cd "$WORK" || return 1

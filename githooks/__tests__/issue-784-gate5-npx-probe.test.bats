@@ -35,7 +35,12 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798: Gate 5's vitest BRANCHES moved to gate-entries/gate-5-entry.sh, but the
+  # shared run_node_bin() helper they call stayed in pre-commit's preamble (it is
+  # used by several gates). Each assertion therefore reads the file that holds
+  # its subject: HOOK for the branches, HOOK_RUNTIME for the helper definition.
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
+  HOOK_RUNTIME="$REPO_ROOT/githooks/pre-commit"
   WORK="$(mktemp -d)"
   mkdir -p "$WORK/bin" "$WORK/node_modules/vitest"
   # npx stub records every call and pretends `--version` succeeds, exactly like
@@ -68,7 +73,7 @@ _call_run_node_bin() {
     export NPX_LOG='$NPX_LOG'
     export PROJECT_ROOT='$WORK'
     cd '$WORK'
-    eval \"\$(awk '/^if ! declare -F run_node_bin/,/^fi\$/' '$HOOK')\"
+    eval \"\$(awk '/^if ! declare -F run_node_bin/,/^fi\$/' '$HOOK_RUNTIME')\"
     run_node_bin $*
   "
 }

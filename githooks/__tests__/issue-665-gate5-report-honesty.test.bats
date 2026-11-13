@@ -18,7 +18,7 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 }
 
 # AC-670-06: the subset-run exemption is recorded as a reason, not left empty.

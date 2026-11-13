@@ -26,7 +26,11 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  # #798: Gate 5's BODY moved to the entry file, but the guarded
+  # `source_gate_lib` line that loads lib/test-failure.sh stayed in pre-commit's
+  # preamble. HOOK reads the body; PRE_COMMIT reads the load.
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
+  PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
   LIB="$REPO_ROOT/githooks/lib/test-failure.sh"
 }
 
@@ -188,7 +192,7 @@ AssertionError: expected 1 to be 2' 'changed test files'
   # correct code. What matters is that the hook loads lib/test-failure.sh from
   # AUDIT_SCRIPT_DIR, and that the handler it defines is really in that library
   # (otherwise the grep could pass on an unrelated mention).
-  run grep -cE '^[[:space:]]*source_gate_lib "\$\{AUDIT_SCRIPT_DIR\}/lib/test-failure\.sh"' "$HOOK"
+  run grep -cE '^[[:space:]]*source_gate_lib "\$\{AUDIT_SCRIPT_DIR\}/lib/test-failure\.sh"' "$PRE_COMMIT"
   [ "$status" -eq 0 ] || {
     echo "pre-commit no longer loads lib/test-failure.sh from AUDIT_SCRIPT_DIR"
     return 1

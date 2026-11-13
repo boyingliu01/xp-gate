@@ -22,6 +22,8 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   PRE_COMMIT_COPY="$REPO_ROOT/githooks/pre-commit"
+  # #798: Gate 0's own logic and hint text moved into its entry body.
+  GATE_0_ENTRY="$REPO_ROOT/githooks/gate-entries/gate-0-entry.sh"
   FIXTURE_REPO="$(mktemp -d)"
   (
     cd "$FIXTURE_REPO" || exit 1
@@ -35,6 +37,12 @@ setup() {
     cp "$REPO_ROOT/githooks/gate-"*.sh .git/hooks/ 2>/dev/null || true
     cp "$REPO_ROOT/githooks/sprint-gate.sh" .git/hooks/ 2>/dev/null || true
     cp -r "$REPO_ROOT/githooks/lib" .git/hooks/ 2>/dev/null || true
+    # #798: pre-commit is a preamble + driver + epilogue; gate bodies live in
+    # gate-entries/ and are sourced from SCRIPT_DIR. Without them the copied hook
+    # runs its preamble and executes no gates, so no Gate 0 verdict appears at all.
+    cp "$REPO_ROOT/githooks/gate-driver.sh" .git/hooks/ 2>/dev/null || true
+    cp "$REPO_ROOT/githooks/gate-registry.sh" .git/hooks/ 2>/dev/null || true
+    cp -r "$REPO_ROOT/githooks/gate-entries" .git/hooks/ 2>/dev/null || true
     cp -r "$REPO_ROOT/githooks/adapters" .git/hooks/ 2>/dev/null || true
     # The module-resolution shim must come from THIS repo, not from a global
     # install. It used to be copied from $HOME/.config/xp-gate/hooks/ behind a
@@ -89,10 +97,10 @@ teardown() {
   # The doc contract moved: a message prefix is gone; the env var is the
   # supported escape hatch. If a future edit reintroduces the prefix promise
   # without reintroducing a mechanism, this fails.
-  run grep -q 'SKIP_VERSION_CHECK=1 git commit' "$PRE_COMMIT_COPY"
+  run grep -q 'SKIP_VERSION_CHECK=1 git commit' "$GATE_0_ENTRY"
   [ "$status" -eq 0 ]
   # And it must NOT advertise the dead COMMIT_EDITMSG-derived prefix as working.
-  run grep -q '\[skip-version-check\] chore: <description>' "$PRE_COMMIT_COPY"
+  run grep -q '\[skip-version-check\] chore: <description>' "$GATE_0_ENTRY"
   [ "$status" -ne 0 ]
 }
 
@@ -116,6 +124,6 @@ teardown() {
 @test "AC-450-04 anti-vacuity: has_real_source actually drives the branch decision" {
   # Defect 2 of #624: the variable was computed and ignored. Pin both its
   # computation and its use as a branch condition.
-  run grep -q 'elif \[ "$has_real_source" = "false" \]' "$PRE_COMMIT_COPY"
+  run grep -q 'elif \[ "$has_real_source" = "false" \]' "$GATE_0_ENTRY"
   [ "$status" -eq 0 ]
 }

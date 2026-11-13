@@ -9,7 +9,14 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # #798 splits this fixture's two inputs apart, and they no longer live in the
+  # same file: the helper functions and the coverage-threshold constants never
+  # moved out of pre-commit's preamble, while generate_quality_report() is now
+  # defined in Gate 13's body. Reading either one from the other file's path
+  # yields an EMPTY extraction, which this fixture already refuses rather than
+  # silently asserting against nothing.
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  REPORT_FN_SRC="$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
   TEST_DIR="$(mktemp -d)"
 }
 
@@ -70,7 +77,7 @@ teardown() {
     printf '_resolve_coverage_threshold >/dev/null\n'
     sed -n '/^COVERAGE_THRESHOLD=/p' "$PRE_COMMIT"
     # The function under test, terminated by its own here-doc marker.
-    sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$PRE_COMMIT"
+    sed -n '/^generate_quality_report()/,/^ENDJSON$/p' "$REPORT_FN_SRC"
     printf '}\n'
   } > "$TEST_DIR/report-fn.sh"
 

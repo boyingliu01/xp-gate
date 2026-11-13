@@ -76,14 +76,14 @@ setup() {
 # --- Gate 6: PIPESTATUS must belong to the dotnet test pipeline ------------
 
 @test "gate-6 reads PIPESTATUS immediately after the dotnet test pipeline" {
-  LOOP=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
-  CS=$(grep -n '"csharp")' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
-  END=$(grep -n 'C# architecture validation completed' "$REPO_ROOT/githooks/pre-commit" | tail -1 | cut -d: -f1)
+  LOOP=$(grep -n 'for CURRENT_LANG in $PROJECT_LANGS; do' "$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh" | tail -1 | cut -d: -f1)
+  CS=$(grep -n '"csharp")' "$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh" | tail -1 | cut -d: -f1)
+  END=$(grep -n 'C# architecture validation completed' "$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh" | tail -1 | cut -d: -f1)
   [ -n "$LOOP" ]
   [ "$CS" -gt "$LOOP" ]
   # PIPESTATUS is only valid on the line IMMEDIATELY after a pipeline; any
   # command in between (even `echo`) resets it and the arm silently reads 0.
-  run bash -c "sed -n '$((CS)),$((END))p' '$REPO_ROOT/githooks/pre-commit' | grep -A1 'dotnet test' | grep -q 'PIPESTATUS\[0\]'"
+  run bash -c "sed -n '$((CS)),$((END))p' '$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh' | grep -A1 'dotnet test' | grep -q 'PIPESTATUS\[0\]'"
   [ "$status" -eq 0 ]
 }
 
@@ -92,7 +92,7 @@ setup() {
 @test "no gate in the C# block path silently swallows a non-zero status" {
   # The #602/#630 shape: `cmd | tail` then unconditional success text. Any
   # `| tail` inside the csharp arms must be followed by a status read.
-  run bash -c "grep -n 'dotnet test' '$REPO_ROOT/githooks/pre-commit' -A2 | grep -q 'PIPESTATUS'"
+  run bash -c "grep -n 'dotnet test' '$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh' -A2 | grep -q 'PIPESTATUS'"
   [ "$status" -eq 0 ]
 }
 
@@ -136,13 +136,17 @@ setup() {
 @test "gate-9.sh is not sourced by any hook, and says so" {
   # A future contributor reading gate-9.sh will see C# code and assume it runs.
   # Both halves are asserted: the fact, and the warning about the fact.
-  run bash -c "grep -c 'gate-9.sh' '$REPO_ROOT/githooks/pre-commit' '$REPO_ROOT/githooks/pre-push'"
+  # #798: gate binding moved out of pre-commit into the registry, which is now
+  # the single source of truth for "which file runs gate N".
+  run bash -c "grep -c 'gate-9.sh' '$REPO_ROOT/githooks/gate-registry.sh' '$REPO_ROOT/githooks/pre-push'"
   [ "$status" -ne 0 ]
   run grep -q 'DEAD CODE' "$REPO_ROOT/githooks/gate-9.sh"
   [ "$status" -eq 0 ]
 }
 
 @test "gate-10.sh is the file pre-commit actually loads for SAST" {
-  run grep -q 'gate-10.sh' "$REPO_ROOT/githooks/pre-commit"
+  # The registry binds the sast gate to gate-10.sh; that binding is what the
+  # driver loads.
+  run grep -q 'sast|10|gate-10.sh' "$REPO_ROOT/githooks/gate-registry.sh"
   [ "$status" -eq 0 ]
 }

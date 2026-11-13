@@ -51,8 +51,19 @@ teardown() {
   [ "$output" = "A.cs" ]
 }
 
-@test "#717 AC-717-19: the .cs entry survives in gate-9's canonical script" {
-  run grep -E '\|cs\|' "$REPO_ROOT/githooks/adapters/gate-9.sh"
+@test "#717 AC-717-19: the .cs entry survives in the file that actually runs SAST" {
+  # #738: githooks/adapters/gate-9.sh was deleted along with its copies. The
+  # regression this AC guards (a C# project whose .cs never reaches the SAST
+  # language list, so the gate silently scans nothing) now lives or dies in
+  # Gate 10's body -- the file the registry binds to the sast gate. Assert there:
+  # pinning the deleted script would have failed for the wrong reason and proved
+  # nothing about what runs.
+  local sast="$REPO_ROOT/githooks/gate-entries/gate-10-entry.sh"
+  [ -f "$sast" ] || {
+    echo "Gate 10's body is gone; re-read this test"
+    return 1
+  }
+  run grep -qF '|cs|csx|' "$sast"
   [ "$status" -eq 0 ]
 }
 

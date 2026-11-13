@@ -27,7 +27,11 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  # #798: this suite COPIES the hook into .git/hooks and EXECUTES it, so it needs
+  # the whole hook, not a gate entry (an entry only defines gate_5_run()). The
+  # content it greps lives in Gate 5's body, read separately via GATE_5.
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  GATE_5="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 
   TEST_DIR="$(mktemp -d)"
   cd "$TEST_DIR" || return 1
@@ -42,6 +46,14 @@ setup() {
   cp "$REPO_ROOT/githooks/adapter-common.sh" .git/hooks/ 2>/dev/null || true
   cp "$REPO_ROOT/githooks/hook-module-resolution.sh" .git/hooks/ 2>/dev/null || true
   for f in "$REPO_ROOT"/githooks/lib/*; do [ -f "$f" ] && cp "$f" .git/hooks/lib/; done
+  # #798: pre-commit is a preamble + driver + epilogue; the gate bodies are
+  # sourced from gate-entries/. A fixture without them runs the preamble and
+  # then executes no gate at all, so every verdict assertion below would fail
+  # for a reason unrelated to the NaN handling this suite is about.
+  cp "$REPO_ROOT/githooks/gate-driver.sh" .git/hooks/ 2>/dev/null || true
+  cp "$REPO_ROOT/githooks/gate-registry.sh" .git/hooks/ 2>/dev/null || true
+  cp -r "$REPO_ROOT/githooks/gate-entries" .git/hooks/ 2>/dev/null || true
+  cp -r "$REPO_ROOT/githooks/adapters" .git/hooks/ 2>/dev/null || true
 
   # Minimal TS project
   echo '{ "name": "nan-fixture", "private": true }' > package.json

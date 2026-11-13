@@ -94,8 +94,9 @@ has_line() {
     return 1
   }
   # And the exemption must still be a real mechanism in the hook.
-  grep -q '\.architecture-skip' "$REPO_ROOT/githooks/pre-commit" || {
-    echo "pre-commit no longer honours .architecture-skip; re-read this test"
+  # #798: the exemption is honoured in Gate 6's body now, not pre-commit's.
+  grep -q '\.architecture-skip' "$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh" || {
+    echo "Gate 6 no longer honours .architecture-skip; re-read this test"
     return 1
   }
 }

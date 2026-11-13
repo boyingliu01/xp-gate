@@ -88,6 +88,21 @@ MOCK
   chmod +x "$TEST_DIR/bin/jscpd" "$TEST_DIR/bin/lizard" "$TEST_DIR/bin/gitleaks" \
            "$TEST_DIR/bin/pytest" "$TEST_DIR/bin/coverage" "$TEST_DIR/bin/ruff" \
            "$TEST_DIR/bin/mypy" "$TEST_DIR/bin/npx"
+
+  # Biome is resolved LOCALLY first: <project>/node_modules/.bin/biome, then
+  # `command -v biome`, then `npx biome` -- so a commit hook never downloads it
+  # from the registry. A stub on `npx` alone is therefore UNREACHABLE on any host
+  # that has biome installed globally, and this fixture would then run the REAL
+  # biome against a toy project. Stub the highest rung: the sub-project the gate
+  # will cd into, which is also what the AC is about (the check must run from
+  # web/, not the root).
+  mkdir -p web/node_modules/.bin
+  cat > web/node_modules/.bin/biome <<'MOCK'
+#!/bin/bash
+echo "Checked 2 files in 3ms. No fixes applied."
+exit 0
+MOCK
+  chmod +x web/node_modules/.bin/biome
   export PATH="$TEST_DIR/bin:$PATH"
   export NPX_LOG="$TEST_DIR/npx.log"
 
@@ -105,6 +120,13 @@ MOCK
   # directory, exactly like a real `xp-gate init` installation does.
   mkdir -p .git/hooks/lib
   cp -R "$SOURCE_GITHOOKS/lib/." .git/hooks/lib/ 2>/dev/null || true
+  # #798: pre-commit is a preamble + driver call + epilogue; every gate body is
+  # sourced from gate-entries/ through gate-driver.sh. Without these the copied
+  # hook runs its preamble and never reaches Gate 1, so this suite would assert
+  # against a hook that executed nothing.
+  cp "$SOURCE_GITHOOKS/gate-driver.sh" .git/hooks/gate-driver.sh 2>/dev/null || true
+  cp "$SOURCE_GITHOOKS/gate-registry.sh" .git/hooks/gate-registry.sh 2>/dev/null || true
+  cp -R "$SOURCE_GITHOOKS/gate-entries" .git/hooks/gate-entries 2>/dev/null || true
   # Gate 1 routes through the language adapters; a real install ships them
   # alongside the hook.
   mkdir -p .git/hooks/adapters

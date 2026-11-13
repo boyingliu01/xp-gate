@@ -15,7 +15,7 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$REPO_ROOT/githooks/lib/coverage-total.sh"
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
   TEST_DIR="$(mktemp -d)"
   cd "$TEST_DIR" || return 1
 }
@@ -284,6 +284,8 @@ run_enforce() {
 }
 
 @test "npm mirror of pre-commit stays byte-identical (Stage 2 polyglot contract)" {
-  run cmp "$HOOK" "$REPO_ROOT/src/npm-package/hooks/pre-commit"
+  # #798: Gate 5's body is gate-entries/gate-5-entry.sh in BOTH trees, so the
+  # byte-identical contract is checked between the two Gate 5 entries.
+  run cmp "$HOOK" "$REPO_ROOT/src/npm-package/hooks/gate-entries/gate-5-entry.sh"
   [ "$status" -eq 0 ]
 }

@@ -37,6 +37,8 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   F="$REPO_ROOT/githooks/__tests__/gate9-architecture.bats"
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  # #798: the protected-branch declaration lives in Gate 0's body.
+  GATE_0="$REPO_ROOT/githooks/gate-entries/gate-0-entry.sh"
 }
 
 @test "AC-592-01: the fixture prepends to PATH instead of replacing it" {
@@ -59,15 +61,38 @@ setup() {
   }
 }
 
-@test "AC-592-02: the fixture copies the whole lib directory" {
+@test "AC-592-02: the fixture installs the whole hook set, lib/ included" {
   # The hook's dependency set grows. Listing files by name is what let this
   # fixture drift nine helpers behind.
-  bash -c "sed 's/#.*//' '$F' | grep -qE 'cp -R? .*/lib/\\.?'" || {
-    echo "the fixture does not copy githooks/lib as a directory."
-    echo "pre-commit sources ten helpers from it; a hand-listed subset goes stale."
+  #
+  # #798: the fixture no longer hand-copies lib/. It delegates to
+  # helpers/install-hook-set.bash, which installs the COMPLETE set (pre-commit,
+  # gate-driver.sh, gate-registry.sh, gate-entries/, adapter-common.sh,
+  # hook-module-resolution.sh, lib/) from one list. That is strictly what this
+  # AC asks for -- a hand-listed subset can still go stale, whereas one shared
+  # list cannot drift from the installation it describes. Accept either form:
+  # the explicit `cp -R .../lib/` this AC was written against, or the helper
+  # that now supersedes it.
+  recovers_lib() {
+    bash -c "sed 's/#.*//' '$F' | grep -qE 'cp -R? .*/lib/\\.?'" && return 0
+    bash -c "sed 's/#.*//' '$F' | grep -q 'install-hook-set.bash'" && return 0
     return 1
   }
-  # Anti-vacuity for the check above: the hook really does pull from lib/.
+  recovers_lib || {
+    echo "the fixture neither copies githooks/lib as a directory nor installs"
+    echo "the shared hook set; pre-commit sources ten helpers from it."
+    return 1
+  }
+  # Anti-vacuity for the check above: the helper really does install lib/, so a
+  # fixture delegating to it is not passing this AC by naming a script that does
+  # not carry the directory.
+  if bash -c "sed 's/#.*//' '$F' | grep -q 'install-hook-set.bash'"; then
+    grep -qE 'lib' "$REPO_ROOT/githooks/__tests__/helpers/install-hook-set.bash" || {
+      echo "install-hook-set.bash no longer installs lib/; re-read this test"
+      return 1
+    }
+  fi
+  # And the hook really does pull from lib/.
   grep -qE 'source .*lib/' "$PRE_COMMIT" || grep -qE 'lib/[a-z-]+\.sh' "$PRE_COMMIT" || {
     echo "pre-commit no longer sources anything from lib/; re-read this test"
     return 1
@@ -82,7 +107,7 @@ setup() {
     return 1
   }
   # And that premise is real: the hook must still be protecting those branches.
-  grep -q 'PROTECTED_BRANCHES=' "$PRE_COMMIT" || {
+  grep -q 'PROTECTED_BRANCHES=' "$GATE_0" || {
     echo "pre-commit no longer declares PROTECTED_BRANCHES; re-read this test"
     return 1
   }

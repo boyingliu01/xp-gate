@@ -21,7 +21,12 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   GATE8="$REPO_ROOT/githooks/gate-8.sh"
-  GATE9="$REPO_ROOT/githooks/gate-9.sh"
+  # #738/#798: githooks/gate-9.sh was DELETED; its SAST work lives in gate-8.sh,
+  # which is the file that actually reads GATE_SCOPE and falls back to
+  # `git ls-files` when GATE_SCOPE=all. The variable keeps its old name so the
+  # AC text below ("gate-9 scans the tracked tree") still reads against the same
+  # subject -- only the file that implements it moved.
+  GATE9="$REPO_ROOT/githooks/gate-8.sh"
   RUNNER="$REPO_ROOT/src/npm-package/lib/gate-runner.js"
 }
 

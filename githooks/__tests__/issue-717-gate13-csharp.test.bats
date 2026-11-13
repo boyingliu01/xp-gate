@@ -170,8 +170,8 @@ _run_g13_csharp() {
 
 @test "#717 AC-717-18: pre-commit actually CALLS the C# stage" {
   # The function existing and being unreachable is the #717 defect itself.
-  run grep -F "gate13_run_csharp_analysis" "$REPO_ROOT/githooks/pre-commit"
+  run grep -F "gate13_run_csharp_analysis" "$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
   [ "$status" -eq 0 ]
-  run grep -c "gate13_run_" "$REPO_ROOT/githooks/pre-commit"
+  run grep -c "gate13_run_" "$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
   [ "$output" -ge 4 ]
 }

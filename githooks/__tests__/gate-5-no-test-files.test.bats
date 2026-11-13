@@ -134,7 +134,7 @@ stdout | src/report.test.ts > prints "No test files found" for empty input'
 # The genuinely non-vitest path must stay unguarded: a vitest-shaped excuse there
 # could let a real pytest/go failure through.
 @test "AC-498-06: the typescript adapter paths are guarded, the non-vitest path is not" {
-  HOOK="$REPO_ROOT/githooks/pre-commit"
+  HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 
   ts_block=$(awk '/Fallback: run_tests without coverage/,/^        fi$/' "$HOOK")
   [ -n "$ts_block" ] || { echo "typescript fallback block not found" >&2; return 1; }
@@ -152,6 +152,8 @@ stdout | src/report.test.ts > prints "No test files found" for empty input'
     echo "vitest-only excuse applied to a non-vitest runner" >&2
     return 1
   fi
-  printf '%s\n' "$non_vitest_block" | grep -q 'exit 1' \
+  # #798: a gate body RETURNS its verdict; the driver maps a non-zero return to
+  # the hook's exit status, so blocking reads `return 1` in the entry body.
+  printf '%s\n' "$non_vitest_block" | grep -qE '(^|[[:space:]])return 1' \
     || { echo "non-vitest path no longer blocks" >&2; return 1; }
 }
