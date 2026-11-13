@@ -42,11 +42,23 @@ setup() {
   }
   # The artifact must really be gitignored, or CI would simply check it out and
   # there would be nothing to build.
-  run git -C "$REPO_ROOT" check-ignore -v plugins/dsh/skills
-  [ "$status" -eq 0 ] || {
-    echo "plugins/dsh/skills is NOT gitignored any more; re-read this test's premise"
-    return 1
-  }
+  #
+  # `check-ignore` cannot answer this. It reports whether the path is ignored
+  # ON DISK, so it exits 1 for a path that does not exist -- and in a fresh CI
+  # checkout plugins/dsh/skills does NOT exist, precisely because it is ignored
+  # and generated. The assertion therefore failed on CI while passing on any
+  # machine that had run prepack once. Read the RULE instead: that is the fact
+  # this test is actually about.
+  if ! grep -qE '^[[:space:]]*plugins/dsh/skills/?[[:space:]]*$' \
+       "$REPO_ROOT/.gitignore" 2>/dev/null; then
+    # Keep the stronger check for a checkout where the path does exist.
+    if git -C "$REPO_ROOT" check-ignore -q -- plugins/dsh/skills; then
+      :
+    else
+      echo "plugins/dsh/skills is NOT gitignored any more; re-read this test's premise"
+      return 1
+    fi
+  fi
   # And the test must actually read that directory.
   grep -q 'skills' "$SKILLS_TEST" || {
     echo "skills.test.ts no longer references the bundled skills directory"

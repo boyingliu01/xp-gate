@@ -33,6 +33,23 @@ esac
 exit 1
 EOF
   chmod +x "$TEST_DIR/bin/npx"
+  # #593 tightened the required-tool probe in adapter-common.sh: it looks at
+  # node_modules/.bin and PATH only, and NO LONGER falls back to `npx` (that
+  # fallback answered "is it installed?" by hitting the registry, so the answer
+  # could be both slow and wrong). A stub `npx` therefore cannot satisfy it --
+  # Gate 2 blocked with "Required tool 'jscpd' not available" and Gate 6, the
+  # subject of the cases below, never ran. Provide the binaries the probe looks
+  # for, which is also what "the tool is installed" actually means.
+  for _tool in jscpd eslint tsc; do
+    cat > "$TEST_DIR/bin/$_tool" <<'TOOL_EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *--version*) echo "stub 1.0.0" ;;
+esac
+exit 0
+TOOL_EOF
+    chmod +x "$TEST_DIR/bin/$_tool"
+  done
   # Gate 5 is fail-closed per language since #570/#523, so a fixture that reaches
   # Gate 5 without a coverage artefact BLOCKS and Gate 9 never runs:
   #     ❌ BLOCKED - Could not determine Python coverage percentage.
@@ -473,10 +490,23 @@ EOF
   mkdir -p src
   echo '// @no-test-required: architecture fixture' > src/index.ts
 
-  git add .
-  
+  # Stage ONLY the files this case wrote. `git add .` also staged the copied
+  # hook infrastructure (gate-*.sh, lib/, gate-entries/), so Gate 1 ran
+  # shellcheck over all of it, hit pre-existing findings in those copies, and
+  # BLOCKED the commit with "SHELLCHECK ERRORS" before Gate 6 was ever reached.
+  # The case then failed looking for Gate 6's fix instructions in output that
+  # never contained them -- a fixture artefact reported as a missing message.
+  git add package.json src/index.ts
+
   run ./pre-commit
-  
+
+  # The verdict must be about the missing config, not about an unrelated gate.
+  [[ "$output" != *"SHELLCHECK ERRORS"* ]] || {
+    echo "the fixture staged the hook's own scripts and tripped Gate 1:"
+    printf '%s\n' "$output" | grep -E 'SHELLCHECK|Gate 1' | head -4
+    return 1
+  }
+
   # Should show fix instructions when blocking
   [[ "$output" == *"Quick fix"* ]] || [[ "$output" == *"curl"* ]] || [[ "$output" == *"github"* ]] || [[ "$output" == *"minimal config"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
