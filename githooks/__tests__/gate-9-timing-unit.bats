@@ -18,11 +18,54 @@
 # silently return.
 # ============================================================================
 
-PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
+# #798 moved every gate BODY out of pre-commit into gate-entries/. The timing
+# assertions below are about Gate 9's own code, so they must read where that
+# code now lives; searching pre-commit found nothing and every `grep` returned
+# 1, which read as "the units are unpaired" on all 7 cases.
+#
+# GATE_SOURCES lists the files that may hold the body, so a future move only has
+# to update this list; GATE_BODY is resolved by searching them. If NONE of them
+# defines the timing variables the suite FAILS LOUDLY rather than grepping a
+# file that no longer contains the code (the vacuous-grep failure mode).
+GATE_ENTRY="$BATS_TEST_DIRNAME/../gate-entries/gate-9-entry.sh"
+GATE_11_ENTRY="$BATS_TEST_DIRNAME/../gate-entries/gate-11-entry.sh"
+
+resolve_gate_body() {
+  local f
+  for f in "$GATE_ENTRY" "$BATS_TEST_DIRNAME/../pre-commit"; do
+    if [ -f "$f" ] && grep -q 'GATE_9_START=' "$f"; then
+      printf '%s' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
+GATE_BODY="$(resolve_gate_body)" || GATE_BODY=""
+
+# Gate 11 is the sibling whose pairing #462 used as the model. Its timing
+# moved with every other gate body in #798.
+GATE_11_BODY=""
+for _f in "$GATE_11_ENTRY" "$BATS_TEST_DIRNAME/../pre-commit"; do
+  if [ -f "$_f" ] && grep -q 'GATE_11_START=' "$_f"; then GATE_11_BODY="$_f"; break; fi
+done
+unset _f
+
+@test "Issue #462: the Gate 9 body that defines its timing is findable (anti-vacuity)" {
+  # Without this, a moved body turns all 7 assertions below into greps against a
+  # file with none of the code -- which is how this suite went red with a
+  # message about unit pairing that had nothing to do with units.
+  [ -n "$GATE_BODY" ] || {
+    echo "no file defines GATE_9_START= (looked in $GATE_ENTRY and pre-commit)"
+    return 1
+  }
+  [ -f "$GATE_BODY" ]
+  grep -q 'GATE_9_END=' "$GATE_BODY"
+}
 
 @test "Issue #462: Gate 9 END uses the millisecond helper, not 'date +%s'" {
   # Extract the Gate 9 timing block and assert the units match GATE_9_START.
-  run grep -n 'GATE_9_END=' "$PRE_COMMIT"
+  run grep -n 'GATE_9_END=' "$GATE_BODY"
   [ "$status" -eq 0 ]
 
   # The end timestamp must be sourced from the same ms helper as the start.
@@ -32,13 +75,13 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
 }
 
 @test "Issue #462: Gate 9 START is still milliseconds (guard against the reverse fix)" {
-  run grep -n 'GATE_9_START=' "$PRE_COMMIT"
+  run grep -n 'GATE_9_START=' "$GATE_BODY"
   [ "$status" -eq 0 ]
   [[ "$output" == *'gate_start_ms'* ]]
 }
 
 @test "Issue #462: Gate 9 duration is converted from ms to seconds for display" {
-  run grep -n 'GATE_9_DURATION=' "$PRE_COMMIT"
+  run grep -n 'GATE_9_DURATION=' "$GATE_BODY"
   [ "$status" -eq 0 ]
 
   # Display value must be the ms delta divided by 1000.
@@ -77,8 +120,8 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
   # The invariant is *pairing*, not "never use date +%s": Gate 11 legitimately
   # uses `date +%s` for BOTH ends, which is internally consistent.
   local start_unit end_unit
-  start_unit=$(grep -o 'GATE_9_START=.*' "$PRE_COMMIT" | grep -o 'gate_start_ms' | head -n1)
-  end_unit=$(grep -o 'GATE_9_END=.*' "$PRE_COMMIT" | grep -o 'gate_start_ms' | head -n1)
+  start_unit=$(grep -o 'GATE_9_START=.*' "$GATE_BODY" | grep -o 'gate_start_ms' | head -n1)
+  end_unit=$(grep -o 'GATE_9_END=.*' "$GATE_BODY" | grep -o 'gate_start_ms' | head -n1)
 
   echo "start_unit=$start_unit end_unit=$end_unit"
 
@@ -100,8 +143,8 @@ PRE_COMMIT="$BATS_TEST_DIRNAME/../pre-commit"
   #
   # So assert the invariant: both ends resolve through the SAME clock.
   local start_line end_line start_unit end_unit
-  start_line=$(grep -n 'GATE_11_START=' "$PRE_COMMIT" | head -n1)
-  end_line=$(grep -n 'GATE_11_END=' "$PRE_COMMIT" | head -n1)
+  start_line=$(grep -n 'GATE_11_START=' "$GATE_11_BODY" | head -n1)
+  end_line=$(grep -n 'GATE_11_END=' "$GATE_11_BODY" | head -n1)
 
   # Both ends must exist — a missing pair is the bug class, not a pass.
   [ -n "$start_line" ]

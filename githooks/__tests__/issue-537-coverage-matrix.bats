@@ -15,7 +15,25 @@
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   PRE_COMMIT="$REPO_ROOT/githooks/pre-commit"
+  # #798 moved every gate BODY out of pre-commit into githooks/gate-entries/.
+  # `classify_coverage_reason` stayed in the preamble (it is a shared helper),
+  # but the matrix fields (`languagesSource`, `coverageMatrix`) and the Gate 6
+  # reason strings moved with Gate 6's body. A test grepping only pre-commit
+  # found nothing there and reported "the contract is missing" on 12 cases --
+  # indistinguishable from the drift this suite exists to catch.
+  #
+  # HOOK_ALL concatenates the preamble and every entry file, so each assertion
+  # below still proves the string is SHIPPED somewhere in the hook, rather than
+  # re-implementing the contract here.
+  HOOK_ALL="$(cat "$PRE_COMMIT" "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)"
+  [ -n "$HOOK_ALL" ] || { echo "no hook sources to search"; return 1; }
 }
+
+# Assertions over HOOK_ALL. Plain functions rather than `run grep`, because the
+# herestring redirection and bats's `run` do not compose cleanly and every one of
+# these cases only reads the exit status.
+hook_has() { grep -q "$1" <<< "$HOOK_ALL"; }
+hook_count() { grep -c "$1" <<< "$HOOK_ALL"; }
 
 # ── REQ-A: reason -> classification mapping ───────────────────────────────────
 
@@ -61,14 +79,13 @@ setup() {
 # ── REQ-A2: languagesSource ───────────────────────────────────────────────────
 
 @test "quality-status declares languagesSource alongside coverageMatrix" {
-  run grep -q '"languagesSource"' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
-  run grep -q '"coverageMatrix"' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
+  hook_has '"languagesSource"' || { echo "expected hook source to contain: "languagesSource""; return 1; }
+  hook_has '"coverageMatrix"' || { echo "expected hook source to contain: "coverageMatrix""; return 1; }
 }
 
 @test "languagesSource distinguishes override, config, changed_files and none" {
-  eval "$(sed -n '/^resolve_languages_source()/,/^}/p' "$PRE_COMMIT")"
+  # The helper may live in the preamble OR in a gate entry file (#798).
+  eval "$(sed -n '/^resolve_languages_source()/,/^}/p' "$PRE_COMMIT"           "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)"
   [ "$(type -t resolve_languages_source)" = "function" ]
   [ "$(resolve_languages_source "override" "config" "typescript")" = "override" ]
   [ "$(resolve_languages_source "" "config" "typescript")" = "config" ]
@@ -80,22 +97,23 @@ setup() {
 
 @test "Gate 6 sets a reason when archlint has no detector for the language" {
   # The catch-all branch used to only echo. It must now record a reason.
-  run grep -q 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="no_archlint_detector"' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
+  hook_has 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="no_archlint_detector"' || { echo "expected hook source to contain: GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="no_archlint_detector""; return 1; }
 }
 
 @test "Gate 6 keeps the scalar aggregate for the existing JSON field shape" {
   # The legacy field must survive: consumers read gates.gate6_arch_boyscout.
   # Structural check only — the value's correctness is proven by the
   # classification tests above, which execute the real functions.
-  run grep -q 'gate6_arch_boyscout' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
-  run grep -q '"reason": "\${GATE_6_REASON' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
+  hook_has 'gate6_arch_boyscout' || { echo "expected hook source to contain: gate6_arch_boyscout"; return 1; }
+  hook_has '"reason": "\${GATE_6_REASON' || { echo "the report must carry the Gate 6 reason alongside the aggregate"; return 1; }
   # And the scalar must be initialised before the language loops, so a config-
   # missing run cannot inherit a stale value from a previous gate.
-  run bash -c "grep -n 'GATE_6_REASON=\"\"' '$PRE_COMMIT' | sed -n '1p' | cut -d: -f1"
-  [ -n "$output" ]
+  # The scalar may be initialised in the preamble or in Gate 6's body; both are
+  # shipped sources. Search them all rather than only the preamble.
+  grep -q 'GATE_6_REASON=""' <<< "$HOOK_ALL" || {
+    echo 'GATE_6_REASON="" is not initialised anywhere in the hook'
+    return 1
+  }
 }
 
 @test "a language archlint really measured is not labelled tool_missing" {
@@ -107,27 +125,29 @@ setup() {
   [ "$(classify_coverage_reason "" PASS)" = "covered" ]
   # And the ASSIGNMENT must exist exactly once (in the catch-all), never in the
   # typescript case. The mapping table legitimately mentions the token too.
-  run grep -c 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="no_archlint_detector"' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
-  [ "$output" -eq 1 ]
+  local count
+  count=$(hook_count 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="no_archlint_detector"')
+  # Exactly one assignment: the catch-all. A second one in the typescript branch
+  # is the bug this case exists for.
+  [ "$count" -eq 1 ] || {
+    echo "expected exactly 1 no_archlint_detector assignment, found $count"
+    return 1
+  }
 }
 
 # ── REQ-C: matrix key set ─────────────────────────────────────────────────────
 
 @test "coverage matrix is keyed by PROJECT_LANGS and covers gates 3, 4 and 6" {
-  run grep -q 'for _cm_lang in \$PROJECT_LANGS' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
+  hook_has 'for _cm_lang in \$PROJECT_LANGS' || { echo "expected hook source to contain: for _cm_lang in \$PROJECT_LANGS"; return 1; }
   for gate in gate3_complexity gate4_principles gate6_architecture; do
-    run grep -q "$gate" "$PRE_COMMIT"
-    [ "$status" -eq 0 ]
+    hook_has "$gate" || { echo "expected hook source to contain: "$gate""; return 1; }
   done
 }
 
 # ── REQ-E: unsupported language must not block ────────────────────────────────
 
 @test "no-tool languages still SKIP rather than BLOCK" {
-  run grep -q 'SKIPPED - Architecture validation (not configured for \$CURRENT_LANG)' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
+  hook_has 'SKIPPED - Architecture validation (not configured for \$CURRENT_LANG)' || { echo "expected hook source to contain: SKIPPED - Architecture validation (not configured for \$CURRENT_LANG)"; return 1; }
   # And the gate must not exit 1 in that branch.
   eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
   [ "$(classify_coverage_reason no_archlint_detector SKIP)" = "tool_missing" ]
@@ -139,14 +159,14 @@ setup() {
   # must flatten its per-language reasons into a GLOBAL string. Found by
   # running the hook for real: the matrix said tool_missing for typescript
   # because the lookup inside the report saw an empty array.
-  run grep -q 'GATE_6_LANG_REASONS=' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
+  hook_has 'GATE_6_LANG_REASONS=' || { echo "expected hook source to contain: GATE_6_LANG_REASONS="; return 1; }
   # The report must read the flattened string (via the extracted helper),
   # never the gate's function-local assoc array.
-  run grep -q 'GATE_6_REASON_BY_LANG\[\$_cm_lang\]' "$PRE_COMMIT"
-  [ "$status" -ne 0 ]
-  run grep -q 'coverage_g6_reason_for' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
+  if hook_has 'GATE_6_REASON_BY_LANG\[\$_cm_lang\]'; then
+    echo "the report reads the gate's function-local array instead of the flattened string"
+    return 1
+  fi
+  hook_has 'coverage_g6_reason_for' || { echo "expected hook source to contain: coverage_g6_reason_for"; return 1; }
 }
 
 @test "flattened lang=reason pairs parse back to the right language" {
@@ -176,7 +196,7 @@ setup() {
   # pre-commit, not a hand-copied reimplementation (the earlier version of
   # this test was a copy with a vacuous `|| true` that could never fail).
   eval "$(sed -n '/^classify_coverage_reason()/,/^}/p' "$PRE_COMMIT")"
-  eval "$(sed -n '/^coverage_g6_reason_for()/,/^}/p' "$PRE_COMMIT")"
+  eval "$(sed -n '/^coverage_g6_reason_for()/,/^}/p' "$PRE_COMMIT"           "$REPO_ROOT"/githooks/gate-entries/*.sh 2>/dev/null)"
   [ "$(type -t coverage_g6_reason_for)" = "function" ]
 
   GATE_6_STATUS="PASS"
@@ -211,9 +231,13 @@ setup() {
   # added the C# config-missing branches, failing a test whose property was
   # still true. An exact count also stays green if one branch is deleted while
   # another is duplicated, which is the wrong direction entirely.
-  run grep -c 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"' "$PRE_COMMIT"
-  [ "$status" -eq 0 ]
-  [ "$output" -ge 3 ]
+  local arch_reason_count
+  arch_reason_count=$(hook_count 'GATE_6_REASON_BY_LANG\["\$CURRENT_LANG"\]="architecture_not_configured"')
+  # Lower bound, per the comment above: #717 took 3 -> 5.
+  [ "$arch_reason_count" -ge 3 ] || {
+    echo "expected >= 3 architecture_not_configured assignments, found $arch_reason_count"
+    return 1
+  }
   # The C# dimension added in #717 must be among them: without it, a C# commit
   # with no arch-csharp.yaml returns to the "no reason + PASS => covered" path
   # this issue exists to remove.
@@ -232,7 +256,7 @@ setup() {
       next
     }
     END { exit(recorded >= 2 ? 0 : 1) }
-  ' "$PRE_COMMIT"
+  ' "$REPO_ROOT/githooks/gate-entries/gate-6-entry.sh" "$PRE_COMMIT"
   [ "$status" -eq 0 ]
 }
 
@@ -242,7 +266,7 @@ setup() {
   # records a reason. Only the bare catch-all assigns no_archlint_detector; the
   # three config-missing branches assign architecture_not_configured; the two
   # tool-missing paths exit 1 before the matrix is written.
-  assigns=$(grep -c 'GATE_6_REASON_BY_LANG\[' "$PRE_COMMIT")
+  assigns=$(grep -c 'GATE_6_REASON_BY_LANG\[' <<< "$HOOK_ALL")
   # 1 declare/init reference + 5 assignments (catch-all + 3 config + typescript
   # case has none by design)
   [ "$assigns" -ge 5 ]
@@ -257,7 +281,6 @@ setup() {
 
 @test "existing quality-status fields keep their shape" {
   for field in reportVersion generatedAt branch commit overall gates; do
-    run grep -q "\"$field\"" "$PRE_COMMIT"
-    [ "$status" -eq 0 ]
+    hook_has "\"$field\"" || { echo "expected hook source to contain: "\"$field\"""; return 1; }
   done
 }

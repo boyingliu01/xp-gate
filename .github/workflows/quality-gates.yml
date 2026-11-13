@@ -997,6 +997,29 @@ jobs:
             | tar -xz -C /usr/local/bin gitleaks
           gitleaks version
 
+      - name: Install the gate tools the fixtures actually invoke
+        run: |
+          # These suites run the REAL hooks against temp fixtures, so a tool
+          # missing here is not "skipped": the gate takes its fail-closed or
+          # BLOCKED path and the case fails for an environment reason that has
+          # nothing to do with the behaviour under test. Measured on run
+          # 43350447520, gate-5a-block.test.bats: "Gate 5: PASS (coverage: 90%)"
+          # followed by "❌ BLOCKED - archlint not installed" -- Gate 5 passed and
+          # a different gate's missing dependency failed the case.
+          #
+          # Same set as gate-check installs, deliberately: the two jobs assert on
+          # the same hooks, so a tool present in one and absent in the other makes
+          # BATS disagree with the pipeline it is supposed to model.
+          npm install --no-save typescript @types/node eslint jscpd @archlinter/cli
+          # Fail the SETUP, not 11 fixture cases, if this ever stops working.
+          for tool in tsc eslint jscpd archlint; do
+            if ! node_modules/.bin/"$tool" --version >/dev/null 2>&1; then
+              echo "❌ $tool did not install; BATS fixtures would fail on a missing tool"
+              exit 1
+            fi
+          done
+          echo "✅ gate tools present"
+
       - name: Verify the shard plan before running it
         run: |
           # Two ways for a shard to lie about coverage: run nothing, or miss the

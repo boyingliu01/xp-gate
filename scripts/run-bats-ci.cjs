@@ -287,8 +287,19 @@ function runShard(files, jobs) {
   return result.status === 0 ? 0 : 1;
 }
 
-function main(argv) {
-  const opts = { shard: null, jobs: 1, printOnly: false, printShards: false, all: false };
+/**
+ * Parse argv into an options object.
+ *
+ * Split out of main() because the flag loop alone pushed main's cyclomatic
+ * complexity to 27 against a block threshold of 10 -- Gate 3 caught it on CI
+ * with "BLOCK scripts/run-bats-ci.cjs:290 main CCN=27". Each branch here is an
+ * independent decision, which is exactly what the metric is counting; keeping
+ * them in one dispatcher conflated parsing, planning and execution.
+ *
+ * Returns { opts } or { error } -- never throws, so the caller keeps one exit path.
+ */
+function parseArgs(argv) {
+  const opts = { shard: null, jobs: 1, printOnly: false, printShards: false, all: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--shard') opts.shard = argv[++i];
@@ -296,13 +307,87 @@ function main(argv) {
     else if (arg === '--print-only') opts.printOnly = true;
     else if (arg === '--print-shards') opts.printShards = true;
     else if (arg === '--all') opts.all = true;
-    else if (arg === '--help' || arg === '-h') {
-      console.log('usage: node scripts/run-bats-ci.cjs --shard 1/3 [--jobs N] [--print-only]');
-      return 0;
-    } else {
-      console.error(`Unknown argument: ${arg}`);
-      return 1;
-    }
+    else if (arg === '--help' || arg === '-h') opts.help = true;
+    else return { error: `Unknown argument: ${arg}` };
+  }
+  return { opts };
+}
+
+/**
+ * The shard this invocation is responsible for, validated against the whole
+ * suite. Returns { files, index, total, cost } or { error, code }.
+ *
+ * Every rejection here is the same principle from a different angle: something
+ * that did not run must not read as passed (#636 / 6ebbd5a). A starved shard, a
+ * plan that omits a suite or repeats one, and an out-of-range index are all
+ * "this matrix entry verified nothing", and each exits 2 rather than 0.
+ */
+function resolveShard(suites, spec) {
+  let spec_ = null;
+  try {
+    spec_ = parseShard(spec, suites.length);
+  } catch (error) {
+    return { error: error.message, code: 1 };
+  }
+  const { index, total } = spec_;
+  const shards = planShards(suites, total);
+  const mine = shards[index - 1];
+
+  if (mine.files.length === 0) {
+    return {
+      error:
+        `shard ${index}/${total} was assigned zero suites. ` +
+        'The split is starved -- fix --shard/suite count, do not merge a green shard.',
+      code: 2,
+    };
+  }
+
+  const assigned = shards.flatMap((s) => s.files);
+  const missing = suites.filter((f) => !assigned.includes(f));
+  const duped = assigned.filter((f, i) => assigned.indexOf(f) !== i);
+  if (missing.length || duped.length) {
+    return {
+      error:
+        `shard plan is not a partition (missing: ${missing.join(', ') || 'none'})
+` +
+        `   duplicated: ${duped.join(', ') || 'none'}`,
+      code: 2,
+    };
+  }
+
+  return { files: mine.files, index, total, cost: mine.cost };
+}
+
+/** Report the unweighed-suite count. Silence here would hide a partial measurement. */
+function reportUnweighed(suites) {
+  const unweighed = suites.filter((f) => !isWeighed(f));
+  if (!unweighed.length) return;
+  console.log(
+    `ℹ️ ${unweighed.length}/${suites.length} suite(s) have no measured weight and use ${DEFAULT_MS} ms; shard balance is approximate until they are weighed.`,
+  );
+}
+
+function printShards(suites, shardSpec) {
+  const total = shardSpec ? parseShard(shardSpec, suites.length).total : 1;
+  const shards = planShards(suites, total);
+  shards.forEach((s, i) => {
+    console.log(`
+Shard ${i + 1}/${total} — ${s.files.length} file(s), ~${s.cost} ms`);
+    for (const f of s.files) console.log(`  ${f}`);
+  });
+  return 0;
+}
+
+function main(argv) {
+  const parsed = parseArgs(argv);
+  if (parsed.error) {
+    console.error(parsed.error);
+    return 1;
+  }
+  const opts = parsed.opts;
+  if (opts.help) {
+    console.log('usage: node scripts/run-bats-ci.cjs --shard 1/3 [--jobs N] [--print-only]');
+    return 0;
   }
 
   if (!fs.existsSync(BATS_DIR)) {
@@ -316,64 +401,30 @@ function main(argv) {
     return 2;
   }
 
-  const unweighed = suites.filter((f) => !isWeighed(f));
-  if (unweighed.length) {
-    console.log(
-      `ℹ️ ${unweighed.length}/${suites.length} suite(s) have no measured weight and use ${DEFAULT_MS} ms; shard balance is approximate until they are weighed.`,
-    );
-  }
+  reportUnweighed(suites);
 
-  if (opts.printShards) {
-    const total = opts.shard ? parseShard(opts.shard, suites.length).total : 1;
-    const shards = planShards(suites, total);
-    shards.forEach((s, i) => {
-      console.log(`\nShard ${i + 1}/${total} — ${s.files.length} file(s), ~${s.cost} ms`);
-      for (const f of s.files) console.log(`  ${f}`);
-    });
-    return 0;
-  }
-
-  if (opts.all) {
-    return runShard(suites, opts.jobs);
-  }
+  if (opts.printShards) return printShards(suites, opts.shard);
+  if (opts.all) return runShard(suites, opts.jobs);
 
   if (!opts.shard) {
     console.error('Pass --shard <index>/<total>, or --all to run every suite serially.');
     return 1;
   }
 
-  // resolve `--shard 1/3` against the number of suites, then split
-  const { index, total } = parseShard(opts.shard, suites.length);
-  const shards = planShards(suites, total);
-  const mine = shards[index - 1];
-
-  if (mine.files.length === 0) {
-    // Starvation: a matrix entry with no work is a configuration bug, and
-    // reporting it green is how a whole shard of contracts disappears.
-    console.error(
-      `❌ shard ${index}/${total} was assigned zero suites. ` +
-        `The split is starved — fix --shard/suite count, do not merge a green shard.`,
-    );
-    return 2;
-  }
-
-  // Anti-vacuity across shards: the union must be every suite exactly once.
-  const assigned = shards.flatMap((s) => s.files);
-  const missing = suites.filter((f) => !assigned.includes(f));
-  const duped = assigned.filter((f, i) => assigned.indexOf(f) !== i);
-  if (missing.length || duped.length) {
-    console.error(`❌ shard plan is not a partition (missing: ${missing.join(', ') || 'none'})`);
-    console.error(`   duplicated: ${duped.join(', ') || 'none'}`);
-    return 2;
+  const shard = resolveShard(suites, opts.shard);
+  if (shard.error) {
+    console.error(`❌ ${shard.error}`);
+    return shard.code;
   }
 
   if (opts.printOnly) {
-    console.log(`Shard ${index}/${total}: ${mine.files.join(' ')}`);
+    console.log(`Shard ${shard.index}/${shard.total}: ${shard.files.join(' ')}`);
     return 0;
   }
 
-  console.log(`\n=== BATS shard ${index}/${total} (~${mine.cost} ms of measured cost) ===`);
-  return runShard(mine.files, opts.jobs);
+  console.log(`
+=== BATS shard ${shard.index}/${shard.total} (~${shard.cost} ms of measured cost) ===`);
+  return runShard(shard.files, opts.jobs);
 }
 
 if (require.main === module) {
