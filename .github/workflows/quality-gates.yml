@@ -1070,21 +1070,42 @@ jobs:
           # believes is already current. Force the entry points back into place.
           python -m pip install --user --force-reinstall --no-deps semgrep
           # `command -v` is NOT proof a tool works -- executing it is the only
-          # check that separates "installed" from "importable". Verified in the
-          # SAME step that installs, because GITHUB_PATH only takes effect for
-          # LATER steps; anything checked here is a claim about this shell.
-          # ~/.local/bin is already on the runner's default PATH, which is why the
-          # BATS job sees the same interpreter without any export.
+          # check that separates "installed" from "importable".
+          #
+          # AND the check has to run under the conditions the FIXTURES impose, not
+          # the ones this step happens to have. gate-10-semgrepignore.test.bats sets
+          #   HOME="$TEST_DIR/no-home"
+          # so Python stops looking in the real ~/.local/lib/python*/site-packages,
+          # and a `pip install --user` semgrep becomes unimportable again -- while
+          # `semgrep --version` right here still succeeds. That gap is exactly what
+          # kept this red across three attempts: the install step reported success
+          # every time and the suite failed every time, for an environmental reason
+          # no check in this step could see.
+          #
+          # PYTHONPATH pins the user site explicitly, so the interpreter finds the
+          # package regardless of what HOME a fixture decides to use. Exported into
+          # GITHUB_ENV (not just this shell) because the BATS step is a different
+          # process and needs the same pin.
+          USER_SITE="$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null \
+                    || python -c 'import site; print(site.getusersitepackages())')"
+          echo "PYTHONPATH=$USER_SITE${PYTHONPATH:+:$PYTHONPATH}" >> "$GITHUB_ENV"
+          # Verify each tool BOTH normally and with a redirected HOME -- the second
+          # is the one that predicts the fixtures, and the first is what catches a
+          # genuinely missing tool.
           for tool in lizard semgrep pytest; do
-            if ! "$tool" --version >/dev/null 2>&1; then
-              echo "❌ $tool is on PATH but cannot run:"
-              echo "   resolved to: $(command -v "$tool" || echo '<not found>')"
-              echo "   python:      $(command -v python)"
-              "$tool" --version 2>&1 | tail -5
-              echo "   A present-but-broken tool is worse than a missing one: the"
-              echo "   fixtures stop skipping and then fail on its error output."
-              exit 1
-            fi
+            for _home in "" "/tmp/xp-gate-home-probe"; do
+              if ! HOME="${_home:-$HOME}" PYTHONPATH="$USER_SITE" \
+                   "$tool" --version >/dev/null 2>&1; then
+                echo "❌ $tool cannot run (HOME=${_home:-<real>}):"
+                echo "   resolved to: $(command -v "$tool" || echo '<not found>')"
+                echo "   python:      $(command -v python)"
+                HOME="${_home:-$HOME}" PYTHONPATH="$USER_SITE" \
+                  "$tool" --version 2>&1 | tail -5
+                echo "   A present-but-broken tool is worse than a missing one: the"
+                echo "   fixtures stop skipping and then fail on its error output."
+                exit 1
+              fi
+            done
             echo "  ✓ $tool $(command -v "$tool")"
           done
           GOT_LIZARD="$(lizard --version 2>/dev/null | tr -d ' \t\r\n')"
