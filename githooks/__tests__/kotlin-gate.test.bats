@@ -208,7 +208,15 @@ EOF
   git add .
 
   # Run pre-commit and expect it to fail
-  run .git/hooks/pre-commit
+  #
+  # SKIP_VERSION_CHECK=1 because this fixture stages a .kt file and nothing else.
+  # It did not need this until Gate 0 learned that .kt is source (it used to call a
+  # Kotlin-only change "doc-only" and skip the entire rest of the chain), after
+  # which Gate 0 correctly demanded a VERSION bump and blocked before Gate 1 ran.
+  # The subject here is detekt's verdict, not the version rules, so the version
+  # gate is declared out of scope -- the same way gate-5a-block and
+  # gate-cjs-source-detection already do it.
+  run env SKIP_VERSION_CHECK=1 .git/hooks/pre-commit
 
   [ "$status" -ne 0 ]
 
@@ -249,10 +257,16 @@ EOF
   git add .
 
   # Run pre-commit detekt check directly
+  #
+  # detekt is given the DIRECTORY, not the newline-joined `git diff` output.
+  # `--input "$CHANGED_FILES"` put every staged path inside one argument, which
+  # jcommander rejects outright:
+  #   ParameterException: Provided path 'GoodCode.kt\n...'
+  # so this case failed on a malformed command line and reported it as "detekt
+  # found violations". Passing `.` also matches what the adapter itself does.
   run bash -c '
-    CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
     if command -v detekt &> /dev/null; then
-      detekt --input "$CHANGED_FILES" 2>&1 | head -30
+      detekt --input . 2>&1 | head -30
       DETEKT_EXIT=${PIPESTATUS[0]}
       if [ "$DETEKT_EXIT" -ne 0 ]; then
         echo "❌ DETEKT ERRORS. Commit blocked."
