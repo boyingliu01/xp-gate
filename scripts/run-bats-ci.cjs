@@ -268,7 +268,7 @@ function findBatsBin() {
  */
 function hasParallelRunner() {
   for (const tool of ['parallel', 'rush', 'semaphore', 'shlock', 'flock']) {
-    const probe = spawnSync(process.platform === 'win32' ? 'where' : 'command', 
+    const probe = spawnSync(process.platform === 'win32' ? 'where' : 'command',
       process.platform === 'win32' ? [tool] : ['-v', tool],
       { cwd: ROOT, stdio: 'ignore', shell: process.platform !== 'win32' });
     if (probe.status === 0) {

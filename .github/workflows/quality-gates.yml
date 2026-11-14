@@ -827,18 +827,29 @@ jobs:
                   [[ -n "$NEW_FILES" ]] && BOYSCOUT_ARGS+=(--new-files "$NEW_FILES")
                   [[ -n "$MODIFIED_FILES" ]] && BOYSCOUT_ARGS+=(--modified-files "$MODIFIED_FILES")
                   
-                  OUTPUT=$(npx tsx src/principles/boy-scout.ts \
+                  # The `if !` form, NOT `OUTPUT=$(...)` followed by `$?`. Two
+                  # separate defects used to live in the latter:
+                  #  1. `$?` after an assignment reports the assignment's status
+                  #     (always 0), not npx's -- so the branch was unreachable.
+                  #  2. The run is under `set -e`, which killed the step at the
+                  #     assignment when the command failed, before the message
+                  #     below could print. CI then showed only "exit code 1" with
+                  #     no reason at all.
+                  # Measured on run 43581441057: the log went straight from
+                  # "Applying Boy Scout Rule to: ..." to "Process completed with
+                  # exit code 1", and the actual finding (a function 4 lines over
+                  # the limit) could only be obtained by reproducing it locally.
+                  # A gate that refuses must say why.
+                  if ! OUTPUT=$(npx tsx src/principles/boy-scout.ts \
                     "${BOYSCOUT_ARGS[@]}" \
-                    --baseline ".warnings-baseline.json" 2>&1)
-                  BOYSCOUT_STATUS=$?
-                  
-                  if [[ $BOYSCOUT_STATUS -ne 0 ]]; then
+                    --baseline ".warnings-baseline.json" 2>&1); then
                     echo "❌ Boy Scout Rule violations detected:"
                     echo "$OUTPUT"
+                    # Surface the offending files even if the JSON shape changes.
+                    echo "$OUTPUT" | grep -oE '"file": "[^"]+"' | sort -u | sed 's/^/   blocked: /'
                     exit 1
-                  else
-                    echo "✅ Boy Scout Rule enforced successfully"
                   fi
+                  echo "✅ Boy Scout Rule enforced successfully"
                 fi
               fi
             else
