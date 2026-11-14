@@ -875,31 +875,46 @@ async function runGate(gateId, targetPath, opts = {}) {
 
   if (gate.run) {
     console.log(`━━━ Gate ${gateId}: ${gate.name} ━━━`);
-    try {
-      // #589: pass the scope through so a handler that shells out to a fragment
-      // can resolve its file list from the tree under --all. Handlers that ignore
-      // the second argument are unaffected.
-      const result = gate.run(targetPath, opts);
-      if (result && typeof result.then === 'function') {
-        return await result;
-      }
-      // A synchronous handler's verdict MUST be propagated (#563). Gates 3, 7,
-      // 8 and 9 reach runTsGate(), which returns a plain number; reporting a
-      // manufactured 0 for them made `xp-gate check` unable to distinguish a
-      // failing gate from a passing one. Handlers that return nothing at all
-      // (gate 2, whose execFileSync throws on a non-zero exit instead) are
-      // still treated as pass, because their failure signal is the throw below.
-      if (result === GATE_NOT_RUN) return GATE_NOT_RUN;
-      return typeof result === 'number' ? result : 0;
-    } catch (err) {
-      // Covers a synchronous throw AND a rejection from the awaited handler.
-      console.error(` Gate ${gateId} FAILED: ${err.message}`);
-      return 1;
-    }
+    return invokeGateHandler(gateId, gate, targetPath, opts);
   }
 
   console.error(`Gate ${gateId}: ${gate.name} — no execution handler available`);
   return 1;
+}
+
+/**
+ * Call a gate's execution handler and normalise its verdict to a number.
+ *
+ * Extracted from runGate(): that function is a dispatch (unknown gate →
+ * pre-commit-only gate → handler → no handler) and this is the one branch with
+ * real logic in it, so keeping both in one body pushed it past the 50-line limit
+ * the Boy Scout rule enforces on a file it touches.
+ *
+ * The verdict rules, unchanged from the inline version:
+ *   - a promise is awaited (a rejection surfaces in the catch below);
+ *   - GATE_NOT_RUN passes through untouched (#778) so "nothing ran" never
+ *     exits like "ran clean";
+ *   - a sync handler's number is propagated (#563) -- manufacturing 0 for gates
+ *     3/7/8/9 made `xp-gate check` unable to report a failure;
+ *   - a handler that returns nothing counts as pass, because gate 2's failure
+ *     signal is the throw from execFileSync, not a return value.
+ */
+async function invokeGateHandler(gateId, gate, targetPath, opts) {
+  try {
+    // #589: pass the scope through so a handler that shells out to a fragment can
+    // resolve its file list from the tree under --all. Handlers that ignore the
+    // second argument are unaffected.
+    const result = gate.run(targetPath, opts);
+    if (result && typeof result.then === 'function') {
+      return await result;
+    }
+    if (result === GATE_NOT_RUN) return GATE_NOT_RUN;
+    return typeof result === 'number' ? result : 0;
+  } catch (err) {
+    // Covers a synchronous throw AND a rejection from the awaited handler.
+    console.error(` Gate ${gateId} FAILED: ${err.message}`);
+    return 1;
+  }
 }
 
 module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
