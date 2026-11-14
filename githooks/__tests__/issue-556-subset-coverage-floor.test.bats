@@ -50,13 +50,28 @@ HOOK="$REPO_ROOT/githooks/gate-entries/gate-5-entry.sh"
 [tool.coverage.report]
 fail_under = 100
 TOML
+  # A module the test never imports. Without it the fixture sat at exactly 100%
+  # (the only file was the test itself, which pytest executes in full), so
+  # `fail_under = 100` was satisfied and the "floor is in force" premise below
+  # could never be observed. The case then took its `skip "pytest-cov not
+  # installed"` branch on a machine where pytest-cov was installed and working --
+  # a skip standing in for a broken fixture, which is the failure mode this whole
+  # exercise is about.
+  cat > "$work/uncovered.py" <<'PY'
+def never_called():
+    return 1
+PY
   cat > "$work/test_one.py" <<'PY'
 def test_a():
     assert True
 PY
   # A subset run at ~0% coverage must fail when the floor is in force...
+  #
+  # The skip is kept but re-worded: it now means what it says (the FLOOR did not
+  # trigger) rather than naming a tool that may well be present. It still guards
+  # the real precondition -- pytest-cov absent means no --cov option at all.
   run bash -c "cd '$work' && python -m pytest -q --cov=. test_one.py >/dev/null 2>&1; echo exit=\$?"
-  [ "$output" = "exit=1" ] || skip "pytest-cov not installed"
+  [ "$output" = "exit=1" ] || skip "pytest-cov unavailable (the coverage floor did not trigger)"
   # ...and pass when it is explicitly disabled.
   run bash -c "cd '$work' && python -m pytest -q --cov=. --cov-fail-under=0 test_one.py >/dev/null 2>&1; echo exit=\$?"
   [ "$output" = "exit=0" ]

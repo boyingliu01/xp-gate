@@ -26,6 +26,8 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 # python.sh — mypy scope must match the CI type job
 # ============================================================================
 
+source "$BATS_TEST_DIRNAME/helpers/copy-githooks-fixture.bash"
+
 @test "python.sh keeps src/ and scripts/ in the default scope set (#501)" {
   # Post-#513 the invocation may be array-guarded, but both dirs must remain
   # the declared default targets (existence-guarded below).
@@ -44,7 +46,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh skips (exit 0, mypy not invoked) when no declared dirs exist (#513)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub"
   printf '#!/usr/bin/env bash\necho invoked > "%s/mypy.invoked"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
   chmod +x "$sandbox/stub/mypy"
@@ -60,7 +62,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh runs guarded mypy over existing dirs only (#513)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
   printf '#!/usr/bin/env bash\necho "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
@@ -80,7 +82,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh .xp-gate-mypy-scope overrides the default dir probing (#513)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src" "$sandbox/repo/engine"
   printf 'engine\n' > "$sandbox/repo/.xp-gate-mypy-scope"
   echo "x = 1" > "$sandbox/repo/engine/a.py"
@@ -148,7 +150,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh mypy runs PER TARGET, one invocation each (#513 R2: duplicate-module guard)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src" "$sandbox/repo/scripts"
   echo "x = 1" > "$sandbox/repo/src/a.py"
   echo "x = 2" > "$sandbox/repo/scripts/a.py"   # same module name in both dirs
@@ -168,7 +170,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh mypy aggregates failures across per-target runs (#513 R2)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src" "$sandbox/repo/scripts"
   echo "x = 1" > "$sandbox/repo/src/a.py"
   echo "x = 1" > "$sandbox/repo/scripts/b.py"
@@ -186,7 +188,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh skips targets without .py files, not just missing dirs (#513 R2: no-py guard)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src"   # TS-style src/: exists, zero .py
   printf '#!/usr/bin/env bash\necho invoked > "%s/mypy.invoked"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
   chmod +x "$sandbox/stub/mypy"
@@ -203,7 +205,16 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh declares-empty .xp-gate-mypy-scope skips with a distinct WARNING (#513 R2)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  # Copy ONLY what this case sources. `cp -r "$BATS_TEST_DIRNAME/.."` took the
+  # whole githooks tree including __tests__/, which other BATS cases write into
+  # and remove from while this one is copying: run 43404316674 failed here with
+  # "cannot stat .../__tests__/_gate8-inner-test_...sh", a temp file belonging to
+  # another case that vanished mid-copy. The race cannot appear in a single-file
+  # local run; it needs the shards running cases concurrently.
+  mkdir -p "$sandbox/githooks" || return 1
+  cp -R "$BATS_TEST_DIRNAME/../adapters" "$sandbox/githooks/adapters" || return 1
+  [ -f "$BATS_TEST_DIRNAME/../adapter-common.sh" ] \
+    && cp "$BATS_TEST_DIRNAME/../adapter-common.sh" "$sandbox/githooks/adapter-common.sh"
   mkdir -p "$sandbox/stub" "$sandbox/repo"
   printf '# only comments\n\n' > "$sandbox/repo/.xp-gate-mypy-scope"
   printf '#!/usr/bin/env bash\necho invoked > "%s/mypy.invoked"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
@@ -221,7 +232,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh WARNs and skips unusable declared targets, keeps usable ones (#513 R2)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/engine" "$sandbox/repo/ghost"
   printf 'engine\ntypo-dir\nghost\n' > "$sandbox/repo/.xp-gate-mypy-scope"  # ghost: exists, no .py
   echo "x = 1" > "$sandbox/repo/engine/a.py"
@@ -241,7 +252,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh inline comments and whitespace in .xp-gate-mypy-scope are tolerated (#513 R2)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/stub" "$sandbox/repo/engine"
   printf '  engine  # main package\n\n# full-line comment\n' > "$sandbox/repo/.xp-gate-mypy-scope"
   echo "x = 1" > "$sandbox/repo/engine/a.py"
@@ -286,7 +297,7 @@ POWERSHELL_ADAPTER="$BATS_TEST_DIRNAME/../adapters/powershell.sh"
 
 @test "python.sh no-type-surface repo SKIPs even when mypy is not installed (#513 R2)" {
   sandbox="$(mktemp -d)"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   mkdir -p "$sandbox/emptybin" "$sandbox/repo"
   cd "$sandbox/repo" || return 1
   # require_tool must run AFTER target resolution: no surface + no mypy on
