@@ -32,6 +32,8 @@ cat "$BATS_TEST_DIRNAME/../pre-commit" \
 # python_staged_py_files — extraction from mixed CHANGED_FILES
 # ============================================================================
 
+source "$BATS_TEST_DIRNAME/helpers/copy-githooks-fixture.bash"
+
 @test "#534 python_staged_py_files extracts only .py/.pyi from CHANGED_FILES" {
   source "$HELPER"
   export CHANGED_FILES=$'src/a.py\nscripts/b.pyi\nREADME.md\nsrc/c.ts\n.pyconfig\n.venv/x.py'
@@ -131,7 +133,7 @@ cat "$BATS_TEST_DIRNAME/../pre-commit" \
   sandbox="$(mktemp -d)"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   # Record one argv word per line: the assertions below grep for '^check$'
   # and '^src$'. A joined `echo "$@"` would write a single "check src" line
   # that can never match those anchors (Windows-visible latent test bug).
@@ -152,7 +154,7 @@ cat "$BATS_TEST_DIRNAME/../pre-commit" \
   sandbox="$(mktemp -d)"
   mkdir -p "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   # Neither ty nor mypy may be present. Prepending an empty dir is NOT enough:
   # a developer machine's PATH (e.g. %APPDATA%\Python\...\Scripts with mypy.exe)
   # still leaks the real mypy through and turns SKIP into a fallback run.
@@ -172,7 +174,7 @@ cat "$BATS_TEST_DIRNAME/../pre-commit" \
   sandbox="$(mktemp -d)"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   # Only mypy stub on PATH (no ty). XP_GATE_TY=1 but ty absent -> must NOT drop
   # the type gate; it warns and falls back to mypy (R2 arch finding 5).
   printf '#!/usr/bin/env bash\n echo "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
@@ -190,7 +192,7 @@ cat "$BATS_TEST_DIRNAME/../pre-commit" \
   sandbox="$(mktemp -d)"
   mkdir -p "$sandbox/stub" "$sandbox/repo/src"
   echo "x = 1" > "$sandbox/repo/src/a.py"
-  cp -r "$BATS_TEST_DIRNAME/.." "$sandbox/githooks"
+  copy_githooks_fixture "$sandbox/githooks"
   printf '#!/usr/bin/env bash\n echo "$@" >> "%s/mypy.args"\nexit 0\n' "$sandbox" > "$sandbox/stub/mypy"
   chmod +x "$sandbox/stub/mypy"
   cd "$sandbox/repo" || return 1

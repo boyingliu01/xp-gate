@@ -258,6 +258,26 @@ function findBatsBin() {
   return bin;
 }
 
+/**
+ * Can `bats --jobs N` actually parallelize here?
+ *
+ * bats delegates intra-file parallelism to an external helper and aborts the
+ * whole run (not just the parallel part) when none is found. The four names
+ * below are the ones bats 1.x will use. Windows has none of them by default,
+ * which is why this check exists rather than trusting the `--jobs` request.
+ */
+function hasParallelRunner() {
+  for (const tool of ['parallel', 'rush', 'semaphore', 'shlock', 'flock']) {
+    const probe = spawnSync(process.platform === 'win32' ? 'where' : 'command', 
+      process.platform === 'win32' ? [tool] : ['-v', tool],
+      { cwd: ROOT, stdio: 'ignore', shell: process.platform !== 'win32' });
+    if (probe.status === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function runShard(files, jobs) {
   const bin = findBatsBin();
   if (!bin) {
@@ -271,12 +291,31 @@ function runShard(files, jobs) {
   // runner exists; otherwise the shard still runs, serially, which is correct
   // if slower. `--print-output-on-failure` is kept from the original step: it
   // is what made a red build diagnosable (#591).
-  if (jobs > 1) {
-    args.push('--jobs', String(jobs));
+  //
+  // The "runner exists" half of that sentence was documented but never coded:
+  // `--jobs N` was passed on the operator's word alone, so on Windows --
+  // where none of the four (parallel/rush/semaphore/shlock) is installed --
+  // bats aborted the whole shard with
+  //     ERROR: flock/shlock is required for parallelization within files!
+  // and printed no test results at all. Asking for parallelism is a request,
+  // not a guarantee; falling back to serial is the documented behaviour, and
+  // now it is the actual one.
+  const effectiveJobs = jobs > 1 && hasParallelRunner() ? jobs : 1;
+  if (jobs > 1 && effectiveJobs === 1) {
+    console.warn(
+      `⚠️  --jobs ${jobs} ignored: no parallel runner (GNU parallel / rush / ` +
+        `semaphore / shlock) on PATH. Running serially.`
+    );
+  }
+  if (effectiveJobs > 1) {
+    args.push('--jobs', String(effectiveJobs));
   }
   args.push('--print-output-on-failure', ...files);
 
-  console.log(`Running ${files.length} suite(s)${jobs > 1 ? ` with --jobs ${jobs}` : ''}:`);
+  console.log(
+    `Running ${files.length} suite(s)` +
+      `${effectiveJobs > 1 ? ` with --jobs ${effectiveJobs}` : ' serially'}:`
+  );
   for (const f of files) console.log(`  - ${f}`);
 
   const result = spawnSync('bash', args, { cwd: ROOT, stdio: 'inherit' });

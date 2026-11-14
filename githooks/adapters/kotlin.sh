@@ -71,18 +71,23 @@ run_static_analysis() {
     # run 43404316674, where those four lines were the ENTIRE lint output.
     #
     # So judge ktlint by its output with those lines removed.
+    #
+    # The noise filter applies to BOTH exit paths. It used to guard only the
+    # zero-exit branch, on the reasoning that "non-zero means ktlint rejected
+    # something". CI disproved that: ktlint 1.3+ is a Gradle launcher, so when
+    # the Gradle build fails ktlint exits non-zero having found NOTHING. Run
+    # 43404316674: `Gradle compilation failed`, then two JVM WARNING pairs, and
+    # the gate blocked on that -- detekt, installed and working, never ran, and
+    # the assertion on its MagicNumber finding could never be satisfied. A
+    # non-zero exit is only a verdict if some non-noise line survives.
     if [ "$lint_rc" -ne 127 ] && [ "$lint_rc" -ne 126 ] \
        && ! printf '%s\n' "$ktlint_out" | grep -q 'No files matched'; then
-      if [ "$lint_rc" -ne 0 ]; then
-        # Non-zero means ktlint actually rejected something: that is a verdict.
+      if printf '%s\n' "$ktlint_out" \
+           | grep -v -e '^WARNING:' -e '^warning:' -e '^[[:space:]]*$' \
+                  -e '^FAILURE: Build' -e '^[0-9]*: Task failed' \
+                  -e "^Failed to query the value of property" \
+           | grep -q .; then
         linted=1
-      else
-        # Zero exit: only a verdict if real output survives removing JVM noise.
-        if printf '%s\n' "$ktlint_out" \
-             | grep -v -e '^WARNING:' -e '^warning:' -e '^[[:space:]]*$' \
-             | grep -q .; then
-          linted=1
-        fi
       fi
     fi
   fi

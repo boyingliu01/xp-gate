@@ -179,8 +179,23 @@ EOF
 }
 
 @test "AC-008-03: the pre-commit Gate 13 block writes nothing under src/npm-package" {
+  # Gate 13 used to be an inline block in githooks/pre-commit delimited by
+  # "GATE 13" / "GATE 13 END". The type-based refactor moved it into
+  # gate-13-compiler-strictness.sh, so that marker matches nothing on current
+  # HEAD and this case spent its life in `skip "block marker not present yet"`.
+  # A skip that means "the code moved" hides the assertion completely, and the
+  # rule under test -- this gate must not write the src/npm-package mirror, whose
+  # sync belongs to the SHIP phase -- was checked nowhere else: the case above
+  # only greps for the string, it does not check for a write.
+  #
+  # Assert it against the file that actually implements the gate, and keep the
+  # old inline-block check for as long as any copy of that block remains.
+  run grep -n 'src/npm-package' "$GATE"
+  [ "$status" -ne 0 ]
+
   local block
   block=$(sed -n '/GATE 13/,/GATE 13 END\|^fi$/p' "$REPO_ROOT/githooks/pre-commit" 2>/dev/null)
-  [ -n "$block" ] || skip "block marker not present yet"
-  [[ "$block" != *"src/npm-package"* ]]
+  if [ -n "$block" ]; then
+    [[ "$block" != *"src/npm-package"* ]]
+  fi
 }
