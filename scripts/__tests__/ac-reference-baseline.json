@@ -1,5 +1,10 @@
 {
   "files": {
+    "githooks/__tests__/gate-0-staged-env-oversize.test.bats": [
+      "AC-809-01",
+      "AC-809-02",
+      "AC-809-03"
+    ],
     "githooks/__tests__/gate-1-typecheck-command.test.bats": [
       "AC-436-01",
       "AC-436-02",
@@ -45,6 +50,12 @@
       "AC-476-06",
       "AC-476-07",
       "AC-476-08"
+    ],
+    "githooks/__tests__/gate-12-conflict-marker-precision.test.bats": [
+      "AC-808-01",
+      "AC-808-02",
+      "AC-808-03",
+      "AC-808-04"
     ],
     "githooks/__tests__/gate-13-compiler-strictness.test.bats": [
       "AC-001-01",
