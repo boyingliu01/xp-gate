@@ -17,6 +17,20 @@
 # on - there is no copy left in the hook.
 # ============================================================================
 
+# #809: Windows caps one env var at 32767 chars. A large merge's staged list can
+# exceed that; exporting it then makes Windows-native children (pytest+syrupy
+# restoring os.environ) raise ValueError, which Gate 5 misreads as Tests FAILED.
+# XP_STAGED_ACM is only the #640 fork cache and every consumer falls back to
+# `git diff --cached` when it is unset -- so export only when it fits, else drop.
+export_staged_acm_cache() {
+  if [ "${#1}" -le 32767 ]; then
+    XP_STAGED_ACM="$1"
+    export XP_STAGED_ACM
+  else
+    unset XP_STAGED_ACM
+  fi
+}
+
 # ============================================================================
 # Gate 0: Version Consistency Check (Protected Branches)
 # ============================================================================
@@ -88,8 +102,7 @@ has_changelog_change=false
 # A cache that is only warm on some branches is not a cache, it is a branch-wide
 # behaviour difference. Assign it before anything can branch.
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
-XP_STAGED_ACM="$STAGED_FILES"
-export XP_STAGED_ACM
+export_staged_acm_cache "$STAGED_FILES"
 
 if [ "$is_protected" = "true" ]; then
   # Env var bypass: SKIP_VERSION_CHECK=1 skips Gate 0 entirely
