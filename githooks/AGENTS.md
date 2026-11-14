@@ -154,7 +154,7 @@ bash node_modules/bats/bin/bats githooks/__tests__/gate-5a-block.test.bats
 # Run the suite the way CI does -- cost-balanced shards, see
 # docs/plans/2026-11-12-ci-bats-runtime-optimization.md
 node scripts/run-bats-ci.cjs --shard 1/4 --print-only   # what would run
-node scripts/run-bats-ci.cjs --shard 1/4 --jobs 4
+node scripts/run-bats-ci.cjs --shard 1/4                # on Windows: serial (see above)
 
 # Check / repair drift between this directory and the INSTALLED hooks
 xp-gate doctor                # reports hook drift + which copy is in charge
@@ -212,6 +212,37 @@ Rule: an adapter is stale until proven otherwise; `md5sum` both copies and
 compare against a known-good commit before believing a hook-vs-direct-call
 difference. CI is unaffected (fresh checkout, no global copy), which is a useful
 control — **if CI disagrees with local, suspect the local install first.**
+
+### Never probe across environments — run everything on Windows
+
+This repo is developed on Windows and **WSL is not part of the development loop**
+(starting it costs ~12 GB of RAM for nothing, since every tool the gates need is
+installed natively: node, python, lizard, semgrep, pytest, pytest-cov, detekt,
+ktlint, jscpd, archlint, gitleaks, checkov, hadolint, kube-score, tflint, mutmut,
+ruff, mypy, eslint, tsc, stryker).
+
+Run BATS with the repo's own runner, natively:
+
+```bash
+bash node_modules/bats/bin/bats githooks/__tests__/<suite>.test.bats   # iterate
+node scripts/run-bats-ci.cjs --shard 1/4                               # CI-shaped
+```
+
+The WSL round-trip above produced a *false* product-defect diagnosis (see the
+adapter-drift note) because it changed `$HOME`, the interpreter, and the files
+each environment could see — all at once, invisibly. When a probe and the real
+environment differ, you are measuring the difference, not the product.
+
+**Known limit, with a real reason:** `bats --jobs N` needs `flock` or `shlock`,
+and Git for Windows ships neither, so parallel shards cannot run natively. The
+runner detects this and falls back to serial with a warning instead of aborting
+(`hasParallelRunner()` in `scripts/run-bats-ci.cjs`). Serial is fine for a single
+suite; the full CI-shaped suite is what GitHub Actions is for.
+
+Two real WSL dependencies remain, and neither is on the daily path: Gate M's
+`mutmut` on native Windows (#410 — `wsl mutmut` is one branch of its probe) and
+`lib/native-path.sh` path translation. Leave them alone; do not reintroduce WSL
+as a general-purpose shell.
 
 ## NOTES
 - See repo root `AGENTS.md` → "Known Drift" for the canonical list of doc-vs-reality gaps (gate count, C-adapter claim, etc).
