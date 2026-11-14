@@ -220,7 +220,7 @@ EOF
   [[ "$output" == *"architecture"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
 
-@test "Python project requires deply tool" {
+@test "Python project runs Gate 9 even when no architecture tool is installed" {
   cat > requirements.txt << 'EOF'
 ruff>=0.1.0
 EOF
@@ -240,12 +240,24 @@ EOF
   # The hook only consults `coverage report` when a .coverage database is present
   # (coverage-total.sh), so the stub needs this marker to be reached at all.
   echo "stub" > .coverage
-  
+
   git add .
-  
+
   run env "PATH=$TEST_DIR/bin:$PATH" ./pre-commit
-  
-  [[ "$output" == *"deply"* ]] || [[ "$output" == *"Deply"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
+
+  # This case used to be named "Python project requires deply tool" and assert
+  # that the output contained "deply" OR "Architecture" OR "Gate 9" OR
+  # "ENVIRONMENT ERROR" -- with `||` between five substring checks, one of which
+  # ("Gate 9") appears in every single run. It could not fail, so it pinned
+  # nothing. It also named a tool the product never calls: `deply` exists on this
+  # machine but appears in zero .ts/.js/.sh/.json files outside this test, and
+  # Gate 6/9 have used archlint since the architecture work moved there.
+  #
+  # What actually matters here is the degraded path: with NO architecture tool
+  # available, Gate 9 must still report a verdict for the language rather than
+  # vanishing from the run. Assert the gate was reached and did not block.
+  [[ "$output" == *"Gate 9"* ]]
+  [[ "$output" != *"ENVIRONMENT ERROR"* ]]
 }
 
 @test "Go project architecture test via goarchtest" {
@@ -389,23 +401,34 @@ EOF
   [[ "$output" == *"version"* ]] || [[ "$output" == *"2.0"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"PASSED"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
 }
 
-@test "Version check for deply - minimum 0.5.0" {
-  if ! command -v deply &> /dev/null; then
-    skip "deply not installed"
-  fi
-  
+@test "Version consistency is checked for a Python project without a package.json" {
+  # This case was "Version check for deply - minimum 0.5.0": it skipped unless a
+  # `deply` binary was on PATH, and then asserted one of six substrings, including
+  # "Gate 9" and "PASSED" which appear in almost any run. `deply` is referenced by
+  # no shipped code (it exists on this machine only), so the case guarded a tool
+  # the product never calls, and its `||` chain could not fail either way.
+  #
+  # The capability actually worth pinning is the one the name was reaching for:
+  # a project with a requirements.txt and NO package.json must still get a version
+  # verdict instead of the gate crashing or silently disappearing. Gate 0 owns
+  # that check; assert it reaches a verdict.
   cat > requirements.txt << 'EOF'
 ruff>=0.1.0
 EOF
 
   mkdir -p src/domain
   touch src/domain/entity.py
-  
+
   git add .
-  
+
   run ./pre-commit
-  
-  [[ "$output" == *"version"* ]] || [[ "$output" == *"0.5"* ]] || [[ "$output" == *"Architecture"* ]] || [[ "$output" == *"Gate 9"* ]] || [[ "$output" == *"PASSED"* ]] || [[ "$output" == *"ENVIRONMENT ERROR"* ]]
+
+  # Asserted on the exact wording Gate 0 prints, taken from a real run rather
+  # than guessed ("VERSION CONSISTENCY CHECK" was my guess and does not exist;
+  # the hook prints "Gate 0: Version Consistency Check"). Guessing the string is
+  # what produced the original five-way `||` chain.
+  [[ "$output" == *"Gate 0: Version Consistency Check"* ]]
+  [[ "$output" != *"ENVIRONMENT ERROR"* ]]
 }
 
 @test "Baseline mode not enabled by default for new projects" {
