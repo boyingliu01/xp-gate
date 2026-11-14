@@ -87,6 +87,14 @@ githooks/shell.sh
 githooks/swift.sh
 githooks/typescript.sh
 githooks/adapters/gate-*.sh
+!githooks/adapters/gate-3.sh
+!githooks/adapters/gate-4.sh
+!githooks/adapters/gate-6-layers.sh
+!githooks/adapters/gate-7.sh
+!githooks/adapters/gate-8.sh
+!githooks/adapters/gate-10.sh
+!githooks/adapters/gate-12-file-hygiene.sh
+!githooks/adapters/gate-13-compiler-strictness.sh
 opencode.json
 
 # IDEs

@@ -1,0 +1,478 @@
+# shellcheck shell=bash
+# ============================================================================
+# GATE 10: Semgrep SAST Security Scan
+# Detects security vulnerabilities (SQL injection, XSS, etc.) in staged files
+# Tool: semgrep -- https://semgrep.dev
+# ============================================================================
+
+ 2>&1 echo ""
+ 2>&1 echo "→ Gate 10: Semgrep SAST Security Scan..."
+GATE_10_START=$(gate_start_ms)
+
+GATE_10_STATUS=""
+# #536: audit trail for "did this commit actually get scanned?". The report
+# surfaces reason + scanned_files so a non-scan never reads as a clean PASS.
+#
+# GATE_10_REASON and GATE_10_SCANNED_FILES are consumed by the sourcing parent
+# (pre-commit builds its report JSON from them after `source gate-10.sh`), not
+# inside this file. The linter checks one file at a time and cannot see the
+# consumer, so each assignment is flagged SC2034 "appears unused" -- which
+# blocks Gate 1 for any repo that vendors this adapter, because that repo's own
+# lint pass runs over the vendored copy (#548). Each assignment carries a
+# scoped directive with that reason stated at the site.
+#
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
+GATE_10_REASON=""
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
+GATE_10_SCANNED_FILES=0
+
+# ---------------------------------------------------------------------------
+# Which path runs semgrep: the sastd daemon (fast) or a direct invocation.
+#
+# A direct `semgrep scan` costs ~9s on Windows, and the bill is almost entirely
+# Python import tax: `--version` alone takes 4-5s because semgrep's CLI eagerly
+# imports commands.ci -> app.auth -> telemetry -> opentelemetry -> requests ->
+# urllib3. Paying that once per machine in a resident process is the point of
+# sastd (measured: a second in-process import costs 0ms).
+#
+# GATE_10_SEMGREP_PATH records what actually happened, so a reader of the report
+# can tell a fast run from a degraded one without timing it.
+#
+# The daemon exists but is NOT the default. It is opt-in via XP_GATE_SASTD=on,
+# and `auto` resolves to direct on purpose -- see the `auto` case below, which
+# records the measurement that made the default a direct scan. Everything here is
+# a switch plus a report field; with the default settings the gate behaves exactly
+# as it did before the daemon was written.
+# ---------------------------------------------------------------------------
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
+GATE_10_SEMGREP_PATH="direct"
+# Set to 1 when sastd was requested but unusable, so "we fell back" is a fact in
+# the report rather than an inference from a missing log line. Never set when the
+# daemon was not requested at all -- a plain direct run is not a degraded run.
+# Consumed by the sourcing parent (pre-commit report JSON), not here.
+# shellcheck disable=SC2034
+GATE_10_SASTD_DEGRADED=0
+
+# shellcheck disable=SC2034
+case "${XP_GATE_SASTD:-direct}" in
+  off|direct|0|false|"")
+    # Explicitly or implicitly off: the direct path. Not a degradation.
+    GATE_10_SEMGREP_PATH="direct"
+    ;;
+  auto)
+    # `auto` deliberately does NOT select the daemon. It was meant to mean "use one
+    # if available", but measurement killed that default: with Gate 10's real
+    # ruleset (p/security-audit, 225 rules) the daemon saves ~20% in steady state
+    # (6.6-6.9s -> 5.2-5.4s) and is SLOWER end to end (10.5s -> 14.6s), because each
+    # gate run is a fresh process that pays the daemon's own startup without
+    # amortising it over a second call. Making that the automatic choice would tax
+    # every user for a benefit most of them never see.
+    #
+    # `auto` therefore behaves as "off" but says so through the `path` field, and it
+    # never sets degraded -- a plain direct run is not a degraded run.
+    GATE_10_SEMGREP_PATH="direct"
+    ;;
+  on|1|true)
+    # Opt-in only. The user asserted a daemon SHOULD be here; whether one actually
+    # answers can only be known after the probe, so the degrade flag is set there.
+    # Setting it at parse time would report a failure before anything has failed.
+    # This is the branch that must never become "skip the scan and call it a pass".
+    GATE_10_SEMGREP_PATH="daemon"
+    ;;
+  *)
+    # An unrecognised value is a configuration mistake, not a reason to scan
+    # less. Use the direct path and name the value so it can be fixed.
+    GATE_10_SEMGREP_PATH="direct"
+    GATE_10_SASTD_DEGRADED=1
+    echo "     ⚠️  XP_GATE_SASTD='${XP_GATE_SASTD}' is not recognised (expected off|auto|on) — using direct semgrep" >&2
+    ;;
+esac
+
+# Semgrep availability check
+SEMGREP_CMD=""
+if command -v semgrep >/dev/null 2>&1; then
+  SEMGREP_CMD="semgrep"
+elif [ -f "$HOME/.local/bin/semgrep" ]; then
+  SEMGREP_CMD="$HOME/.local/bin/semgrep"
+else
+  # #572: Windows pip --user installs land in
+  # %APPDATA%\Python\<ver>\Scripts\semgrep.exe, which git-bash does NOT inherit
+  # on PATH -- so a working, installed semgrep read as "not installed" and this
+  # SAST gate degraded to WARN on the platform the project is developed on.
+  # The glob is expanded by the shell (one candidate per Python version) and
+  # probed by EXIT CODE, never by parsing `semgrep --version` output: a broken
+  # install can still print a plausible version string, and the probe must
+  # distinguish "runnable" from "present".
+  for candidate in "$HOME"/AppData/Roaming/Python/*/Scripts/semgrep.exe; do
+    [ -f "$candidate" ] || continue
+    if "$candidate" --version >/dev/null 2>&1; then
+      SEMGREP_CMD="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$SEMGREP_CMD" ]; then
+  echo "     ⚠️  WARN - semgrep not installed — SAST scanning unavailable"
+  echo "     Install: brew install semgrep (macOS) | pip install semgrep (Linux) | pip install semgrep (Windows)"
+  echo "     Pre-cache rules: semgrep --config=p/security-audit"
+  echo "     Gate 10: SAST Security (WARN, semgrep not installed)"
+  GATE_10_STATUS="WARN"
+  # Consumed by the sourcing parent (pre-commit report JSON), not here.
+  # shellcheck disable=SC2034
+  GATE_10_REASON="tool_not_installed"
+else
+  # Get staged files filtered to Semgrep-supported languages.
+  # #547 finding 3: ps1|psm1 were missing, so a PowerShell-only commit never
+  # reached semgrep even when Gate 10 ran -- the SAST gate was simply absent
+  # for that language.
+  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift|ps1|psm1)$' || true)
+
+  if [ -z "$SEMGREP_FILES" ]; then
+    echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"
+    GATE_10_STATUS="SKIP"
+    # Consumed by the sourcing parent (pre-commit report JSON), not here.
+    # shellcheck disable=SC2034
+    GATE_10_REASON="no_supported_files"
+  else
+    # One path per line into an array. Quoting the newline-joined list would hand
+    # semgrep ONE argument containing newlines -> "Invalid scanning root" once
+    # >=2 files are staged (#490). Same defect class as the Gate 4 --files fix
+    # (#457): an array is the only form that keeps spaces intact AND splits files.
+    #
+    # Each element gets a ./ prefix: a tracked path may legitimately start with
+    # '-' (`git add -- ./-o.ts`), and bare in argv that element reads as an option
+    # and rewrites the scan it was meant to constrain. ./ is a path to every
+    # argument parser.
+    #
+    # The unquoted heredoc below expands $SEMGREP_FILES once, then feeds literal
+    # lines to `read`; bash never rescans the result for separators. Its correct
+    # reading rests on one property of the producer above, not of the loop:
+    # `git diff --cached --name-only` terminates paths with LF and quotes control
+    # by AC-490-04.
+    #
+    # #543: semgrep 1.171 ignores .semgrepignore ENTIRELY when files are passed
+    # as explicit targets (measured: file target -> an ignored finding survives
+    # every suppression form — ignore patterns, --exclude, --exclude-rule,
+    # --project-root; directory target + --include -> the ignore file is honored,
+    # proven fail-closed by removing it and watching the findings return). The
+    # gate therefore passes each staged file's DIRECTORY as a target plus one
+    # --include per staged basename. Coverage stays exact for the staged set
+    # (verified: scanned == staged); the only widening is same-basename siblings
+    # outside the staged set, which scan too — scanning MORE is the safe side.
+    SEMGREP_ARGS=()
+    SEMGREP_FILE_COUNT=0
+    SEMGREP_DIRS_SEEN=$'\n'
+    while IFS= read -r _semgrep_file; do
+      [ -n "$_semgrep_file" ] || continue
+      SEMGREP_FILE_COUNT=$((SEMGREP_FILE_COUNT + 1))
+      SEMGREP_ARGS+=("--include=${_semgrep_file##*/}")
+      # A repo-root file has no slash at all, so "%/*" returns it unchanged and
+      # the old comment's assumption (`"./x.ts" strips to "./"`) never held:
+      # the target became the FILE path dressed as a directory ("./x.ts").
+      # Strip only when a slash is present; otherwise the target is the repo
+      # root, spelled ".". Scanning "." widens the scan to the whole tree, which
+      # is the safe side (see the note above) and is what a root-level staged
+      # file requires in order to be analysed at all.
+      case "$_semgrep_file" in
+        */*) _semgrep_dir="./${_semgrep_file%/*}" ;;
+        *)   _semgrep_dir="." ;;
+      esac
+      # #558: dedup must match WHOLE lines. The previous `case "$SEEN" in
+      # *"$_semgrep_dir"*)` was an unanchored substring test: once
+      # ./fastdl/tests was recorded, the parent ./fastdl matched it and was
+      # never added as a target, so a staged fastdl/a.py contributed an
+      # --include= with no directory to scan it in. Nothing errored and nothing
+      # was reported -- the file was simply not analysed, which for a security
+      # gate is the worst outcome: a silent net loss that looks like a pass.
+      # Sibling prefixes (src/api vs src/app) collapsed the same way.
+      case "$SEMGREP_DIRS_SEEN" in
+        *$'\n'"$_semgrep_dir"$'\n'*) : ;;
+        *) SEMGREP_ARGS+=("$_semgrep_dir"); SEMGREP_DIRS_SEEN="$SEMGREP_DIRS_SEEN$_semgrep_dir"$'\n' ;;
+      esac
+    done <<EOF
+$SEMGREP_FILES
+EOF
+
+    # The verdict is parsed from the JSON with node (see below), so node is a
+    # hard dependency of this gate — check it BEFORE spending a semgrep run
+    # (#518 R2): without it we would silently SKIP every finding as
+    # "unparseable" and lose the whole security net on minimal CI images.
+    if ! command -v node >/dev/null 2>&1; then
+      echo "     ⚠️  WARN - node is not installed — Gate 10 needs it to parse semgrep's JSON verdict"
+      echo "     Install node (https://nodejs.org); without it SAST findings cannot be classified"
+      echo "     ⏭️  SKIPPED - SAST (node not installed)"
+      GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
+      GATE_10_REASON="tool_not_installed"
+    else
+
+    # Run semgrep with JSON output. stdout and stderr are captured SEPARATELY:
+    # --json writes findings to stdout, progress/summary lines to stderr, and the
+    # old `2>&1` merge poisoned the very JSON the verdict now depends on (#518).
+    # SEMGREP_OUTPUT keeps its name and role — what the tool said, printed on the
+    # SKIP path (AC-475-04).
+    #
+    # #518: the exit code does NOT carry the verdict. semgrep exits 0 even with
+    # ERROR-severity findings, and its exit-code semantics have drifted across
+    # versions and platforms (upstream currently reports findings WITH --error
+    # as exit 1 and failures as 2, but that mapping is not something a gate
+    # should bet on). The JSON carries what the exit code never could —
+    # per-severity counts — so the verdict is read from the JSON and the exit
+    # code is demoted to "did the tool itself run". --error stays OFF: it would
+    # add nothing the JSON does not already provide, and keeping it off leaves
+    # failure exit codes unambiguous for the #475 diagnostics path.
+    # #559: bound the run. Without a timeout, a wedged semgrep blocks the
+    # invocation for as long as its process lives; the fail-closed verdict logic
+    # below is correct but unreachable, so the hook hangs instead of judging.
+    # A gate that can wedge an interactive `git commit` gets bypassed with
+    # --no-verify, which is worse than any verdict it could have produced.
+    # `-k` after the primary signal: pysemgrep spinning in a syscall ignores
+    # SIGTERM, and the shipped 0.29 code used the same `-k 10` shape.
+    # #717: p/security-audit carries NO C# rules. Measured on a .cs file with
+    # a textbook SQL injection (string-concatenated SqlCommand) plus a
+    # Process.Start command injection: p/security-audit 0 findings, p/csharp 1
+    # ERROR (csharp-sqli). Line 69 has listed `cs` in the filter all along, so
+    # .cs was accepted and then scanned by a ruleset that cannot see C# -- the
+    # identical "filter looks like coverage" defect this issue removed from
+    # Gate 4. p/csharp is loaded IN ADDITION so the security-audit rules still
+    # cover the other languages in a mixed commit.
+    SEMGREP_RULES=(--config=p/security-audit)
+    if printf '%s
+' "$SEMGREP_FILES" | grep -qE ".cs$"; then
+      SEMGREP_RULES+=(--config=p/csharp)
+    fi
+    SEMGREP_TIMEOUT_S="${XP_GATE_SEMGREP_TIMEOUT:-180}"
+    SEMGREP_TIMED_OUT=false
+    SEMGREP_STDOUT_FILE=$(mktemp)
+    SEMGREP_EXIT=0
+    SEMGREP_OUTPUT=""
+
+    # Daemon path (E3). One long-lived semgrep process, so its ~2.5s import tax is
+    # paid once per machine instead of once per gate run: direct 3.8-4.0s vs daemon
+    # hot 2.1-2.3s measured on this repo.
+    #
+    # A SWITCHED path, never a replacement: every failure below falls through to
+    # the direct scan. The daemon may make this gate SLOWER; it must never make it
+    # greener (#518/#559).
+    if [ "$GATE_10_SEMGREP_PATH" = "daemon" ] && command -v node >/dev/null 2>&1; then
+      # The protocol carries exactly ONE config. Counting rather than overwriting
+      # matters: the previous loop kept only the last --config, so a repo with two
+      # would have been scanned with one and reported on as if fully checked.
+      rules_for_daemon=""
+      config_count=0
+      for _arg in "${SEMGREP_RULES[@]}"; do
+        case "$_arg" in
+          --config=*)
+            rules_for_daemon="${_arg#--config=}"
+            config_count=$((config_count + 1))
+            ;;
+        esac
+      done
+      # Anything the protocol cannot express exactly is left to the direct path
+      # rather than approximated:
+      #  - more than one config (nothing would report the dropped one);
+      #  - p/csharp (Gate 10 adds it for C# repos);
+      #  - "auto" (semgrep's own rule selection, not a spec we can pass through);
+      #  - anything with a comma, which is semgrep's multi-config shorthand;
+      #  - a remote URL, which the daemon would resolve against its own cwd and
+      #    registry cache instead of the one the CLI would have used.
+      if [ "$config_count" -ne 1 ]; then
+        rules_for_daemon=""
+      fi
+      case "$rules_for_daemon" in
+        *p/csharp*|*","*|*"://"*|auto|"") rules_for_daemon="" ;;
+      esac
+      if [ -n "$rules_for_daemon" ]; then
+        daemon_roots=$(printf '%s\n' "${SEMGREP_ARGS[@]}" | grep -v '^--include=' || true)
+        # ARGV TRAP: under `node -e` there is NO script path in argv, so the first
+        # user argument is argv[1]. Indexing it as argv[2] passes undefined as the
+        # config, semgrep raises a python TypeError, and the gate "degrades" for a
+        # reason unrelated to the daemon -- which is how this looked like a flaky
+        # integration instead of an off-by-one.
+        # shellcheck disable=SC2086  # one argv entry per scanning root: word splitting is intended
+        if DAEMON_JSON=$(XP_GATE_SASTD=on node -e 'const NL = String.fromCharCode(10);
+const { requestScan } = require(process.argv[1]);
+requestScan({ config: process.argv[2], roots: process.argv.slice(3) }).then((r) => {
+  if (!r.ok) { process.stderr.write("SASTD_UNAVAILABLE: " + r.error + NL); process.exit(3); }
+  process.stdout.write(JSON.stringify(r.payload));
+}).catch((e) => { process.stderr.write("SASTD_UNAVAILABLE: " + e.message + NL); process.exit(3); });' "$(cd "$GATE_DIR/../src/npm-package/lib" 2>/dev/null && pwd -W)/sastd-client.js" "$rules_for_daemon" $daemon_roots 2>"$SEMGREP_STDOUT_FILE.stderr"); then
+          printf '%s' "$DAEMON_JSON" > "$SEMGREP_STDOUT_FILE"
+          SEMGREP_OUTPUT=$(cat "$SEMGREP_STDOUT_FILE.stderr" 2>/dev/null || true)
+          rm -f "$SEMGREP_STDOUT_FILE.stderr"
+        else
+          SEMGREP_EXIT=$?
+          rm -f "$SEMGREP_STDOUT_FILE.stderr"
+          : > "$SEMGREP_STDOUT_FILE"
+          case "${XP_GATE_SASTD:-direct}" in
+            on|1|true)
+              # Consumed by the sourcing parent (pre-commit report JSON), not here.
+              # shellcheck disable=SC2034
+              GATE_10_SASTD_DEGRADED=1
+              echo "     ⚠️  sastd requested but unavailable — using direct semgrep (degraded)" >&2
+              ;;
+            *)
+              echo "     ℹ️  sastd unavailable — using direct semgrep" >&2
+              ;;
+          esac
+          GATE_10_SEMGREP_PATH="direct"
+        fi
+      else
+        GATE_10_SEMGREP_PATH="direct"
+      fi
+    fi
+
+    if [ "$GATE_10_SEMGREP_PATH" = "direct" ] && command -v timeout >/dev/null 2>&1; then
+      SEMGREP_OUTPUT=$(timeout -k 10 "$SEMGREP_TIMEOUT_S" \
+        "$SEMGREP_CMD" scan "${SEMGREP_RULES[@]}" --json --disable-version-check \
+        "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
+      SEMGREP_EXIT=$?
+      # 124 = timeout's own "I gave up" code. 137 = 128+SIGKILL, which is what
+      # `timeout -k` returns when the child ignored SIGTERM and had to be
+      # killed -- measured with a semgrep stand-in that traps TERM. Both mean
+      # "bounded, no verdict", so both must be reported as a timeout; checking
+      # only 124 told the user their semgrep was unparseable when in fact the
+      # scan had been cut off.
+      case "$SEMGREP_EXIT" in
+        124|137) SEMGREP_TIMED_OUT=true ;;
+      esac
+    elif [ "$GATE_10_SEMGREP_PATH" = "direct" ]; then
+      # No `timeout` on this platform (stock macOS). Say so: an unbounded run
+      # nobody mentioned is exactly how #559 stayed invisible for a whole
+      # release. The scan still runs -- refusing to scan would be a worse
+      # trade -- but the unbounded window is now stated.
+      echo "     ⚠️  'timeout' command not available — semgrep runs UNBOUNDED (install coreutils or set up gtimeout)"
+      SEMGREP_OUTPUT=$("$SEMGREP_CMD" scan "${SEMGREP_RULES[@]}" --json --disable-version-check \
+        "${SEMGREP_ARGS[@]}" 2>&1 >"$SEMGREP_STDOUT_FILE")
+      SEMGREP_EXIT=$?
+    fi
+
+    # One node pass over the JSON: first line = verdict counts, remaining lines =
+    # finding details. The severity vocabulary is the UNION of the two scales
+    # (#518): semgrep's own ERROR is its most severe tier (it maps to the old
+    # CRITICAL/HIGH → BLOCK intent), its WARNING/INFO align with the old
+    # MEDIUM/LOW → warnings-only tier. Anything OUTSIDE both lists (missing,
+    # empty, or a future/new tier) counts as BLOCKING — a security gate must
+    # fail closed on severities it does not recognize (#518 R2). Parsing
+    # failure degrades to PARSE=FAIL — a fail-closed SKIP below, never a PASS.
+    SEMGREP_VERDICT=$(node -e '
+let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{
+let data;try{data=JSON.parse(d);}catch(e){console.log("PARSE=FAIL RESULTS=0 ERRORS=0 BLOCKING=0 WARNINGS=0");return;}
+const results=data.results||[];const errors=data.errors||[];
+const sev=r=>((r.extra&&r.extra.severity)||"").toUpperCase();
+const WARNV=["WARNING","INFO","MEDIUM","LOW"];
+let b=0,w=0;results.forEach(r=>{if(WARNV.indexOf(sev(r))>=0)w++;else b++;});
+console.log("PARSE=OK RESULTS="+results.length+" ERRORS="+errors.length+" BLOCKING="+b+" WARNINGS="+w);
+results.slice(0,5).forEach(r=>{const extra=r.extra||{};const s=sev(r)||"UNKNOWN";
+console.log("  ["+s+"] "+(r.check_id||"unknown"));
+console.log("  "+(r.path||"unknown")+":"+((r.start&&r.start.line)||"?")+" → "+(extra.message||"").slice(0,80));
+console.log("");});
+});' < "$SEMGREP_STDOUT_FILE") || SEMGREP_VERDICT="PARSE=FAIL RESULTS=0 ERRORS=0 BLOCKING=0 WARNINGS=0"
+
+    PARSE_LINE=$(printf '%s\n' "$SEMGREP_VERDICT" | sed -n '1p')
+    FINDING_DETAILS=$(printf '%s\n' "$SEMGREP_VERDICT" | sed -n '2,$p')
+    V_PARSE=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/^PARSE=\([A-Z]*\) .*/\1/p')
+    V_RESULTS=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/.* RESULTS=\([0-9]*\) .*/\1/p')
+    V_ERRORS=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/.* ERRORS=\([0-9]*\) .*/\1/p')
+    V_BLOCKING=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/.* BLOCKING=\([0-9]*\) .*/\1/p')
+    V_WARNINGS=$(printf '%s\n' "$PARSE_LINE" | sed -n 's/.* WARNINGS=\([0-9]*\)$/\1/p')
+    # Keep the raw stdout tail for the unparseable branch's diagnostics BEFORE
+    # the temp file goes away (#518 R2: stderr alone often says nothing there).
+    SEMGREP_STDOUT_TAIL=$(tail -5 "$SEMGREP_STDOUT_FILE" 2>/dev/null)
+    rm -f "$SEMGREP_STDOUT_FILE"
+
+    # Fail closed: an unparseable payload OR an OK parse with any missing count
+    # field (verdict-line format drift) must SKIP, never silently degrade to
+    # PASS (#518).
+    if [ "$V_PARSE" != "OK" ] || [ -z "$V_RESULTS" ] || [ -z "$V_ERRORS" ] || [ -z "$V_BLOCKING" ] || [ -z "$V_WARNINGS" ]; then
+      # Unparseable output: nothing the exit code claims can be trusted (#518).
+      # Fail closed — SKIP with diagnostics, never a PASS.
+      #
+      # #559: name a timeout as a timeout. The generic "unparseable" message
+      # would be true but useless here -- it points at the JSON parser when the
+      # real problem is that the scan was cut off. Same verdict (SKIP), but a
+      # diagnosis the reader can act on.
+      if [ "$SEMGREP_TIMED_OUT" = true ]; then
+        echo "     ⏱️  semgrep exceeded ${SEMGREP_TIMEOUT_S}s and was killed — no verdict is possible"
+        echo "     This is NOT a finding and NOT a clean scan. Raise XP_GATE_SEMGREP_TIMEOUT"
+        echo "     if the repo legitimately takes longer; investigate if semgrep itself is wedged."
+      else
+        echo "     ⚠️  semgrep output unparseable or verdict fields missing (exit code ${SEMGREP_EXIT}) — cannot determine verdict"
+      fi
+      if [ -n "$SEMGREP_OUTPUT" ]; then
+        echo "     ── what semgrep reported on stderr ──"
+        printf '%s\n' "$SEMGREP_OUTPUT" | tail -10 | sed 's/^/     /'
+      fi
+      if [ -n "$SEMGREP_STDOUT_TAIL" ]; then
+        echo "     ── what semgrep wrote to stdout (tail) ──"
+        printf '%s\n' "$SEMGREP_STDOUT_TAIL" | sed 's/^/     /'
+      fi
+      if [ "$SEMGREP_TIMED_OUT" = true ]; then
+        echo "     ⏭️  SKIPPED - SAST (semgrep timed out after ${SEMGREP_TIMEOUT_S}s)"
+        GATE_10_STATUS="SKIP"
+        # Consumed by the sourcing parent (pre-commit report JSON), not here.
+        # shellcheck disable=SC2034
+        GATE_10_REASON="semgrep_timeout"
+      else
+        echo "     ⏭️  SKIPPED - SAST (semgrep output unparseable)"
+        GATE_10_STATUS="SKIP"
+        # Consumed by the sourcing parent (pre-commit report JSON), not here.
+        # shellcheck disable=SC2034
+        GATE_10_REASON="output_unparseable"
+      fi
+    elif [ "$V_RESULTS" -eq 0 ] && { [ "$V_ERRORS" -gt 0 ] || [ "$SEMGREP_EXIT" -ne 0 ]; }; then
+      # Nothing was scanned to a verdict: semgrep either failed outright
+      # (nonzero exit) or completed but reported scan errors for every input
+      # (#518 R2: exit 0 + results:[] + errors:[{...}] used to fall through to
+      # PASS). An operational failure must neither block nor claim a pass
+      # (#475 kept).
+      echo "     ⚠️  semgrep exit=${SEMGREP_EXIT}, scan errors=${V_ERRORS}, findings=${V_RESULTS} — nothing to judge"
+      if [ -n "$SEMGREP_OUTPUT" ]; then
+        echo "     ── what semgrep reported ──"
+        printf '%s\n' "$SEMGREP_OUTPUT" | tail -10 | sed 's/^/     /'
+      fi
+      echo "     ⏭️  SKIPPED - SAST (semgrep runtime error)"
+      GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
+      GATE_10_REASON="semgrep_runtime_error"
+    elif [ "$V_BLOCKING" -gt 0 ]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   GATE 10: Semgrep Security Gate"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "  CRITICAL/HIGH/ERROR:     ${V_BLOCKING}  ❌ BLOCKED"
+      echo "  MEDIUM/LOW/WARNING/INFO: ${V_WARNINGS}  ⚠️  warning"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "  ❌ BLOCKED — blocking-severity vulnerability found"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "$FINDING_DETAILS"
+      # #717: a C# finding comes from p/csharp; naming only security-audit
+      # would send the author to a ruleset that reproduces zero hits.
+      echo "  Run 'semgrep scan --config=p/security-audit --config=p/csharp' to review all findings."
+      GATE_10_STATUS="FAIL"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
+      GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
+      exit 1
+    else
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
+      GATE_10_SCANNED_FILES=$SEMGREP_FILE_COUNT
+      echo ""
+      echo "     ✅ PASSED - No blocking vulnerabilities (files scanned: $SEMGREP_FILE_COUNT)"
+      if [ "$V_WARNINGS" -gt 0 ]; then
+        echo "     ⚠️  ${V_WARNINGS} non-blocking findings (warnings only)"
+        echo "$FINDING_DETAILS"
+      fi
+      GATE_10_STATUS="PASS"
+    fi
+
+    fi # node available
+  fi
+fi
+record_gate_audit "gate-10" "sast-security" "$GATE_10_STATUS" "0" "$GATE_10_START"
