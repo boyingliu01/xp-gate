@@ -140,10 +140,11 @@ fi
 # Runs in BOTH modes. Docs-only commits read the staged DIFF (hunk cost)
 # instead of every full blob — a marker line must be ADDED to matter, so
 # '^+' minus '+++' headers is the precise scope.
+# Exactly 7 chars + a space/EOL boundary: longer runs (Maven `====` log separators, RST/setext underlines) are not conflicts.
 CONFLICT_MARKER_FILES=""
 if [ "${GATE_12_DOCS_ONLY:-false}" = true ]; then
   if git diff --cached --no-color --diff-filter=d 2>/dev/null \
-      | grep -E '^\+' | grep -v '^+++' | grep -qE '^\+(<<<<<<<|=======|>>>>>>>)'; then
+      | grep -E '^\+' | grep -v '^+++' | grep -qE '^\+(<{7}|={7}|>{7})([[:space:]]|$)'; then
     CONFLICT_MARKER_FILES="$STAGED_FILES"
   fi
 else
@@ -154,7 +155,7 @@ while IFS= read -r file; do
     continue
   fi
   # Check for conflict markers in staged content
-  if git show ":$file" 2>/dev/null | grep -qE '^(<<<<<<<|=======|>>>>>>>)'; then
+  if git show ":$file" 2>/dev/null | grep -qE '^(<{7}|={7}|>{7})([[:space:]]|$)'; then
     CONFLICT_MARKER_FILES="$CONFLICT_MARKER_FILES $file"
   fi
 done <<EOF
