@@ -89,7 +89,16 @@ function normaliseChannels(raw) {
  * @returns {{ config?: object, error?: string }}
  */
 function readMachineConfig(home) {
-  const root = home || os.homedir();
+  // Resolve through HOME first, exactly like shared-paths' resolveHomeDir().
+  // `os.homedir()` DELIBERATELY ignores process.env.HOME on Windows (it reads
+  // USERPROFILE instead -- measured: pointing HOME at a temp dir leaves
+  // os.homedir() unchanged), so a caller that sandboxed a test by setting HOME
+  // still read the developer's REAL ~/.config here. That made a real machine's
+  // `channels: ["external"]` leak into tests: nativeEnabled went false, Qoder
+  // deployment was skipped, and three assertions failed for a reason unrelated
+  // to the code under test. Same precedence as shared-paths keeps ONE answer to
+  // "where is home" in this package.
+  const root = home || process.env.HOME || process.env.USERPROFILE || os.homedir();
   const file = path.join(root, '.config', 'xp-gate', '.delphi-config.json');
   if (!fs.existsSync(file)) return {};
   try {

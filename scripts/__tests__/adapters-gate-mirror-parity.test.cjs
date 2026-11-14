@@ -55,8 +55,30 @@ describe('REQ-720 adapter gate copies are mirrors of the canonical gates', () =>
     // that no longer existed — an anti-vacuity check that had itself become
     // vacuous, in the opposite direction from the one it was written to catch.
     // Pinning the set that actually ships is what makes it an oracle again.
+    // The expectation is DERIVED from the canonical tree, not typed out. The
+    // previous version pinned the literal set ['gate-3.sh','gate-4.sh',
+    // 'gate-7.sh','gate-8.sh'] and went stale the moment three more gate copies
+    // shipped (gate-10, gate-12-file-hygiene, gate-13-compiler-strictness,
+    // gate-6-layers), failing on every run for a reason unrelated to parity --
+    // the same rot, in the same assertion, that the comment above already
+    // describes once. Deriving it keeps the anti-vacuity guarantee (a missing
+    // mirror still fails) without needing an edit each time a gate is added.
     const names = adaptersGateNames();
-    expect(names).toEqual(['gate-3.sh', 'gate-4.sh', 'gate-7.sh', 'gate-8.sh']);
+    expect(names.length).toBeGreaterThan(0);
+
+    // A gate body that ships canonically must have a mirror. The mirrored set is
+    // exactly `gate-*.sh` MINUS the chain files: gate-driver.sh/gate-registry.sh
+    // are the order and the name→file binding, and sprint-gate.sh is hook-side
+    // only -- none of the three is a gate body, and none has ever been mirrored
+    // into adapters/.
+    const isMirrored = (f) =>
+      f.endsWith('.sh') &&
+      f.startsWith('gate-') &&
+      f !== 'gate-driver.sh' &&
+      f !== 'gate-registry.sh';
+    const canonicalNames = fs.readdirSync(GITHOOKS).filter(isMirrored).sort();
+    expect(names.length, 'no gate bodies mirrored — the parity check would be vacuous').toBeGreaterThan(0);
+    expect(canonicalNames.filter((n) => !names.includes(n))).toEqual([]);
   });
 
   it('AC-720-02: every adapter gate copy is byte-identical to githooks/<name>', () => {
