@@ -22,6 +22,32 @@
 # Combination of: Old Gates 1 (Static), Gate 2 (Linting), Gate 5 (Shell Check)
 # v0.14.3+ (Issue #312): Skip if no code files changed
 # ============================================================================
+# Select the CHANGED files that the shell arm must lint, one per line.
+#
+# A file is a shell script when its name ends in .sh/.bash, OR when its first
+# line carries a bash/sh shebang. The shebang arm is what reaches `pre-commit`,
+# `pre-push`, `post-commit` and `post-merge`: they have no extension and are the
+# largest shell programs in this repository, so the previous extension-only
+# filter (`grep '\.sh$'`) made them structurally exempt from the gate. The same
+# rule is implemented in githooks/adapters/shell.sh -- keep the two in step.
+#
+# Only files that exist in the work tree are returned: a deleted file cannot be
+# linted, and passing it to shellcheck would turn a deletion into a failure.
+_shell_changed_files() {
+  local f first
+  for f in $CHANGED_FILES; do
+    [ -f "$f" ] || continue
+    case "$f" in
+      *.sh|*.bash) echo "$f"; continue ;;
+    esac
+    # No shell extension: accept only a shell shebang on line 1.
+    first="$(sed -n '1p' "$f" 2>/dev/null || true)"
+    case "$first" in
+      '#!'*bash*|'#!'*'/sh'|'#!'*' sh'|'#!'*'env sh'*) echo "$f" ;;
+    esac
+  done
+}
+
 # Gate body. `return` is used instead of `exit` so the driver decides to
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
@@ -241,8 +267,16 @@ else
         # scripts/check-no-npx-probe.sh fails the build if the npx rung returns.
         BIOME_ARGV=(biome)
       fi
-      # shellcheck disable=SC2086 # BIOME_ARGV may hold a multi-token form on purpose
-      BIOME_OUT=$(cd "$TS_PROJECT_DIR" && ${BIOME_ARGV[@]} check --staged . 2>&1)
+      # Quoted expansion. The array holds exactly one path token (either the
+      # bare word `biome` or an absolute node_modules path), and that path can
+      # contain spaces -- a project checked out under "C:/My Projects/..." is
+      # ordinary on Windows. Unquoted, `${BIOME_ARGV[@]}` re-splits it into
+      # several arguments, so biome would be invoked as a different command and
+      # exit 127; the 127 branch below reads that as "biome absent" and SKIPs.
+      # The old `disable=SC2086  # may hold a multi-token form` was inaccurate:
+      # every assignment site above sets a single element or an empty array,
+      # so no multi-token form exists to protect.
+      BIOME_OUT=$(cd "$TS_PROJECT_DIR" && "${BIOME_ARGV[@]}" check --staged . 2>&1)
       BIOME_STATUS=$?
       if [ "$BIOME_STATUS" -eq 127 ]; then
         # 127 is the shell's own "command not found": biome is genuinely absent.
@@ -524,7 +558,14 @@ else
     shell)
   # Shell: check staged shell files only. Installed hook adapters are infrastructure,
   # not project changes, and should not be linted on unrelated commits.
-  SHELL_FILES=$(echo "$CHANGED_FILES" | grep '\.sh$' || true)
+  #
+  # The filter used to be `grep '\.sh$'`, which cannot match the extensionless
+  # hooks -- `pre-commit`, `pre-push`, `post-commit`, `post-merge` -- and those are
+  # the two largest shell programs in this repository. A file that cannot enter the
+  # gate cannot fail it, so the biggest shell code in the repo was structurally
+  # exempt. Same rule as githooks/adapters/shell.sh: a .sh/.bash name, OR a shell
+  # shebang on the first line for the extensionless cases.
+  SHELL_FILES="$(_shell_changed_files)"
 
   if [ -z "$SHELL_FILES" ]; then
     echo "✅ PASSED - No staged shell scripts to check."
