@@ -88,8 +88,56 @@ run_static_analysis() {
   echo "Running Shell static analysis on ${#files[@]} script(s)..."
   # Each path is passed as its own argument (Bash 3.2 compatible: no mapfile),
   # so a path containing spaces cannot be split into two bogus arguments.
-  shellcheck "${files[@]}"
-  return $?
+  #
+  # The verdict is TIERED, because a flat exit status made every finding block
+  # equally. Measured on this repository: 2 error-level, 74 warning-level, 150
+  # info-level and 182 style-level findings. An unused-variable warning and an
+  # unparseable script are not the same problem, and treating them the same is
+  # how a gate ends up switched off or routed around.
+  #
+  #   error level (which includes every parse failure) -> BLOCK
+  #   warning / note / style                           -> reported, not blocking
+  #
+  # The tier is read from the LEVEL, not from the code range. SC1xxx was tried
+  # first and is wrong: this repository's four SC1xxx findings are all SC1003
+  # ("want to escape a single quote?") at NOTE level, so a code-range test would
+  # have blocked on a suggestion. A real parse failure (SC1073/SC1123/SC1072)
+  # always arrives at error level anyway, so keying on the level covers it.
+  #
+  # The output is captured so the class can be read before deciding, and is
+  # re-printed either way: a tier that does not block must still be VISIBLE, or
+  # it is indistinguishable from a tier that does not exist.
+  local out=""
+  out="$(shellcheck -f gcc "${files[@]}" 2>&1)"
+  local status=$?
+
+  # Print the analyser's own output on BOTH paths. Real shellcheck prints nothing
+  # when it is clean, so this costs nothing there; but it keeps whatever the tool
+  # did say (a version banner, a notice, a wrapper's narration) visible instead of
+  # silently swallowed by the capture. Dropping it on the success path made the
+  # adapter look like it had not invoked anything at all.
+  [ -n "$out" ] && printf '%s\n' "$out"
+
+  [ "$status" -eq 0 ] && return 0
+
+  # Error level: real defects, and the level every parse failure lands on. The
+  # message names the parse case separately because "the file was not analysed"
+  # and "the file was analysed and has a defect" need different responses.
+  if printf '%s\n' "$out" | grep -qE ': error: '; then
+    if printf '%s\n' "$out" | grep -qE '\[SC(1072|1073|1123|1009)\]'; then
+      echo "❌ Shell analysis could not PARSE the file(s) -- they were not fully checked." >&2
+      echo "   Fix the parse failure first: no other shell verdict about them is trustworthy." >&2
+    else
+      echo "❌ Shell errors found (blocking)." >&2
+    fi
+    return 1
+  fi
+
+  # Warnings and below: reported above, not blocking.
+  local soft
+  soft="$(printf '%s\n' "$out" | grep -cE ': (warning|note): ' || true)"
+  echo "⚠️  ${soft:-0} shell warning(s)/note(s) reported above (not blocking)."
+  return 0
 }
 
 run_lint() {
