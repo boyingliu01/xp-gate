@@ -152,17 +152,66 @@ run_static_analysis() {
     # Record a checkov run's exit status and flag a crash. Codes 0 and 1 are
     # normal (1 = findings); anything else, or any traceback in the log, is the
     # tool failing rather than reporting.
+    #
+    # $2 is how many FILES this run covered, not how many runs happened. Since
+    # one launch can now scan a whole batch (#805), counting launches would make
+    # a 3-file commit report "1 file(s) scanned" — true about processes, false
+    # about coverage, and the completion message is what a reader trusts when
+    # deciding whether the gate looked at everything.
     record_checkov_run() {
-      local status=$1 file=$2
-      checkov_scan_count=$((checkov_scan_count + 1))
+      local status=$1 covered=${2:-1}
+      checkov_scan_count=$((checkov_scan_count + covered))
       # #803: a checkov run counts as a completed scan even when it reports a
       # failure — the point of this counter is "a scanner looked", which is what
       # distinguishes a clean scan from a missing toolchain.
       iac_scans_completed=$((iac_scans_completed + 1))
       if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+        # Batching makes the crash LESS specific but never less visible: one
+        # status covers the whole batch, so a crash distrusted all of it. Saying
+        # "on a batch of N" is honest about that; naming one file would imply we
+        # know which one failed, which a batched call cannot tell us.
         CHECKOV_CRASHED=1
-        echo "     ⚠️  checkov exited $status on $file — the scanner failed, this is not a finding"
+        echo "     ⚠️  checkov exited $status on a batch of $covered file(s) — the scanner failed, this is not a finding"
       fi
+    }
+
+    # Run checkov once per BATCH of same-framework files instead of once per file.
+    #
+    # Measured 2026-11-15 (Windows/Git Bash, load 2.2-4.9 of 8 cores): checkov's
+    # cost is python startup + framework import, not scanning. Three real
+    # workflows cost 106.2 s as three launches and 30.6 s as one, for the same
+    # 300 checks. A 4-line file still cost 19.9 s, which is the proof that the
+    # constant dominates.
+    #
+    # The argument form matters and is NOT obvious: `--file A --file B` scans only
+    # A (verified — it reported 116 checks, the single-file count), while
+    # `--file A B` scans both, per checkov's documented `-f FILE [FILE ...]`
+    # signature. So the paths must be expanded into ONE --file list.
+    #
+    # Only files that exist are passed: the old loop skipped missing ones
+    # individually, and handing checkov a path that disappeared between detection
+    # and scanning would turn a benign race into a scanner error.
+    scan_checkov_batch() {
+      local framework_arg=$1
+      shift
+      local batch=""
+      local covered=0
+      local file
+      for file in "$@"; do
+        if [ -f "$file" ]; then
+          batch="$batch $file"
+          covered=$((covered + 1))
+        fi
+      done
+      [ "$covered" -gt 0 ] || return 0
+      # Intentional word splitting: checkov takes the file list positionally
+      # after ONE --file, and each path here has already been through the
+      # adapter's own detection (no spaces in the glob patterns it produces).
+      # shellcheck disable=SC2086
+      "$checkov_bin" --file $batch $checkov_args $framework_arg >> "$checkov_log" 2>&1
+      local status=$?
+      record_checkov_run "$status" "$covered"
+      return 0
     }
 
     # Run checkov on all detected IaC files
@@ -172,12 +221,8 @@ run_static_analysis() {
 
     if [ -n "$tf_files" ]; then
       echo "Scanning Terraform files..."
-      for file in $tf_files; do
-        if [ -f "$file" ]; then
-          "$checkov_bin" --file "$file" $checkov_args >> "$checkov_log" 2>&1
-          record_checkov_run $? "$file"
-        fi
-      done
+      # shellcheck disable=SC2086
+      scan_checkov_batch "" $tf_files
     fi
 
     if [ -n "$k8s_files" ]; then
@@ -193,33 +238,21 @@ run_static_analysis() {
 
       if [ -n "$k8s_only" ]; then
         echo "Scanning Kubernetes manifests..."
-        for file in $k8s_only; do
-          if [ -f "$file" ]; then
-            "$checkov_bin" --file "$file" $checkov_args --framework kubernetes >> "$checkov_log" 2>&1
-          record_checkov_run $? "$file"
-          fi
-        done
+        # shellcheck disable=SC2086
+        scan_checkov_batch "--framework kubernetes" $k8s_only
       fi
 
       if [ -n "$gh_files" ]; then
         echo "Scanning GitHub Actions workflows..."
-        for file in $gh_files; do
-          if [ -f "$file" ]; then
-            "$checkov_bin" --file "$file" $checkov_args --framework github_actions >> "$checkov_log" 2>&1
-            record_checkov_run $? "$file"
-          fi
-        done
+        # shellcheck disable=SC2086
+        scan_checkov_batch "--framework github_actions" $gh_files
       fi
     fi
 
     if [ -n "$docker_files" ]; then
       echo "Scanning Dockerfiles..."
-      for file in $docker_files; do
-        if [ -f "$file" ]; then
-          "$checkov_bin" --file "$file" $checkov_args >> "$checkov_log" 2>&1
-          record_checkov_run $? "$file"
-        fi
-      done
+      # shellcheck disable=SC2086
+      scan_checkov_batch "" $docker_files
     fi
 
     # Print captured output then check for failures
