@@ -20,7 +20,12 @@ setup() {
   # adapter probes checkov / .exe / .cmd because the extensionless MSYS shim
   # cannot be executed on Git Bash, so the invocation is `"$checkov_bin" --file`.
   # Pinning the bare word made a correct fix look like a regression.
-  grep -qE '("[$][A-Za-z_{][^"]*"|checkov) +--file +"\$file"' "$IAC"
+  #
+  # #805 changed the ARGUMENT after --file from one quoted path to a list, so the
+  # path position is no longer `"$file"`. The property this test exists for is
+  # "the resolved binary is what gets invoked" -- keep that, stop pinning the
+  # per-file shape that batching deliberately removed.
+  grep -qE '("\$checkov_bin"|checkov) +--file' "$IAC"
   grep -q 'checkov_bin' "$IAC"
 }
 
@@ -28,32 +33,32 @@ setup() {
   # The defect was a bare invocation whose status went nowhere. Counting lines
   # does not need a regex that pins indentation OR the command spelling: every
   # invocation -- whichever resolvable form of checkov it names -- must be
-  # immediately followed by record_checkov_run.
-  local total recorded any_invocation bound
-  total=$(grep -cE '^\s*("[$][A-Za-z_{][^"]*"|checkov) +--file ' "$IAC")
-  # `grep -A1` encodes an implicit contract: the recording must be the line
-  # IMMEDIATELY after the invocation, and an invocation on the file's last line
-  # would have nothing to follow it. Both hold here, and keeping the recording
-  # adjacent is the property this test is pinning -- not an accident of layout.
-  recorded=$(grep -A1 -E '^\s*("[$][A-Za-z_{][^"]*"|checkov) +--file ' "$IAC" | grep -c 'record_checkov_run')
-  [ "$total" -ge 1 ]
-  [ "$total" -eq "$recorded" ]
+  # followed by record_checkov_run.
+  #
+  # #805 note: one launch may now cover a whole batch of files, so this is a 1:N
+  # relationship, not 1:1. The recording also moved one line further away (the
+  # status is captured into a local first, because the batch's file count has to
+  # be passed along with it). The window is widened to 3 lines to match, which
+  # keeps the real guarantee -- no invocation may drop its status -- without
+  # re-pinning the exact layout batching replaced.
+  local invocations recorded
+  invocations=$(grep -cE '("\$checkov_bin"|checkov) +--file' "$IAC")
+  recorded=$(grep -A3 -E '("\$checkov_bin"|checkov) +--file' "$IAC" | grep -c 'record_checkov_run' || true)
+  [ "$invocations" -ge 1 ]
+  [ "$recorded" -eq "$invocations" ]
   # The two counts above are blind on their own: swap ONE invocation's binary for
-  # something unrelated and the remaining valid calls still satisfy total>=1 and
-  # total==recorded. (Measured: injecting a bogus binary name passed both, because
-  # the bogus line simply fell out of the general pattern.) Anchor from the other
-  # side instead -- count EVERY --file invocation in the file, whatever command
-  # it names, and require all of them to be the resolved checkov binary. A stray
-  # or hardcoded command then surfaces as a mismatch instead of being filtered
-  # out of the assertion by construction.
+  # something unrelated and the remaining valid calls still satisfy them.
+  # (Measured: injecting a bogus binary name passed both, because the bogus line
+  # simply fell out of the general pattern.) Anchor from the other side instead --
+  # count EVERY --file invocation in the file, whatever command it names, and
+  # require all of them to be the resolved checkov binary. A stray or hardcoded
+  # command then surfaces as a mismatch instead of being filtered out of the
+  # assertion by construction.
   #
   # Deliberately broad: this counts ANY non-comment line containing ` --file `,
   # including an echo hint or a variable assignment that mentions it. That is the
   # point -- the assertion is a lower bound on how many commands must be the
   # resolved binary, so extra mentions can only make it stricter, never weaker.
-  # The earlier `|checkov` branch in the two counts above is kept because a
-  # legitimate future bare invocation should satisfy total==recorded; the
-  # any==bound check below is what rejects it unless it is also resolved.
   any_invocation=$(grep -cE '^[[:space:]]*[^#[:space:]].* +--file ' "$IAC")
   bound=$(grep -cE '^[[:space:]]*"\$checkov_bin" +--file ' "$IAC")
   [ "$bound" -ge 1 ]
