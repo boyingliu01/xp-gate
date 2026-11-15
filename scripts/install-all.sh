@@ -4,7 +4,13 @@
 #   1. Project's .git/hooks/ (for current project)
 #   2. OpenCode global template ~/.config/opencode/git-hooks-template/
 #
-# Usage: bash scripts/install-all.sh [--force] [--project-only] [--global-only]
+# Usage: bash scripts/install-all.sh [--project-only] [--global-only]
+#
+# `--force` used to be listed here and parsed below, but nothing ever read it:
+# the script has no "already installed / overwrite?" branch for it to affect, so
+# passing it silently did nothing. A flag that is advertised and ignored is worse
+# than one that is absent -- it answers a question the user did not ask (whether
+# an existing install would be preserved) with a promise the script never keeps.
 
 set -e
 
@@ -48,12 +54,10 @@ GIT_DIR=$(git rev-parse --git-dir)
 echo "${GREEN}✅ Git repository found${NC}"
 
 # Parse arguments
-FORCE_MODE=false
 INSTALL_MODE="both"
 
 for arg in "$@"; do
     case "$arg" in
-        --force) FORCE_MODE=true ;;
         --project-only) INSTALL_MODE="project-only" ;;
         --global-only) INSTALL_MODE="global-only" ;;
     esac

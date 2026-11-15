@@ -19,6 +19,12 @@ flock -n 200 2>/dev/null || exit 0  # another instance is already checking
 
 # ── Check cache validity ──
 if [[ -f "$CACHE_FILE" ]]; then
+  # CACHED_VERSION is read but not consulted: only the timestamp drives the TTL.
+  # It must stay in this `read`, because the cache file is written as
+  # `<remote-version> <epoch>` below and the FIRST field is the version. Dropping
+  # it would bind the version string to CACHED_TS, making the arithmetic below
+  # compare against a number that is not a timestamp.
+  # shellcheck disable=SC2034 # positional read: field 1 is the cache format
   read -r CACHED_VERSION CACHED_TS < "$CACHE_FILE" 2>/dev/null || true
   NOW=$(date +%s 2>/dev/null || echo 0)
   if [[ -n "$CACHED_TS" && -n "$NOW" ]]; then
