@@ -179,8 +179,20 @@ compare_pair() {
     canonical_mode=$(index_mode "$canonical")
     mirror_mode=$(index_mode "$mirror")
     [ -n "$canonical_mode" ] || fail "canonical file is not tracked: $canonical"
-    [ -n "$mirror_mode" ] || fail "mirror file is not tracked: $mirror"
-    [ "$canonical_mode" = "$mirror_mode" ] || fail "mode mismatch: $canonical ($canonical_mode) vs $mirror ($mirror_mode)"
+    # P1-E step 2: the mirror is NOT tracked any more — generate-mirrors.cjs produces
+    # it from the canonical tree at prepack, and `src/npm-package/{hooks/lib,
+    # build-integrity,skills}/` are gitignored. Requiring a tracked mirror here made
+    # every push fail with "mirror file is not tracked" for a tree that is
+    # DELIBERATELY untracked -- the gate still assumed the old duplication.
+    #
+    # The check is not dropped, its question changed: what matters is not "does git
+    # track a second copy" (the whole point is that it must not) but "is the mirror
+    # present and byte-identical to the canonical file", which the `cmp` above
+    # already answers. When a mirror IS tracked, its mode must still match, because
+    # that is how the file will be checked out and executed.
+    if [ -n "$mirror_mode" ]; then
+      [ "$canonical_mode" = "$mirror_mode" ] || fail "mode mismatch: $canonical ($canonical_mode) vs $mirror ($mirror_mode)"
+    fi
   fi
 }
 
