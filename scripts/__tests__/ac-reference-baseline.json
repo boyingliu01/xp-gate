@@ -293,6 +293,19 @@
     "githooks/__tests__/issue-559-semgrep-timeout.test.bats": [
       "AC-559-01"
     ],
+    "githooks/__tests__/issue-787-singular-test-dir.test.bats": [
+      "AC-787-01",
+      "AC-787-02",
+      "AC-787-03"
+    ],
+    "githooks/__tests__/issue-793-gate8-baseline-vs-tool.test.bats": [
+      "AC-793-01",
+      "AC-793-02"
+    ],
+    "githooks/__tests__/issue-810-post-commit-flush-defined.test.bats": [
+      "AC-810-01",
+      "AC-810-02"
+    ],
     "githooks/__tests__/issue-audit-poisoned-start.bats": [
       "AC-AUDIT-001",
       "AC-AUDIT-002"

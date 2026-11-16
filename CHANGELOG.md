@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.38.5.0] - 2026-11-16
+
+**主轴：P0 中的「不可提交 / 它说谎」六项。** 87 个 issue 分诊后，
+按**造成的损害**而非所属子系统定级：要么「用户根本提交不了」，要么「闸门报了绿但没查」。
+本次修完可独立验证的六项；涉及状态语义重写的 `#784`/`#792`/`#811`/`#807`
+与另一条工作线的「NOT_CHECKED 第三态」方案有交叠，留待方案对齐后统一处理，
+避免同一个语义被修两遍。
+
+### Fixed
+
+- **Gate 5a 只认 `tests/`（复数），单数 `test/` 目录下的测试等于不存在（#787）。**
+  候选列表里只有 `tests/foo.test.ts`，于是把测试放在同样常见的 `test/` 下，
+  新文件被判「without corresponding test」**硬拦**。这个缺陷的形态最容易误导人：
+  同样的内容放在 `tests/` 就通过，**只有目录拼写**决定结论，
+  所以「你是不是想写 tests/」根本不算可执行的建议。补上单数两种候选，
+  并附一条**反空洞用例**——放宽候选不能让闸门关掉，真的没测的文件仍须 BLOCK。
+
+- **没有 node/npx 时每一次提交都打印 `_flush: command not found`（#810）。**
+  `_flush` 只在两个工具分支内部定义，而底部排空循环**无条件**调用它。
+  在 PATH 里既无 node 又无 npx 的机器上——恰恰是审计根本无法落盘的机器——
+  每次提交（`rebase` 时是每一次重放）都往 stderr 打一行错误并静默丢失审计行。
+  修法是给一个默认实现，让「没有可用的运行时」变成普通的「零行」结果，
+  而不是围着调用点加判断：判断要复制到每一处调用，下一个人必然漏掉一处。
+
+- **Gate 12 把一个 YAML 错误报成一串假文件名（#772）。**
+  错误列表用空格分隔的字符串累加，又用**未加引号**的 `for f in $YAML_JSON_ERRORS` 重新拆开。
+  解析器消息里本来就有空格，于是 PyYAML 的 `while parsing a flow sequence`
+  变成 `while` / `parsing` / `a` / `flow` / `sequence` **五条**。
+  「YAML/JSON syntax errors:」下面那一行是给人照着去修的文件清单，
+  拆开就意味着让人去找五个不存在的文件，而**真正坏掉的那一个**被埋在最前面。
+  改用数组，条目原样保留。
+
+- **Gate 8 把「缺 baseline」误报成「工具没装」（#793）。**
+  `detect-secrets-hook` 未安装和 `.secrets.baseline` 缺失落进同一个 `else`，
+  都打印 `install: pip install -e ".[dev]"`。已经把 detect-secrets 1.5.52
+  装好的人会照着这行再装一遍——一个**看起来正确、实际什么都没改**的动作，
+  而真正缺的那个文件（需要提交进仓库的 baseline）从头到尾没被点名。
+  两种情况的补救方式不同，只有一种是安装，因此拆开。
+
+- **`files: [dist]` 且用 `noEmit` 的项目被 Gate 9 永久 BLOCK（#786）。**
+  `files` 白名单里列出的是**构建产物**，不是仓库里已有的文件。
+  tsconfig 用 `noEmit`（由打包器或独立构建步骤产出时的正常选择）时没人写 `dist/`，
+  `npm pack` 于是只打包 `package.json`，`inspectPackedFiles` 判定
+  「only package.json included」，闸门**永远红**且没有出口。
+  产物不存在改为带原因的 SKIP：本闸门的主题是构建完整性，
+  它对一个从未构建的包无从判断。消息还必须点出补救办法——
+  「先构建」就是全部答案，而旧文案从没说过。
+
+- **技能内 9 份测试副本里 6 份找不到仓库根（#814）。**
+  定位写死成 `../../..`，这个深度**只对这一份**（`skills/sprint-flow/__tests__`）成立；
+  同样的文件还随 `plugins/<p>/skills/` 和 `src/npm-package/**/skills/` 发布，
+  深三层、四层，固定深度指到了 `plugins/claude-code`、`src/npm-package`——
+  于是 6/7 份在 Gate 5 下失败，而本仓库钩子一旦装好，**提交被彻底堵死**。
+  改为向上查找仓库标记（`VERSION` + `src/npm-package/bin/xp-gate.js`）：
+  数 `..` 的写法把「这个文件住在哪」编码成了常量，每新增一个镜像位置就要再坏一次。
+
+### 验证
+
+- 新增 4 个 BATS 套件 / 9 个用例，**每条修复都先写 RED 再改**，
+  并且都带反空洞用例（防「把闸门关掉」冒充修好）：
+  `issue-787-singular-test-dir`、`issue-810-post-commit-flush-defined`、
+  `issue-772-gate12-error-splitting`、`issue-793-gate8-baseline-vs-tool`。
+- `#810` 与 `#786` 的测试**回滚验证过确实能红**：
+  无修复时前者复现 `line 60: _flush: command not found`，
+  后者让新增用例失败而无修复前 17 个既有用例照常通过（说明红的是对的那条）。
+- 改动全部落到镜像（`gate-5-entry` / `post-commit` / `gate-8` /
+  `gate-12` / `gate-10`），`scripts/check-hook-mirror.sh` 为 PASS。
+- 写测试时另发现两处**测试夹具自身的坑**，已在注释里写明免得下一个人再踩：
+  沙箱里的 `git commit` 会触发机器全局 `core.hooksPath` 装上的一整套闸门；
+  以及 `command -v npx` 对「存在但退出 127」的桩仍然成功，
+  于是「无 npx」的用例其实走了「有 npx」的分支，测了个寂寞。
+
 ## [0.38.1.0] - 2026-11-12
 
 **主轴：0.38.0 发布后 CI 抓到的四个问题。** 全部是**我自己在 0.38.0 里引入的**，

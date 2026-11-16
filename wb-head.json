@@ -1,0 +1,46 @@
+{
+  "src/npm-package/lib/test-alignment.ts": {
+    "totalWarnings": 12,
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+  },
+  "src/build-integrity/__tests__/import-resolver.test.ts": {
+    "totalWarnings": 19,
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+  },
+  "src/npm-package/lib/init.js": {
+    "totalWarnings": 11,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
+  },
+  "src/npm-package/lib/phase-transition.js": {
+    "totalWarnings": 8,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
+  },
+  "src/build-integrity/__tests__/gate-10.test.ts": {
+    "totalWarnings": 7,
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+  },
+  "src/mutation/runners/pitest-runner.ts": {
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
+  },
+  "src/mutation/__tests__/pitest-runner.test.ts": {
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
+  },
+  "src/npm-package/mutation/__tests__/pitest-runner.test.ts": {
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
+  },
+  "src/npm-package/mutation/runners/pitest-runner.ts": {
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
+  },
+  "src/npm-package/scripts/sync-package-content.js": {
+    "totalWarnings": 13,
+    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
+  },
+  "src/mock-policy/__tests__/integration.test.ts": {
+    "totalWarnings": 9,
+    "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+  }
+}

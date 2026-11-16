@@ -322,6 +322,14 @@ else
         "${dir}/__tests__/${filename}.spec.${ext}"
         "tests/${filename}.test.${ext}"
         "tests/${filename}.spec.${ext}"
+        # #787: `test/` (singular) is as conventional as `tests/` (plural), and
+        # both live in the wild -- Jest silently accepts either, so a repo that
+        # picked the singular spelling was hard-BLOCKED on a file whose test was
+        # right there. The asymmetry made it read like a user error: identical
+        # content under tests/ passed, and only the path spelling decided the
+        # verdict, so "did you mean tests/" was not actionable advice.
+        "test/${filename}.test.${ext}"
+        "test/${filename}.spec.${ext}"
       )
 
       for pattern in "${patterns[@]}"; do

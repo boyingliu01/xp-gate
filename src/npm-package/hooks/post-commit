@@ -38,6 +38,15 @@ head_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 if [ -n "$toplevel" ] && [ -n "$head_commit" ] \
    && [ -f "$toplevel/src/npm-package/lib/gate-audit.ts" ]; then
   _pending="$toplevel/.xp-gate/audit.pending.jsonl"
+  # #810: `_flush` used to be defined ONLY inside the two tool branches below,
+  # while the drain loop at the bottom called it unconditionally. On a machine
+  # whose PATH carries neither node nor npx -- which is exactly when the audit
+  # cannot be flushed at all -- every commit (including each replayed commit of
+  # a rebase) printed `_flush: command not found` to stderr and silently lost
+  # the audit rows. The default makes "no usable runtime" an ordinary zero-row
+  # result instead of an error: the loop then exits after its two empty passes,
+  # which is the same observable behaviour as a flush that found nothing.
+  _flush() { echo 0; }
   if [ -f "$toplevel/node_modules/tsx/dist/cli.mjs" ] && command -v node >/dev/null 2>&1; then
     _flush() {
       node "$toplevel/node_modules/tsx/dist/cli.mjs" \

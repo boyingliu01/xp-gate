@@ -199,7 +199,15 @@ fi
 
 # --- Check 5: YAML/JSON syntax validation (Issue #351) ---
 # Only check staged YAML/JSON files that have changes
-YAML_JSON_ERRORS=""
+#
+# #772: these were accumulated into a space-separated STRING and re-split with an
+# unquoted `for f in $YAML_JSON_ERRORS`. Parser messages contain spaces, so one
+# broken file printed as a run of fake "filenames" -- PyYAML's
+# "while parsing a flow sequence" became five entries. The list under
+# "YAML/JSON syntax errors:" reads as the set of files to go fix, so the split
+# sent the reader hunting for files that do not exist. Arrays keep each entry
+# whole no matter what the message contains.
+YAML_JSON_ERRORS=()
 YAML_JSON_CHECK_COUNT=0
 
 # Detect available validators
@@ -241,7 +249,7 @@ except Exception:
     pass
 " 2>&1)
         if [ $? -ne 0 ] && [ -n "$YAML_ERROR" ]; then
-          YAML_JSON_ERRORS="$YAML_JSON_ERRORS $file(yaml:$YAML_ERROR)"
+          YAML_JSON_ERRORS+=("$file(yaml:$YAML_ERROR)")
         fi
       fi
       ;;
@@ -252,12 +260,12 @@ except Exception:
 let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{JSON.parse(d)}catch(e){console.log(e.message.split('\\n')[0]);process.exit(1)}})
 " 2>&1)
         if [ $? -ne 0 ] && [ -n "$JSON_ERROR" ]; then
-          YAML_JSON_ERRORS="$YAML_JSON_ERRORS $file(json:$JSON_ERROR)"
+          YAML_JSON_ERRORS+=("$file(json:$JSON_ERROR)")
         fi
       elif [ "$JSON_CMD" = "jq" ]; then
         JSON_ERROR=$(git show ":$file" 2>/dev/null | jq empty 2>&1)
         if [ $? -ne 0 ] && [ -n "$JSON_ERROR" ]; then
-          YAML_JSON_ERRORS="$YAML_JSON_ERRORS $file(json:syntax error)"
+          YAML_JSON_ERRORS+=("$file(json:syntax error)")
         fi
       fi
       ;;
@@ -266,9 +274,9 @@ done <<EOF
 $CHANGED_YAML_JSON
 EOF
 
-if [ -n "$YAML_JSON_ERRORS" ]; then
+if [ "${#YAML_JSON_ERRORS[@]}" -gt 0 ]; then
   echo "     ❌ YAML/JSON syntax errors:"
-  for f in $YAML_JSON_ERRORS; do
+  for f in "${YAML_JSON_ERRORS[@]}"; do
     echo "        - $f"
   done
   HYGIENE_ISSUES=$((HYGIENE_ISSUES + 1))
@@ -289,7 +297,7 @@ if [ "$HYGIENE_ISSUES" -eq 0 ]; then
   GATE_12_STATUS="PASS"
 else
   # Hard blocks: conflict markers + YAML/JSON syntax errors
-  if [ -n "$CONFLICT_MARKER_FILES" ] || [ -n "$YAML_JSON_ERRORS" ]; then
+  if [ -n "$CONFLICT_MARKER_FILES" ] || [ "${#YAML_JSON_ERRORS[@]}" -gt 0 ]; then
     echo ""
     echo "❌ BLOCKED - File hygiene violations must be fixed before commit."
     GATE_12_STATUS="BLOCK"

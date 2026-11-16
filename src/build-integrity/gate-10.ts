@@ -605,6 +605,36 @@ async function packPrecondition(projectRoot: string): Promise<string | null> {
   if (!pkgJson.files || !Array.isArray(pkgJson.files)) {
     return 'package.json has no files field — skipping pack check';
   }
+  // #786: a `files` allowlist that names an output directory (`dist`, `lib`,
+  // `build`) describes an artifact a BUILD produces, not something already in the
+  // tree. With `noEmit` in tsconfig -- a normal choice when a bundler or a
+  // separate build step owns the output -- nothing writes that directory, so
+  // `npm pack` ships only package.json, `inspectPackedFiles` reports "only
+  // package.json included", and the gate BLOCKS forever with no way out.
+  //
+  // Absent artifacts are therefore a SKIP with the reason spelled out, not a
+  // FAIL. This gate's subject is build integrity, and it cannot judge a package
+  // whose inputs were never built. The message also has to name the remedy --
+  // "build first" is the whole fix, and the old text never said it.
+  const declaredEntries = (pkgJson.files as unknown[]).filter(
+    (entry): entry is string =>
+      typeof entry === 'string' && entry !== '' && !entry.startsWith('!') && !entry.includes('*')
+  );
+  if (declaredEntries.length > 0) {
+    const presence = await Promise.all(
+      declaredEntries.map(async (entry) => {
+        try {
+          await fs.access(path.join(projectRoot, entry));
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+    if (!presence.some(Boolean)) {
+      return `package.json files entries (${declaredEntries.join(', ')}) do not exist on disk — run the build that produces them, then re-run`;
+    }
+  }
   return null;
 }
 
@@ -760,13 +790,24 @@ export function parseGate10Args(args: string[]): Gate10Args {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    // `else if` chains count as nesting depth, which put this function one over
+    // the limit (5 > 4) and blocked every commit that touched this file until it
+    // cleared -- the rule for files at ≤5 warnings is "clear to zero", not "do
+    // not increase". Each branch is independent, so `continue` states that
+    // directly and keeps the depth at 2.
     if (arg === '--help' || arg === '-h') {
       help = true;
-    } else if (arg === '--changed-files') {
+      continue;
+    }
+    if (arg === '--changed-files') {
       changedFilesStr = args[++i] || '';
-    } else if (arg === '--project-root') {
+      continue;
+    }
+    if (arg === '--project-root') {
       projectRoot = args[++i] || process.cwd();
-    } else if (arg === '--timeout') {
+      continue;
+    }
+    if (arg === '--timeout') {
       timeoutMs = parseInt(args[++i] || '60000', 10);
     }
   }
