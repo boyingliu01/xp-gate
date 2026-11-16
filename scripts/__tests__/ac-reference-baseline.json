@@ -719,7 +719,14 @@
     ],
     "githooks/__tests__/issue-594-coverage-nan-pass.test.bats": [
       "AC-821-01",
-      "AC-821-02"
+      "AC-821-02",
+      "AC-823-01",
+      "AC-823-02"
+    ],
+    "githooks/__tests__/gate-availability-matrix.test.bats": [
+      "AC-806-01",
+      "AC-806-02",
+      "AC-806-03"
     ]
   }
 }
