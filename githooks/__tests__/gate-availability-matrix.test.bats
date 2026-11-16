@@ -36,6 +36,30 @@ teardown() {
   cd "$BATS_TEST_DIRNAME" || return 1
 }
 
+# Give the fixture its own view of the repository's principles checker.
+#
+# Gate 4 resolves the checker from `PRINCIPLES_BASE` (default `PROJECT_ROOT`,
+# falling back to `pwd`) and then hands the checker RELATIVE file paths. Those two
+# facts force the fixture to hold BOTH: the checker under `<fixture>/src/principles`
+# and the file under test at `<fixture>/deep.ts`. It is not enough to point
+# PROJECT_ROOT at the repository -- the checker then runs at the repo root and
+# cannot read `deep.ts` ("Could not read file"), which reads as a checker error.
+#
+# A symlink satisfies both without copying the tree, so the gate still runs the
+# checker from the working tree under test rather than a stale snapshot.
+#
+# Why this matters: before it existed the suite passed on developer machines by
+# finding `$HOME/.config/xp-gate/modules/principles` -- an INSTALLED copy, not the
+# tree under test -- and failed on every CI runner, which has no global install.
+# A green local run was measuring the wrong artifact.
+link_principles_checker() {
+  ln -s "$REPO_ROOT/src" "$WORK/src" 2>/dev/null \
+    || cp -r "$REPO_ROOT/src" "$WORK/src" || return 1
+  # The link must not become part of the change set being inspected.
+  printf 'src/\n' >> "$WORK/.git/info/exclude"
+  printf 'tsconfig.json\n' >> "$WORK/.git/info/exclude"
+}
+
 # Run a gate exactly the way pre-commit does: newline-separated CHANGED_FILES,
 # the native-path helper already sourced, and the verdict read from BOTH the
 # status variable and the exit code. $1=gate file, $2=project lang.
@@ -53,6 +77,7 @@ DRIVER
     cd "$WORK" || exit 99
     PROJECT_LANG="$lang" CURRENT_LANG="$lang" \
     AUDIT_SCRIPT_DIR="$GATE_DIR" GATE_DIR="$GATE_DIR" GATE_FILE="$gate" \
+    PROJECT_ROOT="$WORK" \
     CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM)" \
     RAW_CHANGED_FILES="$(git diff --cached --name-only --diff-filter=ACM)" \
     GATE_SCOPE=diff CC_WARNINGS=0 WARNING_COUNT=0 \
@@ -158,15 +183,10 @@ export function deep(a: number): number {
   return 0;
 }
 TS
+  link_principles_checker || skip "could not expose src/ to the fixture"
   git add -A
   local res
   res=$(run_gate gate-4.sh typescript)
-  # On failure, print the verdict and the gate's own output. Without this a CI
-  # failure reports only `[ "${res%%|*}" = "BLOCK" ] failed`, which says nothing
-  # about WHY -- and Gate 4 has three distinct non-BLOCK outcomes (SKIP for no
-  # matching files, SKIP for an unreachable tsx, PASS for a config that lost the
-  # severity). The first CI run of this test failed exactly that way and had to be
-  # diagnosed by reasoning instead of by reading the log.
   if [ "${res%%|*}" != "BLOCK" ]; then
     printf 'expected BLOCK, got: %s\n--- gate output ---\n%s\n' "${res%%|*}" "${res#*|*|}" >&3
   fi
@@ -190,6 +210,7 @@ export function deep(a: number): number {
   return 0;
 }
 TS
+  link_principles_checker || skip "could not expose src/ to the fixture"
   git add -A
   local res
   res=$(run_gate gate-4.sh typescript)

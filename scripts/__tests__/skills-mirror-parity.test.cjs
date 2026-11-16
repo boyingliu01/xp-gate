@@ -31,11 +31,27 @@ const MIRRORS = [
 // is never an acceptable state (AC-485-03). Empty today.
 const EXEMPT = [];
 
+// Directories the SHIPPED mirror never contains, so comparing them would demand
+// the mirrors carry files the packaging step deliberately drops.
+//
+// `__tests__` is the one that matters: sync-package-content.js lists it in
+// SKIP_DIRS because shipping a skill's own tests to end users is noise. A
+// sprint-flow suite added under skills/sprint-flow/__tests__/ is therefore in the
+// canonical tree and by design in no mirror -- and this guard, which walked the
+// canonical tree unfiltered, read that correct packaging decision as drift.
+//
+// The tradeoff is that the exclusion now lives in one place (here) and must track
+// SKIP_DIRS. What the guard is for is unchanged: a canonical edit that was never
+// re-copied still fails, which is the PR #438 incident.
+const SKIP_DIRS = new Set(['__tests__']);
+
 function walkFiles(dir, base = dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) walkFiles(p, base, out);
-    else out.push(path.relative(base, p).split(path.sep).join('/'));
+    if (e.isDirectory()) {
+      if (SKIP_DIRS.has(e.name)) continue;
+      walkFiles(p, base, out);
+    } else out.push(path.relative(base, p).split(path.sep).join('/'));
   }
   return out;
 }
