@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.38.9.0] - 2026-11-17
+
+**主轴：0.38.8.0 把 CI 从"全红"降到"两个红"，这一版解决剩下这两个 —— 而它们的成因是同一个。**
+
+### Fixed
+
+- **Gate 4 的可用性测试一直在读错的对象。** `gate-availability-matrix` 的两个
+  Gate 4 用例在开发者机器上通过、在每一个 CI runner 上失败。原因不是环境差异：
+  Gate 4 从 `PRINCIPLES_BASE`（默认 `PROJECT_ROOT`，否则 `pwd`）向上找
+  `src/principles/index.ts`，找不到就 `SKIP`。测试的 fixture 在临时目录里，既不是
+  仓库也不是 `pwd`，所以候选列表全落空 —— 除非机器上恰好装了全局副本
+  `$HOME/.config/xp-gate/modules/principles`。也就是说：**本地绿，是因为在测一份
+  已安装的产物而不是被测的树**。
+
+  修法是让 fixture 自己有 `src/`（符号链接指向仓库，`cp -r` 兜底），
+  `run_gate` 固定 `PROJECT_ROOT="$WORK"`，链接与 fixture 的 `tsconfig.json`
+  写进 `.git/info/exclude` 以免混进变更集。这样 Gate 4 用的就是被测树里的
+  checker，`deep.ts` 的相对路径也正是相对于 fixture —— 两个事实必须同时成立，
+  之前只满足前一个的尝试会让 checker 在仓库根跑并报
+  `Could not read file: deep.ts`。
+
+  验证方式是**把这台机器的全局副本藏起来**（`HOME=/tmp/nohome`）再跑，
+  不再有 `$HOME` 兜底仍是 8/8。这条比"本地通过"重要：它是唯一能证明
+  CI 也会绿的本地实验。
+
+- **`gate-availability-matrix` 的失败信息现在自解释。** 断言失败时打印判据和
+  Gate 自己的输出。此前 CI 只报 `[ "${res%%|*}" = "BLOCK" ] failed`，而 Gate 4
+  有四种非 BLOCK 结局（无匹配文件 SKIP、找不到 checker SKIP、tsx 不可达 SKIP、
+  配置丢了 severity 而 PASS），光看那一行无法区分——这次的根因就是这样才需要
+  靠推理而不是读日志得到。
+
+- **`skills-mirror-parity` 与打包契约互相矛盾。** 守卫遍历 canonical `skills/`
+  时不过滤目录，于是 `skills/sprint-flow/__tests__/` 下的两个测试文件被判为
+  "missing in mirror"。但 `sync-package-content.js` 的 `SKIP_DIRS` 明确包含
+  `__tests__` —— 把 skill 自己的测试塞进用户包是噪音，生成器不拷贝是**对的**。
+  错误在生产契约，不在测试：守卫在每次运行都把正确的打包决定读成漂移。
+
+  修法是给守卫加同一份目录排除，并保留它原本的存在理由（PR #438：canonical 改了
+  忘记重拷）。**反证**：故意往 `skills/sprint-flow/SKILL.md` 追加一行，
+  6 个镜像用例立刻全红并报 `content drift`——守卫没有被架空。
+
+### 验证
+
+- `gate-availability-matrix` 在 `HOME=/tmp/nohome`（模拟 CI，无全局副本）下
+  8/8，正常环境下同样 8/8
+- `skills-mirror-parity` 8/8；人为制造漂移后 6/8 变红，还原后恢复
+- `issue-582-ccn-baseline-stale` 2/2（CCN 修复随 0.38.8.0 提交后，HEAD 树合规）
+- `issue-717-mirror-parity` 8/8（此前 CI 失败的"npm 镜像不存在"已由生成步骤覆盖）
+- `npx tsc --noEmit` 0 错误；`ccn-report --check` 无违规；
+  `check-hook-mirror.sh` PASS
+
 ## [0.38.8.0] - 2026-11-17
 
 **主轴：0.38.7.0 本地全绿、CI 全红。这一版修的是那五个原因。**
