@@ -23,7 +23,12 @@
 #         This is the same claim the project already enforces elsewhere (#449,
 #         #499, #570): with no evidence you may not claim success. Gate 8 reports
 #         SKIP when gitleaks produces no report for exactly this reason.
-# @covers AC-601-01, AC-601-02, AC-601-03
+# @covers AC-601-01, AC-601-02, AC-601-03, AC-821-01, AC-821-02
+#
+#         AC-821-* live here because they need THIS fixture: the same hook copy,
+#         the same TS project, the same stubbed runner. A second file would mean a
+#         second copy of the ~90-line setup, and duplicate fixture bodies are what
+#         the clone gates exist to prevent.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
@@ -206,6 +211,82 @@ run_full_suite_hook() {
   }
   [[ "$out" != *"BLOCKED"* ]] || {
     echo "95% was blocked; the threshold branch is inverted"
+    return 1
+  }
+}
+
+# Leave a coverage report in the working tree WITHOUT staging it, and stage a
+# change that starts no test run. This is the #821 shape: the report is a leftover
+# from someone's earlier local run and describes a tree that has nothing to do
+# with this commit.
+leave_unstaged_coverage() {
+  local pct_json="$1"
+  mkdir -p coverage
+  printf '{"total":{"lines":{"pct":%s},"statements":{"pct":90},"functions":{"pct":90},"branches":{"pct":90}}}\n' \
+    "$pct_json" > coverage/coverage-summary.json
+  # A .ts change, not markdown: a docs-only commit short-circuits Gate 5 at the
+  # outer `DOCS_ONLY_COMMIT` guard, so the code under test here would never run
+  # and the case would "pass" by never reaching it. `@no-test-required` keeps
+  # Gate 5a's pairing rule quiet, and no test file is staged, so the suite run is
+  # skipped — which is exactly the state the evidence flag decides.
+  cat > src/c.ts <<'EOF'
+// @no-test-required: fixture file, this case asserts the coverage evidence rule
+export const c = 3;
+EOF
+  git add src/c.ts
+  # Anti-vacuity in the OTHER direction: the report must really be present on
+  # disk and really absent from the commit. Without the second half this case
+  # would also pass if the fixture simply failed to write the file.
+  [ -f coverage/coverage-summary.json ] || {
+    echo "fixture bug: the leftover coverage report was not written"
+    return 1
+  }
+  if git diff --cached --name-only | grep -qx 'coverage/coverage-summary.json'; then
+    echo "fixture bug: the leftover coverage report was staged"
+    return 1
+  fi
+}
+
+@test "AC-821-01: a leftover uncommitted coverage report is not evidence about this commit" {
+  # Measured 2026-11-16 in this repo: a commit staging ONE test file under the
+  # bundled mirror was blocked with
+  #     ❌ BLOCKED - TypeScript coverage 2% below 78% threshold
+  # while the identical commit passed once the leftover coverage/ directory was
+  # gone. The number came from a previous run over a DIFFERENT tree, and the
+  # working tree also carried another workstream's uncommitted source. A gate
+  # that answers "how well is this commit tested" may not answer with a
+  # measurement of whatever happens to be lying around.
+  leave_unstaged_coverage '42'
+
+  run_full_suite_hook
+  local out="$output"
+
+  [[ "$out" != *"BLOCKED"* ]] || {
+    echo "a leftover, uncommitted coverage report blocked the commit:"
+    printf '%s\n' "$out" | grep -E 'coverage|BLOCKED' | head -6
+    return 1
+  }
+  # Not blocking is only half of it: the gate must take the SKIP branch and say
+  # so, rather than silently evaluating a number it did not commit to.
+  [[ "$out" == *"skipping coverage check"* ]] || {
+    echo "the coverage check neither blocked nor announced a skip:"
+    printf '%s\n' "$out" | grep -E 'coverage|Coverage' | head -6
+    return 1
+  }
+}
+
+@test "AC-821-02: a coverage report that IS part of the commit is still evidence" {
+  # The control guarding #601: the artefact being staged is exactly the case that
+  # issue set out to honour ("a staged 42% never reached the threshold"). Scoping
+  # evidence to the commit must not weaken that.
+  stage_bad_coverage '42'
+
+  run_full_suite_hook
+  local out="$output"
+
+  [[ "$out" == *"BLOCKED"* ]] || {
+    echo "a staged 42% coverage report no longer blocks (#601 regressed):"
+    printf '%s\n' "$out" | grep -E 'coverage|BLOCKED' | head -6
     return 1
   }
 }
