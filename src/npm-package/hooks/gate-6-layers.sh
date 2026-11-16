@@ -189,8 +189,12 @@ LAYER_TSV=$(awk '
       additem(listkey, clean(substr(body, 3))); next
     }
     listkey = ""; listindent = -1
-    # Any other dash item at the layer indent belongs to a list, not a record.
-    if (indent == layerindent && body ~ /^- /) { next }
+    # Any other dash item at the layer indent is a record shape we do not parse
+    # (`- Name:`, `- "name":`, a scalar). Skipping it without flushing left the
+    # previous record open, so the unknown record fields merged into it: its
+    # paths joined the prior layer patterns and the cross-layer check passed.
+    # Every block-list continuation is matched above, so reaching here is unknown.
+    if (indent == layerindent && body ~ /^- /) { parse_error = 1; next }
     if (body ~ /^name:/) { setname(substr(body, 6)); next }
     if (body ~ /^patterns?:/ || body ~ /^paths:/) {
       v = clean(substr(body, index(body, ":") + 1))
