@@ -34,6 +34,15 @@ paths = [
   # detected" and the blocking path would go untested while staying green.
   '''^scripts/record-hook-behaviour\.cjs$''',
 
+  # Same argument, same scope: the availability-matrix suite asserts that Gate 8
+  # BLOCKS on a GitHub PAT, so it has to contain a PAT-shaped string. Exempt the
+  # one file, not githooks/__tests__/ as a directory -- a fixture permitted at
+  # directory scope would let a real credential land in any neighbouring suite.
+  #
+  # The literal below is `ghp_` + 36 characters that spell nothing; if this entry
+  # ever needs widening, re-read the note above before doing it.
+  '''^githooks/__tests__/gate-availability-matrix\.test\.bats$''',
+
   # Documentation
   '''\.md$''',
   '''docs/(?:.*)$''',

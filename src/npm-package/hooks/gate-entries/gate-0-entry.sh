@@ -43,16 +43,43 @@ GATE_0_STATUS="PASS"
 
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null) || CURRENT_BRANCH=""
 CURRENT_BRANCH=$(printf '%s' "$CURRENT_BRANCH" | tr -d '\r\n'); [ -n "$CURRENT_BRANCH" ] || CURRENT_BRANCH="HEAD"
-PROTECTED_BRANCHES="master develop trunk mainline"
+# #806 D1: `main` was missing from this list, so the gate ran its check on ZERO
+# commits in any repo whose default branch is `main` -- which is git's own modern
+# default, GitHub's default, and this repository's current branch. Measured on
+# this repo: a commit staging production source with VERSION/CHANGELOG untouched
+# printed "PASSED - Version Consistency Check (non-protected branch: main)".
+# The literal list stays as the baseline for the historical names, but the
+# authoritative answer for "what is the default branch" is git's own local
+# `origin/HEAD`, consulted below -- a repo that renames its default (or inits
+# with `git init -b trunk`) then needs no edit here. Read locally on purpose:
+# `git remote show origin` would hit the network, and a gate must never wait on
+# the network.
+PROTECTED_BRANCHES="main master develop trunk mainline"
 # #711: same shape as the branch/commit captures above — `git rev-parse` can
 # print a partial line before failing, so `|| echo "."` can yield "<something>\n."
 # and every later `cd "$ROOT_DIR"` / path join would silently use a two-line value.
 ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null) || ROOT_DIR=""
 ROOT_DIR=$(printf '%s' "$ROOT_DIR" | tr -d '\r\n'); [ -n "$ROOT_DIR" ] || ROOT_DIR="."
 
+# The default branch as this clone records it. `symbolic-ref` resolves the local
+# ref only, so this is free and offline; it is absent in a repo that never
+# fetched (a fresh `git init` has no origin), in which case the literal list above
+# is all the information there is.
+ORIGIN_DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) || ORIGIN_DEFAULT_BRANCH=""
+# Strip the remote prefix: "origin/main" -> "main".
+ORIGIN_DEFAULT_BRANCH="${ORIGIN_DEFAULT_BRANCH#origin/}"
+ORIGIN_DEFAULT_BRANCH=$(printf '%s' "$ORIGIN_DEFAULT_BRANCH" | tr -d '\r\n')
+
 # Optional: project-level .protected-branches config file
 if [ -f "$ROOT_DIR/.protected-branches" ]; then
   PROTECTED_BRANCHES="$PROTECTED_BRANCHES $(cat "$ROOT_DIR/.protected-branches" | tr '\n' ' ')"
+fi
+
+# Derived last so an explicit .protected-branches entry cannot be shadowed by a
+# probe failure, and empty values are dropped rather than added as a blank token
+# that would make `[ "$CURRENT_BRANCH" = "" ]` true for a detached HEAD.
+if [ -n "$ORIGIN_DEFAULT_BRANCH" ]; then
+  PROTECTED_BRANCHES="$PROTECTED_BRANCHES $ORIGIN_DEFAULT_BRANCH"
 fi
 
 is_protected=false
@@ -113,6 +140,13 @@ if [ "$is_protected" = "true" ]; then
     GATE_0_DETAIL="not_selected"
   elif [ "${SKIP_VERSION_CHECK:-}" = "1" ]; then
     echo "⏭️  SKIPPED - Gate 0: Version consistency (SKIP_VERSION_CHECK=1 env var)"
+    # #806 D2: this arm used to only echo, so GATE_0_STATUS kept its
+    # initialization value of PASS. The report (gate-13-entry.sh) counts PASS and
+    # SKIP in different buckets, so a skipped gate inflated the passed count and
+    # "skipped" was indistinguishable from "verified" -- the same defect class as
+    # #800, which rendered a Gate 7 SKIP as PASSED. Set it explicitly.
+    GATE_0_STATUS="SKIP"
+    GATE_0_DETAIL="skip_version_check_env"
   else
   for file in $STAGED_FILES; do
     case "$file" in
@@ -149,61 +183,248 @@ if [ "$is_protected" = "true" ]; then
             SYNC_STAGED=$((SYNC_STAGED + 1))
           fi
         done
-        # Stage AGENTS.md files with header-only modifications (header refresh is the only thing sync-version touches in AGENTS.md)
+        # Stage AGENTS.md files with header-only modifications.
+        #
+        # #806 D4: this used to be `if ! git diff --quiet -- "$agents_file";
+        # then git add "$agents_file"; fi`, i.e. ANY modification was treated as
+        # a header refresh. A developer with a half-written AGENTS.md section
+        # would have it silently folded into an unrelated VERSION-bump commit.
+        # The comment said "headers" but the code never checked.
+        #
+        # sync-version rewrites exactly one line per AGENTS.md -- the pattern
+        # `/^\*\*Version:\*\*.*$/m` in scripts/sync-version.cjs -- so the
+        # legitimate diff is a single changed line matching that shape. Anything
+        # else means the working tree carries edits this commit did not intend to
+        # include, and `git add` would commit them on the user's behalf.
+        #
+        # The check is on the diff's changed lines (`^-`/`^+`, excluding the
+        # +++/--- file headers), not on the file content: a body line that happens
+        # to start with `**Version:**` is not a header refresh either.
         while IFS= read -r -d '' agents_file; do
-          if ! git diff --quiet -- "$agents_file" 2>/dev/null; then
-            git add "$agents_file"
-            SYNC_STAGED=$((SYNC_STAGED + 1))
+          git diff --quiet -- "$agents_file" 2>/dev/null && continue
+          # Changed lines only. `--unified=0` keeps the hunks tight, and the
+          # file-header lines are dropped so they cannot be mistaken for content.
+          _changed_lines=$(git diff --unified=0 -- "$agents_file" 2>/dev/null \
+            | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)')
+          if [ -z "$_changed_lines" ]; then
+            continue
           fi
+          # Every changed line must be a version header (mode change adds none,
+          # so an empty diff is already handled above).
+          if printf '%s\n' "$_changed_lines" | grep -qvE '^[+-]\*\*Version:\*\*'; then
+            echo "   ⚠️  NOT auto-staged: $agents_file has changes beyond the version header."
+            echo "       Stage it yourself if you intend to include them: git add '$agents_file'"
+            continue
+          fi
+          git add "$agents_file"
+          SYNC_STAGED=$((SYNC_STAGED + 1))
         done < <(find "$ROOT_DIR" -name 'AGENTS.md' -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
         echo "   auto-staged $SYNC_STAGED file(s) from sync-version (package.json × ≤6 + AGENTS.md headers)"
       else
-        echo "⚠️  sync-version failed; see /tmp/xp-gate-sync-version.log — continuing without auto-sync"
+        # #806 D3b: this used to warn and CONTINUE, then fall through to
+        # "✅ PASSED - (VERSION/CHANGELOG staged)". The step that just failed is
+        # exactly the fan-out this branch exists to perform, so continuing meant
+        # committing a half-updated version surface under a green Gate 0 -- the
+        # failure the gate is named after, reported as success. A version bump
+        # whose fan-out did not happen is not a version bump.
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERSION CONSISTENCY CHECK (Gate 0)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ BLOCKED - VERSION is staged but sync-version FAILED, so the version
+surface is only half updated.
+
+See the log for the cause:
+  /tmp/xp-gate-sync-version.log
+
+Fix the failure and retry, or bump the version with the HUD:
+  node scripts/sync-version.cjs
+"
+        GATE_0_STATUS="BLOCK"
+        record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "1" "$GATE_0_START" "sync_version_failed"
+        return 1
       fi
     fi
-    echo "✅ PASSED - Gate 0: Version Consistency Check (VERSION/CHANGELOG staged)"
+
+    # ── #806 D3a: the consistency check the gate is NAMED after ──────────────
+    #
+    # Everything above only verified that VERSION or CHANGELOG.md was STAGED.
+    # Nothing compared the version literals, so the exact drift this gate exists
+    # to prevent could sit in a clean checkout while Gate 0 reported PASS.
+    # Measured when this was written: the repository WAS consistent
+    # (VERSION=0.38.5.0, package.json=0.38.5.0, package-lock.json=0.38.5.0,
+    # npm-package + plugin manifests=0.38.5) and nothing asserted it.
+    #
+    # Two formats, because scripts/sync-version.cjs defines two:
+    #   FULL --- MAJOR.MINOR.PATCH.MICRO (4 parts) for VERSION, root
+    #            package.json, and package-lock.json (top-level AND packages[""]).
+    #   NPM  --- the same string minus MICRO (3 parts) for the npm-package and
+    #            plugin manifests, which npm requires to be semver.
+    # Comparing the 3-part group against the 4-part VERSION would flag EVERY
+    # correct repository, so the expectation is computed per file, not once.
+    _full_version=$(tr -d ' \t\r\n' < "$ROOT_DIR/VERSION" 2>/dev/null)
+    if [ -n "$_full_version" ]; then
+      # MICRO-stripped form, mirroring `FULL_VERSION.replace(/\.\d+$/, '')`.
+      _npm_version=$(printf '%s' "$_full_version" | sed -E 's/\.[0-9]+$//')
+      _version_drift=""
+
+      # A missing file is not drift -- not every project has every manifest, and
+      # inventing a failure for an absent optional file would block repositories
+      # that legitimately do not carry it. Only a WRONG value is drift.
+      for _vf in package.json src/npm-package/package.json \
+                 plugins/claude-code/.claude-plugin/plugin.json \
+                 plugins/opencode/package.json plugins/qoder/plugin.json \
+                 plugins/dsh/package.json; do
+        [ -f "$ROOT_DIR/$_vf" ] || continue
+        case "$_vf" in
+          package.json) _expected="$_full_version" ;;
+          *)            _expected="$_npm_version" ;;
+        esac
+        # Extract the top-level "version" string with node when available (JSON
+        # is not parseable with sed reliably), falling back to a narrow grep that
+        # only accepts a top-level-looking `"version": "x"` on its own line.
+        _actual=""
+        if command -v node >/dev/null 2>&1; then
+          _actual=$(node -e '
+            try {
+              const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              if (j && typeof j.version === "string") process.stdout.write(j.version);
+            } catch (e) { /* unparseable: leave empty, reported below */ }
+          ' "$ROOT_DIR/$_vf" 2>/dev/null)
+        fi
+        if [ -z "$_actual" ]; then
+          # Fallback for environments without node. Deliberately NOT anchored to
+          # `^[[:space:]]*"version"`: that only matches pretty-printed JSON, and
+          # a minified manifest (`{"version":"1.0.0"}`) then produced "no version
+          # field found" for a file that has one -- measured while writing this,
+          # where every fixture manifest is minified and the check reported drift
+          # on all of them.
+          #
+          # `grep -m1` limits LINES, not matches: on a minified single-line file
+          # it returned every `"version"` occurrence (top-level and any nested
+          # one), so the value came back as two concatenated lines and never
+          # matched. `head -1` after the extraction keeps exactly the first.
+          _actual=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$ROOT_DIR/$_vf" 2>/dev/null \
+            | head -1 \
+            | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/')
+        fi
+        if [ -z "$_actual" ]; then
+          _version_drift="${_version_drift}
+  - $_vf: no version field found (expected $_expected)"
+        elif [ "$_actual" != "$_expected" ]; then
+          _version_drift="${_version_drift}
+  - $_vf: $_actual (expected $_expected)"
+        fi
+      done
+
+      # package-lock.json carries the version twice: the top-level field and
+      # packages[""]. Both must match, because npm reads the latter for the root
+      # entry and a stale one is the classic half-synced lockfile.
+      if [ -f "$ROOT_DIR/package-lock.json" ]; then
+        if command -v node >/dev/null 2>&1; then
+          _lock_versions=$(node -e '
+            try {
+              const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              const out = [];
+              if (j && typeof j.version === "string") out.push("top:" + j.version);
+              if (j && j.packages && j.packages[""] && typeof j.packages[""].version === "string") {
+                out.push("root:" + j.packages[""].version);
+              }
+              process.stdout.write(out.join("\n"));
+            } catch (e) { /* unparseable: reported as missing below */ }
+          ' "$ROOT_DIR/package-lock.json" 2>/dev/null)
+          if [ -n "$_lock_versions" ]; then
+            while IFS= read -r _lv; do
+              [ -n "$_lv" ] || continue
+              _where="${_lv%%:*}"
+              _value="${_lv#*:}"
+              if [ "$_value" != "$_full_version" ]; then
+                case "$_where" in
+                  top)  _label="package-lock.json (top-level version)" ;;
+                  root) _label="package-lock.json (packages[\"\"].version)" ;;
+                  *)    _label="package-lock.json ($_where)" ;;
+                esac
+                _version_drift="${_version_drift}
+  - $_label: $_value (expected $_full_version)"
+              fi
+            done <<EOF
+$_lock_versions
+EOF
+          fi
+        fi
+      fi
+
+      if [ -n "$_version_drift" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VERSION CONSISTENCY CHECK (Gate 0)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ BLOCKED - VERSION is $_full_version but these files disagree:$_version_drift
+
+Run the fan-out to repair them:
+  node scripts/sync-version.cjs
+
+#806 D3a: this check exists because the gate is named for it. Before it was
+added, the gate only verified that VERSION was STAGED, so a forgotten
+sync-version left a drifted checkout under a green Gate 0.
+"
+        GATE_0_STATUS="BLOCK"
+        record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "1" "$GATE_0_START" "version_drift"
+        return 1
+      fi
+    fi
+
+    echo "✅ PASSED - Gate 0: Version Consistency Check (VERSION/CHANGELOG staged, versions consistent)"
   else
     # Check for doc-only changes (no source code files)
     #
     # The extension list must cover every language an adapter supports, not just
     # the C-family languages this repo happens to be written in. It previously
     # stopped at `*.java`, so a staged .kt/.cs/.swift/.dart/.sh/.ps1 file made
-    # Gate 0 report "doc-only changes" — and the doc-only path skips the REST OF
-    # THE CHAIN. A Kotlin-only commit therefore ran no code gate at all, while
-    # reading green. Found once the Kotlin fixtures stopped skipping themselves
-    # (the skips had hidden it): kotlin-gate reported Gate 0 "doc-only" for a
-    # fixture whose only staged file was BadCode.kt.
+    # Gate 0 report "doc-only changes" — and every downstream gate that asks
+    # "did any code file change?" then said no, so a Kotlin-only commit ran no
+    # code gate at all while reading green. Found once the Kotlin fixtures
+    # stopped skipping themselves (the skips had hidden it): kotlin-gate reported
+    # Gate 0 "doc-only" for a fixture whose only staged file was BadCode.kt.
+    #
+    # #806 D6: this comment used to say "the doc-only path skips the REST OF THE
+    # CHAIN", which is not how it works and would send a maintainer to the wrong
+    # place. Gate 0 does not skip anything -- it returns 0 and the driver
+    # continues. The skipping happens in each downstream gate, which asks the
+    # shared `changed-file-matcher` predicates whether the change set contains
+    # anything it should scan (see changed-file-matcher.test.bats: "doc-only
+    # staged files skip code, IaC, and SAST gates").
     #
     # Keep this identical to gate-5-entry.sh's CODE_EXTENSIONS, which is the list
     # the coverage gate already trusts. A second hand-maintained copy is exactly
     # how these two drifted apart.
-    for file in $STAGED_FILES; do
-      case "$file" in
-        *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.java|*.kt|*.kts|*.cs|*.csx)
-          has_source=true
-          ;;
-        *.cpp|*.cc|*.cxx|*.c|*.h|*.hpp|*.swift|*.m|*.mm|*.dart|*.sh|*.ps1)
-          has_source=true
-          ;;
-        *.css|*.scss|*.rs)
-          has_source=true
-          ;;
-      esac
-    done
-
-    # Check for build-tooling-only changes (adapters, scripts, hooks)
+    # ONE loop computes both flags.
+    #
+    # #806 D5: these were two loops over $STAGED_FILES carrying a byte-identical
+    # extension list, so the second list could drift from the first without
+    # anything noticing -- the same failure mode this block's own comment warns
+    # about ("a second hand-maintained copy is exactly how these two drifted
+    # apart"). The only difference between them is the build-tooling path
+    # carve-out, which belongs to `has_real_source`, so it is applied inline.
+    has_source=false
     has_real_source=false
     for file in $STAGED_FILES; do
       case "$file" in
+        # Build tooling is source for `has_source` (it is code) but not for
+        # `has_real_source` (it needs no VERSION bump) -- so `continue` here
+        # skips only the second flag, keeping the single extension list below.
         src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*)
-          continue ;;
+          has_source=true
+          continue
+          ;;
         *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.py|*.go|*.java|*.kt|*.kts|*.cs|*.csx)
+          has_source=true
           has_real_source=true
           ;;
         *.cpp|*.cc|*.cxx|*.c|*.h|*.hpp|*.swift|*.m|*.mm|*.dart|*.sh|*.ps1)
+          has_source=true
           has_real_source=true
           ;;
         *.css|*.scss|*.rs)
+          has_source=true
           has_real_source=true
           ;;
       esac

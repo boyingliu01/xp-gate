@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.38.7.0] - 2026-11-16
+
+**主轴：#806 —— 把五处「没检查」从「检查通过」里摘出来。**
+
+每一个 bug 都是同一句话的变体：门禁打印了 SKIPPED，日志里却记着 PASS。
+
+### Fixed
+
+- **Gate 0 在 `main` 上检查了零个提交（#806 D1）。** `PROTECTED_BRANCHES` 里没有
+  `main`——而 `main` 是 git 的现代默认、GitHub 的默认、也是本仓库当前分支。实测：
+  暂存生产源码而 VERSION/CHANGELOG 未动，门禁打印
+  `PASSED - Version Consistency Check (non-protected branch: main)`。
+  现在 `main` 进了字面列表，并且同时读 git 自己的 `origin/HEAD`——重命名默认分支的
+  仓库因此不需要改这里。用 `symbolic-ref` 是有意的：`git remote show origin` 会走网络，
+  而门禁绝不该等网络。
+
+- **`SKIP_VERSION_CHECK` 只 echo 不改状态（#806 D2）。** `GATE_0_STATUS` 保持 PASS
+  初始值。报告把 PASS 与 SKIP 计入不同桶，于是被跳过的门禁抬高了通过数。
+  现在显式赋值。
+
+- **AGENTS.md 的任何改动都被自动暂存（#806 D4）。** 注释写着「header-only
+  modifications」，但代码从没检查过。写到一半的章节会被悄悄卷进一次无关的
+  VERSION 变更。现在每一行改动都必须匹配 `**Version:**`，否则报告并留给开发者处理。
+
+- **Gate 1 四处跳过不记状态（#806 G1a）。** 打印 `SKIPPED` 却不赋
+  `GATE_1_STATUS`，继承 PASS。实测 golangci-lint 缺失时：屏幕 SKIPPED，日志 PASS。
+
+- **Biome 分支 `return 0` 中止了整个语言循环（#806 G1b）。** 它并不是「跳过 TS 那半」，
+  而是从 `gate_1_run` 直接返回，导致多语言仓库里 typescript 之后的每种语言都没被检查。
+  实测 `PROJECT_LANGS="typescript python"` 且 biome 缺失：`Checking python` 从未出现，
+  而整轮报告成功。
+
+- **Gate 1 对同一份分析跑了两遍（#806 G1c）。** kotlin、cpp、csharp、objectivec 都写成
+  `run_lint() { run_static_analysis; }`，于是分析执行两次、发现打印两次（kotlin
+  fixture 上 6.6 s 里有 2.1 s 是纯重复）。用 `declare -f` 比较两个函数定义来识别，
+  而不是维护语言列表——列表会漏掉下一个起别名的适配器，正是 Gate 0 那两份手抄扩展名
+  列表漂移开的同一个原因。证明不了相同就照跑两遍：代价是时间，不是验证。
+
+### 验证
+
+- `gate-0-protected-branch-and-staging` 10/10
+- `gate-0-version-consistency` 9/9
+- `gate-1-verdict-integrity` 7/7（连续三轮）
+- `gate-availability-matrix` 8/8
+- `npx tsc --noEmit` 0 错误；`check-hook-mirror.sh` PASS
+
 ## [0.38.6.0] - 2026-11-16
 
 **主轴：P1-E 第二步 —— 让镜像树不再有「可编辑的第二份」。**

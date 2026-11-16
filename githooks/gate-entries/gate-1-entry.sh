@@ -285,7 +285,16 @@ else
         # resolver probe, so there is exactly one place that decides it.
         echo "ℹ️  Biome config found but biome is not installed — SKIP Gate 1 Biome."
         echo "   Install it with: npm install --save-dev @biomejs/biome"
-        return 0
+        # #806 G1a: this branch used to `return 0`, which does not "skip the TS
+        # Biome half" -- it aborts gate_1_run entirely, so in a multi-language
+        # repo every language AFTER typescript was never examined. Measured on a
+        # fixture with PROJECT_LANGS="typescript python" and biome absent: the
+        # log contained `── Checking typescript ──` and never
+        # `── Checking python ──`, while the run reported success. Record the
+        # skip and let the loop continue.
+        GATE_1_STATUS="SKIP"
+        GATE_1_DETAIL="typescript: biome not installed"
+        continue
       fi
       if [ "$BIOME_STATUS" -ne 0 ]; then
         # Biome exits 1 with `internalError/io - No files were processed` when the
@@ -365,6 +374,11 @@ else
   if ! command -v ruff &> /dev/null; then
     echo "ℹ️  ruff not available — skipping Python linting"
     echo "⏭️  SKIPPED - Code quality (ruff not available, run: pip install ruff)"
+    # #806 G1a: printed a skip but left GATE_1_STATUS at its initial PASS, so the
+    # journal recorded "passed" for a check that never ran. The Java branch ten
+    # lines away sets WARN for the same situation; this is the same decision.
+    GATE_1_STATUS="SKIP"
+    GATE_1_DETAIL="python: ruff not installed"
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
@@ -525,6 +539,11 @@ else
   if ! command -v golangci-lint &> /dev/null; then
     echo "ℹ️  golangci-lint not available — skipping Go linting"
     echo "⏭️  SKIPPED - Code quality (golangci-lint not available)"
+    # #806 G1a: same inherited-PASS defect as the Python arm above. Verified by
+    # driving gate_1_run with golangci-lint absent: the skip printed and
+    # GATE_1_STATUS stayed "PASS" with an empty DETAIL.
+    GATE_1_STATUS="SKIP"
+    GATE_1_DETAIL="go: golangci-lint not installed"
   else
     # #534: run golangci-lint over ONLY the staged .go files (incremental),
     # not the whole repo. `golangci-lint run` with no args scans every package
@@ -795,8 +814,62 @@ else
         echo "Running lint check for $CURRENT_LANG..."
         G1L_OUTPUT=""
         G1L_EXIT=0
-        G1L_OUTPUT=$(run_lint 2>&1) || G1L_EXIT=$?
-        [ -n "$G1L_OUTPUT" ] && printf '%s\n' "$G1L_OUTPUT" | head -30
+        # #806 G1c: some adapters define `run_lint() { run_static_analysis; }`
+        # verbatim (kotlin, cpp, csharp, objectivec), so this arm executed the
+        # SAME analysis twice and printed the identical findings twice. Measured
+        # on the Kotlin fixture: a single detekt+ktlint pass takes 1.7-2.2 s and
+        # the total Gate 1 run took 6.6 s, i.e. roughly 2 s (30%) was pure
+        # duplication.
+        #
+        # Detected by comparing the two function DEFINITIONS, not by naming the
+        # languages: a language list here would be hand-maintained and would miss
+        # the next adapter that aliases the two -- the same way Gate 0's two
+        # hand-copied extension lists drifted apart (#806 D5). `declare -f`
+        # prints the body, so identical bodies compare equal.
+        #
+        # Errs toward doing the work: anything the gate cannot prove identical
+        # runs twice, which costs time but never skips verification.
+        #
+        # `declare -f` prints the function NAME plus its body, so comparing the
+        # two outputs directly can never be equal -- measured: kotlin's
+        # run_lint declaration is 42 bytes ("run_lint () { run_static_analysis; }")
+        # against run_static_analysis's 1710. The name line is therefore stripped
+        # from run_lint's declaration and the remaining body is compared with
+        # run_static_analysis' BODY. Two shapes have to be recognised, because an
+        # alias in this codebase is written both ways:
+        #   run_lint() { run_static_analysis; }        -> body is the call
+        #   run_lint() { return run_static_analysis; } -> body is `return <call>`
+        # Anything else runs normally.
+        # Normalise to one line with no blanks. `tr -d ' \t\n'` collapses
+        # everything INCLUDING newlines, so no separator can be left behind.
+        # The first attempt ended with `tr '\n' ' '`, which left a trailing space
+        # ("[run_static_analysis ]") that compared unequal to the expected token,
+        # so the detection silently never fired while `bash -n` stayed clean.
+        G1_RUN_LINT_BODY=$(declare -f run_lint 2>/dev/null \
+          | sed -e '1d' -e '/^[[:space:]]*[{}][[:space:]]*$/d' \
+          | tr -d ' \t\n' | sed -e 's/;$//')
+        G1_ANALYSIS_BODY=$(declare -f run_static_analysis 2>/dev/null \
+          | sed -e '1d' -e '/^[[:space:]]*[{}][[:space:]]*$/d' \
+          | tr -d ' \t\n' | sed -e 's/;$//')
+        G1_LINT_IS_ANALYSIS=0
+        if [ -n "$G1_RUN_LINT_BODY" ]; then
+          if [ "$G1_RUN_LINT_BODY" = "run_static_analysis" ] \
+             || [ "$G1_RUN_LINT_BODY" = "returnrun_static_analysis" ]; then
+            G1_LINT_IS_ANALYSIS=1
+          elif [ -n "$G1_ANALYSIS_BODY" ] && [ "$G1_RUN_LINT_BODY" = "$G1_ANALYSIS_BODY" ]; then
+            # A literal copy of the analysis body is also "the same check".
+            G1_LINT_IS_ANALYSIS=1
+          fi
+        fi
+        if [ "$G1_LINT_IS_ANALYSIS" -eq 1 ]; then
+          # Same check: reuse the verdict already obtained above instead of
+          # paying for a second identical tool invocation.
+          G1L_EXIT="$G1A_EXIT"
+          echo "   (lint and static analysis are the same check for $CURRENT_LANG — ran once)"
+        else
+          G1L_OUTPUT=$(run_lint 2>&1) || G1L_EXIT=$?
+          [ -n "$G1L_OUTPUT" ] && printf '%s\n' "$G1L_OUTPUT" | head -30
+        fi
 
         # The stricter of the two verdicts wins. Note 3 (WARN) must not mask a 1
         # or 2 from the other command: a clean formatter plus a failing analyzer
@@ -844,6 +917,11 @@ else
         # If no adapter exists for this language, skip
         echo "ℹ️  No specific adapter for $CURRENT_LANG — using generic checks if any"
         echo "⏭️  SKIPPED - Code quality (no specific checks for $CURRENT_LANG)"
+        # #806 G1a: an unhandled language reported SKIP in prose and PASS in the
+        # journal. This is the arm that covers every language xp-gate has no
+        # adapter for, so it was the single widest inherited-PASS hole in Gate 1.
+        GATE_1_STATUS="SKIP"
+        GATE_1_DETAIL="${CURRENT_LANG}: no adapter"
       fi
       ;;
     esac
