@@ -605,37 +605,55 @@ async function packPrecondition(projectRoot: string): Promise<string | null> {
   if (!pkgJson.files || !Array.isArray(pkgJson.files)) {
     return 'package.json has no files field — skipping pack check';
   }
-  // #786: a `files` allowlist that names an output directory (`dist`, `lib`,
-  // `build`) describes an artifact a BUILD produces, not something already in the
-  // tree. With `noEmit` in tsconfig -- a normal choice when a bundler or a
-  // separate build step owns the output -- nothing writes that directory, so
-  // `npm pack` ships only package.json, `inspectPackedFiles` reports "only
-  // package.json included", and the gate BLOCKS forever with no way out.
-  //
-  // Absent artifacts are therefore a SKIP with the reason spelled out, not a
-  // FAIL. This gate's subject is build integrity, and it cannot judge a package
-  // whose inputs were never built. The message also has to name the remedy --
-  // "build first" is the whole fix, and the old text never said it.
-  const declaredEntries = (pkgJson.files as unknown[]).filter(
+  return missingDeclaredArtifacts(projectRoot, pkgJson.files);
+}
+
+/**
+ * #786: a `files` allowlist that names an output directory (`dist`, `lib`,
+ * `build`) describes an artifact a BUILD produces, not something already in the
+ * tree. With `noEmit` in tsconfig -- a normal choice when a bundler or a separate
+ * build step owns the output -- nothing writes that directory, so `npm pack`
+ * ships only package.json, `inspectPackedFiles` reports "only package.json
+ * included", and the gate BLOCKS forever with no way out.
+ *
+ * Absent artifacts are therefore a SKIP with the reason spelled out, not a FAIL:
+ * this gate's subject is build integrity, and it cannot judge a package whose
+ * inputs were never built. The message also has to name the remedy -- "build
+ * first" is the whole fix, and the old text never said it.
+ *
+ * Extracted from packPrecondition rather than inlined: the inline version took
+ * that function to CCN=11 against a recorded 5 (block threshold 10), which Gate 3
+ * caught on CI. A ratchet that is satisfied by pushing one function over the line
+ * is not satisfied.
+ */
+async function missingDeclaredArtifacts(
+  projectRoot: string,
+  files: unknown[]
+): Promise<string | null> {
+  const declaredEntries = files.filter(
     (entry): entry is string =>
       typeof entry === 'string' && entry !== '' && !entry.startsWith('!') && !entry.includes('*')
   );
-  if (declaredEntries.length > 0) {
-    const presence = await Promise.all(
-      declaredEntries.map(async (entry) => {
-        try {
-          await fs.access(path.join(projectRoot, entry));
-          return true;
-        } catch {
-          return false;
-        }
-      })
-    );
-    if (!presence.some(Boolean)) {
-      return `package.json files entries (${declaredEntries.join(', ')}) do not exist on disk — run the build that produces them, then re-run`;
-    }
+  if (declaredEntries.length === 0) {
+    return null;
   }
-  return null;
+  const presence = await Promise.all(
+    declaredEntries.map((entry) => pathExists(path.join(projectRoot, entry)))
+  );
+  if (presence.some(Boolean)) {
+    return null;
+  }
+  return `package.json files entries (${declaredEntries.join(', ')}) do not exist on disk — run the build that produces them, then re-run`;
+}
+
+/** Existence probe that reports absence instead of throwing. */
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 interface PackFailure {
