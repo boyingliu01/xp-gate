@@ -103,13 +103,77 @@ index_mode() {
   printf '%s' "${MODE_BY_PATH[$1]:-}"
 }
 
+# Content comparison: ONE `diff -rq` per tree root, reused for every pair.
+#
+# This used to be `cmp -s "$canonical" "$mirror"` inside compare_pair, i.e. one
+# process per file pair. #798 grew HOOK_MIRROR_FILES from 24 to 57 entries, and a
+# process costs a flat ~160 ms on this host no matter how small the file is.
+# Measured 2026-11-15 (Windows 11 + Git Bash, load 2.0-4.9 of 8 cores), 57 pairs:
+#
+#   57 x `cmp -s` ......... 9094 ms
+#    1 x `diff -rq` .......  242 ms      <- 37x cheaper
+#   57 x bash loop ........  140 ms      (the work is free; the processes are not)
+#
+# Same fix, same reason, as the mode lookup above: the cost is the NUMBER OF
+# PROCESSES, not the amount of work. `diff -rq` names the differing path
+# ("Files a/x and b/x differ"), so the per-file message is preserved rather than
+# traded away for speed.
+declare -A DIFFERING_CANONICAL=()
+declare -A DIFF_ROOT_LOADED=()
+
+# Record which canonical paths differ from their mirror, for one tree root.
+# Pairs are canonical "<root>/<rel>" with mirror "<mirror_root>/<rel>", so the
+# diff is run over the two roots and the differing canonical side is remembered.
+preload_diff_root() {
+  local canonical_root="$1"
+  local mirror_root="$2"
+  [ -d "$canonical_root" ] || return 0
+  [ -d "$mirror_root" ] || return 0
+  [ -z "${DIFF_ROOT_LOADED[$canonical_root]:-}" ] || return 0
+  local line
+  # `diff -rq` exits 1 when things differ, which is the normal case here, so the
+  # status is deliberately ignored: no output means every pair is identical.
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+      "Files "*" and "*" differ")
+        # "Files <canonical> and <mirror> differ"
+        local left="${line#Files }"
+        left="${left%% and *}"
+        DIFFERING_CANONICAL["$left"]=1
+        ;;
+      "Only in "*)
+        # "Only in <dir>: <name>" -- present on one side only. Recorded under the
+        # canonical root only when the directory IS that root; a nested "Only in"
+        # is left to the caller's own existence checks, which report it precisely.
+        local dir="${line#Only in }"
+        dir="${dir%%: *}"
+        local name="${line##*: }"
+        if [ "$dir" = "$canonical_root" ]; then
+          DIFFERING_CANONICAL["$canonical_root/$name"]=1
+        else
+          DIFFERING_CANONICAL["$dir/$name"]=1
+        fi
+        ;;
+    esac
+  done < <(diff -rq "$canonical_root" "$mirror_root" 2>&1 || true)
+  DIFF_ROOT_LOADED["$canonical_root"]=1
+}
+
 compare_pair() {
   canonical="$1"
   mirror="$2"
 
   [ -f "$canonical" ] || fail "missing canonical file: $canonical"
   [ -f "$mirror" ] || fail "missing mirror file: $mirror"
-  cmp -s "$canonical" "$mirror" || fail "$mirror differs from canonical $canonical"
+  # Fast path: a tree-wide diff already answered this pair. The slow per-file
+  # `cmp` is the fallback for a pair whose root was never preloaded, so the
+  # function stays correct on its own and every caller is not forced to preload.
+  if [ -n "${DIFF_ROOT_LOADED[$(dirname "$canonical")]:-}" ]; then
+    [ -z "${DIFFERING_CANONICAL[$canonical]:-}" ] || fail "$mirror differs from canonical $canonical"
+  else
+    cmp -s "$canonical" "$mirror" || fail "$mirror differs from canonical $canonical"
+  fi
 
   if in_git_repo; then
     canonical_mode=$(index_mode "$canonical")
@@ -145,6 +209,10 @@ if in_git_repo; then
   done
   preload_modes "${_mode_paths[@]}"
 fi
+
+# One `diff -rq` per guarded tree root, before either compare_pair loop. This is
+# what removes the 68 per-file `cmp` spawns (57 hook pairs + 11 root pairs).
+preload_diff_root githooks src/npm-package/hooks
 
 for rel in $HOOK_MIRROR_FILES; do
   compare_pair "githooks/$rel" "src/npm-package/hooks/$rel"
@@ -220,6 +288,18 @@ $(diff <(printf '%s\n' "$canonical_modes") <(printf '%s\n' "$mirror_modes") | se
 fi
 
 # Root-level shell copies (#507 Delphi round-1 A-MAJOR-4).
+#
+# These mirror githooks/<f> to src/npm-package/<f>, i.e. a DIFFERENT mirror root
+# from the hooks/ pairs above, so the preloaded githooks vs src/npm-package/hooks
+# diff does not describe them: a root file with drifted content shows up there
+# only as "Only in githooks", which is indistinguishable from a file that has no
+# root mirror at all. Each root therefore needs its own one-shot comparison.
+#
+# `diff -rq githooks src/npm-package` would cover them but walks the whole npm
+# package tree (376 ms measured, and it reports ~117 unrelated differences), so
+# only the 11 guarded pairs are compared. That is cheap enough to do with `cmp`
+# as a single per-pair loop is not: 11 x 160 ms is affordable where 68 x 160 ms
+# was not, and it keeps this block's behaviour identical to the old code.
 # shellcheck disable=SC2086  # word splitting IS the intent: iterate names
 for rel in $ROOT_MIRROR_FILES; do
   [ -f "githooks/$rel" ] || fail "missing canonical root file: githooks/$rel"
