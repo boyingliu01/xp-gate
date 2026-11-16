@@ -1286,7 +1286,35 @@ else
         # #570: the report file is absent, so nothing was measured. Warning and
         # continuing made "delete coverage/coverage-summary.json" an effective way
         # to switch this gate off.
-        if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
+        #
+        # #823: but "absent" has two causes and only one of them is a problem.
+        # Measured 2026-11-16 committing a comment-only fix to a gate script --
+        # Gate 5 printed, in this order,
+        #     ✅ PASSED - No test or source files changed, skipping test run.
+        #     ℹ️  No TypeScript tests were selected — no TS coverage to evaluate.
+        #     ❌ BLOCKED - coverage/coverage-summary.json not found.
+        # The gate established twice that it had nothing to measure, then demanded
+        # a measurement. PARTIAL_TEST_RUN did not cover it because that flag means
+        # "some tests ran"; here NO test was selected, so a commit touching nothing
+        # but shell reached the strict arm of #570 and could only land with a Gate 0
+        # version bump or a fabricated report.
+        #
+        # #570 stays intact: tests SELECTED but producing no report is still the
+        # off-switch this must block. Only "nothing was selected" is exempt.
+        #
+        # The exemption keys on TESTS_SKIPPED ALONE, deliberately. The obvious
+        # pairing -- `TESTS_SKIPPED && !TESTS_RAN_ANY` -- does not work, and the
+        # probe that proved it is worth recording: on the reproduction above the
+        # two flags read `skipped=true ran=true` at the same moment. TESTS_RAN_ANY
+        # is set by the IaC arm when its run_tests prints "IaC tests not configured"
+        # and returns 0 (gate-5-entry.sh:850-853, #760), because a runner DID
+        # execute -- it just had nothing to test. So `!TESTS_RAN_ANY` is false for
+        # any repo declaring iac, which is every repo using this gate the way this
+        # one does. TESTS_SKIPPED is the precise signal: it is set only where the
+        # test section concluded there was nothing to run.
+        if [ "${TESTS_SKIPPED:-false}" = "true" ]; then
+          echo "ℹ️  No tests were selected, so no coverage report was expected — skipping the coverage floor."
+        elif [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
           echo "⚠️  coverage/coverage-summary.json not found (subset test run) — not blocking."
         else
           echo "❌ BLOCKED - coverage/coverage-summary.json not found."

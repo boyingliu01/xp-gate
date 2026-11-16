@@ -255,9 +255,7 @@ else
               # The exit code is non-zero for that, so the verdict branch below
               # read it as "architecture violations detected" and printed advice to
               # re-snapshot the baseline -- i.e. the tool never ran, and the gate
-              # blamed the author's code for it. This is the project's own
-              # exit>=2 convention (>=2 = the checker did NOT run, 1 = checked and
-              # failed) applied where it was missing.
+              # blamed the author's code for it.
               #
               # Degrade to the worktree scan, exactly like a snapshot that could not
               # be BUILT, and say so. Falling through to "violations" would be a
