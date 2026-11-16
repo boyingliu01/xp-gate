@@ -63,6 +63,13 @@ run_changed_lists() {
   (
     set -u
     cd "$FIXTURE_REPO" || exit 90
+    # Gate 0 exports XP_STAGED_ACM as a fork cache for the gates that run
+    # AFTER it (#640/#809). When this suite itself runs inside Gate 5, that
+    # inherited value answers for the OUTER commit's index, so the block
+    # below would list the real commit's files instead of the fixture's
+    # mirror-only index and AC-510-02/03 fail on a green tree. The fixture's
+    # own index is the subject here; drop the inherited cache.
+    unset XP_STAGED_ACM
     block=$(changed_lists_block)
     [ -n "$block" ] || { echo "EXTRACTION-EMPTY"; exit 91; }
     eval "$(printf '%s\n' "$block" | sed "$1")"
@@ -128,6 +135,18 @@ run_changed_lists() {
   # either keyword -- what this guard asserts is that the block still CONTAINS
   # the early exit, not which spelling it uses.
   printf '%s\n' "$block" | grep -qE '^[[:space:]]*(exit|return) 0'
+}
+
+@test "AC-510-05: an inherited XP_STAGED_ACM does not leak into the fixture" {
+  # The regression this pins: with the Gate 0 cache exported, the extracted
+  # block listed the OUTER commit's index. Running this suite from inside
+  # Gate 5 (a repo that installed its own hooks) then failed AC-510-02/03 on
+  # a clean tree -- "CI green, installed hook red".
+  export XP_STAGED_ACM=$'githooks/pre-commit\nsrc/npm-package/gate-6-layers.sh'
+  run run_changed_lists ""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"raw=[src/npm-package/lib/mirror.js]"* ]]
+  [[ "$output" == *"changed=[]"* ]]
 }
 
 @test "AC-510-04: gate-8 scans unconditionally -- no gate-8 copy reads the filtered list" {
