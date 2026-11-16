@@ -13,6 +13,16 @@
  *         mirror-only fix that the next publish rolled back, and #717 sent a C#
  *         SAST fix into a file no hook sourced.
  *
+ *         P1-E step 2 adds the three trees that were still committed twice and are
+ *         already byte-identical mirrors: `hooks/lib/` (21), `build-integrity/`
+ *         (9) and `skills/` (67). Same argument, same contract, 97 more files that
+ *         stop having an editorial second copy.
+ *
+ *         `src/principles/` is NOT here yet, and the omission is deliberate: it is
+ *         still being edited in place by another workstream, and two producers
+ *         writing one tree means the content depends on which process ran last.
+ *         It joins once that work lands.
+ *
  *         P1-E step 1 moves the largest tree (`adapters/`, 199 files) out of
  *         version control. Once it is generated, "edit the wrong copy" stops being
  *         detectable-but-possible and becomes physically impossible: there is no
@@ -48,7 +58,10 @@ const REPO_ROOT = path.resolve(PKG_ROOT, '..', '..');
 
 /** Mirrors generated here, each with the canonical tree it comes from. */
 const GENERATED_TREES = Object.freeze([
-  { mirror: 'adapters', canonical: path.join(REPO_ROOT, 'githooks', 'adapters') },
+  { mirror: 'adapters', canonical: path.join(REPO_ROOT, 'githooks', 'adapters'), sync: 'adapters' },
+  { mirror: 'hooks/lib', canonical: path.join(REPO_ROOT, 'githooks', 'lib'), sync: 'hooks' },
+  { mirror: 'build-integrity', canonical: path.join(REPO_ROOT, 'src', 'build-integrity'), sync: 'module' },
+  { mirror: 'skills', canonical: path.join(REPO_ROOT, 'skills'), sync: 'skills' },
 ]);
 
 function quiet(argv) {
@@ -75,46 +88,90 @@ function main(argv = process.argv.slice(2)) {
     if (!silent) process.stderr.write(`${message}\n`);
   };
 
-  // 1. The tree this step owns. Absence of the canonical source is a defect in the
-  //    checkout, not a normal state, so it fails rather than skipping.
-  const [{ mirror, canonical }] = GENERATED_TREES;
-  if (!fs.existsSync(canonical)) {
-    process.stderr.write(
-      `[generate-mirrors] CANNOT GENERATE: canonical tree missing: ${canonical}\n`
-        + '  The package would build without its adapters. Refusing to continue '
-        + 'silently -- a package missing the files it ships is the failure this\n'
-        + '  generator exists to prevent.\n',
-    );
-    return 1;
-  }
+  // The canonical source of `adapters` is the tree this module was built for, so
+  // its absence is a defect in the checkout and fails. The other three are
+  // best-effort: `prepare` runs on every `npm install`, including from a sdist-less
+  // checkout where a sibling tree may legitimately be absent, and an install must
+  // not fail because of that. It must not SILENTLY SKIP either -- a package that
+  // ships without the files it promises is worse than a loud warning.
+  const REQUIRED = 'adapters';
+  const failures = [];
+  let syncSkillsHook;
+  let syncAdaptersHook;
+  let syncModulesHook;
+  let syncHooksHook;
 
-  let sync;
   try {
     // Required lazily: sync-package-content.js runs its own main at require-time
     // when invoked directly, and the eager import would make every caller pay for
     // the skills/plugin discovery even when only the adapters mirror is wanted.
-    // No eslint-disable needed: this file is CommonJS and `global-require` does
-    // not fire here (the directive that used to sit on this line was itself the
-    // reported problem -- an unused disable is a warning, and Gate 1 allows zero).
-    ({ syncAdapters: sync } = require('./sync-package-content.js'));
+    const mod = require('./sync-package-content.js');
+    syncAdaptersHook = mod.syncAdapters;
+    syncModulesHook = mod.syncModules;
+    syncSkillsHook = mod.syncSkills;
+    syncHooksHook = mod.syncHooks;
   } catch (error) {
     process.stderr.write(`[generate-mirrors] cannot load sync-package-content.js: ${error.message}\n`);
     return 1;
   }
 
-  if (typeof sync !== 'function') {
-    process.stderr.write('[generate-mirrors] sync-package-content.js does not export syncAdapters\n');
-    return 1;
+  for (const tree of GENERATED_TREES) {
+    if (!fs.existsSync(tree.canonical)) {
+      if (tree.mirror === REQUIRED) {
+        process.stderr.write(
+          `[generate-mirrors] CANNOT GENERATE: canonical tree missing: ${tree.canonical}\n`
+            + '  The package would build without its adapters. Refusing to continue '
+            + 'silently -- a package missing the files it ships is the failure this\n'
+            + '  generator exists to prevent.\n',
+        );
+        return 1;
+      }
+      process.stderr.write(
+        `[generate-mirrors] WARNING: canonical tree missing, skipping ${tree.mirror}/: ${tree.canonical}\n`
+          + '  The published package would be missing these files. This is tolerated '
+          + 'only because `prepare` runs on installs from partial checkouts.\n',
+      );
+      failures.push(tree.mirror);
+      continue;
+    }
+
+    let produced = 0;
+    try {
+      if (tree.sync === 'adapters') {
+        syncAdaptersHook();
+        produced = 1;
+      } else if (tree.sync === 'hooks') {
+        // syncHooks copies githooks/* plus the whole githooks/lib/ subtree.
+        syncHooksHook();
+        produced = 1;
+      } else if (tree.sync === 'module') {
+        produced = syncModulesHook(tree.mirror);
+      } else if (tree.sync === 'skills') {
+        syncSkillsHook();
+        produced = 1;
+      }
+    } catch (error) {
+      process.stderr.write(`[generate-mirrors] ERROR generating ${tree.mirror}/: ${error.message}\n`);
+      return 1;
+    }
+
+    if (!produced) {
+      process.stderr.write(`[generate-mirrors] ERROR: sync for ${tree.mirror}/ reported nothing copied\n`);
+      return 1;
+    }
+
+    const mirrorDir = tree.mirror === 'hooks/lib'
+      ? path.join(PKG_ROOT, 'hooks', 'lib')
+      : path.join(PKG_ROOT, tree.mirror);
+    const files = countFiles(mirrorDir);
+    if (files === 0) {
+      process.stderr.write(`[generate-mirrors] ERROR: ${tree.mirror}/ generated 0 files from ${tree.canonical}\n`);
+      return 1;
+    }
+    say(`[generate-mirrors] ${tree.mirror}/ (${files} files)`);
   }
 
-  const entries = sync();
-  const files = countFiles(path.join(PKG_ROOT, mirror));
-  if (files === 0) {
-    process.stderr.write(`[generate-mirrors] ERROR: ${mirror}/ generated 0 files from ${canonical}\n`);
-    return 1;
-  }
-  say(`[generate-mirrors] ${mirror}/ (${entries} entries, ${files} files)`);
-
+  if (failures.length > 0) say(`[generate-mirrors] best-effort trees skipped: ${failures.join(', ')}`);
   return 0;
 }
 

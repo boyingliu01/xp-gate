@@ -609,5 +609,10 @@ if (require.main === module) {
     checkPreCommitDrift,
     syncHooks,
     syncAdapters,
+    // P1-E step 2: generate-mirrors.cjs produces these trees too, so the mirror
+    // stops being a second committed copy. Exported for that caller only; the
+    // require-time guards above stay untouched.
+    syncSkills,
+    syncModules,
   };
 }

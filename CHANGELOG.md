@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.38.6.0] - 2026-11-16
+
+**主轴：P1-E 第二步 —— 让镜像树不再有「可编辑的第二份」。**
+P1-E 的第一步把 `src/npm-package/adapters/`（199 文件）移出版本控制。
+这一步做同样的三棵：`hooks/lib`（21）、`build-integrity`（9）、`skills`（67），
+共 97 个文件。移走的是**编辑器里的第二份**，不是发布产物——`npm files[]` 指向包内，
+tarball 必须自带副本，这一点没有选择；有选择的是这些副本是否 ALSO 在 git 里。
+
+这样消掉的缺陷类别正是 #683（4953 字节过期 `gate-3.sh`）和 v0.27.3
+（只改镜像的修复在下次发布被回滚）的来源：版本控制里只有一棵树时，
+构建前不存在「改错的那一份」。
+
+正确性主张从 git 转到生成器，判法与第一步一致——从干净的 canonical 树重新生成，
+要求逐字节相等且文件集合完全相同（REQ-E1-05），并要求镜像**未被跟踪且确实被 ignore**
+（REQ-E1-06）。两项按树独立断言，所以任何一棵漂回版本控制都会红。
+
+配对表写在**测试里**，不从生成器 import：读着被测表格做校验的测试，
+发现不了表格里少了一行。
+
+两点需要明说：
+
+1. 测试的文件枚举必须沿用生成器自己的跳过表。指向 `githooks/lib` 时，
+   它先把 `githooks/lib/__pycache__/*.pyc` 算进了 canonical——那是跑 Python 助手
+   产生的构建残留，未被跟踪，生成器**正确地**没有复制它。结果是 REQ-E1-05
+   对着一个**行为正确**的生成器报红。测试现在跳生成器所跳。
+
+2. `src/principles/` 本次**刻意不含**。它仍被另一条工作线原地修改中
+   （`analyzer.ts` +13、`config.ts` +179 未提交）；两个生产者写同一棵树，
+   等于「最后跑的那个决定内容」。等那条工作线落地后再并入。
+
+### Fixed
+
+- **`gate-6` 快照无法分析时被当成「发现架构违规」（#822）。**
+  `#820` 让 Gate 6 以**提交快照**为判定对象，但 archlint 分析一个 ref 时要先建临时
+  worktree，这一步在 git 争用下会自己失败：
+  `error: Git command error: Failed to create worktree: fatal: Unable to create '...'`。
+  archlint 对此返回 **1**，与「真的发现违规」同一个码，于是判定分支把
+  「工具没跑起来」读成「你有违规」，还建议去更新 baseline——**归因给了作者的代码**。
+  archlint 对「无法解析 ref」「建 worktree 失败」「真违规」一律返回 1，
+  没有退出码通道可区分，只能靠错误文本；现在改为降级到工作树扫描并打
+  `[WARN:SNAPSHOT_UNREADABLE]`，而不是指控。本次提交过程中本地连续命中两次。
+
+### Changed
+
+- `generate-mirrors.cjs` 从「只产 adapters」改为按表 `GENERATED_TREES` 产四棵树，
+  每棵独立校验「canonical 缺失」与「生成 0 文件」。`adapters` 的 canonical 缺失仍是硬失败
+  （包少了插件就不该构建）；其余三棵是 best-effort 但**大声警告**——
+  `prepare` 会在每次 `npm install` 时跑，部分检出的安装不该因此失败，
+  但静默跳过会让「承诺发的文件没发」，更糟。
+
+### Verified
+
+- `generated-mirror-reproducibility.test.cjs`：13 pass / 0 fail
+- `npm pack --dry-run`：adapters 296、hooks/lib 21、build-integrity 9、skills 65
+  （合计 391 文件）——tarball 仍然带齐 `files[]` 承诺的全部内容
+
 ## [0.38.5.0] - 2026-11-16
 
 **主轴：P0 中的「不可提交 / 它说谎」六项。** 87 个 issue 分诊后，

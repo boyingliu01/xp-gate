@@ -245,6 +245,37 @@ else
               echo "     🔍 Scope: staged content (commit snapshot $(printf '%s' "$GATE_6_STAGED_SNAPSHOT" | cut -c1-8))"
               ARCHLINT_OUTPUT=$(run_archlint diff .architecture-baseline.json "$GATE_6_STAGED_SNAPSHOT" --fail-on high 2>&1)
               ARCHLINT_EXIT=$?
+              # #822: a snapshot that CANNOT BE ANALYSED is not a verdict.
+              #
+              # archlint analyzes a ref by creating a temporary worktree, and that
+              # step fails on its own: measured 2026-11-16, mid-commit, with other
+              # git processes holding the repo --
+              #     error: Git command error: Failed to create worktree:
+              #     fatal: Unable to create 'C:/Users/think/AppData/Local/Tem...'
+              # The exit code is non-zero for that, so the verdict branch below
+              # read it as "architecture violations detected" and printed advice to
+              # re-snapshot the baseline -- i.e. the tool never ran, and the gate
+              # blamed the author's code for it. This is the project's own
+              # exit>=2 convention (>=2 = the checker did NOT run, 1 = checked and
+              # failed) applied where it was missing.
+              #
+              # Degrade to the worktree scan, exactly like a snapshot that could not
+              # be BUILT, and say so. Falling through to "violations" would be a
+              # false accusation; skipping silently would be a false pass.
+              #
+              # Matched on the MESSAGE, not on the exit code: measured 2026-11-16,
+              # archlint exits **1** for "Cannot resolve '<sha>'" and for
+              # "Failed to create worktree" alike, which is the same code it uses
+              # for real violations. There is no exit-code channel to tell "the
+              # analysis never ran" from "the analysis found problems", so the
+              # error text is the only usable signal. The project's exit>=2
+              # convention would be the right shape here, but archlint does not
+              # honour it and this gate cannot change that.
+              if printf '%s' "$ARCHLINT_OUTPUT" | grep -qE 'Failed to create worktree|Cannot resolve|Git command error'; then
+                echo "     ⚠️  [WARN:SNAPSHOT_UNREADABLE] archlint could not materialise the snapshot worktree — retrying against the working tree."
+                ARCHLINT_OUTPUT=$(run_archlint diff .architecture-baseline.json --fail-on high 2>&1)
+                ARCHLINT_EXIT=$?
+              fi
             else
               # Snapshot unavailable (e.g. no git, or a read-only index). Fall back
               # to the worktree scan rather than skipping: a wider scope still
