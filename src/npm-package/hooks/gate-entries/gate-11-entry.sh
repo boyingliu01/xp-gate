@@ -91,10 +91,39 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
         GATE_11_STATUS="SKIP"
       fi
       ;;
+    deny)
+      # #806 G11b: `deny` had no arm. A sprint-gate.sh that printed
+      # {"decision":"deny",...} and exited 0 fell into the `*)` fallback below and
+      # was journaled PASS -- a gate that said "deny" in plain text was recorded as
+      # having passed. sprint-gate.sh's own contract (line 49) is
+      # "EXIT: 0 = pass/skip, 1 = block", so deny+exit 0 is a protocol violation;
+      # the safe reading of a violated contract is "not allowed". Measured:
+      #   {"decision":"deny","reason":"delphi-review not APPROVED"} exit 0 -> PASS
+      # Every deny in the shipped sprint-gate.sh pairs with exit 1, so this arm is
+      # defensive -- it exists for a consumer's older/patching/failing copy, which
+      # is exactly the copy a gate cannot inspect.
+      GATE_11_STATUS="BLOCK"
+      echo "❌ BLOCKED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint gate denied})"
+      echo "   sprint-gate.sh reported decision=deny but exited 0; blocking because a"
+      echo "   deny that contradicts its exit status cannot be treated as consent."
+      printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
+      record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
+      return 1
+      ;;
     *)
-      # A run that succeeded but said nothing this gate understands. Pass on the exit
-      # status, but keep the raw output visible rather than inventing a verdict.
-      echo "✅ PASSED - Gate 11: Sprint Flow (no recognisable decision in the gate output)"
+      # #806 G11a: a run that succeeded but said nothing this gate understands.
+      # This arm used to print "✅ PASSED - ... (no recognisable decision)" and
+      # leave GATE_11_STATUS at PASS, which re-armed exactly the defect #584
+      # removed from the `allow` arm one case above: "not evaluated" must never
+      # raise PASSED_COUNT. sprint-gate-report.sh states the rule directly --
+      # "Only checks-passed licenses a PASS ... Defaulting the other way would
+      # reinstate the defect for every consumer who has not re-installed."
+      #
+      # A gate that produced no readable verdict examined nothing, so it SKIPs and
+      # keeps the raw output visible rather than inventing a decision. Exit 1 was
+      # already handled above and still BLOCKs, so this does not weaken it.
+      GATE_11_STATUS="SKIP"
+      echo "⏭️  SKIPPED - Gate 11: Sprint Flow (no recognisable decision in the gate output — not evaluated)"
       printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
       ;;
   esac

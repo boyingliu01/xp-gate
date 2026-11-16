@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.38.8.0] - 2026-11-17
+
+**主轴：0.38.7.0 本地全绿、CI 全红。这一版修的是那五个原因。**
+
+每一条都是同一句话：**本地通过不是证据**。其中三条是测试假定了作者机器上的状态，
+一条是重构后 CI 少了一个必备步骤。
+
+### Fixed
+
+- **BATS 套件看不到生成出来的镜像。** P1-E 第二步把
+  `src/npm-package/{hooks/lib,build-integrity,skills}` 移出版本控制，因此干净检出里
+  什么都没有——而多个契约套件断言这些路径存在（`gate-5-no-test-files` 要求
+  `hooks/lib/test-failure.sh` 与 canonical 逐字节相同）。CI 报 `missing <path>`，
+  本地却通过，因为上一次 pack 已经把文件留在那里。BATS 任务现在先跑
+  `generate-mirrors.cjs`，然后**断言**三个路径确实存在，让生成器坏掉时报告为
+  生成器坏掉，而不是三个互不相干的产品缺陷。验证方式：从 HEAD 抽出干净树、在上面
+  跑生成器、确认三个路径都出现。
+
+- **`check-build-integrity-mirror.sh` 用递归 diff 比较 canonical 与镜像。**
+  `__tests__/` 有意不进镜像（包既不分发也不运行这些套件），镜像变成生成产物后，
+  diff 每次都报 `Only in src/build-integrity: __tests__`。现在排除该目录。
+  canonical 的测试保留：它们是真的，只是不属于镜像内容。
+
+- **`gate-1-verdict-integrity` 断言 `!= "ruff not available"`**，依据是注释
+  「ruff IS installed in this environment」——对写它的机器成立，对 CI 不成立。
+  宿主机是否装有某个工具不是被测属性，**被检查到**才是。两例现在都注入确定性的
+  ruff stub，判据来自夹具。同时修正一条断言：它期待适配器的
+  `Running Python linting (ruff)` 文案，而 harness 把 `resolve_adapter_path` stub 掉后，
+  python 走的是 hook 的内联分支。
+
+- **`src/principles` 撞上 Gate 3 ratchet**：`runRuleOnFile` 8（基线 6），
+  三个新函数超 CCN 10（`globToRegExp` 11、`resolveSeverityForFile` 11、
+  `parseOverrides` 15）。拆成 `consumeDoubleStar` + `globCharToRegExp`、
+  `usableOverrideRank`、`parseOverrideEntry` + `parseOverrideRules`。行为不变，
+  principles 765 例仍全过。
+
+  顺带：`config.ts` 里两处块注释被改写——`/** … */` 内部的 `**/` 和 `/src/**`
+  提前闭合了注释，让一个刚通过类型检查的文件报出 30 个 TypeScript 语法错误。
+  两处现在都用散文描述形状。
+
+- **Gate 11 的 `deny` 没有分支。** `sprint-gate.sh` 输出
+  `{"decision":"deny"}` 并 exit 0 时，落进 `*)` 兜底被记成 PASS——一个明文写着
+  「拒绝」的门禁被记录为通过。`sprint-gate.sh` 的契约是
+  「0 = pass/skip，1 = block」，所以 deny+exit 0 是契约违例，而违例的安全读法是
+  「不允许」。与 Gate 0 / Gate 1 / Gate 7 属同一族。
+
+- **`AC-GATE6-STAGED-02` 从「至多一次工作区扫描」放宽为「至多两次，各自带公告」**：
+  现在有两条合理退化路径（快照不可得 → `SCOPED_TO_WORKTREE`；快照建不出 →
+  `SNAPSHOT_UNREADABLE`）。旧的界限早于第二条分支，会在正确实现上失败。
+
+### 验证
+
+- `gate-1-verdict-integrity` 7/7、`gate-11-verdict-integrity` 7/7、
+  `gate-availability-matrix` 8/8、`issue-820` 3/3、`gate-5-no-test-files` 6/6
+- `src/principles` 765/765；`npx tsc --noEmit` 0 错误
+- `check-hook-mirror.sh` 与 `check-build-integrity-mirror.sh` 双双 PASS
+- `ccn-report --check` 无违规
+
 ## [0.38.7.0] - 2026-11-16
 
 **主轴：#806 —— 把五处「没检查」从「检查通过」里摘出来。**

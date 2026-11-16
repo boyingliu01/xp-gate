@@ -117,6 +117,30 @@ function computeSummary(
   };
 }
 
+/**
+ * Apply path-scoped severity overrides (#806) to one rule's violations.
+ *
+ * Applied centrally so no rule has to know about overrides and a new rule cannot
+ * forget to honour them. Only the SEVERITY is remapped -- the violation is kept,
+ * so "reported but advisory" stays distinguishable from "nothing found".
+ *
+ * Pulled out of runRuleOnFile to keep that function under the Gate 3 ratchet: the
+ * loop pushed it to CCN 8 against a recorded baseline of 6.
+ */
+function applySeverityOverrides(
+  ruleId: string,
+  filePath: string,
+  ruleViolations: Violation[]
+): void {
+  for (const violation of ruleViolations) {
+    violation.severity = resolveSeverityForFile(
+      ruleId,
+      violation.file || filePath,
+      violation.severity
+    ) as Violation['severity'];
+  }
+}
+
 function runRuleOnFile(ctx: RunRuleContext): void {
   const { file, rule, adapter, violations, fileResult, ruleResult, errors } = ctx;
   // Honour `enabled: false` from `.principlesrc`. Nothing read this flag before
@@ -129,17 +153,7 @@ function runRuleOnFile(ctx: RunRuleContext): void {
   try {
     const ruleViolations = rule.check(file, adapter);
     if (ruleViolations.length > 0) {
-      // Path-scoped severity overrides (#806), applied centrally so no rule has
-      // to know about them and a new rule cannot forget to honour them. Only the
-      // severity is remapped -- the violation is kept, so "reported but advisory"
-      // stays distinguishable from "nothing found".
-      for (const violation of ruleViolations) {
-        violation.severity = resolveSeverityForFile(
-          rule.id,
-          violation.file || file,
-          violation.severity
-        ) as Violation['severity'];
-      }
+      applySeverityOverrides(rule.id, file, ruleViolations);
       violations.push(...ruleViolations);
       fileResult.violations.push(...ruleViolations);
       fileResult.ruleIds.push(rule.id);
