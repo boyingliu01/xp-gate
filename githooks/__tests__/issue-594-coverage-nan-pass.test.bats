@@ -139,6 +139,65 @@ run_full_suite_hook() {
   run .git/hooks/pre-commit
 }
 
+# #823: the state Gate 5 itself calls "nothing to measure" -- a shell file, which
+# no adapter claims as a test or a source file. Gate 5 prints
+# "No test or source files changed, skipping test run." and no coverage report is
+# produced, because no runner ran.
+stage_untestable_change() {
+  # The real repo declares `typescript iac`. That is NOT incidental to this bug:
+  # with only one language, an early arm handles the run and the TS coverage arm
+  # below is never reached, so the case would pass without exercising the reported
+  # failure at all. The two-language declaration is what reproduces it.
+  cat > .xp-gate-config.json <<'EOF'
+{ "version": 1, "languages": { "typescript": { "name": "TypeScript" }, "iac": { "name": "IaC" } } }
+EOF
+  mkdir -p githooks
+  printf '#!/usr/bin/env bash\n# fixture: a comment-only edit\n:\n' > githooks/fixture-comment-only.sh
+  git add githooks/fixture-comment-only.sh .xp-gate-config.json
+  # Anti-vacuity: if the file were ignored, the fixture would stage nothing, Gate 5
+  # would take its docs-only short-circuit at the OUTER guard, and the case would
+  # pass without ever reaching the branch under test.
+  git diff --cached --name-only | grep -qx 'githooks/fixture-comment-only.sh' || {
+    echo "fixture bug: the comment-only shell file was not staged"
+    return 1
+  }
+  [ ! -f coverage/coverage-summary.json ] || {
+    echo "fixture bug: a coverage report exists, the absence is the whole premise"
+    return 1
+  }
+}
+
+# #823 control: a change that DOES have something to measure, but which produces no
+# report. This is #570's protected case and must keep blocking.
+stage_testable_change_without_report() {
+  # The adapter probes node_modules/.bin for a runner before anything runs. Without
+  # one it prints "No test runner installed locally" and Gate 5 takes the
+  # TESTS_SKIPPED branch -- the case would then pass for the WRONG reason (no
+  # runner) instead of the one under test (a runner ran, no report was written).
+  # The stub is deliberately silent about coverage: it runs, writes nothing, and
+  # that absence is the input.
+  mkdir -p node_modules/.bin
+  cat > node_modules/.bin/vitest <<'STUB'
+#!/bin/sh
+case "$*" in
+  *--coverage*) exit 0 ;;
+esac
+exit 0
+STUB
+  chmod +x node_modules/.bin/vitest
+
+  cat > src/d.ts <<'EOF'
+// @no-test-required: fixture file, this case asserts the missing-report verdict
+export const d = 4;
+EOF
+  git add src/d.ts
+  git diff --cached --name-only | grep -qx 'src/d.ts' || {
+    echo "fixture bug: the source file was not staged"
+    return 1
+  }
+  rm -f coverage/coverage-summary.json coverage/coverage-final.json
+}
+
 @test "AC-601-01: a NaN coverage percentage is never reported as a pass" {
   # istanbul's real "Unknown" shape, not a hand-made NaN literal: this is the
   # input that produced the bug in the field.
@@ -287,6 +346,52 @@ EOF
   [[ "$out" == *"BLOCKED"* ]] || {
     echo "a staged 42% coverage report no longer blocks (#601 regressed):"
     printf '%s\n' "$out" | grep -E 'coverage|BLOCKED' | head -6
+    return 1
+  }
+}
+
+@test "AC-823-01: a commit with nothing testable in it is not blocked for missing coverage" {
+  # Measured 2026-11-16 while committing a comment-only fix to a gate script:
+  # Gate 5 printed BOTH of these in the same run --
+  #     ✅ PASSED - No test or source files changed, skipping test run.
+  #     ℹ️  No TypeScript tests were selected — no TS coverage to evaluate.
+  # -- and then blocked with
+  #     ❌ BLOCKED - coverage/coverage-summary.json not found.
+  # The gate had already established there was nothing to measure, and then
+  # demanded a measurement anyway. `PARTIAL_TEST_RUN` covers "some tests ran", not
+  # "no tests were selected", so a commit touching only a shell comment could not
+  # be landed without either a version bump (Gate 0) or a fabricated report.
+  stage_untestable_change
+
+  run_full_suite_hook
+  local out="$output"
+
+  [[ "$out" != *"coverage-summary.json not found"* ]] || {
+    echo "a commit with no testable change was blocked for a missing report:"
+    printf '%s\n' "$out" | grep -E 'No test|coverage|BLOCKED' | head -6
+    return 1
+  }
+  [[ "$out" != *"BLOCKED"* ]] || {
+    echo "a commit with no testable change was blocked:"
+    printf '%s\n' "$out" | grep -E 'BLOCKED' | head -4
+    return 1
+  }
+}
+
+@test "AC-823-02: a testable change with no coverage report is STILL blocked" {
+  # The control. The failure mode this guards against is "no tests were selected"
+  # being read as a licence to skip coverage universally -- that would turn
+  # "delete coverage/coverage-summary.json" back into an off switch, which is
+  # exactly what #570 closed. A source change that DID run tests must still block
+  # when no report was produced.
+  stage_testable_change_without_report
+
+  run_full_suite_hook
+  local out="$output"
+
+  [[ "$out" == *"coverage-summary.json not found"* ]] || {
+    echo "a testable change with no coverage report no longer blocks (#570 regressed):"
+    printf '%s\n' "$out" | grep -E 'No test|coverage|BLOCKED' | head -6
     return 1
   }
 }
