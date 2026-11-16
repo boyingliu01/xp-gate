@@ -331,3 +331,244 @@ YAML
   [ "$status" -eq 1 ]
   [[ "$output" == *"domain -> infrastructure"* ]]
 }
+
+@test "a layers: sequence of maps parses, and its paths: key classifies files" {
+  # #811: a list of maps is ordinary YAML for `layers:`, but the parser only
+  # recognised the map form and only the `pattern(s):` key. A correct config
+  # written this way parsed to an empty layer table and the gate exited 2
+  # (unparsable) — a fail-closed block for the wrong reason.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+    allowed_imports: [domain]
+  - name: infrastructure
+    paths: ["src/infrastructure/**"]
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "a bare dash record keeps its nested name: and block-list paths" {
+  # The third YAML shape for a list of maps: `-` alone, then `name:` at the next
+  # level. Fields were dropped whenever the name was not on the dash line, so
+  # this shape needs its own assertion — the same silent no-op one level deeper.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  -
+    name: domain
+    paths:
+      - "src/domain/**"
+    allowed_imports: [domain]
+  - name: infrastructure
+    paths:
+      - src/infrastructure/**
+    allowed_imports:
+      - domain
+      - infrastructure
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "the sequence form still catches a violation" {
+  # Accepting more shapes must not soften the verdict: the positive case is what
+  # separates a working parser from one that merely stopped blocking.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+    allowed_imports: [domain]
+  - name: infrastructure
+    paths: ["src/infrastructure/**"]
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'import { i } from "../infrastructure/c";\nexport const d = i;\n' > src/domain/a.ts
+  printf 'export const i = 1;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"domain -> infrastructure"* ]]
+}
+
+# ── Round 2 walkthrough findings (MC-01) ─────────────────────────────────────
+# An unrecognised record shape at the layer indent used to be skipped without
+# flushing, so its field lines merged into the record above it: two layers became
+# one, the inner->outer import fell inside the same layer, and the gate exited 0
+# on a tree that violates. The general skip is now a parse error.
+
+@test "a record key the parser does not recognise is BLOCKED, not merged into the previous layer" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+    allowed_imports: [domain]
+  - Name: infrastructure
+    paths: ["src/infrastructure/**"]
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'import { i } from "../infrastructure/c";\nexport const d = i;\n' > src/domain/a.ts
+  printf 'export const i = 1;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a quoted record key is BLOCKED too, for the same merge reason" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+  - "name": infrastructure
+    paths: ["src/infrastructure/**"]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+# ── Round 1 walkthrough findings (#811 follow-up) ───────────────────────────
+# YAML permits both layouts below, and each used to parse to an empty (or
+# partial) layer table — the same style-dependent failure #811 fixed one form of.
+
+@test "a sequence that starts at column 0 parses (layers: then - name: at indent 0)" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+- name: domain
+  paths:
+  - src/domain/**
+  allowed_imports: [domain]
+- name: infrastructure
+  paths:
+  - src/infrastructure/**
+  allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "block-list items at their key's own indent parse (paths: then - x, both at 4)" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths:
+    - src/domain/**
+  - name: infrastructure
+    paths:
+    - src/infrastructure/**
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "a record that never receives a name is BLOCKED (exit 2), not dropped" {
+  # Dropping a nameless record would enforce the rest of the config while the
+  # file still claims that boundary — partial enforcement that reads as a pass.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  -
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a sequence-form name outside the key grammar is BLOCKED (exit 2)" {
+  # The map form only accepts [A-Za-z0-9_-]+ keys; the sequence form took any
+  # substring, and a comma corrupts the comma-encoded name column.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: a,b
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a nested name: line gets the same validation as an inline one" {
+  # The two name paths share setname(); before that they diverged, and the
+  # nested form would have written "a,b" straight into the table.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  -
+    name: a,b
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a flow-mapping record is BLOCKED (exit 2), never silently skipped" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - {name: domain, paths: [src/domain/**]}
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a trailing comment on a sequence-form name is stripped, not part of the name" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain # the core
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 file(s) classified"* ]]
+}
+
+@test "a trailing comment on a map-form key is still a record" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:   # the core
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 file(s) classified"* ]]
+}
+
