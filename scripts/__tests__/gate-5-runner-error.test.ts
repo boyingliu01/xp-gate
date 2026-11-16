@@ -409,6 +409,24 @@ function hookScript(project: string, bin: string): string {
     'git add -A >/dev/null 2>&1',
     // POSIX form is required here -- see toPosixPath().
     `export PATH="${toPosixPath(bin)}:$PATH"`,
+    // Run ONLY Gate 5. Every assertion in this file reads a Gate 5 verdict, but
+    // the hook was running the whole chain for each of the five beforeAll
+    // fixtures, and the expensive gates dominate the cost: measured on this host
+    // (2026-11-16, load 0.7-2.2 of 8 cores) one sandboxed run is 38.3 s for all
+    // gates versus 12.2 s for Gate 5 alone. semgrep by itself is 7-12 s for
+    // `--version` (Python import tax) and no assertion here reads it.
+    //
+    // This is the hook's documented iteration filter rather than a test-only
+    // backdoor: a deselected gate is recorded as SKIP with detail
+    // "not_selected" through record_gate_audit, so the journal can never read a
+    // gate that did not run as one that passed.
+    //
+    // It also removes a hidden dependency: Gate 6 used to decide the hook's exit
+    // status for these fixtures (the sandbox has no .archlint.yaml), which is
+    // why createProjectFixture writes a `.architecture-skip` marker. With only
+    // Gate 5 selected that gate cannot interfere at all, so the fixture is
+    // measuring Gate 5 and nothing else.
+    'export XP_GATE_ONLY_GATE=5',
     `bash "${toBashPath(HOOK)}" 2>&1 || echo "__HOOK_EXIT=$?"`,
   ].join(' && ');
 }
@@ -868,6 +886,32 @@ describe('Gate 5 distinguishes runner infrastructure errors from real failures (
     };
     expect(runForm('rc=0\nfalse || rc=$?\necho "rc=$rc"')).toBe('rc=1');
     expect(runForm('rc=0\nfalse\nrc=$?\necho "rc=$rc"')).not.toContain('rc=');
+  });
+  it('AC-454-09: the sandbox runs ONLY Gate 5, so the fixture cannot pay for gates it never asserts on', () => {
+    // Every assertion in this file reads a GATE 5 verdict. The hook was still
+    // running the entire chain for each of the five beforeAll fixtures, and the
+    // expensive gates dominate: on this host one sandboxed run costs 38.3 s for
+    // all gates versus 12.2 s with `XP_GATE_ONLY_GATE=5` (measured 2026-11-16,
+    // load 0.7-2.2 of 8 cores). semgrep alone is 7-12 s just for `--version`
+    // (Python import tax), and none of it is read by a single assertion here.
+    //
+    // This is the hook's own supported iteration filter, not a test-only hack:
+    // deselected gates are recorded as SKIP with detail "not_selected" through
+    // record_gate_audit, so a journal can never read a gate that did not run as
+    // one that passed (pinned by a2-only-gate-selection.test.bats).
+    //
+    // The assertion is on the COMMAND the runner builds rather than on wall
+    // time: a timing assertion here would be the flaky kind this repository has
+    // had to delete before, and what actually needs pinning is that the filter
+    // reaches the hook.
+    const script = hookScript('/tmp/project', '/tmp/bin');
+    expect(script).toContain('XP_GATE_ONLY_GATE=5');
+
+    // Anti-vacuity: the same builder must still produce a runnable hook command,
+    // otherwise "the variable is in the string" could be satisfied by a script
+    // that no longer invokes the hook at all.
+    expect(script).toContain('pre-commit');
+    expect(script).toContain('__HOOK_EXIT=');
   });
 });
 

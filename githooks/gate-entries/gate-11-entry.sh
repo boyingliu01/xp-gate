@@ -26,6 +26,13 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_11_run() {
+if ! gate_enabled 11; then
+  echo "⏭️  SKIPPED - Gate 11: Sprint flow (not selected by XP_GATE_ONLY_GATE)"
+  GATE_11_STATUS="SKIP"
+  GATE_11_DETAIL="not_selected"
+  return 0
+fi
+
 GATE_11_START=$(gate_start_ms)
 GATE_11_STATUS="PASS"
 

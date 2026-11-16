@@ -24,6 +24,13 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_6_run() {
+if ! gate_enabled 6; then
+  echo "⏭️  SKIPPED - Gate 6: Architecture & tech debt (not selected by XP_GATE_ONLY_GATE)"
+  GATE_6_STATUS="SKIP"
+  GATE_6_DETAIL="not_selected"
+  return 0
+fi
+
  2>&1 echo ""
  2>&1 echo "→ Gate 6: Architecture & tech debt..."
 GATE_6_START=$(gate_start_ms)

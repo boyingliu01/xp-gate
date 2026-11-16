@@ -27,6 +27,13 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_10_run() {
+if ! gate_enabled 10; then
+  echo "⏭️  SKIPPED - Gate 10: SAST security (not selected by XP_GATE_ONLY_GATE)"
+  GATE_10_STATUS="SKIP"
+  GATE_10_DETAIL="not_selected"
+  return 0
+fi
+
 if any_changed_files_match "\.(ts|tsx|js|jsx|py|go|java|kt|cpp|c|swift|m|dart|sh|ps1|psm1|cs|csx|fs|vb|rs|php|rb|lua|pl)$"; then
   if [ -f "$GATE_DIR/gate-10.sh" ]; then
     source "$GATE_DIR/gate-10.sh"
