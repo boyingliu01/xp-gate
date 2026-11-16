@@ -49,14 +49,28 @@ const CANONICAL = path.join(REPO_ROOT, 'githooks', 'adapters');
 const MIRROR = path.join(REPO_ROOT, 'src', 'npm-package', 'adapters');
 const GENERATOR = path.join(REPO_ROOT, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs');
 
-/** Every file under `dir`, relative, posix-normalised, sorted. */
+// The generator's own skip list (sync-package-content.js SKIP_DIRS). The test must
+// apply the same exclusions, or it compares a canonical listing that includes
+// build artefacts no generator should ever copy -- `githooks/lib/__pycache__/*.pyc`
+// is produced by running the Python helpers, is not tracked, and appeared in the
+// canonical listing as soon as this file started checking githooks/lib. That made
+// REQ-E1-05 fail for a correct generator: the right answer is "not copied", and the
+// test was asserting "copied".
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode', '__pycache__', '__tests__']);
+const SKIP_FILES = new Set(['package-lock.json']);
+
+/** Every file under `dir` that the generator is expected to copy, relative, sorted. */
 function listFiles(dir) {
   const out = [];
   const walk = (current) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile()) out.push(path.relative(dir, full).split(path.sep).join('/'));
+      else if (entry.isFile()) {
+        if (SKIP_FILES.has(entry.name)) continue;
+        out.push(path.relative(dir, full).split(path.sep).join('/'));
+      }
     }
   };
   walk(dir);
@@ -125,6 +139,74 @@ it('REQ-E1-03: publishing still ships the adapters', () => {
   // without running prepack.
   assert.match(String(pkg.scripts.prepare || ''), /generate-mirrors\.cjs/,
     'prepare must generate the mirrors so a fresh clone can run the test suite');
+});
+
+// P1-E step 1 moved adapters out of version control. This step does the same for
+// the three trees that are already byte-identical mirrors and were still committed
+// twice -- 97 files of duplication, each one a place to edit by mistake.
+//
+// The pairs are declared HERE rather than imported from the generator: a test that
+// reads the same table it is checking cannot notice a pair missing from it. If the
+// generator silently stops handling `skills`, an imported table simply gets shorter
+// and every case still passes.
+const MIRROR_PAIRS = Object.freeze([
+  { name: 'adapters', canonical: path.join(REPO_ROOT, 'githooks', 'adapters'), mirror: path.join(REPO_ROOT, 'src', 'npm-package', 'adapters') },
+  { name: 'hooks/lib', canonical: path.join(REPO_ROOT, 'githooks', 'lib'), mirror: path.join(REPO_ROOT, 'src', 'npm-package', 'hooks', 'lib') },
+  { name: 'build-integrity', canonical: path.join(REPO_ROOT, 'src', 'build-integrity'), mirror: path.join(REPO_ROOT, 'src', 'npm-package', 'build-integrity') },
+  { name: 'skills', canonical: path.join(REPO_ROOT, 'skills'), mirror: path.join(REPO_ROOT, 'src', 'npm-package', 'skills') },
+]);
+
+for (const pair of MIRROR_PAIRS) {
+  it(`REQ-E1-05: the generator reproduces ${pair.name} byte-for-byte`, () => {
+    // `src/principles` is deliberately absent: it is still edited in place by
+    // another workstream, and two producers writing one tree is how a mirror gets
+    // its content decided by whichever process ran last. It is the one pair that
+    // still needs step 1's treatment.
+    const before = listFiles(pair.canonical);
+    assert.ok(before.length > 0,
+      `the canonical ${pair.name} tree must not be empty, got ${before.length} files`);
+
+    const run = childProcess.spawnSync(process.execPath, [GENERATOR, '--quiet'], {
+      cwd: REPO_ROOT, encoding: 'utf8', timeout: 180000,
+    });
+    assert.strictEqual(run.status, 0,
+      'generate-mirrors.cjs must succeed: ' + String(run.stderr).slice(0, 300));
+
+    const generated = listFiles(pair.mirror);
+    assert.deepStrictEqual(generated, before,
+      `the generated ${pair.name} tree must contain exactly the canonical file set`);
+
+    const mismatched = before.filter((relative) =>
+      !fs.readFileSync(path.join(pair.canonical, relative))
+        .equals(fs.readFileSync(path.join(pair.mirror, relative))));
+    assert.deepStrictEqual(mismatched, [],
+      `these ${pair.name} files were not reproduced byte-for-byte: ` + JSON.stringify(mismatched.slice(0, 10)));
+  });
+
+  it(`REQ-E1-06: the ${pair.name} mirror is not tracked by git`, () => {
+    const relativeMirror = path.relative(REPO_ROOT, pair.mirror).split(path.sep).join('/');
+    const tracked = childProcess.execFileSync('git', ['ls-files', '--', relativeMirror], {
+      cwd: REPO_ROOT, encoding: 'utf8',
+    }).trim();
+    assert.strictEqual(tracked, '',
+      `${relativeMirror}/ must not be tracked; found: ` + tracked.split('\n').slice(0, 5).join(', '));
+
+    const ignored = childProcess.spawnSync('git', ['check-ignore', '-q', relativeMirror], {
+      cwd: REPO_ROOT,
+    });
+    assert.strictEqual(ignored.status, 0,
+      `${relativeMirror}/ must be gitignored, not merely untracked`);
+  });
+}
+
+it('REQ-E1-07: every generated tree is still published', () => {
+  // The mirror exists to be packed. Taking a tree out of git is only safe while
+  // package.json still ships it -- otherwise the tarball silently loses it.
+  const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'src', 'npm-package', 'package.json'), 'utf8'));
+  for (const entry of ['adapters/', 'hooks/', 'build-integrity/', 'skills/']) {
+    assert.ok(pkg.files.includes(entry),
+      `package.json files[] must still include ${entry}, got ` + JSON.stringify(pkg.files));
+  }
 });
 
 it('REQ-E1-04: generating never writes the canonical tree', () => {
