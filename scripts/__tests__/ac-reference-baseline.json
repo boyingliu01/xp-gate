@@ -710,6 +710,16 @@
       "AC-002-06",
       "AC-002-07",
       "AC-002-08"
+    ],
+    "scripts/__tests__/gate-5-runner-error.test.ts": [
+      "AC-454-09"
+    ],
+    "githooks/__tests__/a2-only-gate-selection.test.bats": [
+      "AC-GATESEL-05"
+    ],
+    "githooks/__tests__/issue-594-coverage-nan-pass.test.bats": [
+      "AC-821-01",
+      "AC-821-02"
     ]
   }
 }
