@@ -34,6 +34,13 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_12b_run() {
+if ! gate_enabled 12b; then
+  echo "⏭️  SKIPPED - Gate 12b: Vendor exclusion (not selected by XP_GATE_ONLY_GATE)"
+  GATE_12B_STATUS="SKIP"
+  GATE_12B_DETAIL="not_selected"
+  return 0
+fi
+
 MIRROR_STAGED=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
 # `src/npm-package/` is in this filter because a mirror-only edit is the
 # dangerous direction, not the harmless one. Keying off the canonical paths

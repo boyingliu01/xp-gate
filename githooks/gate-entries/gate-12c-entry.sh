@@ -36,6 +36,13 @@ gate_12c_run() {
 # Scoped to commits that touch hook sources: the rule can only be broken by
 # editing one, and scanning 51 files on every docs-only commit is exactly the
 # fixed cost the input short-circuit convention exists to avoid.
+if ! gate_enabled 12c; then
+  echo "⏭️  SKIPPED - Gate 12c: Worktree hygiene (not selected by XP_GATE_ONLY_GATE)"
+  GATE_12C_STATUS="SKIP"
+  GATE_12C_DETAIL="not_selected"
+  return 0
+fi
+
 if printf '%s\n' "$STAGED_FILES" 2>/dev/null | grep -qE '^githooks/(adapters/|lib/|adapter-common\.sh|pre-commit|pre-push|post-commit|post-merge)'; then
   _probe_root="${PROJECT_ROOT:-}"
   if [ -n "$_probe_root" ] && [ -f "$_probe_root/scripts/check-no-npx-probe.sh" ]; then

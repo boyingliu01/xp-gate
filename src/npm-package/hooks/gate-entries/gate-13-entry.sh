@@ -509,6 +509,13 @@ ENDJSON
 }
 
 gate_13_run() {
+if ! gate_enabled 13; then
+  echo "⏭️  SKIPPED - Gate 13: Compiler strictness (not selected by XP_GATE_ONLY_GATE)"
+  GATE_13_STATUS="SKIP"
+  GATE_13_DETAIL="not_selected"
+  return 0
+fi
+
 GATE_13_STATUS="SKIP"
 if [ "${XP_GATE_DISABLE_13:-}" = "1" ]; then
   echo "⏭️  SKIPPED - Gate 13: Compiler Strictness (XP_GATE_DISABLE_13=1)"

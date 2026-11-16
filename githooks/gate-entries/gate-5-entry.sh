@@ -895,7 +895,25 @@ else
   # staged 42% never reached the threshold. The skip now also requires that no
   # coverage evidence is present.
   GATE_5_COVERAGE_EVIDENCE=false
-  if [ -f "coverage/coverage-summary.json" ] || [ -f "coverage/coverage-final.json" ]; then
+  # #821: evidence must come FROM THE COMMIT, not from the working tree.
+  #
+  # This used to be a bare `-f` on the two report paths, so ANY leftover report
+  # counted -- e.g. coverage/coverage-summary.json left behind by an earlier local
+  # run over a different tree. Measured 2026-11-16 in this repo: a commit staging
+  # one test file under the bundled mirror was blocked with
+  #     ❌ BLOCKED - TypeScript coverage 2% below 78% threshold
+  # and the identical commit passed once the leftover coverage/ directory was
+  # removed. The percentage described neither this commit nor this tree, and the
+  # working tree additionally carried a second workstream's uncommitted source.
+  #
+  # A report is evidence for this commit when the commit carries it. This keeps
+  # #601 intact -- that issue is about a STAGED report being ignored, and its
+  # fixtures stage the artefact with `git add -f` -- while refusing to answer
+  # "how well is this change tested" with a stale measurement of something else.
+  # `git cat-file -e :<path>` asks the INDEX (the commit being built) for the
+  # blob; a plain `-f` asks the directory.
+  if git cat-file -e ":coverage/coverage-summary.json" 2>/dev/null \
+     || git cat-file -e ":coverage/coverage-final.json" 2>/dev/null; then
     GATE_5_COVERAGE_EVIDENCE=true
   fi
   if [ "${TESTS_SKIPPED:-false}" = "true" ] && [ "${TESTS_RAN_ANY:-false}" != "true" ] \

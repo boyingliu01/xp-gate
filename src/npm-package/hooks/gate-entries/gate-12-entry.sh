@@ -27,6 +27,13 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_12_run() {
+if ! gate_enabled 12; then
+  echo "⏭️  SKIPPED - Gate 12: File hygiene (not selected by XP_GATE_ONLY_GATE)"
+  GATE_12_STATUS="SKIP"
+  GATE_12_DETAIL="not_selected"
+  return 0
+fi
+
 if [ -f "$GATE_DIR/gate-12-file-hygiene.sh" ]; then
   source "$GATE_DIR/gate-12-file-hygiene.sh"
 elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-12-file-hygiene.sh" ]; then

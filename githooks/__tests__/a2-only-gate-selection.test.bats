@@ -140,3 +140,77 @@ _load_gate_chain() {
   grep -q 'PARTIAL GATE RUN' <<< "$HOOK_TEXT"
   grep -q 'This commit has NOT been checked against the gates it skips' <<< "$HOOK_TEXT"
 }
+
+# ── AC-GATESEL-05: EVERY gate honors the selector, not just the early ones ────
+#
+# The selector was implemented for Gates 0-5 only. Gates 6, 7, 8, 9, 10, 11, 12,
+# 12b, 12c and 13 ignored it completely, so `XP_GATE_ONLY_GATE=5 git commit`
+# printed the PARTIAL GATE RUN banner and "Gates not named are recorded as
+# SKIP/not_selected" while semgrep, jscpd, gitleaks, the arch+boy-scout scan and
+# the compiler-strictness pass all ran anyway.
+#
+# Measured 2026-11-16 on this host: one sandboxed hook run costs 38-90 s, and
+# `semgrep --version` alone is 7-12 s (Python import tax). The selector exists to
+# re-check ONE gate while iterating on it; a selector that skips only the cheap
+# gates and still pays for the expensive ones does not do that, and its own
+# banner tells the operator the opposite of what happened.
+#
+# The test is deliberately about EVERY id in XP_GATE_ORDER rather than a fixed
+# list of gate numbers: a gate added later without the guard would otherwise
+# reintroduce the same silent partial run.
+
+# Read the ids the driver actually runs, so the assertion cannot drift from it.
+_gate_order_ids() {
+  sed -n 's/^XP_GATE_ORDER="\([^"]*\)".*/\1/p' "$BATS_TEST_DIRNAME/../gate-driver.sh" | tr ' ' '\n' | grep -v '^$'
+}
+
+@test "AC-GATESEL-05: the gate order is discoverable (anti-vacuity)" {
+  local ids
+  ids="$(_gate_order_ids)"
+  [ -n "$ids" ]
+  # Sanity: the chain is the full pre-commit ladder, not a stub.
+  [ "$(printf '%s\n' "$ids" | wc -l)" -ge 10 ]
+}
+
+@test "AC-GATESEL-05: every gate in XP_GATE_ORDER consults gate_enabled" {
+  local ids id missing
+  ids="$(_gate_order_ids)"
+  missing=""
+  for id in $ids; do
+    local entry="$BATS_TEST_DIRNAME/../gate-entries/gate-${id}-entry.sh"
+    # 12b/12c have their own entry files named exactly that way.
+    if [ ! -f "$entry" ]; then
+      missing="$missing ${id}(no-entry-file)"
+      continue
+    fi
+    # The guard may be `gate_enabled N` or `! gate_enabled N` (the latter is the
+    # shape every existing gate uses to take its SKIP branch).
+    if ! grep -qE "(^|[^a-z_])gate_enabled +${id}([^0-9]|$)" "$entry"; then
+      missing="$missing $id"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    echo "gates in XP_GATE_ORDER that never consult gate_enabled:$missing" >&2
+    echo "Each one runs on every commit even when XP_GATE_ONLY_GATE excludes it," >&2
+    echo "while the hook's own banner claims they were recorded as SKIP/not_selected." >&2
+    return 1
+  fi
+}
+
+@test "AC-GATESEL-05: a deselected late gate records SKIP/not_selected, not PASS" {
+  # Consulting the selector is not enough: the branch must also set the SKIP
+  # detail, otherwise the journal records a pass for a gate that never ran --
+  # the exact failure AC-GATESEL-03 pins for the early gates.
+  local ids id bad
+  ids="$(_gate_order_ids)"
+  bad=""
+  for id in $ids; do
+    local entry="$BATS_TEST_DIRNAME/../gate-entries/gate-${id}-entry.sh"
+    [ -f "$entry" ] || continue
+    grep -q "not_selected" "$entry" || bad="$bad $id"
+  done
+  if [ -n "$bad" ]; then
+    echo "gates that consult no not_selected detail:$bad" >&2
+    return 1
+  fi
+}

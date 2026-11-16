@@ -30,6 +30,13 @@ gate_9_run() {
 # project" -- which is exactly the silent-no-coverage path this sprint
 # removes. Verdict codes (mirror of the java.sh G1 contract):
 #   0=PASS 2=BLOCK(compile failed) 3=SKIP+WARN(reason printed)
+if ! gate_enabled 9; then
+  echo "⏭️  SKIPPED - Gate 9: Build integrity (not selected by XP_GATE_ONLY_GATE)"
+  GATE_9_STATUS="SKIP"
+  GATE_9_DETAIL="not_selected"
+  return 0
+fi
+
 resolve_build_integrity_timeout() {
   local file=".xp-gate/build-integrity-timeout" val=""
   if [ -f "$file" ]; then
