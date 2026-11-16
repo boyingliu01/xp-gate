@@ -403,6 +403,46 @@ YAML
   [[ "$output" == *"domain -> infrastructure"* ]]
 }
 
+# ── Round 2 walkthrough findings (MC-01) ─────────────────────────────────────
+# An unrecognised record shape at the layer indent used to be skipped without
+# flushing, so its field lines merged into the record above it: two layers became
+# one, the inner->outer import fell inside the same layer, and the gate exited 0
+# on a tree that violates. The general skip is now a parse error.
+
+@test "a record key the parser does not recognise is BLOCKED, not merged into the previous layer" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+    allowed_imports: [domain]
+  - Name: infrastructure
+    paths: ["src/infrastructure/**"]
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'import { i } from "../infrastructure/c";\nexport const d = i;\n' > src/domain/a.ts
+  printf 'export const i = 1;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a quoted record key is BLOCKED too, for the same merge reason" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+  - "name": infrastructure
+    paths: ["src/infrastructure/**"]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
 # ── Round 1 walkthrough findings (#811 follow-up) ───────────────────────────
 # YAML permits both layouts below, and each used to parse to an empty (or
 # partial) layer table — the same style-dependent failure #811 fixed one form of.
