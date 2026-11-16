@@ -50,6 +50,50 @@ else
     fi
   )
 
+  # ---------------------------------------------------------------------------
+  # Which tree does the verdict describe? The COMMIT, not the directory.
+  #
+  # `archlint diff <baseline>` makes its CURRENT argument default to "analyze the
+  # current working tree", so the pass/fail verdict included every uncommitted
+  # file in the checkout -- including files belonging to other work in progress.
+  # Measured 2026-11-11 in this repo: a worktree carrying 7 unstaged files put 217
+  # regressions / 122 files into the verdict, none of which the commit under
+  # review had touched. Two things then went wrong at once:
+  #
+  #   1. the block was attributed to the wrong author (a commit is blocked by
+  #      someone else's editor buffer), and
+  #   2. the block message advised `archlint snapshot -o .architecture-baseline.json`
+  #      -- correct for a genuine regression, but here it froze ANOTHER PERSON'S
+  #      UNCOMMITTED WORK into the baseline as the accepted norm. Following the
+  #      tool's own advice made the repo worse.
+  #
+  # A commit contains the index, so the index is the correct input. `git
+  # write-tree` + `git commit-tree` cheaply produce a commit object holding
+  # exactly the staged content; archlint accepts a git ref and analyzes a
+  # temporary worktree of it. The object is unreachable (no ref, no reflog entry)
+  # and is reclaimed by gc -- it never appears in the history being committed.
+  #
+  # Failure handling is deliberate: if the snapshot cannot be built, the gate
+  # falls back to the old worktree scan and SAYS SO, rather than skipping. A
+  # check that quietly stops checking is the #554/#562 lie; a wider-than-intended
+  # scope at least still checks something.
+  # ---------------------------------------------------------------------------
+  GATE_6_STAGED_SNAPSHOT=""
+  GATE_6_STAGED_SNAPSHOT_AVAILABLE=0
+
+  _gate6_snapshot() {
+    local _tree _commit
+    _tree=$(git -C "$PROJECT_ROOT" write-tree 2>/dev/null) || return 1
+    [ -n "$_tree" ] || return 1
+    # No parent: the content is all archlint reads, and a parentless commit
+    # cannot be confused with a real one if the object ever surfaces.
+    _commit=$(git -C "$PROJECT_ROOT" commit-tree "$_tree" -m "xp-gate: staged snapshot for Gate 6" 2>/dev/null) || return 1
+    [ -n "$_commit" ] || return 1
+    GATE_6_STAGED_SNAPSHOT="$_commit"
+    GATE_6_STAGED_SNAPSHOT_AVAILABLE=1
+    return 0
+  }
+
   # Check if architecture config exists (use $PROJECT_ROOT — hook may have cd'd to a subdir via ARCH-03)
   if [ -f "$PROJECT_ROOT/architecture.yaml" ] || [ -f "$PROJECT_ROOT/.architecturerc" ] || [ -f "$PROJECT_ROOT/.archlint.yaml" ]; then
     # #686: an `architecture.yaml` is NOT evidence that layer boundaries are
@@ -189,8 +233,19 @@ else
             ARCHLINT_OUTPUT=""
             ARCHLINT_EXIT=0
           elif [ -f "$PROJECT_ROOT/.architecture-baseline.json" ]; then
-            ARCHLINT_OUTPUT=$(run_archlint diff .architecture-baseline.json --fail-on high 2>&1)
-            ARCHLINT_EXIT=$?
+            # Scope the verdict to the COMMIT under review (see _gate6_snapshot).
+            if _gate6_snapshot; then
+              echo "     🔍 Scope: staged content (commit snapshot $(printf '%s' "$GATE_6_STAGED_SNAPSHOT" | cut -c1-8))"
+              ARCHLINT_OUTPUT=$(run_archlint diff .architecture-baseline.json "$GATE_6_STAGED_SNAPSHOT" --fail-on high 2>&1)
+              ARCHLINT_EXIT=$?
+            else
+              # Snapshot unavailable (e.g. no git, or a read-only index). Fall back
+              # to the worktree scan rather than skipping: a wider scope still
+              # checks something, whereas a silent skip checks nothing.
+              echo "     ⚠️  [WARN:SCOPED_TO_WORKTREE] could not snapshot the index — the verdict below covers the working tree, including uncommitted files that are NOT part of this commit."
+              ARCHLINT_OUTPUT=$(run_archlint diff .architecture-baseline.json --fail-on high 2>&1)
+              ARCHLINT_EXIT=$?
+            fi
           else
             ARCHLINT_OUTPUT=$(run_archlint scan . -f table --quiet 2>&1)
             ARCHLINT_EXIT=$?
