@@ -10,7 +10,23 @@
 # 错就一起绿。只有让生产方真的产出、校验方真的读，才能发现这类偏差。
 
 setup() {
-  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  # #814: this used to be a hard-coded `../../..`, which resolves to the repo
+  # root only for THIS copy (skills/sprint-flow/__tests__). The same file also
+  # ships under plugins/<p>/skills/ and src/npm-package/**/skills/, three and four
+  # levels deep, where the fixed depth points at plugins/claude-code or
+  # src/npm-package -- so 6 of the 7 copies failed under Gate 5 and, once this
+  # repo's own hooks are installed, made every commit impossible.
+  #
+  # Walk up until the markers of the repo are both present instead of counting
+  # `..`. Depth-counting is what broke: it encodes "where this file lives" into a
+  # constant, and every new mirror location re-breaks it.
+  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME" && pwd)"
+  while [ "$REPO_ROOT" != "/" ] && [ -n "$REPO_ROOT" ]; do
+    if [ -f "$REPO_ROOT/VERSION" ] && [ -f "$REPO_ROOT/src/npm-package/bin/xp-gate.js" ]; then
+      break
+    fi
+    REPO_ROOT="$(dirname "$REPO_ROOT")"
+  done
   VERIFY="$REPO_ROOT/skills/sprint-flow/scripts/verify-sprint-state.sh"
   CLI="$REPO_ROOT/src/npm-package/bin/xp-gate.js"
   WORK="$(mktemp -d)"
@@ -23,6 +39,12 @@ teardown() {
 @test "AC-688-01: accepts state written by xp-gate sprint-init" {
   cd "$WORK"
   git init -q .
+  # The developer machine sets a GLOBAL core.hooksPath at the installed hooks, so
+  # a bare `git commit` in the fixture would run the whole gate suite instead of
+  # creating the fixture commit. Pin it to an empty dir: this suite tests the
+  # verify script, not the hook chain.
+  mkdir -p "$WORK/empty-hooks"
+  git config core.hooksPath "$WORK/empty-hooks"
   echo '{}' > package.json
   git add -A
   git -c user.email=t@t -c user.name=t commit -q -m init

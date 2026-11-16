@@ -348,7 +348,19 @@ if command -v detect-secrets-hook >/dev/null 2>&1 && [ -f ".secrets.baseline" ];
   fi
   # Temp cleanup is owned by the gate8_cleanup trap; no rm here.
 else
-  echo "     ⚠️  detect-secrets-hook unavailable (install: pip install -e \".[dev]\") — gitleaks only."
+  # #793: this branch used to blame the tool unconditionally. Both "the hook is
+  # not installed" and "the baseline file is missing" land here, so a repo with
+  # detect-secrets 1.5.52 on PATH was told to run `pip install -e ".[dev]"` --
+  # correct-looking advice that changes nothing, while the file actually missing
+  # (the committed `.secrets.baseline`) was never named. The two have different
+  # remedies and only one of them is an install, so they are split here.
+  if command -v detect-secrets-hook >/dev/null 2>&1; then
+    echo "     ⚠️  detect-secrets-hook is installed but .secrets.baseline is missing."
+    echo "         Generate it once with: detect-secrets scan > .secrets.baseline"
+    echo "         (gitleaks still ran.)"
+  else
+    echo "     ⚠️  detect-secrets-hook unavailable (install: pip install -e \".[dev]\") — gitleaks only."
+  fi
 fi
 
 record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
