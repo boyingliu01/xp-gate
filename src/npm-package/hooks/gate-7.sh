@@ -16,8 +16,13 @@ IAC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -
 # shellcheck disable=SC2034
 GATE_7_SCANNED_FILES=0
 if [ -z "$IAC_FILES" ]; then
-  echo "✅ PASSED - No IaC files detected in changes."
-  GATE_7_STATUS="PASS"
+  # #800: "nothing to scan" must never be rendered as "scanned and clean".
+  # This branch used to print PASSED and set GATE_7_STATUS=PASS, while the report
+  # simultaneously carried scanned_files=0 -- the gate contradicted itself, and
+  # the PASS was what downstream consumers read. A change set with no IaC file is
+  # a SKIP with a reason, exactly like the no-adapter branch below.
+  echo "⏭️  SKIPPED - IaC security (no IaC files in this change set)."
+  GATE_7_STATUS="SKIP"
 else
   # Consumed by the sourcing parent, not here (see #548).
   # shellcheck disable=SC2034

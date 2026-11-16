@@ -10,6 +10,28 @@ export interface RuleConfig {
   methodThreshold?: number;
 }
 
+/**
+ * A path-scoped severity relaxation (#806).
+ *
+ * `severity` in `rules` is one global value per rule, so a project could not both
+ * block a rule in production and keep it advisory in tests. Measured here with
+ * four rules promoted to `error`: 220 of 271 findings were in test files, so
+ * enabling production blocking would have blocked nearly every test edit -- and
+ * demoting the rule globally re-opened the defect the promotion existed to fix.
+ *
+ * These entries may only RELAX a rule (error -> warning/info). They never
+ * promote and never suppress: the violation is still reported, only its severity
+ * changes for matching paths. See `resolveSeverityForFile`.
+ */
+export interface SeverityOverride {
+  // POSIX-style globs matched against the file path, e.g. any `__tests__`
+  // directory at any depth. Written as a line comment on purpose: a block
+  // comment cannot carry a globstar path, because the `/` after `**` closes it.
+  paths: string[];
+  /** `"<group>.<rule>"` -> target severity. */
+  rules: Record<string, string>;
+}
+
 interface PrinciplesConfig {
   rules: {
     'clean-code': {
@@ -54,6 +76,8 @@ interface PrinciplesConfig {
     mode?: string;
     mediumProjectDefinition?: string;
   };
+  /** Path-scoped severity relaxations, applied in order (#806). */
+  overrides?: SeverityOverride[];
 }
 
 /** Config keys that carry a numeric threshold, per group. */
@@ -267,6 +291,10 @@ function mergeConfig(
     // just outside `rules`; found by the Delphi walkthrough.
     output: mergeSection(defaults.output, user.output),
     performance: mergeSection(defaults.performance, user.performance),
+    // Explicit: `...user` would carry the RAW block through unvalidated, so a
+    // malformed override would reach the resolver and fail there instead of
+    // being reported once, at load, with a message naming the bad entry.
+    overrides: parseOverrides(user.overrides, '.principlesrc'),
     rules: {
       'clean-code': mergeGroup(
         defaults.rules['clean-code'],
@@ -479,4 +507,155 @@ export function setActiveConfig(config: PrinciplesConfig): void {
 export function resetActiveConfig(): void {
   activeConfig = getDefaultConfig();
   activeConfigInstalled = false;
+}
+
+// ---------------------------------------------------------------------------
+// Path-scoped severity overrides (#806)
+// ---------------------------------------------------------------------------
+
+/** Severity order, most to least severe. Used to forbid upward overrides. */
+const SEVERITY_RANK: Record<string, number> = { error: 3, warning: 2, info: 1 };
+
+/**
+ * Translate a POSIX-style glob to a RegExp.
+ *
+ * Deliberately small: this supports the two shapes the feature needs (`**` across
+ * directories, `*` within one segment) plus `?`. Anything richer belongs in a
+ * glob library, and pulling a dependency into `src/npm-package` is forbidden.
+ *
+ * `**` becomes `.*` (so `**​/__tests__/**` matches a nested test dir AND an
+ * absolute native path), `*` becomes `[^/]*`, and regex metacharacters are
+ * escaped so a literal `.` in `*.test.ts` does not match `a_test.ts`.
+ */
+function globToRegExp(glob: string): RegExp {
+  let out = '';
+  for (let i = 0; i < glob.length; i++) {
+    const ch = glob[i];
+    if (ch === '*') {
+      if (glob[i + 1] === '*') {
+        out += '.*';
+        i++;
+        // `**/` may match zero segments (`src/__tests__/a.ts` for `/src/**`).
+        if (glob[i + 1] === '/') i++;
+      } else {
+        out += '[^/]*';
+      }
+    } else if (ch === '?') {
+      out += '[^/]';
+    } else if ('\\^$.|+()[]{}'.includes(ch)) {
+      out += `\\${ch}`;
+    } else {
+      out += ch;
+    }
+  }
+  return new RegExp(`^${out}$`);
+}
+
+/** Normalise a path for matching: native separators -> POSIX. */
+function normaliseForMatch(filePath: string): string {
+  return filePath.replace(/\\/g, '/');
+}
+
+/**
+ * Whether `filePath` matches `glob`.
+ *
+ * Tries the whole path first, then every trailing segment run, so a repo-relative
+ * glob also matches a file handed to the checker as an absolute native path. Gate
+ * 4 passes repo-relative paths, but `--files` accepts absolute ones and the
+ * override must not silently stop applying because the caller changed shape.
+ */
+function matchesGlob(filePath: string, glob: string): boolean {
+  const target = normaliseForMatch(filePath);
+  const re = globToRegExp(normaliseForMatch(glob));
+  if (re.test(target)) return true;
+  const segments = target.split('/');
+  for (let i = 1; i < segments.length; i++) {
+    if (re.test(segments.slice(i).join('/'))) return true;
+  }
+  return false;
+}
+
+/**
+ * The severity to report for one rule on one file.
+ *
+ * Starts from the declared severity (the caller passes what the rule would emit)
+ * and lets a matching override RELAX it. Relaxing only is enforced by rank, not
+ * by convention: a stray override must never turn an advisory rule into a
+ * blocker, because that would make the gate's reach depend on path globs nobody
+ * reviewed.
+ *
+ * Never suppresses the violation -- the finding is still reported. Only its
+ * severity changes, so the "passed with warnings" case stays distinguishable
+ * from "nothing found".
+ */
+export function resolveSeverityForFile(
+  ruleId: string,
+  filePath: string,
+  declaredSeverity: string
+): string {
+  const overrides = activeConfig.overrides;
+  if (!Array.isArray(overrides) || overrides.length === 0) return declaredSeverity;
+
+  let effective = declaredSeverity;
+  const declaredRank = SEVERITY_RANK[declaredSeverity] ?? 0;
+  for (const entry of overrides) {
+    const target = entry?.rules?.[ruleId];
+    if (!target) continue;
+    const targetRank = SEVERITY_RANK[target];
+    // Unknown severity or an upward move: ignore rather than guess.
+    if (targetRank === undefined || targetRank >= declaredRank) continue;
+    if (!entry.paths.some(p => matchesGlob(filePath, p))) continue;
+    // A later override may relax further, never tighten back up.
+    if (targetRank < (SEVERITY_RANK[effective] ?? 0)) effective = target;
+  }
+  return effective;
+}
+
+/**
+ * Validate the `overrides` block, dropping malformed entries with a warning.
+ *
+ * A config typo must not take Gate 4 down, and it must not silently do nothing
+ * either -- both would be the silent-defaults defect this module removes. The
+ * same reasoning as `mergeRule`, applied to a nested structure.
+ */
+function parseOverrides(raw: unknown, source: string): SeverityOverride[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    warn(`"overrides" in ${source} must be an array — ignored`);
+    return [];
+  }
+  const out: SeverityOverride[] = [];
+  for (const [index, entry] of raw.entries()) {
+    if (!isPlainObject(entry)) {
+      warn(`overrides[${index}] in ${source} must be an object — ignored`);
+      continue;
+    }
+    const paths = entry.paths;
+    if (!Array.isArray(paths) || paths.length === 0 || paths.some(p => typeof p !== 'string')) {
+      warn(`overrides[${index}].paths in ${source} must be a non-empty string array — ignored`);
+      continue;
+    }
+    const rules = entry.rules;
+    if (!isPlainObject(rules) || Object.keys(rules).length === 0) {
+      warn(`overrides[${index}].rules in ${source} must be a non-empty object — ignored`);
+      continue;
+    }
+    const cleanRules: Record<string, string> = {};
+    for (const [ruleId, severity] of Object.entries(rules)) {
+      if (typeof severity !== 'string' || !(SEVERITIES as readonly string[]).includes(severity)) {
+        warn(
+          `overrides[${index}].rules["${ruleId}"] in ${source} must be one of ${SEVERITIES.join('|')} — ignored`
+        );
+        continue;
+      }
+      if (!ruleId.includes('.')) {
+        warn(`overrides[${index}].rules["${ruleId}"] in ${source} must be "<group>.<rule>" — ignored`);
+        continue;
+      }
+      cleanRules[ruleId] = severity;
+    }
+    if (Object.keys(cleanRules).length === 0) continue;
+    out.push({ paths: paths as string[], rules: cleanRules });
+  }
+  return out;
 }

@@ -1,5 +1,5 @@
 import { Rule, Violation, Adapter } from './types';
-import { getActiveConfig } from './config';
+import { getActiveConfig, resolveSeverityForFile } from './config';
 import { TypeScriptAdapter } from './adapters/typescript';
 import { PythonAdapter } from './adapters/python';
 import { GoAdapter } from './adapters/go';
@@ -129,6 +129,17 @@ function runRuleOnFile(ctx: RunRuleContext): void {
   try {
     const ruleViolations = rule.check(file, adapter);
     if (ruleViolations.length > 0) {
+      // Path-scoped severity overrides (#806), applied centrally so no rule has
+      // to know about them and a new rule cannot forget to honour them. Only the
+      // severity is remapped -- the violation is kept, so "reported but advisory"
+      // stays distinguishable from "nothing found".
+      for (const violation of ruleViolations) {
+        violation.severity = resolveSeverityForFile(
+          rule.id,
+          violation.file || file,
+          violation.severity
+        ) as Violation['severity'];
+      }
       violations.push(...ruleViolations);
       fileResult.violations.push(...ruleViolations);
       fileResult.ruleIds.push(rule.id);

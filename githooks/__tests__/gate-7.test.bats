@@ -22,7 +22,11 @@ setup() {
   [ -n "$GATE_7_STATUS" ]
 }
 
-@test "gate-7.sh passes when no IaC files changed" {
+@test "gate-7.sh SKIPs (not PASSes) when no IaC files changed" {
   source "$BATS_TEST_DIRNAME/../gate-7.sh"
-  [ "$GATE_7_STATUS" = "PASS" ]
+  # #800: this assertion used to require "PASS". A change set with no IaC file
+  # was rendered as "✅ PASSED - No IaC files detected", so a security gate that
+  # never ran was counted as a security gate that passed -- while the same run
+  # reported scanned_files=0. Nothing-to-scan is a SKIP with a reason.
+  [ "$GATE_7_STATUS" = "SKIP" ]
 }

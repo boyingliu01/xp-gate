@@ -38,6 +38,16 @@
   而不是维护语言列表——列表会漏掉下一个起别名的适配器，正是 Gate 0 那两份手抄扩展名
   列表漂移开的同一个原因。证明不了相同就照跑两遍：代价是时间，不是验证。
 
+- **Gate 7 把「没有可扫的东西」渲染成「扫过且干净」（#800）。** 无 IaC 文件时它打印
+  `✅ PASSED - No IaC files detected in changes.` 并置 `GATE_7_STATUS=PASS`，而报告里
+  同时带着 `scanned_files=0`——门禁自相矛盾，而下游读到的是那个 PASS。现在是无 IaC
+  文件即 SKIP 并给出原因，与下方 no-adapter 分支一致。
+
+- **Gate 4 支持按路径覆盖严重度。** `.principlesrc` 新增 `overrides[]`，可对不同路径
+  （如测试文件）单独设定规则严重度；此前四条核心规则被提升为 `error` 后，测试这类
+  天然重复/嵌套的代码无处豁免。`src/principles/config.ts` 新增 179 行实现，
+  `config-path-severity-overrides.test.ts` 覆盖 6 例。
+
 ### 验证
 
 - `gate-0-protected-branch-and-staging` 10/10
