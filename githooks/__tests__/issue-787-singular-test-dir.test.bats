@@ -81,8 +81,16 @@ write_test_file() {
   write_test_file test/foo.test.ts
   git add src/foo.ts test/foo.test.ts
   run_fixture_hook
-  [ "$status" -eq 0 ]
+  # Assert the PAIRING verdict, not the hook's overall exit status. Later gates
+  # legitimately fail in a throwaway fixture (Gate 5 can BLOCK on a missing
+  # coverage/coverage-summary.json, which has nothing to do with pairing), so
+  # `[ "$status" -eq 0 ]` made this case pass locally and fail on CI -- the
+  # environment, not the fix, decided the outcome.
   [[ "$output" != *"without corresponding test"* ]]
+  [[ "$output" != *"without corresponding tests"* ]]
+  # Anti-vacuity: Gate 5 must actually have run. Without this, a hook that
+  # aborted before the pairing check would satisfy the two assertions above.
+  [[ "$output" == *"Gate 5"* ]]
 }
 
 # ── AC-787-02: the plural form must keep working (no regression) ─────
@@ -93,8 +101,10 @@ write_test_file() {
   write_test_file tests/foo.test.ts
   git add src/foo.ts tests/foo.test.ts
   run_fixture_hook
-  [ "$status" -eq 0 ]
+  # Same reasoning as AC-787-01: the pairing verdict is the subject here.
   [[ "$output" != *"without corresponding test"* ]]
+  [[ "$output" != *"without corresponding tests"* ]]
+  [[ "$output" == *"Gate 5"* ]]
 }
 
 # ── AC-787-03: anti-vacuity — a genuinely test-less file still BLOCKS ─
