@@ -161,6 +161,15 @@ TS
   git add -A
   local res
   res=$(run_gate gate-4.sh typescript)
+  # On failure, print the verdict and the gate's own output. Without this a CI
+  # failure reports only `[ "${res%%|*}" = "BLOCK" ] failed`, which says nothing
+  # about WHY -- and Gate 4 has three distinct non-BLOCK outcomes (SKIP for no
+  # matching files, SKIP for an unreachable tsx, PASS for a config that lost the
+  # severity). The first CI run of this test failed exactly that way and had to be
+  # diagnosed by reasoning instead of by reading the log.
+  if [ "${res%%|*}" != "BLOCK" ]; then
+    printf 'expected BLOCK, got: %s\n--- gate output ---\n%s\n' "${res%%|*}" "${res#*|*|}" >&3
+  fi
   [ "${res%%|*}" = "BLOCK" ]
 }
 
@@ -184,12 +193,15 @@ TS
   git add -A
   local res
   res=$(run_gate gate-4.sh typescript)
+  if [ "${res%%|*}" != "PASS" ]; then
+    printf 'expected PASS, got: %s\n--- gate output ---\n%s\n' "${res%%|*}" "${res#*|*|}" >&3
+  fi
   [ "${res%%|*}" = "PASS" ]
   # ... and it still reports the finding, so PASS here means "advisory", not
   # "nothing found" -- the distinction the old behaviour destroyed.
   case "$res" in
     *"warnings found"*) : ;;
-    *) false ;;
+    *) printf 'expected a "warnings found" line in:\n%s\n' "${res#*|*|}" >&3; false ;;
   esac
 }
 

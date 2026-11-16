@@ -42,12 +42,20 @@ setup() {
 
 @test "AC-GATE6-STAGED-02: the worktree-scanning invocation survives only behind the announced fallback" {
   # `diff <baseline> --fail-on ...` with no CURRENT ref is precisely "scan the
-  # working tree". It is allowed exactly once: the degraded path, which must
-  # announce itself. Any occurrence without the marker means the defect is back.
+  # working tree". It is allowed only on degraded paths, and every degraded path
+  # must announce itself. Any occurrence without a marker means the defect is back.
+  #
+  # Bounded at 2 rather than 1: there are now two distinct degradations -- the
+  # index could not be SNAPSHOT at all (SCOPED_TO_WORKTREE), and the snapshot was
+  # built but archlint could not materialise it (SNAPSHOT_UNREADABLE). The earlier
+  # `-le 1` predated the second branch, so it failed on a correct implementation.
+  # Two markers, two call sites: the bound tracks the announcement, not a count
+  # that a new legitimate fallback would have to fight.
   count=$(grep -cE 'run_archlint diff [^|]*\.architecture-baseline\.json --fail-on' "$GATE6" || true)
-  [ "$count" -le 1 ]
-  if [ "$count" -eq 1 ]; then
+  [ "$count" -le 2 ]
+  if [ "$count" -ge 1 ]; then
     grep -q 'SCOPED_TO_WORKTREE' "$GATE6"
+    grep -q 'SNAPSHOT_UNREADABLE' "$GATE6"
   fi
 }
 

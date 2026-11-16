@@ -1171,6 +1171,26 @@ jobs:
           # 2) and this step prints the assignment so the log names the files.
           node scripts/run-bats-ci.cjs --shard ${{ matrix.shard }} --print-only
 
+      - name: Materialise generated mirrors
+        run: |
+          # P1-E step 2 moved src/npm-package/{hooks/lib,build-integrity,skills}
+          # out of version control: they are produced by generate-mirrors.cjs at
+          # prepack time, and .gitignore stops a second editable copy existing.
+          # That is right for the repository, but a fresh checkout therefore has
+          # NOTHING there -- and several contract suites assert against those
+          # paths (gate-5-no-test-files.test.bats requires
+          # src/npm-package/hooks/lib/test-failure.sh to exist byte-identically to
+          # its canonical copy). Without this step they fail with "missing <path>"
+          # on CI while passing locally, where an earlier pack had already left
+          # the files behind.
+          node src/npm-package/scripts/generate-mirrors.cjs
+          # Prove the step worked, rather than letting the suites report it as a
+          # product defect one file at a time.
+          test -f src/npm-package/hooks/lib/test-failure.sh
+          test -d src/npm-package/build-integrity
+          test -d src/npm-package/skills
+          echo "✅ generated mirrors materialised"
+
       - name: 'Gate 5b: BATS hook behavior contracts (shard ${{ matrix.shard }})'
         run: |
           # Pin the parallel job count to the runner's core count. Bats needs

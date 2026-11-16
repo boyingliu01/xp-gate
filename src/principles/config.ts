@@ -527,26 +527,47 @@ const SEVERITY_RANK: Record<string, number> = { error: 3, warning: 2, info: 1 };
  * absolute native path), `*` becomes `[^/]*`, and regex metacharacters are
  * escaped so a literal `.` in `*.test.ts` does not match `a_test.ts`.
  */
+const REGEX_METACHARS = '\\^$.|+()[]{}';
+
+/**
+ * Consume a `**` run starting at `index`, returning the emitted pattern and the
+ * index of the last character consumed.
+ *
+ * Split out of globToRegExp to keep its cyclomatic complexity under the Gate 3
+ * block threshold: the double-star form has three sub-cases (bare, with a
+ * trailing slash, and at the end) that read as nesting when inlined, and the
+ * ratchet blocks new functions above CCN 10.
+ */
+function consumeDoubleStar(glob: string, index: number): { emit: string; last: number } {
+  let last = index + 1;
+  // A trailing slash is consumed too, so the prefix may match zero segments
+  // (`src/__tests__/a.ts` matches a pattern ending in that prefix).
+  if (glob[last + 1] === '/') last++;
+  return { emit: '.*', last };
+}
+
+/**
+ * Translate a single glob character to its regex fragment, or the character
+ * itself when it is literal.
+ */
+function globCharToRegExp(ch: string): string {
+  if (ch === '*') return '[^/]*';
+  if (ch === '?') return '[^/]';
+  if (REGEX_METACHARS.includes(ch)) return `\\${ch}`;
+  return ch;
+}
+
 function globToRegExp(glob: string): RegExp {
   let out = '';
   for (let i = 0; i < glob.length; i++) {
     const ch = glob[i];
-    if (ch === '*') {
-      if (glob[i + 1] === '*') {
-        out += '.*';
-        i++;
-        // `**/` may match zero segments (`src/__tests__/a.ts` for `/src/**`).
-        if (glob[i + 1] === '/') i++;
-      } else {
-        out += '[^/]*';
-      }
-    } else if (ch === '?') {
-      out += '[^/]';
-    } else if ('\\^$.|+()[]{}'.includes(ch)) {
-      out += `\\${ch}`;
-    } else {
-      out += ch;
+    if (ch === '*' && glob[i + 1] === '*') {
+      const consumed = consumeDoubleStar(glob, i);
+      out += consumed.emit;
+      i = consumed.last;
+      continue;
     }
+    out += globCharToRegExp(ch);
   }
   return new RegExp(`^${out}$`);
 }
@@ -588,6 +609,19 @@ function matchesGlob(filePath: string, glob: string): boolean {
  * severity changes, so the "passed with warnings" case stays distinguishable
  * from "nothing found".
  */
+/**
+ * The rank an override may apply, or undefined when it must be ignored.
+ *
+ * An override may only RELAX: an unknown severity, or one ranked at least as
+ * severe as the declaration, is skipped rather than guessed at. Pulled out of
+ * resolveSeverityForFile to keep that function under the Gate 3 block threshold.
+ */
+function usableOverrideRank(target: string | undefined, declaredRank: number): number | undefined {
+  const targetRank = target === undefined ? undefined : SEVERITY_RANK[target];
+  if (targetRank === undefined || targetRank >= declaredRank) return undefined;
+  return targetRank;
+}
+
 export function resolveSeverityForFile(
   ruleId: string,
   filePath: string,
@@ -599,14 +633,11 @@ export function resolveSeverityForFile(
   let effective = declaredSeverity;
   const declaredRank = SEVERITY_RANK[declaredSeverity] ?? 0;
   for (const entry of overrides) {
-    const target = entry?.rules?.[ruleId];
-    if (!target) continue;
-    const targetRank = SEVERITY_RANK[target];
-    // Unknown severity or an upward move: ignore rather than guess.
-    if (targetRank === undefined || targetRank >= declaredRank) continue;
+    const targetRank = usableOverrideRank(entry?.rules?.[ruleId], declaredRank);
+    if (targetRank === undefined) continue;
     if (!entry.paths.some(p => matchesGlob(filePath, p))) continue;
     // A later override may relax further, never tighten back up.
-    if (targetRank < (SEVERITY_RANK[effective] ?? 0)) effective = target;
+    if (targetRank < (SEVERITY_RANK[effective] ?? 0)) effective = entry.rules[ruleId];
   }
   return effective;
 }
@@ -618,6 +649,66 @@ export function resolveSeverityForFile(
  * either -- both would be the silent-defaults defect this module removes. The
  * same reasoning as `mergeRule`, applied to a nested structure.
  */
+/**
+ * Validate one override entry's `rules` map, dropping unusable pairs.
+ *
+ * Extracted from parseOverrides to keep that function under the Gate 3 block
+ * threshold: the two per-rule rejections (bad severity, missing group prefix)
+ * made it CCN 15.
+ */
+function parseOverrideRules(
+  rules: Record<string, unknown>,
+  index: number,
+  source: string
+): Record<string, string> {
+  const cleanRules: Record<string, string> = {};
+  for (const [ruleId, severity] of Object.entries(rules)) {
+    if (typeof severity !== 'string' || !(SEVERITIES as readonly string[]).includes(severity)) {
+      warn(
+        `overrides[${index}].rules["${ruleId}"] in ${source} must be one of ${SEVERITIES.join('|')} — ignored`
+      );
+      continue;
+    }
+    if (!ruleId.includes('.')) {
+      warn(`overrides[${index}].rules["${ruleId}"] in ${source} must be "<group>.<rule>" — ignored`);
+      continue;
+    }
+    cleanRules[ruleId] = severity;
+  }
+  return cleanRules;
+}
+
+/**
+ * Validate one `overrides[]` entry, returning it or undefined when unusable.
+ *
+ * Extracted from parseOverrides so that function is just "loop and collect": the
+ * three structural rejections (not an object, bad paths, bad rules) kept it at
+ * CCN 11, over the Gate 3 block threshold.
+ */
+function parseOverrideEntry(
+  entry: unknown,
+  index: number,
+  source: string
+): SeverityOverride | undefined {
+  if (!isPlainObject(entry)) {
+    warn(`overrides[${index}] in ${source} must be an object — ignored`);
+    return undefined;
+  }
+  const paths = entry.paths;
+  if (!Array.isArray(paths) || paths.length === 0 || paths.some(p => typeof p !== 'string')) {
+    warn(`overrides[${index}].paths in ${source} must be a non-empty string array — ignored`);
+    return undefined;
+  }
+  const rules = entry.rules;
+  if (!isPlainObject(rules) || Object.keys(rules).length === 0) {
+    warn(`overrides[${index}].rules in ${source} must be a non-empty object — ignored`);
+    return undefined;
+  }
+  const cleanRules = parseOverrideRules(rules, index, source);
+  if (Object.keys(cleanRules).length === 0) return undefined;
+  return { paths: paths as string[], rules: cleanRules };
+}
+
 function parseOverrides(raw: unknown, source: string): SeverityOverride[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) {
@@ -626,36 +717,8 @@ function parseOverrides(raw: unknown, source: string): SeverityOverride[] {
   }
   const out: SeverityOverride[] = [];
   for (const [index, entry] of raw.entries()) {
-    if (!isPlainObject(entry)) {
-      warn(`overrides[${index}] in ${source} must be an object — ignored`);
-      continue;
-    }
-    const paths = entry.paths;
-    if (!Array.isArray(paths) || paths.length === 0 || paths.some(p => typeof p !== 'string')) {
-      warn(`overrides[${index}].paths in ${source} must be a non-empty string array — ignored`);
-      continue;
-    }
-    const rules = entry.rules;
-    if (!isPlainObject(rules) || Object.keys(rules).length === 0) {
-      warn(`overrides[${index}].rules in ${source} must be a non-empty object — ignored`);
-      continue;
-    }
-    const cleanRules: Record<string, string> = {};
-    for (const [ruleId, severity] of Object.entries(rules)) {
-      if (typeof severity !== 'string' || !(SEVERITIES as readonly string[]).includes(severity)) {
-        warn(
-          `overrides[${index}].rules["${ruleId}"] in ${source} must be one of ${SEVERITIES.join('|')} — ignored`
-        );
-        continue;
-      }
-      if (!ruleId.includes('.')) {
-        warn(`overrides[${index}].rules["${ruleId}"] in ${source} must be "<group>.<rule>" — ignored`);
-        continue;
-      }
-      cleanRules[ruleId] = severity;
-    }
-    if (Object.keys(cleanRules).length === 0) continue;
-    out.push({ paths: paths as string[], rules: cleanRules });
+    const parsed = parseOverrideEntry(entry, index, source);
+    if (parsed) out.push(parsed);
   }
   return out;
 }

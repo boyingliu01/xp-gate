@@ -142,15 +142,28 @@ HARNESS
   printf 'import os\n\ndef f():\n    return 1\n' > a.py
 
   # biome resolves but exits 127, which the arm reads as "not installed".
+  #
+  # ruff is stubbed here rather than assumed present. An earlier version of this
+  # test asserted `!= "ruff not available"` with the comment "ruff IS installed in
+  # this environment" -- true on the author's machine, false on CI, so the test
+  # passed locally and failed on every CI run. Whether the host happens to ship a
+  # tool is not a property under test; the property is that python is REACHED.
+  # The stub answers "clean" so the assertion below measures reachability only.
   run_gate_1 "typescript python" "a.ts a.py" \
-    'mkdir -p shadow && printf "#!/bin/sh\nexit 127\n" > shadow/biome && chmod +x shadow/biome && PATH="$PWD/shadow:$PATH" && export PATH'
+    'mkdir -p shadow && printf "#!/bin/sh\nexit 127\n" > shadow/biome \
+      && printf "#!/bin/sh\nexit 0\n" > shadow/ruff \
+      && chmod +x shadow/biome shadow/ruff && PATH="$PWD/shadow:$PATH" && export PATH'
 
   # Both languages must be examined.
   [[ "$GATE1_LOG" == *"── Checking typescript ──"* ]]
   [[ "$GATE1_LOG" == *"── Checking python ──"* ]]
-  # And python's own verdict must be reached: ruff IS installed in this
-  # environment, so the run must get past its availability probe.
-  [[ "$GATE1_LOG" != *"ruff not available"* ]]
+  # python's own lint pass ran. Assert on the inline arm's own wording rather
+  # than on the adapter's: run_gate_1 stubs `resolve_adapter_path` to return 1, so
+  # python is handled by the hook's inline branch ("Running Ruff linting (syntax +
+  # lint)..."), never by adapters/python.sh run_lint. Asserting the adapter string
+  # would have failed for a reason unrelated to what this test is about.
+  [[ "$GATE1_LOG" == *"Ruff linting"* ]]
+  [[ "$GATE1_LOG" != *"No Python linter available"* ]]
 }
 
 @test "AC-806-G1b anti-vacuity: the second language's real verdict is still reported" {
@@ -163,11 +176,17 @@ HARNESS
   printf 'const x = 1;\n' > a.ts
   printf 'import os\nimport sys\n\ndef f():\n    return 1\n' > a.py
 
+  # ruff is stubbed to REPORT A VIOLATION, for the same reason as the test above:
+  # the verdict must come from the stub, not from whichever ruff the host has.
+  # It prints a finding and exits 1, which is what ruff does on a real violation.
   run_gate_1 "typescript python" "a.ts a.py" \
-    'mkdir -p shadow && printf "#!/bin/sh\nexit 127\n" > shadow/biome && chmod +x shadow/biome && PATH="$PWD/shadow:$PATH" && export PATH'
+    'mkdir -p shadow && printf "#!/bin/sh\nexit 127\n" > shadow/biome \
+      && printf "#!/bin/sh\necho \"a.py:2:8: F401 unused import sys\"\nexit 1\n" > shadow/ruff \
+      && chmod +x shadow/biome shadow/ruff && PATH="$PWD/shadow:$PATH" && export PATH'
 
-  # ruff flags the unused imports; that verdict must survive.
-  [[ "$GATE1_LOG" == *"RUFF ERRORS"* ]] || [[ "$GATE1_RESULT" == *"RC=1"* ]]
+  # ruff's finding must survive the skipped first language and BLOCK the gate.
+  [[ "$GATE1_LOG" == *"F401 unused import sys"* ]]
+  [[ "$GATE1_LOG" == *"BLOCKED"* ]] || [[ "$GATE1_RESULT" == *"RC=1"* ]]
 }
 
 # ---------------------------------------------------------------------------

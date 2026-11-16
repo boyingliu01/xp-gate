@@ -38,7 +38,18 @@ if [ "${1:-}" = "--post-sync" ]; then
   exit 0
 fi
 
-if ! diff -ru "$canonical" "$mirror"; then
+# `__tests__/` is deliberately absent from the mirror: it holds the source tree's
+# own vitest suites, which the npm package neither ships nor runs. Before P1-E
+# step 2 the mirror carried a stale copy of that directory, so a plain recursive
+# diff happened to agree; once the mirror became a generated artifact
+# (src/npm-package/scripts/generate-mirrors.cjs, 9 files) the generator correctly
+# stopped emitting it and the recursive diff started reporting
+# "Only in src/build-integrity: __tests__" on every run.
+#
+# Exclude rather than deleting the canonical tests: the suites are real, they are
+# just not mirror content. `-x` matches the directory name at any depth, which is
+# what "tests anywhere in this tree are not shipped" means.
+if ! diff -ru -x '__tests__' "$canonical" "$mirror"; then
   printf '%s\n' "FAIL: $mirror differs from canonical $canonical before sync" >&2
   exit 1
 fi
