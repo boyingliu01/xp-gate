@@ -136,7 +136,27 @@ EOF
   run ./pre-commit
   [ -f "$ARCHLINT_LOG.cwd" ]
   [ "$(cat "$ARCHLINT_LOG.cwd")" = "$TEST_DIR" ]
-  [ "$(tr '\n' ' ' < "$ARCHLINT_LOG.args")" = "diff .architecture-baseline.json --fail-on high " ]
+  # The CURRENT argument must be a snapshot OF THE COMMIT, not the working tree.
+  #
+  # This assertion used to read
+  #     [ "$(tr '\n' ' ' < "$ARCHLINT_LOG.args")" = "diff .architecture-baseline.json --fail-on high " ]
+  # i.e. it pinned the invocation that omitted CURRENT -- and omitting CURRENT is
+  # exactly "scan the working tree", which attributed other people's uncommitted
+  # work to whichever commit was in flight (#820). The old assertion therefore
+  # locked the defect in place: fixing the scope could only make it fail.
+  #
+  # Assert the shape explicitly instead of comparing a flattened string, and
+  # assert the 3rd argument is a REAL commit object in this repo rather than
+  # merely "something extra" -- "any 40-hex string" would also be satisfied by a
+  # blob or a tree, neither of which archlint can analyze.
+  mapfile -t ARGS < "$ARCHLINT_LOG.args"
+  [ "${ARGS[0]}" = "diff" ]
+  [ "${ARGS[1]}" = ".architecture-baseline.json" ]
+  [[ "${ARGS[2]}" =~ ^[0-9a-f]{40}$ ]]
+  [ "$(git cat-file -t "${ARGS[2]}")" = "commit" ]
+  [ "${ARGS[3]}" = "--fail-on" ]
+  [ "${ARGS[4]}" = "high" ]
+  [ "${#ARGS[@]}" -eq 5 ]
 }
 
 teardown() {
