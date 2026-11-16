@@ -331,3 +331,74 @@ YAML
   [ "$status" -eq 1 ]
   [[ "$output" == *"domain -> infrastructure"* ]]
 }
+
+@test "a layers: sequence of maps parses, and its paths: key classifies files" {
+  # #811: a list of maps is ordinary YAML for `layers:`, but the parser only
+  # recognised the map form and only the `pattern(s):` key. A correct config
+  # written this way parsed to an empty layer table and the gate exited 2
+  # (unparsable) — a fail-closed block for the wrong reason.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+    allowed_imports: [domain]
+  - name: infrastructure
+    paths: ["src/infrastructure/**"]
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "a bare dash record keeps its nested name: and block-list paths" {
+  # The third YAML shape for a list of maps: `-` alone, then `name:` at the next
+  # level. Fields were dropped whenever the name was not on the dash line, so
+  # this shape needs its own assertion — the same silent no-op one level deeper.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  -
+    name: domain
+    paths:
+      - "src/domain/**"
+    allowed_imports: [domain]
+  - name: infrastructure
+    paths:
+      - src/infrastructure/**
+    allowed_imports:
+      - domain
+      - infrastructure
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "the sequence form still catches a violation" {
+  # Accepting more shapes must not soften the verdict: the positive case is what
+  # separates a working parser from one that merely stopped blocking.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths: ["src/domain/**"]
+    allowed_imports: [domain]
+  - name: infrastructure
+    paths: ["src/infrastructure/**"]
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'import { i } from "../infrastructure/c";\nexport const d = i;\n' > src/domain/a.ts
+  printf 'export const i = 1;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"domain -> infrastructure"* ]]
+}
