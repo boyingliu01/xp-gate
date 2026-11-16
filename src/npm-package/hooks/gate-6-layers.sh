@@ -71,11 +71,23 @@ fi
 #     shared:                 map form
 #     - name: shared          sequence form, name inline
 #     -                       sequence form, name on the following line
+# Two layout freedoms apply to all of them, because YAML allows both:
+#     layers:
+#     - name: shared          a sequence may start at column 0
+#       paths:
+#       - src/shared/**       block-list items may sit at their key's indent
 # Paths may be written as `pattern:`, `patterns:` or `paths:` (the last is what
 # dependency-cruiser-style configs use), and lists may be flow (`[a, b]`) or
 # block (`- a` on following lines). Accepting only one spelling made a correct
 # config parse to an empty layer table — a fail-closed BLOCK that blocked the
 # commit for the wrong reason (#811).
+#
+# Not supported, and rejected as unparsable rather than skipped: flow-mapping
+# records (`- {name: x, paths: [y]}`), records with no name, and names outside
+# the map form's `[A-Za-z0-9_-]+` key grammar. Skipping them would enforce the
+# rest of the config silently — partial enforcement that reads as a pass.
+# A name is comma-encoded in the table, so `a,b` would corrupt it; a comment on
+# a sequence-form name (`- name: core # note`) is stripped before the check.
 LAYER_TSV=$(awk '
   function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
   function unq(s)  { s = trim(s); gsub(/^["\047]|["\047]$/, "", s); return s }
@@ -94,8 +106,17 @@ LAYER_TSV=$(awk '
   # Start one record. A bare `-` starts a record whose name arrives on a later
   # line, so an empty name here is legitimate — `inrecord` says "fields below
   # belong to a record", which an empty name must not be used to infer.
+  # The name is comma-encoded in the table and must obey the same grammar as a
+  # map-form key, so strip a trailing comment first and fail closed otherwise.
+  # Both the dash-line name and the nested `name:` line go through here, or the
+  # nested form would bypass the check.
+  function setname(v,   n) {
+    n = trim(v); sub(/#.*$/, "", n); name = unq(n)
+    if (name != "" && name !~ /^[A-Za-z0-9_-]+$/) parse_error = 1
+  }
   function start(n) {
-    name = unq(n); pattern = ""; allowed = ""; forbidden = ""
+    name = ""; pattern = ""; allowed = ""; forbidden = ""
+    setname(n)
     inrecord = 1; listkey = ""; listindent = -1
   }
   function additem(k, v) {
@@ -114,6 +135,11 @@ LAYER_TSV=$(awk '
   # a file, and the scanner zero-classified guard reports that instead of
   # treating it as clean.
   function flush(   k, i, p) {
+    # A record that was opened but never received a name is not a layer the
+    # scanner can judge: dropping it would enforce the rest of the config while
+    # the file still claims that boundary. Fail closed instead.
+    if (inrecord && name == "") parse_error = 1
+    inrecord = 0
     if (name == "") return
     k = split(pattern, p, ",")
     if (k == 0) { print name "\t\t" allowed "\t" forbidden; name = ""; return }
@@ -126,7 +152,7 @@ LAYER_TSV=$(awk '
   BEGIN {
     inlayers = 0; layerindent = -1; inrecord = 0
     name = ""; pattern = ""; allowed = ""; forbidden = ""
-    listkey = ""; listindent = -1
+    listkey = ""; listindent = -1; parse_error = 0
   }
   /^[ \t]*#/ { next }
   /^[ \t]*$/ { next }
@@ -136,29 +162,36 @@ LAYER_TSV=$(awk '
     body = trim(line)
     # `layers:` may carry a trailing comment — still the block opener.
     if (!inlayers) { if (body ~ /^layers:[ \t]*(#.*)?$/) inlayers = 1; next }
-    # A key at indent 0 ends the layers block.
-    if (indent == 0) exit
+    # A KEY at column 0 ends the layers block. A sequence item at column 0 does
+    # not: `layers:` followed by `- name: x` is everyday YAML, and exiting on it
+    # made a valid config unparsable — the style-dependent failure of #811.
+    if (indent == 0 && body !~ /^-/) exit
     if (layerindent < 0) layerindent = indent
     # ── record starts ──────────────────────────────────────────────────────
-    if (indent == layerindent && body ~ /^- name:/) {
-      flush(); start(substr(body, 8)); next
+    if (indent == layerindent && body ~ /^- +name[ \t]*:/) {
+      flush(); start(substr(body, index(body, ":") + 1)); next
     }
     if (indent == layerindent && body == "-") {
       flush(); start(""); next
     }
-    if (indent == layerindent && body ~ /^[A-Za-z0-9_-]+:[ \t]*$/) {
+    if (indent == layerindent && body ~ /^[A-Za-z0-9_-]+:[ \t]*(#.*)?$/) {
       flush(); start(substr(body, 1, index(body, ":") - 1)); next
     }
-    # Any other dash item at the layer indent belongs to a list, not a record.
-    if (indent == layerindent && body ~ /^- /) { next }
+    # A flow-mapping record is valid YAML we do not parse. Skipping it would
+    # leave the rest of the config enforced while this layer silently vanished.
+    if (indent == layerindent && body ~ /^- *\{/) { parse_error = 1; next }
     # Fields before the first record start (a stray key above `layers:`).
     if (!inrecord) next
     # ── block-list continuation: `paths:` whose value starts on later lines ──
-    if (listkey != "" && indent > listindent && body ~ /^- /) {
+    # YAML also allows the items at the SAME indent as their key (`paths:` then
+    # `- src/x` both at 4), so the test is `>=`, not `>`.
+    if (listkey != "" && indent >= listindent && body ~ /^- /) {
       additem(listkey, clean(substr(body, 3))); next
     }
     listkey = ""; listindent = -1
-    if (body ~ /^name:/) { name = unq(substr(body, 6)); next }
+    # Any other dash item at the layer indent belongs to a list, not a record.
+    if (indent == layerindent && body ~ /^- /) { next }
+    if (body ~ /^name:/) { setname(substr(body, 6)); next }
     if (body ~ /^patterns?:/ || body ~ /^paths:/) {
       v = clean(substr(body, index(body, ":") + 1))
       if (v == "") { listkey = "pattern"; listindent = indent } else pattern = join(pattern, v)
@@ -175,10 +208,16 @@ LAYER_TSV=$(awk '
       next
     }
   }
-  END { flush() }
+  END { flush(); if (parse_error) exit 3 }
 ' "$LAYER_CONFIG" 2>/dev/null)
+LAYER_PARSE_RC=$?
 
 # ─── 3. Config present but unparseable → BLOCK (fail-closed) ───────────────
+if [ "$LAYER_PARSE_RC" -ne 0 ]; then
+  _layers_verdict 2 \
+    "❌ BLOCKED - $LAYER_CONFIG has an unusable layer record (flow-mapping record, or a record with a missing or invalid name)." \
+    "layer_config_unparsable"
+fi
 if [ -z "$LAYER_TSV" ]; then
   _layers_verdict 2 \
     "❌ BLOCKED - $LAYER_CONFIG exists but declares no usable layers." \

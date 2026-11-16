@@ -402,3 +402,133 @@ YAML
   [ "$status" -eq 1 ]
   [[ "$output" == *"domain -> infrastructure"* ]]
 }
+
+# ── Round 1 walkthrough findings (#811 follow-up) ───────────────────────────
+# YAML permits both layouts below, and each used to parse to an empty (or
+# partial) layer table — the same style-dependent failure #811 fixed one form of.
+
+@test "a sequence that starts at column 0 parses (layers: then - name: at indent 0)" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+- name: domain
+  paths:
+  - src/domain/**
+  allowed_imports: [domain]
+- name: infrastructure
+  paths:
+  - src/infrastructure/**
+  allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "block-list items at their key's own indent parse (paths: then - x, both at 4)" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain
+    paths:
+    - src/domain/**
+  - name: infrastructure
+    paths:
+    - src/infrastructure/**
+    allowed_imports: [domain, infrastructure]
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const v = 1;\n' > src/domain/a.ts
+  printf 'import { v } from "../domain/a";\nexport const i = v;\n' > src/infrastructure/c.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 file(s) classified"* ]]
+}
+
+@test "a record that never receives a name is BLOCKED (exit 2), not dropped" {
+  # Dropping a nameless record would enforce the rest of the config while the
+  # file still claims that boundary — partial enforcement that reads as a pass.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  -
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a sequence-form name outside the key grammar is BLOCKED (exit 2)" {
+  # The map form only accepts [A-Za-z0-9_-]+ keys; the sequence form took any
+  # substring, and a comma corrupts the comma-encoded name column.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: a,b
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a nested name: line gets the same validation as an inline one" {
+  # The two name paths share setname(); before that they diverged, and the
+  # nested form would have written "a,b" straight into the table.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  -
+    name: a,b
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a flow-mapping record is BLOCKED (exit 2), never silently skipped" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - {name: domain, paths: [src/domain/**]}
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"layer_config_unparsable"* ]]
+}
+
+@test "a trailing comment on a sequence-form name is stripped, not part of the name" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  - name: domain # the core
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 file(s) classified"* ]]
+}
+
+@test "a trailing comment on a map-form key is still a record" {
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:   # the core
+    paths: [src/domain/**]
+YAML
+  seed_clean_tree
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 file(s) classified"* ]]
+}
+
