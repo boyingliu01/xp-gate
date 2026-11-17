@@ -1,122 +1,109 @@
 # SRC/NPM-PACKAGE KNOWLEDGE BASE
 
-**Generated:** 2026-11-04
-**Commit:** eb2097b0
-**Branch:** sprint/2026-11-03-02
-**Version:** 0.38.9.0
+**Updated:** 2026-11-17
 
-## OVERVIEW
-npm distribution package — zero-install CLI for xp-gate. Published as `@boyingliu01/xp-gate` on the public npm registry. Bundles hooks + 13 language adapters + 8 skills + 3 platform plugins at `prepack` time. Registers **≥15 CLI subcommands** (was ≥11 before 0.8.9; `check`/`principles`/`arch` added for OpenCode-plugin parity, fixes #208).
+> **What this file is for.** This directory is a *build output that is also
+> committed* — the riskiest kind of tree to document. It carries the npm
+> distribution and holds byte-identical mirrors of `githooks/`, `plugins/`,
+> `skills/` and several `src/` modules, regenerated at prepack time.
+>
+> Counts, file lists and CLI inventories are deliberately absent. They were here
+> before and drifted silently — an adapter count that read 13 when there were 14,
+> a "≥15 CLI subcommands" figure, a skill count of 8 when there are 12. Every one
+> of them was true when written. Ask the code instead:
+>
+> | Question | Answer |
+> |---|---|
+> | CLI surface | `xp-gate --help`, or read `bin/xp-gate.js` |
+> | Gate name ↔ deciding file | `gate-registry.sh` (mirrored from `githooks/`) |
+> | Mirror drift | `xp-gate sync-mirrors` (dry-run by default) |
+> | What actually ships | `npm pack --dry-run` |
 
-## STRUCTURE
-```
-src/npm-package/
-├── bin/xp-gate.js              # CLI entry: dispatches all subcommands
-├── adapters/                   # 13 shell adapters (mirror of ../../githooks/adapters/)
-├── hooks/                      # pre-commit, pre-push, adapter-common.sh (copied at publish)
-├── lib/                        # 14 CLI implementation files
-│   ├── init.js                 # `xp-gate init` — install hooks + adapters into a project
-│   ├── install-skill.js        # `xp-gate install-skill`
-│   ├── update-skill.js         # `xp-gate update-skill`
-│   ├── uninstall-skill.js      # `xp-gate uninstall-skill --force`
-│   ├── uninstall.js            # `xp-gate uninstall` (reverse of init; --dry-run/--force/--local/--global)
-│   ├── doctor.js               # `xp-gate doctor [--fix]` — diagnose config/hooks/adapters/env
-│   ├── migrate.js              # `xp-gate migrate` — clean v0.4.x GitHub-Packages residue from ~/.npmrc
-│   ├── baseline.js             # `xp-gate baseline <create|show|reset|diff>` — Boy Scout track
-│   ├── audit-log.ts            # gate-audit append-only log writer
-│   ├── gate-audit.ts           # `xp-gate audit [--tail|--stats|record]`
-│   ├── rollback.js             # rollback failed installations
-│   ├── ui-detector.ts          # auto-detects UI framework (Issue #79)
-│   ├── ui-review.ts            # `xp-gate ui-review` — visual review for UI-bearing changes
-│   ├── shared-paths.js         # cross-command path helpers
-│   ├── shared-utils.js         # cross-command utilities
-│   └── __tests__/              # unit tests
-├── skills/                     # 8 skills bundled at publish time (mirror of ../../skills/)
-├── plugins/                    # 3 platform plugins bundled at publish time
-│   ├── claude-code/            # only sprint-flow currently — see root AGENTS.md drift #7
-│   ├── opencode/               # only sprint-flow currently
-│   └── qoder/                  # 7 skills, manifest still missing — see drift #6
-├── scripts/sync-package-content.js  # prepack hook that syncs skills + plugins from repo
-└── package.json                # name: "xp-gate" (registered under @boyingliu01 scope on publish)
-```
+## THE ONE RULE THAT MATTERS HERE
 
-## WHERE TO LOOK
-| Task | Location | Notes |
-|------|----------|-------|
-| CLI entry | bin/xp-gate.js | Dispatches ≥15 subcommands |
-| init (per-project install) | lib/init.js | Copies hooks + adapters into the consumer repo |
-| setup-global | lib/init.js (mode flag) | Installs adapters under `~/.config/xp-gate/` |
-| uninstall | lib/uninstall.js | Reverse of init; `--dry-run --force --local --global` |
-| doctor | lib/doctor.js | Inspects config/hooks/adapters/env; `--fix` repairs |
-| migrate | lib/migrate.js | Cleans v0.4.x GitHub-Packages residue |
-| baseline | lib/baseline.js | Boy Scout Rule baseline lifecycle |
-| audit log | lib/audit-log.ts | Append-only journal writer |
-| audit CLI | lib/gate-audit.ts | `xp-gate audit --tail / --stats / record` |
-| skill install/update | lib/install-skill.js, lib/update-skill.js | copied from the bundled skills/<name>/ — no network |
-| UI detection | lib/ui-detector.ts | Auto-pick web/mobile framework |
-| UI review | lib/ui-review.ts | Visual review entry for UI-bearing changes |
-| rollback | lib/rollback.js | Rollback a failed install |
-| prepack bundling | scripts/sync-package-content.js | Copies skills/ + plugins/ before publish |
+**This directory is downstream. Edit upstream, then resync.**
 
-## CLI Subcommands (registered in `bin/xp-gate.js`)
+| If you touched this here | The canonical source is |
+|---|---|
+| `adapters/*.sh`, `hooks/**`, `gate-*.sh` | `githooks/**` |
+| `plugins/**` | `plugins/**` |
+| `skills/**` | `skills/**` |
+| `principles/**` | `src/principles/**` |
+| `build-integrity/**`, `mutation/**`, `mock-policy/**`, `gates/**` | the sibling `src/<same>/` |
 
-| Command | Purpose |
-|---------|---------|
-| `xp-gate init` | Install hooks + adapter infrastructure into current project |
-| `xp-gate setup-global` | Install adapters globally under `~/.config/xp-gate/` |
-| `xp-gate uninstall` | Reverse of `init`; supports `--dry-run --force --local --global` |
-| `xp-gate doctor [--fix]` | Diagnose hook/adapter/env health; **Check 9: OpenCode TUI panel registration** |
-| `xp-gate migrate` | Clean v0.4.x GitHub-Packages residue from `~/.npmrc` |
-| `xp-gate baseline <create\|show\|reset\|diff>` | Manage lint baseline (Boy Scout track) |
-| `xp-gate install-skill <name>` | Install a skill from the package bundle (skills/<name>/) |
-| `xp-gate update-skill <name>` | Update an already-installed skill |
-| `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
-| `xp-gate audit [--tail \| --stats \| record]` | Inspect / record gate audit log |
-| `xp-gate ui-review` | Visual review for UI-bearing changes |
-| `xp-gate sprint-status [--json] [--watch] [--dir <path>]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`) |
-| `xp-gate gate-coverage [--json] [--debt] [--strict]` | Compliance view across every gate with four states (PASS/DEBT/SKIP/FAIL), debt quantification, evidence pointers, STALE detection (#636) |
-| `xp-gate runtime-journal [--days N] [--json] [--sessions-dir <path>]` | Measures the AGENTS.md runtime rules from agent session journals: blocking `job_output` waits, literal `sleep`, CI polling loops, calls/step batching (#712). Advisory — always exits 0, and reports NOT MEASURABLE rather than 0% when no journal is found |
-| `xp-gate sync-mirrors [--write] [--json]` | Reports drift between each canonical tree and its mirror under this package, and repairs it with `--write` (#713). **Dry-run by default** — a wrong pair declaration silently mass-overwrites, so writing is opt-in. Compares the *tracked* file set so untracked artefacts like `githooks/lib/__pycache__/` are never read as drift |
-| `xp-gate --version` | Print version (sourced from VERSION file) |
+Prepack regenerates the mirrors, so a mirror-only fix is **silently reverted at
+the next publish**. This is not hypothetical: a release once shipped with the fix
+present in the working tree and absent from the tarball while every local check
+stayed green.
 
-## CONVENTIONS
-- **Zero runtime dependencies.** `package.json` `dependencies` MUST stay empty. The point is a hook installer that works without `npm install` in the consumer repo.
-- **VERSION as truth.** Repo root `VERSION` (4-digit MAJOR.MINOR.PATCH.MICRO) is propagated by `scripts/sync-version.cjs` into this `package.json` as 3-digit npm semver (MAJOR.MINOR.PATCH). Never hand-edit.
-- **Adapters duplicated** from `githooks/adapters/`. Source of truth = `githooks/`. Sync via `scripts/sync-package-content.js` (runs in `prepack`).
-- **Lib files mostly `.js`**, not `.ts` — keeps `bin/xp-gate.js` runnable with raw Node, no transpile step at install time. The few `.ts` files (`audit-log.ts`, `gate-audit.ts`, `ui-detector.ts`, `ui-review.ts`) are loaded via `npx tsx` on demand.
-- **Tests** live alongside source under `lib/__tests__/`.
-- **Graceful degradation**: CLI commands should produce useful output even when hooks aren't installed.
+First hypothesis when a change "didn't take effect": the CLI you ran is executing
+*this* copy while your edit landed upstream.
 
-## ANTI-PATTERNS (THIS PROJECT)
-- Do NOT add anything to `dependencies` in `package.json`. Use `devDependencies` if you need it for development; everything that ships must be vendored or stdlib.
-- Do NOT edit `adapters/` here directly — edit `../../githooks/adapters/` and resync.
-- Do NOT skip `scripts/sync-package-content.js` in the `prepack` flow. Published artifacts will lose the skill/plugin bundle.
-- Do NOT hand-edit `package.json` `version`. Run `node scripts/sync-version.cjs` against the repo root `VERSION`.
-- Do NOT introduce a new CLI subcommand without also updating: (a) `bin/xp-gate.js` switch, (b) this file's CLI table, (c) the root `AGENTS.md` CLI table, (d) `README.md`, (e) `docs/MANIFEST.md`.
+## DESIGN INTENT
 
-## UNIQUE STYLES
-- **Single source-of-truth for hooks/adapters/skills**: this package re-bundles from sibling directories, never duplicates content in version control beyond the necessary mirror.
-- **Prepack-bundled, not symlinked**: ensures publish output is self-contained even if consumers copy the tarball offline.
-- **`tsx` for TS lib files** — no compile step in the package, runtime tsx invocation only when those subcommands are called.
+### Zero runtime dependencies
 
-## COMMANDS
-```bash
-# From an installed package
-xp-gate init                       # Install hooks + adapters in current project
-xp-gate doctor --fix               # Diagnose + auto-repair installation
-xp-gate uninstall --dry-run        # Preview removal
-xp-gate baseline create             # Snapshot current lint state
-xp-gate audit --tail               # Tail recent gate runs
-xp-gate install-skill sprint-flow  # Pull skill from GitHub
+The package is installed transiently (`npx`, `npm i -g`) into environments where
+a dependency tree cannot be assumed, and it has to work before anything is
+installed in the consumer repo. A runtime `dependencies` entry breaks that
+promise. Build-time and dev-time dependencies are fine.
 
-# From repo (development)
-node src/npm-package/bin/xp-gate.js --version
-node src/npm-package/scripts/sync-package-content.js   # Manual prepack sync
-```
+Two consequences that are easy to forget:
 
-## NOTES
-- Published as `@boyingliu01/xp-gate` on the public npm registry (moved from GitHub Packages in v0.5.x; the `migrate` command cleans up v0.4.x users' `~/.npmrc`).
-- Adapters duplicated from `githooks/adapters/` — known tech debt acknowledged in root `AGENTS.md`.
-- `sync-package-content.js` runs in `prepack` on `npm version` and `npm pack`.
-- Bundled skills snapshot is whatever `skills/` contains at publish time (currently 8 skills). The `plugins/` bundle is currently incomplete — see root `AGENTS.md` "Known Drift" #7 for the claude-code/opencode-only-ship-sprint-flow issue.
+- Shell hooks and adapters must **degrade gracefully** when a tool is absent —
+  this is where the SKIP contract comes from, and why an unavailable tool must
+  never be reported as a clean result.
+- `.js` over `.ts` for CLI lib files is deliberate: they must run on raw Node
+  with no transpile step at install time. The few `.ts` files are loaded on
+  demand through `tsx`, and only for the subcommands that need them.
 
+### Hooks are shipped, not installed by a package manager
+
+`init` / `update-hooks` copy hook scripts into the consumer project or a shared
+hooks directory. That copying is why mirror drift exists at all, and why `doctor`
+must report which copy actually executes.
+
+**The hooks shipped from here are the product.** A defect in them reaches every
+consumer and will present as a git problem rather than a packaging problem.
+
+### The bundle is asserted, not assumed
+
+Build integrity (pack, module reachability) runs as a gate. A change that breaks
+the tarball must fail locally, never at publish — publishing is the one step that
+cannot be quietly undone.
+
+### Advisory commands exit 0
+
+Diagnostics (`rework`, `crap`, `runtime-journal`, `audit`) are advisory by
+design; a script that gates on them would turn "here is information" into "here
+is a verdict". Gate commands are the ones allowed to fail. When adding a
+subcommand, decide deliberately which of those two it is.
+
+## TRAPS
+
+- **A green local test run does not prove the tarball is correct.** Mirrors are
+  regenerated at pack time — test what ships, not what is in the tree.
+- **`node_modules/` here is not part of the package**, and its presence says
+  nothing about runtime availability.
+- **The platform plugins genuinely differ in shape.** The DSH plugin carries its
+  own package, build config and client directory; the others are lighter. Do not
+  "unify" them without checking what each host actually loads.
+- **Package name, version and manifest fields are generated.** Version flows from
+  the repo-root `VERSION`; hand-editing a manifest version is both overwritten and
+  blocked by the version-consistency gate.
+- **A new subcommand has more than one registration point.** The dispatch switch
+  alone is not enough — the manifest, the README and the help text all describe
+  the same surface and are not generated from it. Missing one makes the feature
+  invisible.
+
+## ANTI-PATTERNS
+
+- Do NOT edit a mirror. Edit upstream and resync.
+- Do NOT add runtime dependencies.
+- Do NOT hand-edit version fields.
+- Do NOT skip the prepack content sync — the published artifact silently loses
+  the bundled skills and plugins.
+- Do NOT assume the hooks here are what runs on this machine; verify with
+  `xp-gate doctor`.
+- Do NOT record counts or inventories in this file. They change with every
+  upstream edit, and a mirror cannot be trusted to stay in step.

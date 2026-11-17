@@ -1,279 +1,209 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-11-04
-**Commit:** eb2097b0
-**Branch:** sprint/2026-11-03-02
-**Version:** 0.38.9.0
+**Updated:** 2026-11-17
 
-## OVERVIEW
-XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Delphi) + Sprint Flow pipeline (6 phases: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE) + npm zero-install distribution + cross-platform plugin system (Claude Code / OpenCode / Qoder). Pre-commit runs **12 numbered gates (Gate 0–11) plus Gate 12 (File Hygiene, warning-only)**. Pre-push runs **8 gates: Gate 10 (Build Integrity), Gate M/M-Python/M-Go/M-Java/M-Kotlin (Mutation), Gate M2 (Mock Density, WARNING), Gate ML (Mock Layering), Gate UI (UI Sprint Gates), Gate MW (Code Walkthrough), and Gate S (Sprint Flow)**. Implements 14 Clean Code/SOLID rules across 9 language adapters (TypeScript engine), 13 shell adapters (gate routing), Boy Scout Rule baseline enforcement, test-specification alignment, mock policy enforcement, and incremental mutation testing.
+## WHY THIS FILE LOOKS DIFFERENT
 
-> **Doc-vs-script drift resolved in v0.18.2:** Gate counts in docs, script comments, and AGENTS.md files are now consistent: pre-commit = 12 numbered gates (0–11 + 12 file hygiene warning-only), pre-push = 8 gates.
->
-> **v0.9.2**: Windows Git Bash compatibility — `detect_os_env()`, `head→sed` migration (46 changes), `[[ ]]→[ ]` POSIX conditionals (47 changes), winget install hints, Windows CI job. All 37 githooks `.sh` files are now `head`-free.
+This file used to carry gate tables, CLI command lists, line counts, adapter
+counts, directory trees and test-suite totals. All of it was **true when
+written and false within weeks** — measured: the `pre-commit` line count went
+from 6168 to 1166 in a single commit (#798), the adapter directory changed 94
+times in 90 days, and this file itself changed 81 times in 30 days, making it the
+fourth most-churned file in the repo it was supposed to describe.
 
-## STRUCTURE
-```
-./
-├── src/
-│   ├── npm-package/    # npm distribution v0.8.8 (@boyingliu01/xp-gate); 11+ CLI commands
-│   │   ├── bin/xp-gate.js              # CLI entry: dispatches all subcommands
-│   │   ├── adapters/                   # 13 shell adapters (mirror of githooks/adapters/ — tech debt)
-│   │   ├── hooks/                      # pre-commit, pre-push, adapter-common.sh (shipped to user repos)
-│   │   ├── lib/                        # init, install/update/uninstall-skill, doctor, migrate,
-│   │   │                               # baseline, audit-log, gate-audit, rollback, ui-detector,
-│   │   │                               # ui-review, shared-paths, shared-utils
-│   │   ├── skills/                     # 12 skills bundled at publish time (mirror of repo skills/)
-│   │   ├── plugins/                    # claude-code/, opencode/, qoder/ bundled at publish time
-│   │   └── scripts/sync-package-content.js  # prepack hook that copies skills+plugins in
-│   ├── principles/     # 14 Clean Code/SOLID rules × 9 language adapters (Gate 4)
-│   ├── architecture/   # version-parser.ts + __tests__/  (Gate 0 only; ARCH-001..014 NOT implemented)
-│   ├── debugger/       # trace-collector.ts + summarizer.ts + types.ts (debug trace pipeline)
-│   ├── mock-policy/    # Gate M3: scope scanner + mock decision engine + per-file validator
-│   ├── mutation/       # Gate M (incremental mutation) + Gate M2 helpers (detect-ai-test) + baselines
-│   └── rules/          # Shared rule index
-├── plugins/            # Cross-platform plugin sources (v0.4.0+; rebuilt into src/npm-package/plugins/)
-│   ├── claude-code/    # JSON manifest + bash hooks + bin wrapper; ships all 12 skills
-│   ├── opencode/       # TS module with 3 tools (gate-check, gate-principles, gate-arch); ships all 12 skills
-│   ├── qoder/          # 8 skills (expects npx xp-gate call for gate tooling; plugin.json exists)
-│   └── shared/         # Cross-platform docs (when present)
-├── githooks/           # Source-of-truth hook scripts (also bundled into npm package)
-│   ├── pre-commit      # ~2084 lines: Gate 0 (Version Consistency) + Gates 1–9
-│   ├── pre-push        # ~607 lines: Gate M + Gate M2 + Gate M3 + Delphi code-walkthrough
-│   ├── adapter-common.sh  # detect_project_lang() + route_to_adapter() + 3-tier resolution
-│   ├── adapters/       # 13 shell adapters: typescript, python, go, java, kotlin, cpp, swift,
-│   │                   # objectivec, shell, powershell, dart, flutter, iac (NO standalone c.sh)
-│   ├── adapters/plugins/  # 5 third-party extensions: p3c-java, whalecloud-java,
-│   │                   # book299-{20132-python,4081-c,4083-javascriptes5}
-│   ├── QUALITY-GATES-CODE-OF-CONDUCT.md
-│   └── __tests__/      # BATS tests
-├── skills/             # 12 canonical AI workflow skills (SKILL.md + references/ + templates/)
-│   ├── sprint-flow/    # 6-phase pipeline (Phase 1-6: PREP, DESIGN, BUILD, VERIFY, SHIP, CLOSE); docs say "6 阶段流水线"
-│   ├── delphi-review/  # ≥90% consensus; 3 modes (design, code-walkthrough, requirements) (SKILL.md)
-│   ├── test-specification-alignment/   # 2-phase (align modifiable → execute frozen)
-│   ├── test-driven-development/        # NEW in 0.8.x; bundles testing-anti-patterns.md
-│   ├── ralph-loop/                     # Phase 2 default build mode (REQ-level; 40-67% token savings)
-│   ├── improve-codebase-architecture/  # Periodic architecture health check
-│   ├── to-issues/                      # Vertical-slice issue splitter
-│   ├── admin-template-guidelines/
-│   ├── grill-with-docs/                # NEW in 0.18.0 (Matt Pocock); Phase 2 THINK main, brainstorming replacement
-│   ├── batch-grill-me/                 # NEW in 0.18.0 (Matt Pocock); Phase 2 batch decisions, autoplan replacement
-│   ├── grilling/                       # NEW in 0.18.0 (Matt Pocock); grill engine, dependency of grill-with-docs
-│   └── domain-modeling/                # NEW in 0.18.0 (Matt Pocock); CONTEXT.md/ADR maintenance, with templates
-├── docs/               # 30+ design plans, incidents, retros, guides + ARCHITECTURE.md, CAPABILITIES.md, MANIFEST.md
-├── scripts/            # build-plugin.sh, copy-skills.sh, sync-version.cjs, test-plugins.mjs,
-│                       #   install-{hooks,skills,all}.sh, prepack.cjs
-├── dashboard/          # Quality dashboard (serve.js + dashboard.js → localhost:3333)
-├── .github/workflows/  # 5 CI pipelines: quality-gates (~948 LOC), npm-publish, cross-platform-ci,
-│                       #   security-audit, mutation-test
-├── architecture.yaml   # ARCH-001..014 rule definitions (NOT ENFORCED — see #687)
-├── specification.yaml  # Requirements (auto-generated from APPROVED design docs)
-├── VERSION             # Single source of truth: 0.18.0.0 (MAJOR.MINOR.PATCH.MICRO)
-├── .architecture-baseline.json  # ARCH baseline snapshot (~20 KB)
-├── .archlint.yaml      # Architecture lint config
-├── .mockpolicyrc       # Gate M3 mock policy config
-├── .gitleaks.toml      # Gate 8 secret-scan rules
-├── .checkov.yaml       # Gate 7 IaC scan config
-├── hadolint.yaml       # Dockerfile lint config (IaC)
-├── jscpd.conf.json     # Gate 2 duplicate-code config
-├── .kube-score.yaml    # K8s manifest lint config (IaC)
-├── .tflint.hcl         # Terraform lint config (IaC)
-├── stryker.conf.json   # Gate M mutation config (full suite)
-├── stryker.prepush.conf.json  # Gate M mutation config (pre-push slim)
-├── .delphi-config.json # Delphi expert/model config (gitignored when contains keys)
-└── .warnings-baseline.json    # Boy Scout Rule history
-```
+Worse, hand-copying generated facts created **competing sources of truth**. For
+"how many languages does Gate 4 cover", three sources disagreed at once:
+`gate-list`'s hardcoded prose said 9, `src/principles/adapters/` held 14, and the
+docs said 14. Only one can be maintained; the other two are debt.
 
-## WHERE TO LOOK
-| Task | Location | Notes |
-|------|----------|-------|
-| npm CLI dispatcher | src/npm-package/bin/xp-gate.js | 11+ subcommands |
-| CLI implementations | src/npm-package/lib/ | init, install/update/uninstall-skill, doctor, migrate, uninstall, baseline, audit-log, gate-audit, rollback, ui-detector, ui-review, shared-* |
-| Claude Code plugin | plugins/claude-code/ | Manifest: .claude-plugin/plugin.json; hooks: hooks/hooks.json |
-| OpenCode plugin | plugins/opencode/ | index.ts exposes gate-check, gate-principles, gate-arch |
-| Qoder plugin | plugins/qoder/ | 7 skills + 3 Delphi agents (auto-deployed by `xp-gate init` on Qoder platform) |
-| Plugin builder | scripts/build-plugin.sh | --platform claude-code\|opencode\|qoder |
-| Skill copy | scripts/copy-skills.sh | Preserves references/ and templates/ |
-| Plugin tests | scripts/test-plugins.mjs | `npm run test:plugins` |
-| Pre-commit gates | githooks/pre-commit | Gate 0–9 (see Gates section) |
-| Pre-push gates | githooks/pre-push | Gate M, M2, M3 + Delphi walkthrough |
-| Language adapters | githooks/adapters/ | 13 .sh files + 5 plugin extensions |
-| Adapter routing | githooks/adapter-common.sh | 3-tier: global → project → script dir |
-| Code of Conduct | githooks/QUALITY-GATES-CODE-OF-CONDUCT.md | --no-verify prohibited |
-| Sprint Flow | skills/sprint-flow/SKILL.md | 6 phases; Phase 2 DESIGN: grill-with-docs → R1 requirements → batch-grill-me → R2 delphi-review; phase docs in references/phase-*.md |
-| Delphi Review | skills/delphi-review/SKILL.md | 3 modes: design + code-walkthrough + requirements; ≥90% consensus |
-| Test Alignment | skills/test-specification-alignment/SKILL.md | Phase 1 modifiable / Phase 2 frozen |
-| Principles Engine | src/principles/ | analyzer.ts + index.ts CLI; SARIF 2.1.0 output |
-| Boy Scout Rule | src/principles/boy-scout.ts | Differential warning enforcement (Gate 6) |
-| Architecture rules | `src/architecture/version-parser.ts` (Gate 0 only) + `architecture.yaml` (**NOT ENFORCED** — see #687) | ARCH-001..014 是规划编号，当前无实现 |
-| Mutation Gate M | src/mutation/gate-m.ts | Incremental mutation on changed TS files |
-| Mock Policy Gate M3 | src/mock-policy/gate-m3.ts | runGateM3() orchestrator |
-| Debugger | src/debugger/ | trace-collector.ts + summarizer.ts |
-| Version sync | scripts/sync-version.cjs | VERSION → 4 package.json files (3-digit npm semver) |
-| Quality Dashboard | dashboard/ | `npm run dashboard` → :3333 |
-| CI Workflows | .github/workflows/ | 5 pipelines (~948 LOC quality-gates) |
-| Design history | docs/plans/ | 30+ chronological design plans (YYYY-MM-DD-topic.md) |
+So the rule is now:
 
-## GATES (script-level, current as of f60b2e9)
+> **If a command can answer it, this file does not state it.**
+> **If only a human can know it — intent, constraint, scar tissue — it is here.**
 
-### Pre-commit — `githooks/pre-commit`, ~2084 lines
+Everything quantitative lives in the code and is reachable through the commands
+listed below. Nothing here should need updating when a gate is added, a file is
+split, or a count changes.
 
-| Gate | Name | Source / Tool | Block on |
-|------|------|---------------|----------|
-| 0 | Version Consistency | `src/architecture/version-parser.ts` + VERSION | VERSION ≠ package.json |
-| 1 | Code Quality | Adapter `lint` (ESLint/Ruff/govet/...) | Any lint error |
-| 2 | Duplicate Code | jscpd (`jscpd.conf.json`) | >5% similarity |
-| 3 | Cyclomatic Complexity | lizard (CCN) | >5 warn, >10 block |
-| 4 | Principles | `src/principles/index.ts` (14 rules × 9 langs) | Any error/warning per .principlesrc |
-| 5 | Tests + Coverage | Adapter `test` + coverage | Test fail, coverage <80%. Gate 5a: new .ts/.tsx files BLOCK if no test |
-| 6 | Architecture + Boy Scout | `.archlint.yaml` + `boy-scout.ts` | New warnings on modified files |
-| 7 | IaC Security | checkov / hadolint / kube-score / tflint | High-severity finding |
-| 8 | Secret Scanning | gitleaks (`.gitleaks.toml`) | Any leaked secret |
-| 9 | Build Integrity | tsc + npm pack + import check | Build/compilation failure |
-| 10 | SAST Security | semgrep (`githooks/gate-10.sh`) | High-severity finding |
-| 11 | Sprint Flow | `sprint-gate.sh` | Sprint compliance violation |
-| 12 | File Hygiene | `gate-12-file-hygiene.sh` | WARNING only (conflict markers) |
-| 13 | Compiler Strictness | `gate-13-compiler-strictness.sh` | Warnings under the strict tier |
+---
 
-> **Gate numbers are labels, not identities.** `githooks/gate-registry.sh` is the
-> single source of truth binding each gate's **name** to the **file that runs
-> it**. Use the name in prose, commits, and tests; the number is positional only.
->
-> This matters concretely: this table previously listed Gate 9 as "Semgrep SAST"
-> while the hook ran Build Integrity. In #717 that inaccuracy sent a C# SAST fix
-> into `githooks/gate-9.sh` — a file no hook sources — so the fix changed nothing
-> while appearing to land. `githooks/__tests__/gate-registry.test.bats` now
-> asserts this table against the registry, so the drift fails a test instead of
-> misleading the next reader.
+## XP-GATE IN ONE PARAGRAPH
 
-> **Conceptual grouping in README/docs/CAPABILITIES.md (still called "6 Gates"):**
-> CodeQ (1+2+5) · Complexity (3) · Principles (4) · Tests (3+4+5) · Architecture (6) · plus newer Security gates (7+8+9). Gate 0 is treated as a pre-flight check.
-> The two views are intentionally maintained until the README rewrite catches up.
+Deterministic git quality gates, AI-driven multi-expert review (Delphi), a
+6-phase Sprint Flow pipeline, npm zero-install distribution, and cross-platform
+plugins (Claude Code / OpenCode / Qoder / DSH). Gates run on commit and on push;
+each is only as valuable as its ability to say "not checked" honestly, which is
+the single theme most of this file's warnings come back to.
 
-### Pre-push — `githooks/pre-push`, ~1212 lines
+## WHERE TO LOOK — ASK THE TOOL, NOT THIS FILE
 
-| Gate | Name | Source | Block on |
-|------|------|--------|----------|
-| M | Incremental Mutation | `src/mutation/gate-m.ts` (Stryker, prepush config) | Mutation score < threshold (TS only) |
-| M2 | Mock Density Check | inline in pre-push | >30% mock density (Phase 1 WARNING) without `@mock-justified` |
-| ML (M3) | Mock Layering Policy | `src/mock-policy/gate-m3.ts` | Per-layer mock policy violation (severity=error) |
-| UI | UI Sprint Quality Gates | inline in pre-push | UI regression or missing UI review for UI-bearing changes |
-| MW (Delphi) | Code-walkthrough validator | `.code-walkthrough-result.json` | Missing or stale walkthrough vs HEAD commit |
+| You want to know | Run |
+|---|---|
+| Every gate, its name, aliases, what runs it | `xp-gate gate-list` |
+| **All** gates incl. push-only, and whether each can run standalone | `xp-gate gate-capability` |
+| The thresholds that can block you, with evidence pointers | `xp-gate gate-rules` |
+| Which gate is NAME ↔ which FILE decides it | `githooks/gate-registry.sh` (the authority) |
+| Execution order | `XP_GATE_ORDER` in `githooks/gate-driver.sh` |
+| Compliance per gate (PASS / DEBT / SKIP / FAIL) | `xp-gate gate-coverage` |
+| Languages detected and which tools are present | `xp-gate detect-languages` |
+| Which hooks actually execute, and drift direction | `xp-gate doctor` |
+| All CLI subcommands | `xp-gate --help` |
+| What the last runs did | `xp-gate audit --tail` / `xp-gate rework` |
+| Whether the plugin bundles agree | `node scripts/test-plugins.mjs` — the cross-platform twin; no `.sh` variant exists (#486) |
 
-> Pre-push size limits were intentionally removed for AI workflows. All pre-push runs are journaled to `.xp-gate/reports/pre-push/*.json`.
->
-> **Three gates skip on main/master pushes (by design — pre-reviewed via PR):**
-> - **Mock Layering (Gate ML)** — `pre-push` line 715–718: `SKIP — pushing to main/master`
-> - **UI Sprint Quality Gates (Gate UI)** — `pre-push` line 786–788: `UI Gate skipped (pre-reviewed via PR)`
-> - **Code Walkthrough (Gate MW)** — `pre-push` line 858–860: `MW walkthrough skipped`
+**`gate-list` omits push-only gates** — use `gate-capability` for the full set.
 
-## CLI (`src/npm-package/bin/xp-gate.js`)
+## ARCHITECTURE INTENT — THE PARTS THAT CANNOT BE RE-DERIVED
 
-Subcommands registered in 0.8.8.0 (verified against bin source):
+### Order is data, never layout (#798)
 
-| Command | Purpose |
-|---------|---------|
-| `xp-gate init` | Install hooks + adapter infrastructure into current project |
-| `xp-gate setup-global` | Install adapters globally under `~/.config/xp-gate/` |
-| `xp-gate uninstall` | Reverse of `init`; supports `--dry-run --force --local --global` |
-| `xp-gate doctor [--brief]` | Diagnose hook/adapter/env health; `--brief` dumps every common environment fact in one read-only pass (hooks/language/adapters/coverage/gate state, #653) — answers ~90% of exploratory probes in one round trip instead of many, and refuses to combine with `--fix`/`--sync-hooks`/`--install-tools`/`--force`; `--fix` for auto-repair; `--sync-hooks` copies repo `githooks/` over the installed copy and reports which hooks actually execute (#451) |
-| `xp-gate migrate` | Clean v0.4.x GitHub-Packages residue from `~/.npmrc` |
-| `xp-gate baseline <create\|show\|reset\|diff>` | Manage lint baseline (Boy Scout track) |
-| `xp-gate install-skill <name>` | Install a skill from the package bundle (skills/<name>/) |
-| `xp-gate update-skill <name>` | Update an already-installed skill |
-| `xp-gate uninstall-skill <name> --force` | Remove an installed skill |
-| `xp-gate audit [--tail \| --stats \| record \| assertions]` | Inspect / record gate audit log; `audit assertions [--json]` lists pre-existing tautology / empty-catch debt across the repo (#668) — Gate 5d only inspects diff files, so this is the batch work queue, and it always exits 0 |
-| `xp-gate gate-rules [--json]` | The gate limits that can block a commit, generated from `.principlesrc` / `jscpd.conf.json` / the hook itself, each with an evidence pointer (#652). Generated rather than hand-copied: a checklist that drifts from its config teaches the wrong rule |
-| `xp-gate ui-review` | Visual review for UI-bearing changes (delegates to ui-review.ts) |
-| `xp-gate sprint-status [--json] [--watch] [--dir <path>] [--rework-check]` | Show Sprint Flow progress (reads `.sprint-state/sprint-state.json`); `--rework-check` calculates rework rate by counting fix commits after sprint completion (#369) |
-| `xp-gate retro [--days N] [--all] [--json] [--sprint <id>]` | Generate engineering retrospective report (activity summary, rework rate trends, evidence skip exposure, quality trends) (#369) |
-| `.flaky-quarantine.yaml` | Flaky-test quarantine ledger (#603). Every entry requires `owner` and `expiry`; `xp-gate doctor` warns on expired entries, and an entry with no expiry counts as already expired. `critical_path: true` is reported even before expiry. `xp-gate retro` prints first-pass rate, flaky recoveries and quarantine violations — and reports **NOT MEASURABLE** rather than 0% when the journal holds no re-run records |
-| `xp-gate gate-coverage [--json] [--debt] [--strict] [--branch <name>]` | One view of compliance against every gate with FOUR states — PASS / **DEBT** / **SKIP** / **FAIL**. SKIP always carries a reason (`hook-only` / `not-applicable`) so a gate that never ran can never be read as green; DEBT is quantified with an evidence path (e.g. `136 warnings / 14 files` → `.warnings-baseline.json`). Marks the report **STALE** when the artifact's `commit` differs from HEAD rather than presenting another commit's results as current. Exit 0 unless a gate FAILed; `--strict` also fails on DEBT (#636) |
-| `xp-gate rework [--top N] [--dir <path>] [--json]` | Rework report from the gate journal: first-pass rate (**NOT MEASURABLE** rather than 100% when the journal holds no failures), rounds before a landing (median/mean/worst), and top-N blocking reasons grouped by `failure_reason`. Excludes implausible `duration_ms` values whether or not they carry `duration_anomaly` (#651). Advisory only — always exits 0 |
-| `xp-gate runtime-journal [--days N] [--json] [--sessions-dir <path>]` | Measures `AGENTS.md` §AGENT RUNTIME DISCIPLINE from the agent's own session journals: blocking `job_output` waits (and explicit `wait:true`), literal `sleep`, CI polling loops, oversized `timeout`, and calls/step batching (#712). **Advisory only — always exits 0**; reports **NOT MEASURABLE** rather than 0% when no journal is found. This is the only trustworthy source for "has the rule taken effect" |
-| `xp-gate crap [--top N] [--threshold N] [--json] [--paths <p...>] [--include-mirrors]` | Rank functions by CRAP = CCN² × (1 − coverage) + CCN, worst first (#404). **Advisory only — always exits 0.** Needs `coverage/coverage-final.json`; functions whose file no test ever loaded are counted as `unmeasured`, never scored as 0% or 100% |
-| `xp-gate sync-mirrors [--write] [--json]` | Drift report + repair for every canonical ↔ mirror pair (`githooks/adapters`, `githooks/lib`, `src/principles`, `src/build-integrity`, `skills`), (#713). **Dry-run unless `--write`** — a mis-declared pair silently mass-overwrites, so writing is opt-in. Compares the *tracked* file set, so an untracked artefact such as `githooks/lib/__pycache__/` is never read as drift; a tracked-but-deleted file still counts, which is what makes repair possible |
-| `xp-gate --version` | Print version (from VERSION file) |
+Gate bodies live in `githooks/gate-entries/gate-<KEY>-entry.sh`, one file each,
+wrapped in `gate_<KEY>_run()`. Their order is the `XP_GATE_ORDER` list.
 
-> Older docs said "8 commands"; 0.8.8 grew to ≥11; 0.8.9 added `check`/`principles`/`arch` for parity with the OpenCode plugin (fixes #208). v0.8.16 added `sprint-status`, bringing the total to ≥16. v0.18.0 added `retro` and `sprint-status --rework-check` (#369). v0.30.2 added `crap` (#404).
+**To reorder gates, edit that list. Do not move code.**
 
-## EVIDENCE VALIDATION FRAMEWORK (v0.18.0+)
+Why this is not negotiable: the order used to BE the physical order of inline
+blocks in a 6341-line file. A reorder attempt also moved the hook's epilogue,
+after which *every gate past it silently stopped running* — while `bash -n`
+passed, the line count looked right, and five ordering tests stayed green. Gate
+5a stopped blocking commits and only a behavioural fingerprint noticed
+(`scripts/record-hook-behaviour.cjs`). **A structural test cannot prove a gate
+still runs; only behaviour can.**
 
-Sprint phase transitions (`xp-gate phase-transition`) validate evidence artifacts before allowing progression. Enforcement strictness depends on the sprint's `evidence_schema_version`.
+### Gate bodies `return`; they do not `exit`
 
-| Evidence file | Location | Purpose | Required at |
-|---------------|----------|---------|-------------|
-| `requirements-reviewed.json` | `.sprint-state/phase-outputs/` | R1 requirements review evidence (Delphi `--mode requirements`) | Phase 2 → 3 (DESIGN → BUILD) |
-| `test-alignment-report.json` | `.sprint-state/phase-outputs/` | Phase 4 test-specification alignment evidence (HARD-GATE) | Phase 4 (VERIFY) |
+The driver converts a non-zero return into the hook's exit status, so the EXIT
+trap still fires on the same status. A top-level `exit` inside a `gate_N_run()`
+body bypasses the driver's single exit point. Sub-shell exits (`( ... )`,
+`$( ... )`) are deliberately left as `exit` — do not "fix" those.
 
-**Enforcement by schema version:**
-- `evidence_schema_version >= 2` (new sprints): missing/invalid evidence → **BLOCK** (ok=false)
-- `evidence_schema_version` missing or `< 2` (legacy sprints): missing/invalid evidence → **WARNING** (ok=true; upgrade sprint to `evidence_schema_version: 2` to enforce)
+### SKIP must be recorded, not merely printed
 
-**Escape hatch:** `--skip-evidence --reason "<text>"` bypasses evidence validation for emergencies (e.g. hotfix). The skip is **audit-logged** (`.xp-gate/audit.jsonl`) and surfaced in `xp-gate retro` as "evidence skip exposure". A reason is mandatory — `--skip-evidence` without `--reason` is rejected.
+A gate that cannot run must set `GATE_N_STATUS="SKIP"` **and** write an audit
+line. The recurring failure in this codebase is prose saying "SKIPPED" while the
+status variable keeps its pre-gate value and the journal records a pass — or
+records nothing, leaving the gate indistinguishable from one the chain does not
+contain.
 
-```
-xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"
-```
+This is the most repeated defect family here (#806 D2, G1a ×4, G11a, G12a). The
+principle behind all of them: **"not checked" must never be indistinguishable
+from "passed"**, in either direction — machine or human. When a gate cannot
+evaluate something, say so with a reason, and never let the absence of a verdict
+score as a positive one.
+
+The corollary matters when reading results: a green `gate-coverage` row with no
+reason attached is a bug, not a pass. SKIP must always carry why.
+
+### Some things are declarations, never name lists
+
+When behaviour depends on a language's capabilities, the **adapter declares it**
+(e.g. `coverage_runs_tests() { return 0; }` when its coverage step already runs
+the suite); the hook never asks "is this language X". Hand-maintained language
+lists drift and always miss the next adapter — that mistake was patched twice
+(#794). **The default must be the safe side**: an adapter that does not declare
+its extra capabilities gets the conservative treatment (double-checking costs
+time; not checking costs verification).
+
+The same reasoning drives Gate 1's duplicate-analysis detection: it compares the
+two function *definitions* rather than naming languages, because a list of names
+can only ever cover what someone remembered.
+
+### One clock, and never fabricate a duration
+
+Duration fields come from `githooks/lib/now-ms.sh` only. A second millisecond
+clock, or an `|| 0` fallback on a failed measurement, produces numbers that look
+real and are wrong — and every future optimisation decision inherits them. When a
+duration cannot be measured it is omitted, never zeroed: **"instant" and "not
+measured" must not look alike.**
+
+### A gate must never wait on the network
+
+Probing for a tool by running `npx --yes <tool> --version` *installs what it was
+asked to detect* — it changes the environment it is measuring. Off by default
+(`XP_GATE_NPX_PROBE=1` to enable). Likewise `record_gate_audit` must resolve a
+local binary only: a network fallback per gate once cost 180 s per blocked commit.
+
+### Input short-circuit before tool probe
+
+Ask "is there anything here to check?" (cheap, from the change set) before "is
+the tool installed?" (expensive). **Every short-circuit ships with a
+"must NOT be short-circuited" test** — a predicate written against the *project*
+instead of the *change set* silently turns "checked" into "checked nothing".
+
+## TRAPS — THINGS THAT LOOK FINE AND ARE NOT
+
+**`core.hooksPath` means your edit may have no effect.** With a global install,
+git runs `~/.config/xp-gate/hooks/`, not `githooks/`. Editing here changes
+nothing until you sync (`xp-gate doctor --sync-hooks`). This was all of #451 and
+it reads as "my edit does nothing".
+
+**Stale adapters override fresh ones.** `githooks/adapters/*.sh` resolve through
+a 3-tier chain, so an old `~/.config/xp-gate/adapters/<lang>.sh` wins over the
+tracked file. Measured once: a stale 77-line Kotlin adapter reported "Gradle
+compilation failed" while the tracked version printed two real findings. **An
+adapter is stale until proven otherwise — `md5sum` both copies before believing a
+hook-vs-direct-call difference.** CI has no global copy, so if CI disagrees with
+local, suspect the local install first.
+
+**`githooks/adapters/` holds two unrelated kinds of file.** Language adapters and
+gate scripts (`gate-3.sh`, `gate-10.sh`, …) share one directory and one mirror,
+so they travel and drift together. Read the name, not the location.
+
+**Mirror edits get silently reverted.** `githooks/**` and `plugins/*/src/**` are
+canonical; `src/npm-package/**` holds byte-identical mirrors regenerated at
+prepack. Editing only the mirror means the next publish rolls your change back —
+that shipped as a real bug once. Edit canonical, then resync.
+
+**Duplicate analyses hide in plain sight.** Some adapters define
+`run_lint() { run_static_analysis; }`, so a gate that runs both does the identical
+work twice and prints identical findings twice. Measured at ~30% of one gate's
+runtime.
+
+**Never probe across environments.** Windows is the whole development loop; every
+gate tool is installed natively. WSL changes `$HOME`, the interpreter and file
+visibility at once and produced a false product-defect diagnosis that survived
+several rounds. When a probe and reality differ, you are measuring the
+difference, not the product.
 
 ## CONVENTIONS
-- **VERSION as single source of truth.** `scripts/sync-version.cjs` propagates `MAJOR.MINOR.PATCH.MICRO` from `VERSION` into npm package.json files (3-digit) and plugin manifests. Root `package.json` uses 3-digit version. Never edit `package.json` versions by hand.
-- **No `--no-verify` ever.** `githooks/QUALITY-GATES-CODE-OF-CONDUCT.md` makes hook bypass a process violation.
-- **Tool missing → SKIP, not BLOCK — except Gate 8.** When a language tool isn't installed, the adapter degrades the gate to SKIP instead of blocking the commit. Hard-block only fires when the tool exists and the check fails. Gate 8 (secret scanning) is fail-closed since #499: gitleaks missing or crashing BLOCKs, because a security gate that cannot run must not report success.
-- **Input short-circuit before tool probe.** A gate must first ask "is there anything here to check?" (cheap, from the change set / project files) and only then "is the tool installed?" (expensive). `gate-9` filters semgrep files before probing semgrep; `python-health` calls `hasPythonSignal()` before probing mypy/pytest/ruff/flake8/black. Measured 2026-11-09 on a no-input fixture: python-health 3802 ms → 1607 ms (−57.7%), gate-9 789 ms → 624 ms (−21.0%), both load-valid (12-round ABBA). Every short-circuit MUST ship with a "must NOT be short-circuited" test — a predicate written against the *project* instead of the *change set* silently turns "checked" into "checked nothing". See REQ-GATE-PROBE-SHORTCUT.
-- **npx is never used to probe a tool by default.** `probeToolNpx` runs `npx --yes <tool> --version`, where `--yes` means "install it without asking" — i.e. answering "is semgrep installed?" could hit the registry, download a package, and execute it. It is now off unless `XP_GATE_NPX_PROBE=1` (accepts `1`/`true`/`yes`). PATH lookup and `~/.local/bin` are unchanged, so a normally-installed tool is still found. Set the variable in CI for projects that deliberately rely on npx-provided tooling.
-- **Which language needs a test run is an ADAPTER declaration, never a language name (v0.38+, #798/#794).** An adapter whose `run_coverage()` already executes and validates the suite defines `coverage_runs_tests() { return 0; }`; the hook then runs the suite ONCE instead of twice. Declared today: csharp, go, java, kotlin, dart, swift (typescript and python already collected coverage inline). **The default is the safe side**: an adapter that does not declare runs the tests anyway, because double-running costs time while not running them costs verification. Do NOT add `if [ "$CURRENT_LANG" = "<name>" ]` to defer test execution — that pattern was hand-patched twice (#794) and can only ever cover languages someone remembers. Add the one-line declaration to the new adapter instead.
-- **Duration fields come from ONE clock, and a contradiction is reported as null (#798).** Both hooks measure with the shared `githooks/lib/now-ms.sh` helper (node `Date.now()`, regex-validated, `date +%s` fallback). The old `/proc/uptime` fraction parser (`cut -c1-3`) turned `331154.04` into `33115404` — 10× small — and reported 21,754 ms for a run that measured 199,000 ms, which is why #798 sat unoptimised. **Never introduce a second millisecond clock**, and never fall back to `|| 0` when the measurement fails: `duration_ms` is omitted/null instead, and is rejected to null when it is smaller than the longest per-gate duration recorded inside the run ("宁可没有数，也不要有一个会让所有优化决策跑偏的数").
-- **Per-gate durations are published in the run report as `gateTimings` (#798).** `record_gate_audit` fills a `gate_name → ms` table and `gate_timings_json` emits it once into `.xp-gate/reports/pre-commit/*.json`. A gate that never measured a duration is ABSENT from the object, never `0` — "instant" and "not measured" must not look alike when ordering decisions read this. Any future "reorder gates by cost" work reads this field instead of estimating.
-- **Boy Scout Rule (Gate 6).** New files: zero warnings. Modified files: warning count cannot increase vs `.warnings-baseline.json`. Untouched files: unchecked.
-- **Pre-push size limits removed.** File/LOC hard limits were intentionally removed for AI workflows; pre-push still enforces mutation, mock, and code-walkthrough gates.
-- **Three-model Delphi policy.** `.delphi-config.json` must configure architecture, technical, and feasibility. All three must execute successfully with distinct trimmed requested model IDs. Provider, vendor, gateway, and model nationality are unrestricted; one provider and token plan are allowed. `provider: local` fallback cannot count.
-- **Test annotations are mandatory.** Every test file must carry `@test REQ-XXX`, `@intent ...`, `@covers AC-XXX` JSDoc tags. Missing tags ⇒ test rejected.
-- **TypeScript strict mode, always.** No `as any`, `@ts-ignore`, or `@ts-expect-error`. No empty `catch` blocks. No `print()` — use `logging`.
-- **Adapters are duplicated** between `githooks/adapters/` and `src/npm-package/adapters/`. Edit `githooks/` first, then resync via build scripts. Known tech debt.
-- **Root lockfile names only the canonical npm registry.** Every `"resolved"` in `package-lock.json` is `https://registry.npmjs.org` — no mirror, no non-default port, no credentials, no query string, no plain http. This is an *artifact-level* invariant: npm rewrites the fetch host to the machine's configured `registry` at download time by default (`replace-registry-host`), so pinning the lock removes the repository's dependency on a mirror, not each developer machine's. A mirror in a developer `~/.npmrc` re-contaminates one entry per added dependency (`.npmrc` `replace-registry-host` is a measured no-op against mirrors). Repair offline with `npm run normalize-lock` (rewrites resolved sources only), never by hand-editing. Guarded by `scripts/__tests__/package-lock-registry.test.cjs`; tradeoffs in `docs/plans/2026-09-30-package-lock-registry-normalization.md`.
-- **TDD mandatory before implementation (v0.14.0+).** Every implementation change MUST follow RED → GREEN → REFACTOR. Before delegating any implementation work, verify a failing test exists. If no test exists, write one first and mark the todo as `[TDD-RED]`. Only delegate implementation AFTER the RED test is committed. See `skills/sprint-flow/references/phase-3-build.md` for the full TDD-GATE specification. ralph-loop creates tests as step 0 — this is the pre-ralph-loop check, not a replacement.
-- **In-session verification after changes (v0.14.31+).** After every implementation change (file edit, refactor, new feature, bug fix), the Agent MUST: (1) run the relevant verification commands (`npm test`, `npx vitest run`, `npm run lint`, `npx tsc --noEmit`, or project-specific equivalents) and (2) record the verification result in a structured format that external tools (e.g. Better Loop Harness) can capture. Never claim a change is complete without running and recording verification. See `skills/sprint-flow/references/phase-3-build.md` §In-Session Verification for the full specification.
 
-## ANTI-PATTERNS (THIS PROJECT)
-- Do NOT bypass any gate with `--no-verify`. Process violation.
-- Do NOT edit `src/npm-package/adapters/` directly. Edit `githooks/adapters/` and resync.
-- Do NOT edit `src/npm-package/plugins/*/src/` directly (#542). The canonical source is `plugins/<name>/src/`; the mirror is regenerated by prepack's sync (a mirror-only fix gets silently rolled back at the next publish — v0.27.3 shipped exactly that bug). `scripts/check-hook-mirror.sh` now diffs every `plugins/*/src ↔ src/npm-package/plugins/*/src` pair.
-- Do NOT edit a skill's `AGENTS.md` mirror under `plugins/*/skills/` or `src/npm-package/**/skills/` — those are byte-identical copies of `skills/<name>/AGENTS.md`. Edit the canonical file then re-copy.
-- Do NOT hand-edit `package.json` versions. Run `node scripts/sync-version.cjs` against `VERSION`.
-- Do NOT add runtime dependencies to `src/npm-package/` — it ships zero-install.
-- Do NOT bypass the three distinct executable model requirement. `cross_provider_required` is deprecated and ignored with a warning.
-- Do NOT skip `R1 requirements review` or `R2 delphi-review` in Sprint Flow Phase 2 (DESIGN) — HARD-GATE blocks Phase 3 (BUILD).
-- Do NOT terminate Delphi review before ≥90% consensus or 5 rounds (whichever first).
-- Do NOT modify tests during Phase 2 of test-specification-alignment (freeze enforced).
-- Do NOT push from main/master and expect Gate ML, Gate UI, or Gate MW to run — by design all three are skipped (pre-reviewed via PR).
-- Do NOT delete or rename `.code-walkthrough-result.json` before push.
-- Do NOT claim a change is complete without running verification commands and recording the result. Every file edit, refactor, or feature implementation MUST be followed by `npm test` (or equivalent) + `npm run lint` and the output recorded. Unverified changes are invisible to Better Loop Harness and break the change→validation traceability chain.
+- **No `--no-verify`, ever.** Process violation per
+  `githooks/QUALITY-GATES-CODE-OF-CONDUCT.md`.
+- **Tool missing → SKIP, not BLOCK — except secret scanning**, which is
+  fail-closed: a security gate that cannot run must not report success.
+- **VERSION is the single source of truth**; manifests are generated from it and
+  drift is blocked. Never hand-edit a version field.
+- **Adapters and hooks are edited canonically, then resynced.** Both directions
+  are guarded by `xp-gate sync-mirrors` (dry-run by default; `--write` to repair).
+- **Tests carry mandatory annotations**: `@test REQ-XXX`, `@intent`, `@covers`.
+- **TypeScript strict, always** — no `as any`, `@ts-ignore`, `@ts-expect-error`,
+  empty `catch`, or `print()`.
+- **TDD mandatory**: RED → GREEN → REFACTOR. The failing test comes first.
+- **Verify in-session and record it.** An unverified change is invisible to the
+  traceability chain.
+- **Three gates skip on main/master pushes by design** (pre-reviewed via PR).
+  That is intentional; do not "fix" it.
 
-## KNOWN DRIFT HISTORY
+## MEASUREMENT DISCIPLINE
 
-All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Sprint Flow phases, CLI count, qoder manifest, skill bundling, C adapter, CHANGELOG date, AGENTS.md staleness) were resolved in v0.8.9–v0.9.2. Run `/init-deep` whenever VERSION bumps a minor digit to prevent AGENTS.md mirror staleness.
+This machine runs at 90–100% CPU, so noise routinely exceeds the effect being
+measured. Each rule below corresponds to a real wrong conclusion:
 
+1. **Read the call contract before designing the measurement.** A wrong call
+   method yields numbers unrelated to real performance — the more plausible the
+   better.
+2. **Prefer the subject's own tooling.** A hand-written baseline is lighter than
+   the real implementation and UNDERSTATES the gain.
+3. **Use real-time occupancy, not accumulated CPU seconds.**
+4. **Attribute with multiple samples.** One snapshot is not a parent-child fact.
+5. **A-B-A is not enough — use ABBA and record per-arm load.** A monotonic
+   A→B→A is a time trend, not a treatment effect.
+6. **Wait for load to drop, and report it.** Comparisons whose per-arm load
+   differs by >5% are invalid.
 
-## AI CODING DISCIPLINE (Karpathy Principles)
-
-**原则 3: Surgical Changes（外科手术式改动）**
-- 只碰必须碰的代码。只清理自己制造的混乱。
-- 编辑现有代码时，不"优化"相邻代码、注释或 formatting
-- 不重构没坏的东西
-- 匹配现有代码风格，即使 AI 更喜欢另一种
-- 发现无关的死代码 → 提及但不要删除（除非用户明确要求）
-- 自己的改动产生的 orphaned import/variable/function → 必须清理
-- 判定标准: 每一行改动都应能直接追溯到用户的请求
-
-**原则 4: Goal-Driven Execution（目标驱动执行）**
-- 定义成功标准。循环直到验证。
-- 把指令转化为可验证目标：
-  - "加验证" → "写测试 → 让测试通过"
-  - "修 bug" → "写复现测试 → 让测试通过"
-  - "重构 X" → "确保重构前后测试都通过"
-- 多步骤任务列出验证点
-- 改完任何代码后必须运行测试确认无 regression
+**Prefer "not measurable" over a confidently wrong direction.** A wrong
+conclusion is worse than none: it drives decisions — disabling security software,
+abandoning a working optimisation — on a false premise.
 
 ## AGENT RUNTIME DISCIPLINE — 工具调用效率（P2, 2026-10-30 诊断）
 
@@ -330,3 +260,15 @@ All 10 documented drift items (Gate count, pre-push gates, Delphi threshold, Spr
 - 目标：触及打包/发布的改动，契约测试先于实现提交；漏发次数保持 **0**。
   验证方式不是 `runtime-journal`（它只测工具调用效率），而是发布前
   `npm pack --json` + 契约测试是否真的跑过。
+
+## WHEN YOU CHANGE SOMETHING
+
+- Reordering gates → edit `XP_GATE_ORDER`.
+- Adding a gate → a registry row in `githooks/gate-registry.sh` is what makes it
+  real; prose elsewhere does not.
+- Changing a hook → check `xp-gate doctor` afterwards, or you may have changed
+  nothing.
+- Changing a gate's verdict logic → the pinning test is the deliverable. Prove it
+  goes red without the fix; "it passes now" is not evidence.
+- **This file needs no update for any of the above** — only when you learn a new
+  invariant, trap or measurement lesson worth passing on.

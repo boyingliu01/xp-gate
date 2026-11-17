@@ -1,80 +1,100 @@
 # DOCUMENTATION KNOWLEDGE BASE
 
-**Generated:** 2026-11-04
-**Commit:** eb2097b0
-**Branch:** sprint/2026-11-03-02
-**Version:** 0.38.9.0
+**Updated:** 2026-11-17
 
-## OVERVIEW
-Reference guides, design history, postmortems, and weekly retros. **30+ chronologically-archived design plans** under `plans/`. Plan docs follow `YYYY-MM-DD-topic.md` and each typically corresponds to a Delphi consensus report or implementation plan.
+> **Scope.** Reference guides, design history, postmortems and retros — the
+> project's memory. This file records the rules that keep that memory usable.
+>
+> File inventories are deliberately absent. The previous revision carried a tree
+> of individual plan filenames and asserted "30+ plans, newest = 2026-06"; the
+> directory now holds over a hundred, and the listed "newest" entries are months
+> stale. A catalogue of files is a snapshot that decays with every commit — list
+> the directory instead:
+>
+> | Question | Answer |
+> |---|---|
+> | What plans exist | `ls docs/plans/` |
+> | What happened recently | `ls docs/plans/ | sort | tail` |
+> | How a past decision was reached | grep `docs/plans/` and `docs/incidents/` |
+> | Current requirements | `specification.yaml` at the repo root |
 
-## STRUCTURE
-```
-docs/
-├── plans/                # 30+ design docs (YYYY-MM-DD-topic.md format)
-│   ├── 2026-04-05-*.md   # XP 12 practices, Delphi consensus
-│   ├── 2026-04-09-*.md   # v0.0.2 architecture + implementation
-│   ├── 2026-04-12-clean-code-solid-checker-design.md
-│   ├── 2026-04-13-quality-gate-enhancement-design.md
-│   ├── 2026-04-14-specification-generator-update-mode-design{,-v2}.md
-│   ├── 2026-04-25-unified-boy-scout-design.md
-│   ├── 2026-04-27-quality-gates-refactor.md
-│   ├── 2026-05-04-mutation-testing-gate10.md
-│   ├── 2026-05-04-sprint-flow-phase3-delphi.md
-│   ├── 2026-05-04-sprint-flow-web-frontend.md
-│   ├── 2026-05-16-gate8-mutation-testing-precommit.md
-│   ├── 2026-05-17-web-dashboard.md
-│   ├── 2026-05-19-xp-gate-zero-install-{design,specification.yaml,consensus-report}.md
-│   ├── 2026-05-29-xp-gate-cross-platform-plugin-{design,implementation-plan}.md
-│   ├── 2026-05-29-specification-fix-issues.yaml
-│   ├── 2026-05-30-xp-gate-uninstall-design.md
-│   ├── 2026-05-31-issue-79-ui-sprint-detection-design.md
-│   ├── 2026-06-02-issue-78-mock-layering-strategy.md
-│   ├── 2026-06-04-skill-version-sync-design.md
-│   └── 2026-06-06-sprint-branch-cleanup-design.md
-├── incidents/            # Postmortems
-├── retros/               # Weekly engineering retrospectives
-├── admin-template-guidelines.md
-├── gate-validation-guide.md
-├── MULTI-MODEL-REVIEW-GUIDE.md
-├── performance-benchmark.md
-├── principlesrc-configuration.md
-├── ralph-loop-design.md
-├── rename-guide.md
-├── specification-ahe-observability.yaml
-└── sprint-fix-open-issues-design.md
-```
+## WHY THIS DIRECTORY EXISTS
 
-## WHERE TO LOOK
-| Task | Location |
-|------|----------|
-| Design history | `plans/` (sorted chronologically; oldest = 2026-04, newest = 2026-06) |
-| Gate validation guide | `gate-validation-guide.md` |
-| Multi-model review process | `MULTI-MODEL-REVIEW-GUIDE.md` |
-| Performance benchmark data | `performance-benchmark.md` |
-| Principles config reference | `principlesrc-configuration.md` |
-| Ralph-loop design | `ralph-loop-design.md` |
-| Mock-layering design | `plans/2026-06-02-issue-78-mock-layering-strategy.md` |
-| UI sprint detection | `plans/2026-05-31-issue-79-ui-sprint-detection-design.md` |
-| Skill version sync | `plans/2026-06-04-skill-version-sync-design.md` |
-| Sprint-branch cleanup | `plans/2026-06-06-sprint-branch-cleanup-design.md` |
-| Past incidents | `incidents/` |
-| Weekly retros | `retros/` |
+Three kinds of document live here, and they have different lifespans:
+
+- **Reference guides** — describe how something works *now*. Must be kept true or
+  deleted; a stale guide is actively harmful because it reads as current fact.
+- **Design plans** — record what was decided and why, at a point in time. Their
+  value survives being out of date: they answer "why is it like this?" even when
+  the answer has been superseded.
+- **Postmortems and retros** — record what went wrong and what was learned. These
+  are the highest-value documents per line in the repository, and the least
+  likely to be reread, which is why their conclusions get re-learned the hard way.
+
+The distinction matters when editing: **a reference guide is wrong if stale; a
+plan is not.** Do not "update" a historical plan to match today's code — that
+destroys the record of what was believed at the time.
+
+## THE RULES THAT PROTECT THE RECORD
+
+### Plans are immutable once approved
+
+Corrections go in a new file (`-v2`, `-v3`), never by editing the original. The
+whole point of the archive is that you can read an old decision in the state it
+was actually made. An edited plan is a forgery of your own history.
+
+### Filename date is the decision date
+
+`YYYY-MM-DD-topic.md` — the date the design was approved or filed, not when code
+shipped. This is how the archive stays chronological, and why you can locate "the
+thinking in November" without opening files.
+
+### One topic, one file
+
+Bundled documents cannot be reviewed (a single verdict covering three designs
+hides which one was objectionable) and cannot be superseded cleanly.
+
+### Only approved designs flow into requirements
+
+Design documents feed the requirements file only once approved. A draft that
+leaks into `specification.yaml` makes an unratified idea look like a committed
+requirement — and downstream, every gate that checks against requirements will
+enforce it.
+
+## TRAPS
+
+- **A stale reference guide is worse than no guide.** It is trusted. When the
+  code changes and the guide does not, the guide teaches the old behaviour with
+  full confidence. Update it in the same change, or delete it.
+- **Listing files in prose creates a second, decaying catalogue.** Point at the
+  directory.
+- **"Known issues" sections harden into misinformation.** Once an issue is fixed,
+  delete the entry. An entry marked "resolved" reads as live to the next reader.
+- **Retros are only useful if someone reads them.** A lesson recorded here and
+  then contradicted in practice is a signal that the rule was never internalised —
+  prefer a test or a lint over a paragraph.
+- **Documents that duplicate generated facts** (counts, versions, gate lists)
+  drift silently. Link to the source instead.
 
 ## CONVENTIONS
-- **Plan doc filename**: strict `YYYY-MM-DD-topic.md`. Date = the day the design was approved or filed, not the day code shipped.
-- **One topic = one file**. Major revisions get a `-v2`, `-v3` suffix; never overwrite history.
-- **Approved design docs feed `specification.yaml`**: only APPROVED plans are auto-merged into the requirements file at the repo root.
-- **Plans are immutable once Delphi-APPROVED**. Corrections happen in a new `-v2` file.
 
-## ANTI-PATTERNS (THIS PROJECT)
-- Do NOT mix code and documentation changes in one commit. Hooks may pass but reviewers will reject.
-- Do NOT create docs-only commits that bypass the gate suite by being all `*.md`. (Gate 0 still runs.)
-- Do NOT re-introduce skill validation/evaluation/certification docs — out of scope per issue #140 (see CHANGELOG v0.7.2). XP-Gate's responsibility for skills is packaging / install / update / uninstall / distribution / runtime invocation only.
-- Do NOT delete or rename a plan doc after it's been Delphi-APPROVED. Supersede with `-v2`.
+- Do not mix documentation and code changes in one commit — the gates may pass,
+  but the history becomes hard to bisect.
+- A docs-only change is still a change: it is gated, and it should not be used as
+  a way to move a branch forward.
+- When superseding a design, link forward from the old file to the new one so a
+  reader following history does not stop at a superseded decision.
+- Record the *decision and its reason*, not a transcript. The value is in the
+  rejected alternatives — that is the part future readers cannot reconstruct.
 
-## NOTES
-- Plan docs frequently link to one or more `.code-walkthrough-result.json` snapshots stored under `.xp-gate/reports/` in the implementation PR.
-- Skill validation/evaluation/certification docs were removed in issue #140 (see `CHANGELOG.md` v0.7.2). XP-Gate's skill scope is packaging/install/update/uninstall/distribution/runtime invocation only.
-- The two newest plans (`2026-06-02-issue-78-mock-layering-strategy.md` and `2026-06-06-sprint-branch-cleanup-design.md`) correspond to the work that shipped in v0.8.x.
+## ANTI-PATTERNS
 
+- Do NOT edit an approved plan. Supersede it.
+- Do NOT rename or delete an approved plan.
+- Do NOT let a draft requirement into the requirements file before approval.
+- Do NOT keep resolved issues documented as warnings.
+- Do NOT catalogue files in prose; list the directory.
+- Do NOT re-introduce skill validation/evaluation/certification content — out of
+  scope by decision (see the changelog for that release). This project's skill
+  responsibility is packaging, install, update, uninstall, distribution and
+  runtime invocation only.
