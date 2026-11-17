@@ -21,8 +21,40 @@ PRE_COMMIT_MIRROR="$REPO_ROOT/src/npm-package/hooks/gate-entries/gate-0-entry.sh
   local text
   text=$(cat "$PRE_COMMIT_COPY")
   echo "$text" | grep -qF 'SKIP_VERSION_CHECK=1 git commit'
-  echo "$text" | grep -q "adapters/, scripts/, hooks/"
+  # The hint must describe the exemptions the gate ACTUALLY applies. It used to
+  # be pinned to the literal "adapters/, scripts/, hooks/" -- which went stale
+  # the moment #806 added gate-entries/ and the skill tooling, and then failed
+  # for a hint that was MORE correct than the assertion. Pin the invariant
+  # instead of one snapshot of the prose: every exempt directory named in the
+  # gate's case-list must also be named in the hint.
+  echo "$text" | grep -q "adapters/"
+  echo "$text" | grep -q "gate-entries/"
   echo "$text" | grep -q "build-tooling-only"
+}
+
+@test "AC-450-01b: the hint names every build-tooling path the whitelist exempts" {
+  # Anti-drift check, and the reason AC-450-01 no longer hardcodes one list: if
+  # the case-list grows an exemption and the hint is not updated, the operator
+  # reads a narrower rule than the gate enforces.
+  #
+  # The hint is isolated first, and that is not incidental: a naive
+  # `grep "gate-entries/"` over the whole file always succeeds, because the
+  # comments and the case-list itself contain those strings. That version of
+  # this test was written, then falsified by deleting the term from the hint
+  # alone -- it stayed GREEN, which is this repo's recurring failure mode: an
+  # assertion that passes for a reason unrelated to what it claims to check.
+  local text hint whitelist
+  text=$(cat "$PRE_COMMIT_COPY")
+  # The hint block starts at the build-tooling sentence and runs to the blank
+  # line before the SKIP_VERSION_CHECK paragraph.
+  hint=$(echo "$text" | grep -A2 "^Build-tooling-only changes")
+  [ -n "$hint" ] || fail "the build-tooling hint block is missing entirely"
+  whitelist=$(echo "$text" | grep -o 'src/npm-package/adapters/\*|[^)]*')
+
+  for token in "adapters/" "gate-entries/" "scripts/" "hooks/"; do
+    echo "$whitelist" | grep -q "$token" || fail "expected '$token' in the exemption whitelist"
+    echo "$hint" | grep -qF "$token" || fail "whitelist exempts '$token' but the HINT never mentions it (hint: $hint)"
+  done
 }
 
 @test "AC-450-02: the dead message-prefix recipe is gone from both copies (mirrors in sync)" {
