@@ -27,14 +27,14 @@ Sprint Flow is NOT just a sequential launcher of existing skills. Here's what ma
 |-----------|-----------------|-------------|
 | **Context Continuity** | Each skill starts fresh; lost design decisions between phases | Phase summaries + sprint-state.json maintain full traceability across 6 phases |
 | **Gate Enforcement** | No enforcement — easy to skip Delphi, skip TDD, skip UAT | HARD-GATE: design must be APPROVED (≥90% Delphi consensus) before coding; UAT is mandatory (no bypass) |
-| **Token Efficiency** | Linear context accumulation across phases — ~150K+ tokens | Ralph-loop default: 40-67% token savings via clean REQ-level contexts |
+| **Context Growth** | Linear context accumulation across phases — one growing shared context | Ralph-loop default: each REQ starts from a clean context instead of inheriting everything before it |
 | **Emergent Requirements** | Discovered late, silently ignored or merged | Phase 6 CLOSE explicitly captures emergent issues via template; triggers Sprint 2 for critical issues |
 | **Quality Ecosystem** | No integration with quality gates | Integrated with xp-gate's full quality ecosystem: Gate 5 (coverage), Gate M2 (mock density), Delphi code-walkthrough |
 | **Progress Tracking** | Ad-hoc, memory-based | `.sprint-state/` persistence with phase history, timing, and metrics — `--status` renders progress dashboard |
 
 ### Key Differentiators
 
-1. **40-67% Token Savings via Ralph Loop**: Phase 3 BUILD default (`ralph-loop`) processes one REQ at a time with clean context, avoiding the linear context accumulation that costs 150K+ tokens in parallel mode.
+1. **No Cross-REQ Context Accumulation via Ralph Loop**: Phase 3 BUILD default (`ralph-loop`) processes one REQ at a time with a clean context, instead of carrying every earlier REQ in one growing context as parallel mode does. The benefit is qualitative — earlier REQs stop competing for room with the current one — and no measured token figure is claimed here.
 
 2. **HARD-GATE Discipline**: Design must pass Delphi review with all three expert roles executed successfully, three distinct requested model IDs verified, and ≥90% aggregate consensus within five rounds before Phase 3 BUILD can start. This is enforced both in SKILL.md instructions and via the Claude Code plugin's PreToolUse hook.
 
@@ -190,7 +190,7 @@ Sprint Flow: PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE
 2. **DELPHI-GATE**: 验证 `.sprint-state/delphi-reviewed.json` 存在且 `verdict = "APPROVED"` → 否则 BLOCK
 3. **TDD-GATE (MANDATORY — v0.14.0+)**: 在 delegation 前验证每个 REQ 存在 failing test。无 test → mark `[TDD-RED]`（ralph-loop 创建）。有 test 且 GREEN 且无实现 → BLOCK（TDD bypass）。详见 `references/phase-3-build.md#tdd-gate-pre-implementation-tdd-check-mandatory`。
 4. **输入**: `slices-manifest.json`（Phase 2/6 生成），按 `execution_order` 逐个执行
-5. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，token 节约 40-67%），可选 `--mode parallel`
+5. **模式**: 默认 `ralph-loop`（逐 REQ 迭代，每个 REQ 独立干净上下文，不与之前的 REQ 累积），可选 `--mode parallel`
 6. **Skill 步骤**: BUILD-ENTRY-CONTRACT → hooks-install → TDD-GATE → TDD (RED/GREEN/REFACTOR) → blind-review (read-only subagent, tools: [Read, Grep, Glob]) → verification-before-completion → 成本监控 → learnings.md 写入
 7. **Mock Minimization**: integration-first, mock 仅限 external services, 密度 > 30% 需 `@mock-justified`
 

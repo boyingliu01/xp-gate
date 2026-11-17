@@ -7,7 +7,7 @@ maturity: stable
 
 # Ralph Loop — Default REQ-Level Iterative Build
 
-Core principles: **isolated context per REQ**, **TDD-first**, **full regression every iteration**, **token efficiency** (40-67% savings vs parallel).
+Core principles: **isolated context per REQ**, **TDD-first**, **full regression every iteration**, **no cross-REQ context accumulation** (each REQ starts clean instead of inheriting an ever-growing shared context).
 
 ## Triggers
 
