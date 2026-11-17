@@ -6,7 +6,7 @@
 **Version:** 0.38.9.0
 
 ## OVERVIEW
-**6-phase** development pipeline (v2.0 compact redesign, Issue #290): PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE. Phase 3/6 BUILD default build mode is **ralph-loop** (REQ-level iteration, 40-67% token savings vs parallel). HARD-GATE between DESIGN (2/6) and BUILD (3/6): design must pass Delphi review (≥90% consensus) before any coding.
+**6-phase** development pipeline (v2.0 compact redesign, Issue #290): PREP → DESIGN → BUILD → VERIFY → SHIP → CLOSE. Phase 3/6 BUILD default build mode is **ralph-loop** (REQ-level iteration; each REQ starts from a clean context instead of accumulating one across REQs). HARD-GATE between DESIGN (2/6) and BUILD (3/6): design must pass Delphi review (≥90% consensus) before any coding.
 
 > **v2.0 Compact Redesign (Issue #290)**: Merged from 11 phases to 6. PREP = old ISOLATE + AUTO-ESTIMATE. DESIGN = old THINK + PLAN. BUILD = old BUILD. VERIFY = old REVIEW + FEEDBACK. SHIP = old SHIP + LAND. CLOSE = old USER ACCEPTANCE + CLEANUP.
 
@@ -63,7 +63,7 @@ skills/sprint-flow/
 | 6/6 | CLOSE | USER ACCEPT + CLEANUP | Manual UAT → emergent issues → cleanup | HARD-GATE: UAT mandatory manual |
 
 ## CONVENTIONS
-- **ralph-loop is Phase 3/6 BUILD default**. Each REQ runs in a clean context, saving 40-67% tokens.
+- **ralph-loop is Phase 3/6 BUILD default**. Each REQ runs in a clean context, so context does not accumulate across REQs.
 - **delphi-review HARD-GATE in Phase 2/6 DESIGN**: all three expert roles must execute with three distinct requested model IDs, then aggregate ≥90% consensus within 5 rounds. Unapproved or unverifiable → BLOCK coding.
 - **`learn` is called twice**: once per REQ in Phase 3/6 (ralph-loop internal) and once in Phase 4/6 VERIFY (Sprint-level retro).
 - **Phase isolation**: each phase has explicit entry/exit criteria documented in its `references/phase-*.md` file.

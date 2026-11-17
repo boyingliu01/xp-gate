@@ -260,12 +260,30 @@ function testUniqueValuePropositionExists() {
   console.log('  ✓ Unique Value Proposition section exists');
 }
 
-function testUvpMentionsTokenSavings() {
+function testUvpMentionsContextIsolation() {
   const section = contentSplit('Unique Value Proposition');
-  if (!section.includes('40') || !section.includes('67') || !section.includes('token')) {
-    throw new Error('Unique Value Proposition must mention 40-67% token savings');
+  // Guards the MECHANISM, not a number. This assertion used to require the
+  // literal '40' and '67' -- a figure with no measurement behind it anywhere in
+  // the repo, copied between docs and pinned here so it could never be corrected.
+  // What actually distinguishes ralph-loop is that a REQ starts from a clean
+  // context instead of inheriting one: that is checkable and does not rot.
+  const mentionsIsolation =
+    /clean context|context (?:does not|doesn't) accumulate|no cross-REQ context accumulation|Context Growth/i.test(
+      section
+    );
+  if (!mentionsIsolation) {
+    throw new Error(
+      'Unique Value Proposition must explain the per-REQ clean-context mechanism'
+    );
   }
-  console.log('  ✓ UVP mentions 40-67% token savings');
+  // And it must not resurrect an unsourced percentage as if it were measured.
+  const unsourcedPercentage = /\b\d{1,3}\s*[-–]\s*\d{1,3}%\s*(?:token|Token)/.test(section);
+  if (unsourcedPercentage) {
+    throw new Error(
+      'UVP states a token-savings percentage range; no measurement backs it, so do not reinstate one without data'
+    );
+  }
+  console.log('  ✓ UVP explains per-REQ clean context without an unsourced figure');
 }
 
 function testUvpMentionsHardGate() {
@@ -353,7 +371,7 @@ function runTests(opts = {}) {
     { name: 'force-levels.md exists with three levels', fn: testForceLevelsDocumentExists },
     { name: 'force-levels.md requires Delphi review', fn: testForceLevelsRequiresDelphi },
     { name: 'Unique Value Proposition exists', fn: testUniqueValuePropositionExists },
-    { name: 'UVP mentions 40-67% token savings', fn: testUvpMentionsTokenSavings },
+    { name: 'UVP explains per-REQ clean context (no unsourced figure)', fn: testUvpMentionsContextIsolation },
     { name: 'UVP mentions HARD-GATE', fn: testUvpMentionsHardGate },
     { name: 'UVP mentions emergent requirements', fn: testUvpMentionsEmergentRequirements },
     { name: 'Timing & Stability section exists', fn: testTimingSectionExists },
@@ -436,7 +454,7 @@ describe('sprint-flow SKILL.md', () => {
     { name: 'force-levels.md exists with three levels', fn: testForceLevelsDocumentExists },
     { name: 'force-levels.md requires Delphi review', fn: testForceLevelsRequiresDelphi },
     { name: 'Unique Value Proposition exists', fn: testUniqueValuePropositionExists },
-    { name: 'UVP mentions 40-67% token savings', fn: testUvpMentionsTokenSavings },
+    { name: 'UVP explains per-REQ clean context (no unsourced figure)', fn: testUvpMentionsContextIsolation },
     { name: 'UVP mentions HARD-GATE', fn: testUvpMentionsHardGate },
     { name: 'UVP mentions emergent requirements', fn: testUvpMentionsEmergentRequirements },
     { name: 'Timing & Stability section exists', fn: testTimingSectionExists },
