@@ -411,7 +411,20 @@ sync-version left a drifted checkout under a green Gate 0.
         # Build tooling is source for `has_source` (it is code) but not for
         # `has_real_source` (it needs no VERSION bump) -- so `continue` here
         # skips only the second flag, keeping the single extension list below.
-        src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*)
+        #
+        # #806 G0a: `githooks/gate-entries/*` was missing. Gate bodies live there
+        # and are the same kind of code as `githooks/adapters/*` -- both change
+        # what the gates DO, neither changes the shipped package's behaviour -- so
+        # leaving it out meant an adapter edit passed while a gate-logic edit
+        # demanded a VERSION bump. The only ways through were a real bump (which
+        # pollutes the version history with changes users cannot observe) or
+        # SKIP_VERSION_CHECK=1 (which bypasses the gate instead of satisfying it);
+        # the second was used repeatedly, which is how the asymmetry was found.
+        #
+        # A path prefix exempts everything beneath it, so these tests pin the
+        # boundary from both sides: gate-entries passes, and real source under
+        # other paths (including a `.sh` outside these prefixes) still blocks.
+        src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*|githooks/gate-entries/*)
           has_source=true
           continue
           ;;
@@ -468,8 +481,8 @@ Before committing:
   2. Add entry to CHANGELOG.md
   3. Run: node scripts/sync-version.cjs
 
-Build-tooling-only changes (adapters/, scripts/, hooks/) need NO version bump
-and pass this gate automatically — no marker required.
+Build-tooling-only changes (adapters/, gate-entries/, scripts/, hooks/) need NO
+version bump and pass this gate automatically — no marker required.
 
 If you genuinely must land production source without a version bump, the
 supported escape hatch is the env var (a message prefix cannot work here
