@@ -21,8 +21,23 @@
 # case needs beyond this should be copied explicitly at the call site, so the
 # fixture stays independent of unrelated test churn.
 #
+# Git context
+# -----------
+# A hook exports GIT_DIR/GIT_WORK_TREE to everything it starts, and those win
+# over both `git -C <fixture>` and a `cd` into the fixture: a case that builds a
+# throwaway repo then silently operates on the project repo (measured: the
+# adapter read the project's file list instead of the fixture's). Sourcing this
+# file drops the inherited variables for the rest of the bats file, using the
+# same list the adapters isolate with (git_hook_context_vars, adapter-common.sh).
+#
 # Usage:
 #   source "$BATS_TEST_DIRNAME/helpers/copy-githooks-fixture.bash"
+#
+# shellcheck source=/dev/null
+source "$BATS_TEST_DIRNAME/../adapter-common.sh"
+# shellcheck disable=SC2046  # one name per word, by design
+unset $(git_hook_context_vars)
+
 #   copy_githooks_fixture "$sandbox/githooks"
 
 copy_githooks_fixture() {
@@ -58,4 +73,25 @@ copy_githooks_fixture() {
   [ -d "$src/lib" ] && { cp -R "$src/lib" "$dest/lib" || return 1; }
 
   return 0
+}
+
+# Git context
+# -----------
+# A hook exports GIT_DIR/GIT_WORK_TREE to every process it starts, and those win
+# over both `git -C <fixture>` and a `cd` into the fixture. A case that builds a
+# throwaway repo then silently operates on the project repo instead (measured
+# while committing through the hook: `git ls-files` inside a fixture returned the
+# project's files). Sourcing this file also installs a setup_file that drops the
+# inherited variables for the rest of the bats file, using the same list the
+# adapters isolate with (git_hook_context_vars in adapter-common.sh).
+#
+# Bats runs setup_file after the file is loaded, so defining it here wins over a
+# suite that does not define its own. A suite that needs per-file setup of its
+# own must call this one, or drop the variables itself.
+# shellcheck source=/dev/null
+source "$BATS_TEST_DIRNAME/../adapter-common.sh"
+
+setup_file() {
+  # shellcheck disable=SC2046  # one name per word, by design
+  unset $(git_hook_context_vars)
 }

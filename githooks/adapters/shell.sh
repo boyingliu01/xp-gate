@@ -175,13 +175,27 @@ run_tests() {
   count="$(printf '%s\n' "$suites" | wc -l | tr -d ' ')"
   echo "Running Shell tests (${count} .bats suite(s))..."
 
-  # --abort, not --filter-status: the latter needs a previous run's bookkeeping
-  # and silently runs a subset (or nothing) when that state is missing. Every
-  # suite here is independent, so the first real failure is all a pre-commit
-  # needs to know, and stopping there saves the rest of a serial run.
-  # shellcheck disable=SC2086  # word-splitting is the point: one arg per suite
-  bats --abort $suites
-  return $?
+  # --abort: every suite is independent, so the first real failure is all a
+  # pre-commit needs to know. Not --filter-status, which needs a previous run's
+  # bookkeeping and silently runs a subset (or nothing) when it is missing.
+  #
+  # Suites are launched one at a time rather than in a single bats call, so each
+  # suite's timing can be printed. A single call was measured at ~1s per suite on
+  # Windows with no GNU parallel (so no --jobs), i.e. a quarter of an hour with
+  # nothing on stdout -- indistinguishable from a hung git commit.
+  local suite t0 elapsed suite_start=$SECONDS
+  for suite in $suites; do
+    t0=$SECONDS
+    bats --abort "$suite" || {
+      elapsed=$((SECONDS - t0))
+      echo "❌ ${suite} failed after ${elapsed}s"
+      return 1
+    }
+    elapsed=$((SECONDS - t0))
+    [ "$elapsed" -ge 5 ] && echo "   ✓ ${suite} (${elapsed}s)"
+  done
+  echo "✅ Shell tests passed (${count} suite(s), $((SECONDS - suite_start))s)"
+  return 0
 }
 
 run_coverage() {

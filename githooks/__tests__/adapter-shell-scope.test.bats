@@ -23,6 +23,19 @@
 #
 # ASCII only.
 
+# Under a real hook git exports GIT_DIR/GIT_WORK_TREE, and they win over
+# `git -C <fixture>`: the throwaway repo below was then never created and the
+# adapter read the project tree ("No shell scripts detected.", measured while
+# committing through the hook). Fixtures drop the inherited variables for the
+# rest of the file, using the same list the adapters isolate with. setup_file,
+# not setup: the unset has to outlive each per-test subshell.
+setup_file() {
+  # shellcheck source=/dev/null
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh"
+  # shellcheck disable=SC2046  # one name per word, by design
+  unset $(git_hook_context_vars)
+}
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   ADAPTER="$REPO_ROOT/githooks/adapters/shell.sh"

@@ -65,8 +65,9 @@ Gate 5 的 `CODE_EXTENSIONS` 漏了 `rs`，于是"只有 Rust 变更"被判成"�
   fail-closed 语义。
 - `githooks/__tests__/gate-5-adapter-fail-closed.test.bats`（新增 3 例）：两条出口
   各自钉一个 BLOCK，并断言输出里不再出现 "assuming none to run"。
-- `githooks/__tests__/adapter-shell-tests.test.bats`（+1 例）：`run_tests` 必须把
-  `--abort` 传给 bats（去掉该参数即红，已实测）。
+- `githooks/__tests__/adapter-shell-tests.test.bats`（+2 例）：`run_tests` 必须把
+  `--abort` 传给 bats；逐个套件调用时**每个被发现的套件都要真的执行**。两条都做过
+  反证：去掉 `--abort`、或在首套件后 `return 0`，对应用例各自变红（已实测）。
 - `githooks/__tests__/gate-3.test.bats`（+2 例）：Rust 文件被分级；人口过滤按路径列
   命中（用一份路径在该行的基线喂进去，断言不再整批丢弃）。
 - `githooks/__tests__/gate-13-compiler-strictness.test.bats`（34 例）：新增

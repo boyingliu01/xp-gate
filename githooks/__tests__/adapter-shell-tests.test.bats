@@ -145,6 +145,50 @@ STUB
   [[ "$output" == *"BATS_SAW_ABORT"* ]]
 }
 
+@test "AC-GATE-SHELL-TESTS-03: every discovered suite is executed, not just the first" {
+  # Per-suite invocation must not turn into "run one suite and report green".
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$work/bin" "$work/githooks/__tests__"
+
+  for name in first second third; do
+    cat > "$work/githooks/__tests__/${name}.test.bats" <<'SUITE'
+#!/usr/bin/env bats
+@test "trivially passing" {
+  [ 1 -eq 1 ]
+}
+SUITE
+  done
+
+  cat > "$work/bin/bats" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in
+    *.bats) echo "BATS_RAN:$(basename "$arg")" ;;
+  esac
+done
+exit 0
+STUB
+  chmod +x "$work/bin/bats"
+  printf 'node_modules/\n' > "$work/.gitignore"
+  git -C "$work" init -q -b test-branch 2>/dev/null
+  git -C "$work" add -A 2>/dev/null
+
+  ORIGPATH="$PATH"
+  run bash -c "
+    cd '$work' || exit 9
+    PATH='$work/bin:$ORIGPATH'
+    export PATH
+    # shellcheck source=/dev/null
+    . '$ADAPTER'
+    run_tests 2>&1
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BATS_RAN:first.test.bats"* ]]
+  [[ "$output" == *"BATS_RAN:second.test.bats"* ]]
+  [[ "$output" == *"BATS_RAN:third.test.bats"* ]]
+}
+
 @test "AC-GATE-SHELL-TESTS-02: the shunit2 branch is no longer a silent no-op" {
   # The old branch detected shunit2 and returned 0 without executing it. A
   # detection that cannot run anything must not be spelled as a skip inside a
