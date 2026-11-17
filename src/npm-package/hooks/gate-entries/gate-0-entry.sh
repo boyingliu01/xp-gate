@@ -424,7 +424,38 @@ sync-version left a drifted checkout under a green Gate 0.
         # A path prefix exempts everything beneath it, so these tests pin the
         # boundary from both sides: gate-entries passes, and real source under
         # other paths (including a `.sh` outside these prefixes) still blocks.
-        src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*|githooks/gate-entries/*)
+        #
+        # #806 G0b: a skill's `scripts/` and `__tests__/` are the machinery that
+        # produces confidence in the skill -- changing them changes no behaviour a
+        # user experiences, exactly like the directories above.
+        #
+        # Deliberately NOT `skills/*`: sync-package-content.js:79 copies the whole
+        # of skills/ into the published package, and SKILL.md plus references/ ARE
+        # what the agent follows after install. Exempting the whole tree would let
+        # a change to shipped behaviour land without appearing anywhere in version
+        # history. Exempt the mechanics, not the instructions -- so these patterns
+        # anchor on the scripts/ and __tests__/ segments, never on `skills/*`.
+        src/npm-package/adapters/*|src/npm-package/scripts/*|src/npm-package/hooks/*|scripts/*|githooks/adapters/*|githooks/gate-entries/*|skills/*/scripts/*|skills/*/__tests__/*)
+          has_source=true
+          continue
+          ;;
+        # #806 G0c: test files, anywhere. 684 are tracked across src/, githooks/,
+        # scripts/, plugins/ and skills/, and npm ships 261 of them -- the `files`
+        # list names directories such as `lib/` and `hooks/`, and the prefix drags
+        # their `__tests__/` along. So a test IS in the package, the same argument
+        # that exempted a skill's scripts/ and __tests__/ above.
+        #
+        # What a test asserts is not what a user experiences, and a version number
+        # promises a behaviour change. Requiring a bump for test edits trains
+        # maintainers to either inflate the version history or reach for
+        # SKIP_VERSION_CHECK=1 -- both were observed.
+        #
+        # Two conventions must both match, because this repo uses both: a
+        # `__tests__/` directory (src/, githooks/) and a sibling `*.test.*` file
+        # (scripts/, skills/). Anchored on full segments and the dotted infix, not
+        # a `*test*` substring -- `contest.cjs` and `latest.cjs` are real modules
+        # and stay gated (pinned by name in the tests).
+        */__tests__/*|*.test.*)
           has_source=true
           continue
           ;;
@@ -481,8 +512,9 @@ Before committing:
   2. Add entry to CHANGELOG.md
   3. Run: node scripts/sync-version.cjs
 
-Build-tooling-only changes (adapters/, gate-entries/, scripts/, hooks/) need NO
-version bump and pass this gate automatically — no marker required.
+Build-tooling-only changes (adapters/, gate-entries/, scripts/, hooks/, and a
+skill's scripts/ or __tests__/) need NO version bump and pass this gate
+automatically — no marker required.
 
 If you genuinely must land production source without a version bump, the
 supported escape hatch is the env var (a message prefix cannot work here

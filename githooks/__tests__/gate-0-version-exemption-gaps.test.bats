@@ -46,6 +46,11 @@ make_fixture() {
     printf 'run_lint() { :; }\n' > githooks/adapters/shell.sh
     printf 'helper() { :; }\n' > githooks/lib/helper.sh
     printf '#!/usr/bin/env bash\necho build\n' > scripts/build.sh
+    # A skill's behaviour and its test harness, plus a skill's instructions.
+    mkdir -p skills/demo/scripts skills/demo/__tests__
+    printf '#!/usr/bin/env bash\necho verify\n' > skills/demo/scripts/verify.sh
+    printf 'console.log(1);\n' > skills/demo/__tests__/demo.test.cjs
+    printf '# Demo skill\n\nInstructions.\n' > skills/demo/SKILL.md
     printf 'def f():\n    return 1\n' > a.py
     git add -A
     git commit --no-verify -q -m seed
@@ -157,4 +162,157 @@ HARNESS
 
   [ "$GATE0_STATUS_OBSERVED" = "BLOCK" ] ||
     { echo "a real .sh under src/ was exempted"; return 1; }
+}
+
+# ---------------------------------------------------------------------------
+# G0b: skills/ -- scripts and tests are tooling, the skill CONTENT is not
+# ---------------------------------------------------------------------------
+#
+# The split is decided by what reaches a user. `src/npm-package/scripts/
+# sync-package-content.js:79` copies the whole of skills/ into the published
+# package, so both halves ship. But only one of them carries release semantics:
+#   - a skill's scripts/ and __tests__/ are the machinery that produces confidence
+#     in the skill; changing them changes no behaviour a user experiences.
+#   - SKILL.md / references/ ARE the behaviour: they are the instructions the
+#     agent follows after install.
+# So the tooling is exempt and the content is not. The anti-vacuity test below
+# exists because a `skills/*` prefix would have swept up both.
+
+@test "AC-806-G0b: editing only skills/*/scripts/* needs no version bump" {
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  printf '#!/usr/bin/env bash\necho verify-v2\n' > skills/demo/scripts/verify.sh
+  git add skills/demo/scripts/verify.sh
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "PASS" ] ||
+    { echo "a skill script was treated as production source: $GATE0_LOG"; return 1; }
+}
+
+@test "AC-806-G0b: editing only skills/*/__tests__/* needs no version bump" {
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  printf 'console.log(2);\n' > skills/demo/__tests__/demo.test.cjs
+  git add skills/demo/__tests__/demo.test.cjs
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "PASS" ] ||
+    { echo "a skill test was treated as production source: $GATE0_LOG"; return 1; }
+}
+
+@test "AC-806-G0b anti-vacuity: skill CONTENT still BLOCKS (it is what the agent follows)" {
+  # This is the line the user drew: exempt the mechanics, not the instructions.
+  # `skills/` is synced into the published package, so SKILL.md IS shipped
+  # behaviour -- exempting it would let a change to what the agent does land
+  # without appearing anywhere in version history. A `.md` file alone reaches
+  # the "doc-only" branch, so this stages a code file beside it to force the
+  # content question: if a future edit widens the exemption to `skills/*`, this
+  # test is what stops it.
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  mkdir -p skills/demo/references/src
+  printf '# Demo skill\n\nDifferent instructions.\n' > skills/demo/SKILL.md
+  printf 'export const helper = () => 1;\n' > skills/demo/references/src/helper.ts
+  git add skills/demo/SKILL.md skills/demo/references/src/helper.ts
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "BLOCK" ] ||
+    { echo "skill content was exempted from the version bump"; return 1; }
+}
+
+@test "AC-806-G0b anti-vacuity: a script outside scripts/ under a skill still BLOCKS" {
+  # The exemption is `skills/*/scripts/*`, not `skills/*`. A .sh sitting at the
+  # skill root is not the declared tooling location and must not be swept in.
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  printf '#!/usr/bin/env bash\necho stray\n' > skills/demo/stray.sh
+  git add skills/demo/stray.sh
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "BLOCK" ] ||
+    { echo "the skills exemption leaked outside scripts/ and __tests__/"; return 1; }
+}
+
+# ---------------------------------------------------------------------------
+# G0c: test files anywhere in the repo
+# ---------------------------------------------------------------------------
+#
+# 684 test files are tracked under src/, githooks/, scripts/, plugins/ and
+# skills/; npm actually ships 261 of them (the `files` list names directories
+# like lib/ and hooks/, and the prefix drags __tests__/ along with it). So a test
+# file IS part of the package -- the same argument that made a skill's scripts/
+# and __tests__/ exempt in G0b applies here.
+#
+# What a test asserts is not what a user experiences. A version number promises a
+# behaviour change; changing how we know something works is not that. Requiring a
+# bump for it trains maintainers to either inflate the version history or reach
+# for SKIP_VERSION_CHECK=1, and both were observed before this fix.
+#
+# `__tests__/` and the `*.test.*` filename convention are both covered because
+# this repo uses both: whole directories in src/ and githooks/, sibling
+# `*.test.cjs` files in scripts/ and skills/.
+
+@test "AC-806-G0c: a .cjs test inside __tests__/ needs no version bump" {
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  mkdir -p src/lib/__tests__ githooks/__tests__
+  printf 'console.log(1);\n' > src/lib/__tests__/thing.test.cjs
+  printf 'console.log(1);\n' > githooks/__tests__/helper.cjs
+  git add src/lib/__tests__/thing.test.cjs githooks/__tests__/helper.cjs
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "PASS" ] ||
+    { echo "a test file was treated as production source: $GATE0_LOG"; return 1; }
+}
+
+@test "AC-806-G0c: a sibling *.test.* file outside __tests__/ needs no version bump" {
+  # scripts/ and skills/ put tests beside the code as `*.test.cjs`, not in a
+  # directory. A directory-only rule would leave those still blocked.
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  printf 'console.log(1);\n' > scripts/thing.test.cjs
+  printf 'export const t = () => 1;\n' > src/other.test.ts
+  git add scripts/thing.test.cjs src/other.test.ts
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "PASS" ] ||
+    { echo "a sibling *.test.* file was treated as production source: $GATE0_LOG"; return 1; }
+}
+
+@test "AC-806-G0c anti-vacuity: a NON-test .cjs beside the tests still BLOCKS" {
+  # The exemption must key on the test convention, not on the extension. `*.cjs`
+  # is a real source extension in this repo, so a rule that merely dropped .cjs
+  # (or exempted its whole directory) would silently stop gating real code.
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  mkdir -p src/lib
+  printf 'module.exports = () => 1;\n' > src/lib/real-module.cjs
+  git add src/lib/real-module.cjs
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "BLOCK" ] ||
+    { echo "a real .cjs module was exempted as if it were a test"; return 1; }
+}
+
+@test "AC-806-G0c anti-vacuity: a _tests-ish name that is not a test convention BLOCKS" {
+  # Guards against a sloppy substring match: `contest.cjs` and `latest.js` both
+  # contain the letters "test", and a `*test*` glob would exempt them.
+  make_fixture
+  cd "$FIXTURE_REPO" || return 1
+  mkdir -p src/lib
+  printf 'module.exports = 1;\n' > src/lib/contest.cjs
+  printf 'module.exports = 2;\n' > src/lib/latest.cjs
+  git add src/lib/contest.cjs src/lib/latest.cjs
+
+  run_gate_0
+
+  [ "$GATE0_STATUS_OBSERVED" = "BLOCK" ] ||
+    { echo "a substring match exempted a non-test file"; return 1; }
 }
