@@ -1520,7 +1520,30 @@ else
       ;;
     "powershell")
       COVERAGE_ENFORCED=true
-      if [ -f "coverage.xml" ]; then
+      # #806 G5a: a repo with no Pester tests can never produce coverage.xml, yet
+      # the branch below demanded one and BLOCKED -- refusing every commit that
+      # touched a .ps1 on evidence the repo could not supply. The gate even printed
+      # "No Pester tests found" earlier in the same run, then blocked for the
+      # missing artifact anyway.
+      #
+      # "There are no tests to run" and "tests ran but coverage is missing" are
+      # different states and must not collapse into one verdict. The first is SKIP
+      # with a reason; the second stays fail-closed (#570: an unavailable
+      # measurement is not a pass). Detection uses the same *.Tests.ps1 convention
+      # the rest of Gate 5 uses, so a repo that acquires tests automatically gets
+      # enforcement back -- there is nothing to remember to flip.
+      if ! find . \( -name '*.Tests.ps1' -o -name '*.Tests.psm1' \) \
+             -not -path './node_modules/*' -not -path './.git/*' \
+             -print -quit 2>/dev/null | grep -q .; then
+        echo "⏭️  SKIPPED - PowerShell coverage: no Pester tests in this project (*.Tests.ps1)"
+        echo "    Nothing can produce coverage.xml here, so the floor is not applicable."
+        echo "    This is NOT a pass: add Pester tests and coverage is enforced again."
+        if [ -n "$(printf '%s' "${GATE_5_STATUS:-}")" ] && [ "$GATE_5_STATUS" = "PASS" ]; then
+          GATE_5_STATUS="SKIP"
+        fi
+        GATE_5_DETAIL="powershell: no Pester tests (coverage not applicable)"
+        COVERAGE_ENFORCED=false
+      elif [ -f "coverage.xml" ]; then
         # The threshold is passed INTO node: the verdict used to be computed
         # against a hard-coded 80 inside the script, so a project that configured
         # a different floor got a verdict about a number it never set (#570).

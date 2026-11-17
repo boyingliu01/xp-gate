@@ -1,0 +1,26 @@
+# PSScriptAnalyzer analysis scope for this repository (#571 / #578).
+#
+# Purpose: the PowerShell arm of Gate 1 analyses PRODUCT code. Without this file
+# the adapter falls back to a whole-repo scan, which sweeps in interactive
+# installer scripts -- `setup-dsh.ps1` exists to print progress to a human, so it
+# uses Write-Host by design and trips PSAvoidUsingWriteHost repeatedly. Gating it
+# against product rules either blocks every PowerShell-touching commit or forces
+# the rule set open, and both outcomes end with PowerShell not being gated at all.
+#
+# Rules that apply here are declared in PSScriptAnalyzerSettings.psd1, which the
+# adapter REQUIRES alongside this file: a scope without a declared rule set would
+# silently grade against defaults, so the run is refused (fail-closed) instead.
+#
+# Every path listed must exist. A missing entry means product code escaped the
+# gate (renamed, moved, or added without updating this file) and is reported as
+# a WARN inside the scoring denominator -- not silently analysed less.
+
+# Product code: the shared complexity measurement used by the gate suite.
+githooks/lib/Measure-PowerShellComplexity.ps1
+
+# NOT listed, deliberately:
+#   plugins/dsh/setup-dsh.ps1 (+ its src/npm-package mirror)
+#     Interactive environment-setup script. Write-Host is its interface to the
+#     operator, not a defect. Kept out of product scope rather than suppressed
+#     line by line, so a real rule violation elsewhere in it cannot hide behind
+#     a suppression block.

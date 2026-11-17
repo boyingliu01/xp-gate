@@ -29,17 +29,36 @@
 gate_12_run() {
 if ! gate_enabled 12; then
   echo "⏭️  SKIPPED - Gate 12: File hygiene (not selected by XP_GATE_ONLY_GATE)"
+  # No GATE_12_DETAIL here (removed with #806 G12a): pre-commit's blocking-exit
+  # journal reads GATE_<id>_DETAIL, but only on a blocking exit, and Gate 12 is
+  # non-blocking -- so a detail variable for this gate is write-only. Gate 0/1
+  # populate one legitimately because they CAN block.
   GATE_12_STATUS="SKIP"
-  GATE_12_DETAIL="not_selected"
   return 0
 fi
 
 if [ -f "$GATE_DIR/gate-12-file-hygiene.sh" ]; then
   source "$GATE_DIR/gate-12-file-hygiene.sh"
 elif [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-12-file-hygiene.sh" ]; then
+  # shellcheck source=/dev/null
+  # Above: the path is only known at runtime (git rev-parse), so shellcheck
+  # cannot follow it and reports SC1090/SC1091. The guard on the preceding
+  # `elif` already proves the file exists, so this is a static-analysis
+  # limitation, not an unchecked source.
   source "$(git rev-parse --show-toplevel)/githooks/gate-12-file-hygiene.sh"
 else
+  # #806 G12a: this arm printed SKIPPED and stopped there, so GATE_12_STATUS kept
+  # whatever the driver left in it -- measured PASS -- and record_gate_audit was
+  # never called, meaning the gate left NO journal line at all. A gate that wrote
+  # nothing is indistinguishable from a gate the chain never contained, and the
+  # operator was told "SKIPPED" while the machine recorded a pass.
+  #
+  # Same family as #806 G1a (Gate 1's four SKIP sites) and #806 D2 (Gate 0's
+  # --skip-version-check arm): the words said SKIP, the state said PASS.
   echo "⏭️  SKIPPED - Gate 12: File Hygiene (gate-12-file-hygiene.sh not found)"
+  GATE_12_STATUS="SKIP"
+  GATE_12_START=$(gate_start_ms)
+  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START"
 fi
 # ============================================================================
   return 0
