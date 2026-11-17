@@ -1,94 +1,96 @@
 # SRC/MOCK-POLICY KNOWLEDGE BASE
 
-**Generated:** 2026-11-04
-**Commit:** eb2097b0
-**Branch:** sprint/2026-11-03-02
-**Version:** 0.38.9.0
+Mock layering for pre-push Gate M3: internal dependencies get real
+implementations, external ones get mocks, and every pending dependency carries a
+removal plan.
 
-## OVERVIEW
-Mock layering policy enforcement — Gate M3 of pre-push hook. Ensures integration tests use real implementations for internal dependencies, mock external dependencies, and annotate pending mocks with removal plans. Combines project scope scanning, mock decision engine, and per-file validation into a single pipeline.
+## WHY THIS GATE EXISTS
 
-## STRUCTURE
-```
-src/mock-policy/
-├── types.ts                    # Type definitions (MockStrategy, ProjectScope, MockDecision, etc.)
-├── schema.ts                   # Zod schema for MockPolicyConfig validation
-├── config.ts                   # loadMockPolicyConfig — loads from .mockpolicyrc / .xp-gate/mock-policy.yaml
-├── scope-scanner.ts            # scanProjectScope — classifies imports as internal/external/pending
-├── mock-decision-engine.ts     # MockDecisionEngine — decides mock vs real per import + test layer
-├── gate-m3.ts                  # runGateM3 — orchestrator: filter test files → scan scope → validate
-└── __tests__/
-    ├── config.test.ts          # Config loader unit tests
-    ├── scope-scanner.test.ts   # Scope scanner unit + tmpdir integration tests
-    ├── mock-decision-engine.test.ts  # Decision engine unit tests
-    └── integration.test.ts     # Full pipeline integration test
-```
+A test that mocks the very thing it is testing always passes. That is not a weak
+test — it is a test that reports success while measuring nothing, and the
+failure surfaces as an incident rather than a red build. Gate M3's whole job is
+to make the difference between "asserted against the real implementation" and
+"asserted against my own stub" visible, because a reviewer cannot reliably tell
+those apart by reading an import line.
+
+The policy is expressed as a **decision matrix keyed by test layer**, not a list
+of banned calls. The layer is what makes a mock acceptable: mocking an external
+service in an integration test is correct; mocking the module under test never
+is, and no amount of annotation changes that.
+
+## THE INVARIANTS THAT MATTER
+
+**Test layer decides the rule.** e2e = always real. unit (lenient) = always mock
+allowed, unchecked. unit (strict) = treated as integration-like. integration =
+decided by dependency scope. Layer detection is delegated to
+`src/mutation/detect-ai-test.ts` — deliberately not reimplemented here, so the
+two gates cannot disagree about what a file is.
+
+**Scope decides mock vs real for integration tests.** An import is internal
+(resolves inside the project boundary) → must be real. External (Node builtin,
+npm package outside the boundary) → mock allowed. Pending (declared but not yet
+implemented) → mock allowed only with a removal plan.
+
+**`@mock-justified` is the escape hatch for pending dependencies in integration
+tests, and it demands a removal plan.** Not a suppression: a pending dependency
+without one is exactly the "mock forever" state the gate exists to prevent.
+
+**Default severity is `warning` — Gate M3 does not block a push.** This is
+intentional while the matrix is being adopted; it means a green push is not
+evidence that mock layering is satisfied. Read the gate's output, do not rely on
+the exit status.
+
+**Config resolves `.mockpolicyrc` (JSON) > `.xp-gate/mock-policy.yaml` (YAML) >
+built-in defaults**, and is Zod-validated before use. A malformed config fails
+rather than silently falling back to defaults — a gate graded against a config
+nobody wrote is worse than a gate that refuses to run.
+
+## TRAPS
+
+**`gate-m3.ts`'s helpers are deliberately not exported** (beyond
+`runGateM`/`main`). Importing them couples callers to internals the matrix is
+free to change; go through `runGateM`.
+
+**The scanner touches the real filesystem.** There is no virtual-FS abstraction,
+so scope resolution reflects the working tree — a file that exists only in the
+index, or a path that requires a build step to exist, classifies as
+unimplemented. Tests account for this by building real temp directories under
+`os.tmpdir()`.
+
+**`workspace:*` dependencies are skipped** when reading `package.json`, because
+they are neither versioned releases nor external services.
+
+**Do not set severity to `error` without running the full integration suite
+first.** The matrix's default is `warning` precisely because the codebase's
+current mock usage has not been validated against a blocking threshold.
 
 ## WHERE TO LOOK
-| Task | Location | Notes |
-|------|----------|-------|
-| Types/Interfaces | types.ts | MockStrategy, ProjectScope, MockPolicyConfig, MockPolicyResult |
-| Config loading | config.ts | .mockpolicyrc (JSON) > .xp-gate/mock-policy.yaml (YAML) > DEFAULT_CONFIG |
-| Schema validation | schema.ts | Zod schema for full config validation |
-| Scope scanning | scope-scanner.ts | scanProjectScope, classifyDependency, isExternalImport, loadExternalDependencies |
-| Mock decisions | mock-decision-engine.ts | MockDecisionEngine.decide() — decision matrix per test layer |
-| Gate runner | gate-m3.ts | runGateM3, validateFile, collectImports, detectMockUsage |
-| Integration tests | __tests__/integration.test.ts | End-to-end pipeline with temp project directories |
 
-## CODE MAP
-| Symbol | Type | Location | Role |
-|--------|------|----------|------|
-| runGateM3 | Function | gate-m3.ts | Orchestrator: filter test files → scan scope → validate → return MockPolicyResult |
-| validateFile | Function | gate-m3.ts | Per-file validation: read content → detect layer → check imports → compare decision vs usage |
-| collectImports | Function | gate-m3.ts | Regex-based import extraction (static + dynamic) |
-| detectMockUsage | Function | gate-m3.ts | Checks for vi.mock/jest.mock/vi.doMock calls matching an import |
-| MockDecisionEngine | Class | mock-decision-engine.ts | decide(importPath, layer) → MockDecision with strategy/reason/pendingRemoval |
-| scanProjectScope | Function | scope-scanner.ts | Classifies imports into implemented/unimplemented/external |
-| classifyDependency | Function | scope-scanner.ts | Single dependency scope classification with optional existCache |
-| isExternalImport | Function | scope-scanner.ts | Checks Node.js builtins, bare npm packages, boundary patterns |
-| loadExternalDependencies | Function | scope-scanner.ts | Reads package.json dependencies (skips workspace:* protocol) |
-| loadMockPolicyConfig | Function | config.ts | Config loader with fallback chain and Zod validation |
-| detectTestLayer | Function | src/mutation/detect-ai-test.ts | Classifies test file path as unit/integration/e2e/unknown |
+| Task | File |
+|---|---|
+| Types / interfaces | `types.ts` |
+| Zod config schema | `schema.ts` |
+| Config loading + fallback chain | `config.ts` |
+| Internal / external / pending classification | `scope-scanner.ts` |
+| Per-layer mock decision matrix | `mock-decision-engine.ts` |
+| Gate orchestration, per-file validation | `gate-m3.ts` |
 
-## CONVENTIONS
-- Decision matrix: e2e=always real, unit(lenient)=always mock, unit(strict)=integration-like, integration=scope-based
-- Pending dependencies in integration tests require `@mock-justified` annotation
-- Default severity: `warning` (does NOT block push)
-- Default boundary: `['src/**']`
-- Default integration policy: strict, requireRealForImplemented=true, allowExternalMock=true, requirePendingRemoval=true
-- Default e2e policy: strict, allowExternalMock=false, maxMockDensity=0
-- Unit tests with lenient policy are not checked — all mocks allowed
-- Config resolution: `.mockpolicyrc` (JSON) > `.xp-gate/mock-policy.yaml` (YAML) > `DEFAULT_CONFIG`
-- Config validated via Zod schema before use
-
-## ANTI-PATTERNS (THIS PROJECT)
-- Do NOT use `as any` or `@ts-ignore` in mock-policy code
-- Do NOT set severity to `error` without verifying integration test suite
-- Do NOT disable mock checks entirely by setting zero thresholds
-- Do NOT import from `gate-m3.ts` private functions — they are deliberately not exported
-
-## UNIQUE STYLES
-- Gate M3 is the third pre-push gate (after Gate M mutation + Gate M2 AI test detection)
-- Pipeline: filterTestFiles → loadConfig → collectAllImports → scanProjectScope → MockDecisionEngine → validateFile per file → aggregate violations
-- Uses real filesystem for scope scanning (no virtual filesystem abstraction)
-- Integration tests use tmpdir with real package.json + source files
-- Test layer detection delegates to `src/mutation/detect-ai-test.ts`
+For the exact exported symbol names and signatures, read the files — a list here
+would rot, and the file *is* the answer.
 
 ## COMMANDS
+
 ```bash
-# Run Gate M3 directly on changed files
-npx tsx src/mock-policy/gate-m3.ts <test-file-1> <test-file-2> ...
-
-# Run all mock-policy unit tests
-npx vitest run src/mock-policy/__tests__/
-
-# Run just the integration test
-npx vitest run src/mock-policy/__tests__/integration.test.ts
+npx tsx src/mock-policy/gate-m3.ts <test-file>...   # run Gate M3 on given files
+npx vitest run src/mock-policy/__tests__/           # this module's tests
 ```
 
-## NOTES
-- Gate M3 is invoked by pre-push hook after Gate M (mutation) and Gate M2 (AI test detection)
-- code walkthrough scope: no hard file-count or LOC threshold; large diffs require complete review or user-directed splitting, never a size-based bypass
-- Coverage exclude: src/mock-policy/ controlled by vitest config
-- The integration test creates real temporary directories under os.tmpdir()
-- Dependencies on: `src/mutation/detect-ai-test.ts` (detectTestLayer)
+## WHEN YOU CHANGE SOMETHING
+
+- Adding a test layer → update the matrix in `mock-decision-engine.ts` **and**
+  `src/mutation/detect-ai-test.ts`; the two must agree or files classify into a
+  layer the matrix has no rule for.
+- Changing severity → run the whole suite first; `warning` became the default
+  because blocking was never validated against real usage.
+- Coverage exclusion for this directory is controlled by the vitest config, not
+  from here.
