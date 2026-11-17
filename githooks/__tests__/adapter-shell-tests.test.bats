@@ -16,6 +16,7 @@
 #
 # @covers AC-GATE-SHELL-TESTS-01
 # @covers AC-GATE-SHELL-TESTS-02
+# @covers AC-GATE-SHELL-TESTS-03
 #
 # ASCII only.
 
@@ -100,6 +101,48 @@ STUB
     run_tests 2>&1
   "
   [ "$status" -ne 0 ]
+}
+
+@test "AC-GATE-SHELL-TESTS-03: run_tests tells bats to abort at the first failing suite" {
+  # A serial run over every suite is the pre-commit's only option on Windows
+  # (no GNU parallel), and measured there it costs about a second per suite.
+  # Without --abort a red run still pays for every suite after the first
+  # failure; with it the gate stops at the defect it is about to report.
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$work/bin" "$work/githooks/__tests__"
+
+  cat > "$work/githooks/__tests__/sample.test.bats" <<'SUITE'
+#!/usr/bin/env bats
+@test "trivially passing" {
+  [ 1 -eq 1 ]
+}
+SUITE
+
+  cat > "$work/bin/bats" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  [ "$arg" = "--abort" ] && { echo "BATS_SAW_ABORT"; exit 0; }
+done
+echo "BATS_SAW_NO_ABORT"
+exit 0
+STUB
+  chmod +x "$work/bin/bats"
+  printf 'node_modules/\n' > "$work/.gitignore"
+  git -C "$work" init -q -b test-branch 2>/dev/null
+  git -C "$work" add -A 2>/dev/null
+
+  ORIGPATH="$PATH"
+  run bash -c "
+    cd '$work' || exit 9
+    PATH='$work/bin:$ORIGPATH'
+    export PATH
+    # shellcheck source=/dev/null
+    . '$ADAPTER'
+    run_tests 2>&1
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"BATS_SAW_ABORT"* ]]
 }
 
 @test "AC-GATE-SHELL-TESTS-02: the shunit2 branch is no longer a silent no-op" {

@@ -54,6 +54,10 @@ toolchain_path_candidates() {
   [ -n "$_home" ] && [ -d "$_home/.local/bin" ] && printf '%s\n' "$_home/.local/bin"
   [ -n "$_home" ] && [ -d "$_home/bin" ] && printf '%s\n' "$_home/bin"
 
+  # Rust: rustup keeps cargo, rustc, rustfmt and installed cargo subcommands
+  # (cargo-llvm-cov) in one directory that git-bash on Windows does not inherit.
+  [ -n "$_home" ] && [ -d "$_home/.cargo/bin" ] && printf '%s\n' "$_home/.cargo/bin"
+
   return 0
 }
 

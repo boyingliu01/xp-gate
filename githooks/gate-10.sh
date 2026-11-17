@@ -129,7 +129,7 @@ else
   # #547 finding 3: ps1|psm1 were missing, so a PowerShell-only commit never
   # reached semgrep even when Gate 10 ran -- the SAST gate was simply absent
   # for that language.
-  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift|ps1|psm1)$' || true)
+  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift|ps1|psm1|rs)$' || true)
 
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"
@@ -245,6 +245,13 @@ EOF
     if printf '%s
 ' "$SEMGREP_FILES" | grep -qE ".cs$"; then
       SEMGREP_RULES+=(--config=p/csharp)
+    fi
+    # Same defect class as p/csharp above, measured: p/security-audit carries
+    # NO Rust rules either. `rs` in the filter without p/rust is the "filter
+    # looks like coverage" failure #717 removed for C#.
+    if printf '%s
+' "$SEMGREP_FILES" | grep -qE "\.rs$"; then
+      SEMGREP_RULES+=(--config=p/rust)
     fi
     SEMGREP_TIMEOUT_S="${XP_GATE_SEMGREP_TIMEOUT:-180}"
     SEMGREP_TIMED_OUT=false

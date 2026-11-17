@@ -1,5 +1,87 @@
 # Changelog
 
+## [0.38.10.0] - 2026-11-17
+
+**主轴：补上 Rust —— 以及顺着 Rust 这条线挖出的 4 个"绿灯但没检查"缺陷。**
+
+一个 Tauri 项目（TypeScript 前端 + Rust 后端）提交 `.rs` 文件时，四道门同时缺席，
+而且全部报 PASS/SKIP：Gate 0 的语言检测没有 `rs` 分支，`adapters/rust.sh` 不存在；
+Gate 3 的复杂度文件过滤不认 `rs`；Gate 10 的 semgrep 过滤器和规则集都不认 `rs`；
+Gate 5 的 `CODE_EXTENSIONS` 漏了 `rs`，于是"只有 Rust 变更"被判成"没有代码变更，
+测试不必跑"。四件事都属同一形状：**缺席被记成通过**。
+
+### Added
+
+- **`githooks/adapters/rust.sh`**：Gate 1 用 `cargo clippy --workspace --all-targets
+  -- -D warnings` 加 `cargo fmt --all -- --check`；Gate 5 用 `cargo test --workspace`
+  与 `cargo llvm-cov --workspace --lcov`（产出 `coverage/lcov.info`，即 Gate 5 已经
+  会解析的形状，覆盖率阈值对 Rust 自动生效）。cargo 的**清单级 lint**
+  （`unused_dependencies`）不受 `-D warnings` 管辖——实测 clippy 退出 0 却打印
+  `warning: unused dependency`，所以适配器额外把 `^warning: ` 当作发现，
+  否则"0 warning"只等于"0 个 rustc warning"。找不到 cargo 时回 `2`（fail-closed），
+  不降级成 PASS。
+- **Gate 0 的 `rs` 分支 + `Cargo.toml` 清单兜底**：`.rs` 变更把 `rust` 加入
+  `PROJECT_LANGS`；纯 `Cargo.lock` 提交靠清单识别。`package.json` 保持优先，
+  Tauri 项目仍以 JS 测试套件为主语言。
+- **Gate 3 / Gate 10 的 `rs`**：lizard 本来就解析 Rust，只是文件过滤把它挡在门外；
+  semgrep 在 `p/security-audit` 之外追加 `--config=p/rust`——与 #717 对 C# 的修法
+  同源：`p/security-audit` 实测没有任何 Rust 规则，"过滤器里有 rs"不等于"有规则能看 rs"。
+- **`language-tools.js` 的 `rust` 条目**（`cargo` 必需、`cargo-llvm-cov` 可选）与
+  `toolchain-path.sh` 的 `~/.cargo/bin`：rustup 把 cargo/rustfmt/cargo 子命令都放在
+  这个目录，git-bash 在 Windows 上不继承它，不探就报"工具缺失"。
+
+### Fixed
+
+- **Gate 5 的两条 fail-open 出口改 BLOCK**："adapter 存在但 source 不起来"与
+  "找不到 adapter"都曾打印 `✅ PASSED - ... assuming none to run`。装坏一份适配器
+  就能让测试环节整段消失而门禁全绿。现在两条都 `BLOCKED` 并给出修复命令，
+  `.xp-gate-config.json` 写了不支持的语言同样落在这条上。
+- **Gate 3 的基线人口过滤读错了列**：`awk -F, '{print $1}'` 取的是 lizard 的第 1 列
+  NLOC（如 `12`），路径在第 7 列。`ccn_file_in_population` 于是拒绝了声明了人口的
+  基线的**每一行**——棘轮一行都没评级，门禁仍旧打印 PASSED。改为走共享的
+  引号感知 CSV 切分取第 7 列（兼容路径里带逗号的形态）。
+- **`parse_lcov_coverage` 返回整数**：原 `printf "%.1f"` 产出 `100.0`，两个调用点都用
+  `test -ge/-lt`（只接受整数），失败被 `2>/dev/null` 吞成 false，于是**100% 覆盖的
+  Rust crate 被判"无法确定覆盖率"并 BLOCK**。改为四舍五入到整数。
+- **Gate 13 的 C++ 阶段先探编译器、后问有没有东西可编**：仓库里一个 `.c/.cc/.cpp`
+  都没有时（Rust / TypeScript / Python 项目的日常提交），门禁每次都 WARN
+  "no usable C/C++ compiler found"——对一个没有任何检查对象的检查报警。Java 与 C#
+  阶段本来就是先看源文件列表，只有这一段没这么做。现在空列表直接 PASS 并打印
+  "nothing to compile"。
+- **`.gitattributes` 增加 `.shellcheckrc text eol=lf`**：系统级 `core.autocrlf=true`
+  把这份**配置文件**检出成 CRLF，ShellCheck 把首行之后的所有指令判为无效，规则集
+  静默回退到默认——在干净的工作树上报了 482 条（实测）。`.shellcheckrc` 内容本身
+  与 HEAD 一致，缺的只是"检出形状"的约束。
+- **Shell 适配器在失败处停下**：`run_tests()` 一次把全部 `*.bats` 套件交给 bats，
+  没有 `--abort`。Windows 上没有 GNU parallel，`--jobs` 用不了，只剩串行；本仓库
+  263 个套件在 Windows 上实测约 1 秒/套件，一次红色提交也要把后面全部套件跑完
+  才知道结论。改为 `bats --abort`（不用 `--filter-status`：它依赖上一次运行的记录，
+  缺失时静默只跑子集或什么都不跑）。实测预提交从"数小时"降到按首个失败点截断。
+
+### 验证
+
+- `githooks/__tests__/rust-language-support.test.bats`（新增 13 例）：Gate 0 识别、
+  Gate 3 纳入分级、Gate 5 不再跳过、Gate 10 追加规则集、cargo 缺失时的
+  fail-closed 语义。
+- `githooks/__tests__/gate-5-adapter-fail-closed.test.bats`（新增 3 例）：两条出口
+  各自钉一个 BLOCK，并断言输出里不再出现 "assuming none to run"。
+- `githooks/__tests__/adapter-shell-tests.test.bats`（+1 例）：`run_tests` 必须把
+  `--abort` 传给 bats（去掉该参数即红，已实测）。
+- `githooks/__tests__/gate-3.test.bats`（+2 例）：Rust 文件被分级；人口过滤按路径列
+  命中（用一份路径在该行的基线喂进去，断言不再整批丢弃）。
+- `githooks/__tests__/gate-13-compiler-strictness.test.bats`（34 例）：新增
+  "空暂存列表 ⇒ PASS 而非编译器告警"；三个原本"创建了 `.cpp` 但没 `git add`"的
+  夹具补上 `git add`（新的短路让它们此前走到了 PASS）；`#780` 三个集成用例的
+  `TargetFramework` 从写死 `net8.0` 改为按已安装 SDK 的主版本推导——只有 SDK 10
+  的机器上 `net8.0` 还原失败（`NU1100` ×3），那是环境缺口，不该伪装成门禁缺陷。
+  交叉编译用例补一只假编译器，否则在没有编译器的机器上会先撞到"无可用编译器"
+  而从没走到 cross 分支。
+- 反证：把 0.38.9.0 的 Gate 13 顺序还原（删掉短路块）后，空暂存仓库实测输出
+  `WARN - no usable C/C++ compiler found` 且 `rc=3`；恢复后 `rc=0` 并打印
+  "nothing to compile"。
+- `node src/npm-package/scripts/generate-mirrors.cjs` + `bash scripts/check-hook-mirror.sh`
+  → 全绿；`npx vitest run scripts/__tests__/adapters-gate-mirror-parity.test.cjs` 3/3。
+
 ## [0.38.9.0] - 2026-11-17
 
 **主轴：0.38.8.0 把 CI 从"全红"降到"两个红"，这一版解决剩下这两个 —— 而它们的成因是同一个。**

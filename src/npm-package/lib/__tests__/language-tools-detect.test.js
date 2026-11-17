@@ -216,4 +216,25 @@ describe('detectProjectLanguages C# registry membership (#730)', () => {
     const { detected } = detectIn({ 'package.json': '{}', 'index.js': '' });
     expect(detected).not.toContain('csharp');
   });
+
+  // Rust: the registry is what makes `detect-languages` emit the entry at all.
+  // Gate 0 trusts .xp-gate-config.json when it exists and does not fall back to
+  // extension sniffing, so a repo initialized without this entry never routes a
+  // single .rs file to clippy or cargo test.
+  it('detects rust from Cargo.toml', () => {
+    const { detected, configFiles } = detectIn({ 'Cargo.toml': '[workspace]\n' });
+    expect(detected).toContain('rust');
+    expect(configFiles.rust).toContain('Cargo.toml');
+  });
+
+  it('reports rust alongside typescript for a Tauri workspace', () => {
+    const { detected } = detectIn({
+      'Cargo.toml': '[workspace]\nmembers = ["src-tauri"]\n',
+      'src-tauri/Cargo.toml': '[package]\nname = "app"\n',
+      'src-tauri/src/main.rs': 'fn main() {}\n',
+      'package.json': '{"name":"app"}',
+      'src/main.ts': '',
+    });
+    expect(detected).toEqual(expect.arrayContaining(['rust', 'typescript']));
+  });
 });

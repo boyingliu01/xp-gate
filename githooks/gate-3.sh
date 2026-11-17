@@ -363,7 +363,11 @@ else
     LIZARD_PATH=$(eval echo "$LIZARD_CMD")
 
     # Get changed source files for complexity check (includes test files)
-    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs)$' || true)
+    # `rs` is graded by the same lizard engine as the rest: lizard parses Rust
+    # (fn/impl bodies, match arms counted as decision points), so a Rust repo
+    # had a permanently unmeasured complexity dimension while the gate reported
+    # PASSED. Keep the list alphabetical-ish by group to stay diffable.
+    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs|rs)$' || true)
 
     # Grade exactly the population the baseline was written from. The two must
     # match or the ratchet reports pre-existing code as "new", which is a false
@@ -484,7 +488,18 @@ else
             _cc_pop_skipped=""
             while IFS= read -r _cc_row; do
               [ -n "$_cc_row" ] || continue
-              _cc_row_path=$(printf '%s' "$_cc_row" | awk -F, '{print $1}')
+              # The path is lizard's 7th column, not the 1st: column 1 is NLOC
+              # (e.g. "12"). Reading $1 fed "12" to ccn_file_in_population,
+              # which therefore rejected EVERY row of a declared-population
+              # baseline -- the ratchet silently graded nothing while the gate
+              # still printed PASSED. Parse with the shared quote-aware CSV
+              # splitter so a path containing a comma is not truncated at it.
+              if declare -F csv_to_unit_separated >/dev/null 2>&1; then
+                _cc_row_path=$(printf '%s\n' "$_cc_row" | csv_to_unit_separated | awk -F"$CSV_FS" '{print $7}')
+              else
+                _cc_row_path=$(printf '%s' "$_cc_row" | awk -F, '{print $7}')
+              fi
+              _cc_row_path=${_cc_row_path%$'\r'}
               if ccn_file_in_population ".ccn-baseline.json" "$_cc_row_path"; then
                 _cc_pop_kept="${_cc_pop_kept}${_cc_row}
 "

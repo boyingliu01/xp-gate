@@ -595,7 +595,13 @@ else
   # of a test result was reported as the absence of a need for one. The
   # Principles extensions list got `.cs` in ac214d38; this one was left behind,
   # which is why the C# arm looked like it worked while Gate 5 stood down.
-  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|cs|csx|cpp|cc|cxx|c|h|hpp|swift|m|mm|dart|sh|ps1)$"
+  # #717-mirror for Rust: `rs` was missing from this list, so a commit touching
+  # ONLY Rust sources produced an empty CHANGED_CODE_FILES and took the early
+  # skip below -- cargo test and llvm-cov never ran, and the absence of a test
+  # result was reported as the absence of a need for one. Measured on a
+  # Rust-only crate: with `src/lib.rs` staged the gate printed "No code files
+  # changed (only docs/config/VERSION) — test run not needed."
+  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|cs|csx|cpp|cc|cxx|c|h|hpp|swift|rs|m|mm|dart|sh|ps1)$"
   CHANGED_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "$CODE_EXTENSIONS" || true)
   if [ -z "$CHANGED_CODE_FILES" ]; then
     # #554: this branch DID stand down deliberately, but "PASS" is a claim that
@@ -856,10 +862,27 @@ else
         fi
       fi
     else
-      echo "✅ PASSED - Could not source ${CURRENT_LANG} adapter for tests, assuming none to run."
+      # A resolved adapter path that cannot be sourced is an install defect, not
+      # a language without tests. The old text ("assuming none to run") reported
+      # that defect as PASSED, which is the same fail-open shape as the missing
+      # Rust binding: the gate claimed a verification that never executed.
+      echo ""
+      echo "❌ BLOCKED - ${CURRENT_LANG} adapter exists but could not be sourced."
+      echo "   Path: ${ADAPTER_FILE}"
+      echo "   Fix: reinstall the hooks (xp-gate update-hooks --global --force) or repair the file."
+      return 1
     fi
   else
-    echo "✅ PASSED - No ${CURRENT_LANG} adapter found for tests, assuming none to run."
+    # Every language Gate 0 can detect ships an adapter, so this arm means the
+    # install lost one (or .xp-gate-config.json names a language xp-gate does
+    # not support). Either way the test half of Gate 5 measured nothing; say so
+    # instead of printing PASSED over an empty run.
+    echo ""
+    echo "❌ BLOCKED - No ${CURRENT_LANG} adapter found, so tests could not run."
+    echo "   xp-gate ships an adapter for every language it detects; a missing one is an incomplete install."
+    echo "   Fix: reinstall the hooks (xp-gate update-hooks --global --force); if ${CURRENT_LANG} came from"
+    echo "        .xp-gate-config.json, remove it there or add the adapter under githooks/adapters/."
+    return 1
   fi
   done  # end for CURRENT_LANG
 

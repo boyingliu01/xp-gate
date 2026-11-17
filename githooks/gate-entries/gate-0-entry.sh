@@ -726,6 +726,13 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
   if [ "$(_detect_ext_lang "cs" "csx")" = "1" ]; then
     PROJECT_LANGS="$PROJECT_LANGS csharp"
   fi
+  # Same unreachable-adapter shape as the csharp arm above: without an `rs` arm
+  # a Tauri/mixed repo staging a .rs file was classified as TypeScript only (the
+  # package.json fallback), so adapters/rust.sh never got a turn and Gate 3's
+  # complexity check, Gate 1's clippy and Gate 5's cargo test never ran for Rust.
+  if [ "$(_detect_ext_lang "rs")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS rust"
+  fi
   # IaC: .tf, .tfvars, Dockerfile, docker-compose*, .yaml/.yml in kube context
   if echo "$CHANGED_FILES" | grep -qE '(\.tf$|\.tfvars$|Dockerfile|docker-compose)' 2>/dev/null; then
     PROJECT_LANGS="$PROJECT_LANGS iac"
@@ -749,6 +756,11 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
       PROJECT_LANGS="python"
     elif [ -f "go.mod" ]; then
       PROJECT_LANGS="go"
+    elif [ -f "Cargo.toml" ]; then
+      # Manifest fallback only fires when no changed file carried a recognised
+      # extension (e.g. a Cargo.lock-only commit). package.json stays first so a
+      # Tauri app keeps its JS test suite as the primary language.
+      PROJECT_LANGS="rust"
     elif [ -f "pubspec.yaml" ]; then
       if grep -q "flutter:" pubspec.yaml 2>/dev/null || [ -f ".metadata" ]; then
         PROJECT_LANGS="flutter"

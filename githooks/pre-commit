@@ -492,7 +492,15 @@ fi
 
 # Parse LCOV file and return coverage percentage
 # Usage: parse_lcov_coverage <lcov_file>
-# Returns: coverage percentage (e.g., "85.5")
+# Returns: coverage percentage as an INTEGER (e.g., "85")
+#
+# Integer, not a decimal: both call sites compare with test(1)'s `-ge`/`-lt`,
+# which is integer-only. The old "%.1f" produced "100.0", `[ "100.0" -ge 0 ]`
+# failed with "integer expression expected", and the caller's `2>/dev/null`
+# turned that error into "false" -- so lcov-shaped coverage (Rust via
+# cargo-llvm-cov, Dart/Flutter) fell through to "Could not determine coverage
+# percentage" and BLOCKED even though the report was complete and 100% covered.
+# Measured 2026-11-17 on a fully-covered Rust crate.
 parse_lcov_coverage() {
   local lcov_file="$1"
   local total_lines=0
@@ -516,8 +524,8 @@ parse_lcov_coverage() {
   done < "$lcov_file"
   
   if [ "$total_lines" -gt 0 ]; then
-    # Calculate percentage using awk for floating point
-    awk "BEGIN {printf \"%.1f\", ($covered_lines / $total_lines) * 100}"
+    # Round to a whole percent; the consumers can only compare integers.
+    awk "BEGIN {printf \"%d\", int(($covered_lines / $total_lines) * 100 + 0.5)}"
   else
     echo "0"
   fi

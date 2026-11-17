@@ -175,8 +175,12 @@ run_tests() {
   count="$(printf '%s\n' "$suites" | wc -l | tr -d ' ')"
   echo "Running Shell tests (${count} .bats suite(s))..."
 
+  # --abort, not --filter-status: the latter needs a previous run's bookkeeping
+  # and silently runs a subset (or nothing) when that state is missing. Every
+  # suite here is independent, so the first real failure is all a pre-commit
+  # needs to know, and stopping there saves the rest of a serial run.
   # shellcheck disable=SC2086  # word-splitting is the point: one arg per suite
-  bats $suites
+  bats --abort $suites
   return $?
 }
 

@@ -249,3 +249,103 @@ PY
   [[ "$output" == *"ratchet library unavailable"* ]]
   [[ "$output" != *"PASSED"* ]]
 }
+
+# ============================================================================
+# Rust parity: lizard parses `fn`/`impl` bodies, so `.rs` must be in the graded
+# extension set. While it was absent, a Rust-only change produced no CC_FILES
+# at all and Gate 3 reported PASSED without measuring a single function.
+# ============================================================================
+
+@test "Rust files are graded by the complexity gate" {
+  command -v lizard > /dev/null 2>&1 || skip "lizard not installed"
+
+  local work="$BATS_TEST_TMPDIR/ccn-rust"
+  mkdir -p "$work"
+  cat > "$work/lib.rs" <<'RS'
+fn pick(a: i32, b: i32, c: i32, d: i32, e: i32) -> i32 {
+    if a > 0 {
+        if b > 0 { return 1; }
+        if c > 0 { return 2; }
+    } else if d > 0 {
+        if e > 0 { return 3; }
+        return 4;
+    }
+    if a == b { return 5; }
+    0
+}
+RS
+
+  run bash -c "
+    cd '$work' || exit 9
+    PROJECT_LANG='rust'
+    CHANGED_FILES='lib.rs'
+    CC_WARNINGS=0
+    GATE_3_STATUS=''
+    gate_start_ms() { echo 0; }
+    record_gate_audit() { :; }
+    source '$BATS_TEST_DIRNAME/../gate-3.sh'
+  "
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"1 functions"* ]]
+}
+
+# ============================================================================
+# #617 follow-up: the declared baseline population filtered on CSV column 1
+# (NLOC, e.g. "12"), not column 7 (the path). ccn_file_in_population therefore
+# rejected every row, the ratchet graded an empty CSV and the gate printed
+# PASSED -- the population feature masked the very code it was meant to scope.
+#
+# The fixture makes the defect observable: complex_one.py records CCN=1 while
+# the function is CCN 6, so a correct run must BLOCK. lib.rs is outside the
+# declared `.py` population and must be reported as skipped, not graded.
+# ============================================================================
+
+@test "declared baseline population filters on the path column, not NLOC" {
+  command -v lizard > /dev/null 2>&1 || skip "lizard not installed"
+  command -v node > /dev/null 2>&1 || skip "node not installed"
+
+  local work="$BATS_TEST_TMPDIR/ccn-population"
+  mkdir -p "$work/scripts" "$work/githooks/lib"
+  git init -q "$work"
+  cat > "$work/complex_one.py" <<'PY'
+def complex_one(a, b, c, d, e):
+    if a:
+        if b:
+            if c:
+                if d:
+                    if e:
+                        return 1
+    return 0
+PY
+  cat > "$work/lib.rs" <<'RS'
+fn pick(a: i32, b: i32, c: i32) -> i32 {
+    if a > 0 { return 1; }
+    if b > 0 { return 2; }
+    if c > 0 { return 3; }
+    0
+}
+RS
+  printf '{"population":{"extensions":[".py"]},"entries":{"complex_one.py::complex_one":1}}\n' \
+    > "$work/.ccn-baseline.json"
+  # Passthrough verifier: the subject here is the population filter, not spans.
+  printf 'process.stdin.pipe(process.stdout);\n' > "$work/scripts/ccn-report.cjs"
+  cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+
+  run bash -c "
+    cd '$work' || exit 9
+    PROJECT_LANG='python'
+    CHANGED_FILES='complex_one.py
+lib.rs'
+    CC_WARNINGS=0
+    GATE_3_STATUS=''
+    gate_start_ms() { echo 0; }
+    record_gate_audit() { :; }
+    source '$BATS_TEST_DIRNAME/../gate-3.sh'
+  "
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"complex_one"* ]]
+  [[ "$output" == *"ratchet"* ]]
+  [[ "$output" == *"outside the baseline population"* ]]
+}

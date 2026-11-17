@@ -129,6 +129,9 @@ EOF
   unset CC
   export CXX="$TEST_DIR/bin/g++"
   echo 'int main(){return 0;}' > a.cpp
+  # The gate short-circuits on an empty staged-source list, so the source has to
+  # be staged for the compiler probe to be reached at all.
+  git add a.cpp
 
   load_gate
   run gate13_run_cpp_analysis
@@ -136,8 +139,21 @@ EOF
   [ "$status" -ne "$GATE13_PASS" ]
 }
 
-# ------------------------------------- AC-001-03 cross-compilation predicate
+@test "AC-001-02: an empty staged C/C++ list is PASS, not a compiler warning" {
+  # Measured regression: the gate probed for a compiler before asking whether
+  # there was anything to compile, so every commit in a Rust/TypeScript/Python
+  # repository WARNed "no usable C/C++ compiler found" about a check that had
+  # nothing to check. The Java and C# stages already short-circuited first.
+  unset CC CXX CROSS_COMPILE
 
+  load_gate
+  run gate13_run_cpp_analysis
+  [ "$status" -eq "$GATE13_PASS" ]
+  [[ "$output" == *"nothing to compile"* ]]
+  [[ "$output" != *"no usable C/C++ compiler"* ]]
+}
+
+# ------------------------------------- AC-001-03 cross-compilation predicate
 @test "AC-001-03: cross-compile is detected from a non-empty CROSS_COMPILE" {
   load_gate
   CROSS_COMPILE="arm-linux-gnueabihf-" run gate13_is_cross_compiling "g++"
@@ -176,8 +192,20 @@ EOF
 }
 
 @test "AC-001-03: cross-compilation skips the gate with WARN, never a host-compiler compile" {
+  # A compiler must exist for the cross predicate to be reached at all: with no
+  # usable compiler the gate WARNs about that first, which would let this test
+  # pass without ever exercising the cross-compilation branch.
+  cat > bin/g++ <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = "--version" ] && { echo "g++ (fake) 99.1"; exit 0; }
+exit 0
+EOF
+  chmod +x bin/g++
+  export PATH="$TEST_DIR/bin:$PATH"
+  export CXX="$TEST_DIR/bin/g++"
   export CROSS_COMPILE="aarch64-linux-gnu-"
   echo 'int main(){return 0;}' > a.cpp
+  git add a.cpp
 
   load_gate
   run gate13_run_cpp_analysis
@@ -197,6 +225,7 @@ EOF
   export PATH="$TEST_DIR/bin:$PATH"
   export CXX="$TEST_DIR/bin/does-not-exist-cxx"
   echo 'int main(){return 0;}' > a.cpp
+  git add a.cpp
 
   load_gate
   run gate13_run_cpp_analysis
@@ -392,17 +421,29 @@ EOF
 # Skipped when no .NET SDK is present (CI on Linux runners often lacks one);
 # the gate itself already returns WARN in that case, so skipping the test keeps
 # the suite honest instead of silently passing.
+#
+# The fixtures target whatever TFM the installed SDK ships reference packs for,
+# derived from its own version. A hardcoded net8.0 fails to restore on a box
+# whose only SDK is 10 (measured: NU1100 for Microsoft.NETCore.App.Ref 8.0.33),
+# which reads as a gate defect when it is an environment gap.
+
+fixture_tfm() {
+  printf 'net%s.0\n' "$(dotnet --version | cut -d. -f1)"
+}
 
 @test "#780 integration: injected flags turn a warning into a BLOCK on a real build" {
   if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --version >/dev/null 2>&1; then
     skip "dotnet SDK not installed"
   fi
 
+  local tfm
+  tfm=$(fixture_tfm)
+
   mkdir -p loose
-  cat > loose/Loose.csproj <<'CSPROJ'
+  cat > loose/Loose.csproj <<CSPROJ
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>${tfm}</TargetFramework>
     <OutputType>Library</OutputType>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
@@ -440,11 +481,14 @@ CSPROJ
     skip "dotnet SDK not installed"
   fi
 
+  local tfm
+  tfm=$(fixture_tfm)
+
   mkdir -p strict
-  cat > strict/Strict.csproj <<'CSPROJ'
+  cat > strict/Strict.csproj <<CSPROJ
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>${tfm}</TargetFramework>
     <OutputType>Library</OutputType>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
@@ -473,11 +517,14 @@ CSPROJ
     skip "dotnet SDK not installed"
   fi
 
+  local tfm
+  tfm=$(fixture_tfm)
+
   mkdir -p wo
-  cat > wo/Wo.csproj <<'CSPROJ'
+  cat > wo/Wo.csproj <<CSPROJ
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>${tfm}</TargetFramework>
     <OutputType>Library</OutputType>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>

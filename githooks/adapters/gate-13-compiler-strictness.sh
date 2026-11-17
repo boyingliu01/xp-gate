@@ -1077,6 +1077,19 @@ gate13_run_cpp_analysis() {
     return "$GATE13_WARN"
   fi
 
+  # Ask what there is to compile BEFORE probing for a compiler. The probe used
+  # to come first, so a repository with zero .c/.cc/.cpp files (the common case:
+  # Rust, TypeScript, Python) was told "no usable C/C++ compiler found" and the
+  # gate WARNed on every commit -- a warning about a check that had nothing to
+  # check. The Java and C# stages already short-circuit on their source list
+  # first; this stage was the one that did not.
+  local classified
+  classified=$(gate13_classify_changed)
+  if [ -z "$classified" ]; then
+    echo "     ℹ️  No staged C/C++ source files — nothing to compile"
+    return "$GATE13_PASS"
+  fi
+
   budget=$(gate13_timeout_budget)
   cxx=$(gate13_select_cxx)
   local sel_rc=$?
@@ -1102,13 +1115,6 @@ gate13_run_cpp_analysis() {
 
   echo "compiler: ${cxx} ($(gate13_compiler_id "$cxx"))"
   echo "strictness: ${tier} | flags: ${flags} | budget: ${budget}s"
-
-  local classified
-  classified=$(gate13_classify_changed)
-  if [ -z "$classified" ]; then
-    echo "     ℹ️  No staged C/C++ source files — nothing to compile"
-    return "$GATE13_PASS"
-  fi
 
   if ! gate13_baseline_exists; then
     echo "     ⚠️  baseline missing — run 'xp-gate compiler-baseline create' to enable enforcement on modified files"

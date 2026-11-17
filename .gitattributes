@@ -1,5 +1,16 @@
-# Shell scripts — enforce LF line endings across platforms
+# Shell scripts — enforce LF line endings across platforms.
+# .bash and .bats are shell too: with only *.sh listed, core.autocrlf=true checked
+# out the .bash test helpers as CRLF, so every WSL run of the suites that source
+# them died on "$'\r': command not found" while the same suites passed on Windows.
 *.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+
+# ShellCheck reads this as a config FILE, not a script: a trailing CR makes every
+# directive after the first line invalid, which silently un-disables the rules it
+# lists and reported 482 findings on an otherwise clean tree (measured on Windows
+# with core.autocrlf=true).
+.shellcheckrc text eol=lf
 
 # Extensionless hook scripts (bash) — CRLF breaks their shebang/interpretation
 githooks/pre-commit text eol=lf

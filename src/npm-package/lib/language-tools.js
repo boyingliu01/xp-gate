@@ -335,6 +335,44 @@ const LANGUAGE_REGISTRY = {
     ],
   },
 
+  rust: {
+    name: 'Rust',
+    extensions: ['rs'],
+    // Cargo.toml is the only reliable marker: `target/`, `vendor/` and every
+    // crate under `crates/` carry .rs files, so extension sniffing alone would
+    // label any repo with a stray .rs file a Rust project.
+    configFiles: ['Cargo.toml'],
+    tools: [
+      {
+        // The adapter drives everything through cargo: `cargo fmt --check` for
+        // Gate 1 lint, `cargo clippy -- -D warnings` for static analysis,
+        // `cargo test --workspace` for Gate 5.
+        name: 'cargo',
+        checkCmd: 'cargo --version',
+        install: {
+          darwin: 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh',
+          linux: 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh',
+          win32: 'winget install Rustlang.Rustup',
+        },
+        optional: false,
+        gates: ['Gate 1 (Code Quality)', 'Gate 5 (Tests + Coverage)'],
+      },
+      {
+        // Coverage is measured through llvm-cov and reported as coverage/lcov.info,
+        // the same shape Gate 5 already parses for other languages.
+        name: 'cargo-llvm-cov',
+        checkCmd: 'cargo llvm-cov --version',
+        install: {
+          darwin: 'cargo install cargo-llvm-cov --locked && rustup component add llvm-tools-preview',
+          linux: 'cargo install cargo-llvm-cov --locked && rustup component add llvm-tools-preview',
+          win32: 'cargo install cargo-llvm-cov --locked && rustup component add llvm-tools-preview',
+        },
+        optional: true,
+        gates: ['Gate 5 (Tests + Coverage)'],
+      },
+    ],
+  },
+
   swift: {
     name: 'Swift',
     extensions: ['swift'],
