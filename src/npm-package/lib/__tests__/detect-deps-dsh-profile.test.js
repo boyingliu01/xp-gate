@@ -1,9 +1,11 @@
 /**
- * @test REQ-635
+ * @test REQ-DSH-020
  * @intent `xp-gate init` 会向 ~/.dsh/skills 部署技能、npm 包也带 plugins/dsh，
  *         但 PLATFORM_PROFILES 里没有 dsh 条目，getSkillsDirs('dsh') 静默回落到
- *         opencode 的路径，导致 DSH 机器的技能从不被解析（#635）
- * @covers AC-635-04, AC-635-05
+ *         opencode 的路径，导致 DSH 机器的技能从不被解析（#635）。
+ *         原注释写的 @covers AC-635-04/05 在 spec 里从未存在（REQ-635 是
+ *         normalize-lock-registry 的 lockfile 路径需求），已改指真实条目。
+ * @covers AC-DSH-020-01, AC-DSH-020-02, AC-DSH-020-03, AC-DSH-020-04
  */
 const fs = require('fs');
 const path = require('path');
@@ -145,5 +147,177 @@ describe('detectInstalledPlatforms (#725 detect-all)', () => {
   it('returns an empty list when no platform directory exists', () => {
     const { detectInstalledPlatforms } = require('../detect-deps');
     expect(detectInstalledPlatforms()).toEqual([]);
+  });
+});
+
+/**
+ * @test REQ-DSH-020
+ * @intent #635 只给 PLATFORM_PROFILES 补了 dsh 条目，detectPlatform() 本身仍只
+ *         可能返回 qoder / claude-code / opencode。只有 DSH 的机器上，所有持有
+ *         该结果的调用方（install-skill、checkDeps、getTemplateDir）都瞄向
+ *         ~/.config/opencode —— 一个 running agent 不读、也可能不存在的位置。
+ *         `~/.dsh/profiles` 与 `~/.dsh/.shim` 是 DSH 独有目录，可作为可靠标记。
+ * @covers AC-DSH-020-01, AC-DSH-020-02, AC-DSH-020-03, AC-DSH-020-04
+ */
+describe('detectPlatform() resolves dsh (#635 follow-up)', () => {
+  let tmpHome;
+  let originalHome;
+
+  const load = () => {
+    vi.resetModules();
+    delete require.cache[require.resolve('../shared-paths')];
+    return require('../shared-paths');
+  };
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-platdsh-'));
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  // AC-DSH-020-01
+  it('returns dsh when ~/.dsh/profiles exists', () => {
+    fs.mkdirSync(path.join(tmpHome, '.dsh', 'profiles'), { recursive: true });
+    expect(load().detectPlatform()).toBe('dsh');
+  });
+
+  it('returns dsh when only ~/.dsh/.shim exists', () => {
+    fs.mkdirSync(path.join(tmpHome, '.dsh', '.shim'), { recursive: true });
+    expect(load().detectPlatform()).toBe('dsh');
+  });
+
+  it('does not return dsh when neither dsh marker exists', () => {
+    // A bare ~/.dsh/skills is NOT a marker: every platform has a skills/ dir,
+    // so keying on it would steal opencode/qoder machines.
+    fs.mkdirSync(path.join(tmpHome, '.dsh', 'skills'), { recursive: true });
+    expect(load().detectPlatform()).not.toBe('dsh');
+  });
+
+  it('still falls back to opencode on an empty home', () => {
+    expect(load().detectPlatform()).toBe('opencode');
+  });
+
+  // AC-DSH-020-02: DSH wins over the other markers — it is the agent whose
+  // skills/ the user is actually reading, so installs must land there.
+  it('prefers dsh over qoder and claude-code when all markers coexist', () => {
+    fs.mkdirSync(path.join(tmpHome, '.dsh', 'profiles'), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, '.qoder'), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, '.claude', 'skills'), { recursive: true });
+    expect(load().detectPlatform()).toBe('dsh');
+  });
+
+  // AC-DSH-020-02: the pre-existing precedence must survive — removing the DSH
+  // markers must restore qoder > claude-code > opencode exactly as before.
+  it('leaves qoder/claude-code/opencode precedence intact without dsh markers', () => {
+    fs.mkdirSync(path.join(tmpHome, '.qoder'), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, '.claude', 'skills'), { recursive: true });
+    expect(load().detectPlatform()).toBe('qoder');
+
+    fs.rmSync(path.join(tmpHome, '.qoder'), { recursive: true, force: true });
+    expect(load().detectPlatform()).toBe('claude-code');
+
+    fs.rmSync(path.join(tmpHome, '.claude'), { recursive: true, force: true });
+    expect(load().detectPlatform()).toBe('opencode');
+  });
+
+  // AC-DSH-020-04
+  it('getTemplateDir() targets ~/.dsh, not the opencode fallback', () => {
+    fs.mkdirSync(path.join(tmpHome, '.dsh', 'profiles'), { recursive: true });
+    const dir = load().getTemplateDir();
+    expect(dir).toBe(path.join(tmpHome, '.dsh', 'git-hooks-template'));
+    expect(dir).not.toContain(path.join('.config', 'opencode'));
+  });
+});
+
+/**
+ * @test REQ-DSH-020
+ * @intent install-skill 曾维护第二份平台→目录表（getSkillsDir），#635 给
+ *         PLATFORM_PROFILES 加 dsh 后它没跟着改，仍在 DSH-only 机器上返回
+ *         ~/.config/opencode/skills。改为从 getSkillsDirs() 派生，消除第二事实源。
+ * @covers AC-DSH-020-03
+ */
+describe('install-skill resolves its target through PLATFORM_PROFILES', () => {
+  let tmpHome;
+  let originalHome;
+
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-installdsh-'));
+    process.env.HOME = tmpHome;
+    vi.resetModules();
+    delete require.cache[require.resolve('../install-skill')];
+    delete require.cache[require.resolve('../detect-deps')];
+    delete require.cache[require.resolve('../shared-paths')];
+  });
+
+  afterEach(() => {
+    process.env.HOME = originalHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  // The regression that actually bit (#635 follow-up), pinned end-to-end:
+  // `installSkill()` calls `checkDeps(detectPlatform())` BEFORE it resolves any
+  // target directory. When detection fell through to opencode on a DSH machine,
+  // the dependency probe looked in `~/.config/opencode/skills`, found nothing,
+  // and the command aborted with "superpowers is required but not installed" --
+  // no skill was ever written, so a test that only asserted the write target
+  // would have passed while the reported bug stayed live.
+  //
+  // Mutation-checked: making detectPlatform() skip the DSH markers turns the
+  // `code` assertion back to 1 with "superpowers is required".
+  it('passes the dependency check when deps live under a DSH-only ~/.dsh/skills', async () => {
+    const BUNDLED = path.join(__dirname, '..', '..', 'skills');
+    if (!fs.existsSync(BUNDLED)) return; // packaged build not generated in this tree
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'xpgate-depcheck-'));
+    try {
+      fs.mkdirSync(path.join(home, '.dsh', 'profiles'), { recursive: true });
+      const dshSkills = path.join(home, '.dsh', 'skills');
+      // Deps are installed where DSH keeps skills -- and nowhere else. The old
+      // opencode fallback therefore cannot see them.
+      for (const dep of ['superpowers', 'gstack']) {
+        const dir = path.join(dshSkills, dep);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+      }
+
+      process.env.HOME = home;
+      vi.resetModules();
+      delete require.cache[require.resolve('../install-skill')];
+      delete require.cache[require.resolve('../detect-deps')];
+      delete require.cache[require.resolve('../shared-paths')];
+
+      const { detectPlatform } = require('../shared-paths');
+      const { checkDeps } = require('../detect-deps');
+      // The load-bearing assertion: detection must name dsh so the probe looks
+      // in the tree the deps were actually installed into.
+      expect(detectPlatform()).toBe('dsh');
+      expect(await checkDeps(detectPlatform())).toEqual({ ok: true });
+      // Anti-vacuity: the same tree is invisible to the platform the pre-fix
+      // code would have selected.
+      expect(await checkDeps('opencode')).toEqual({ ok: false, missing: 'superpowers' });
+    } finally {
+      process.env.HOME = originalHome;
+      fs.rmSync(home, { recursive: true, force: true });
+      vi.resetModules();
+      delete require.cache[require.resolve('../install-skill')];
+      delete require.cache[require.resolve('../detect-deps')];
+      delete require.cache[require.resolve('../shared-paths')];
+    }
+  });
+
+  // A bare ~/.dsh/skills must not steal an opencode machine — restated here
+  // because this is exactly the case the duplicated table got wrong.
+  it('does not target ~/.dsh/skills when only that directory exists', () => {
+    fs.mkdirSync(path.join(tmpHome, '.dsh', 'skills'), { recursive: true });
+    const { detectPlatform } = require('../shared-paths');
+    const { getSkillsDirs } = require('../detect-deps');
+
+    expect(getSkillsDirs(detectPlatform())[0]).not.toBe(path.join(tmpHome, '.dsh', 'skills'));
   });
 });

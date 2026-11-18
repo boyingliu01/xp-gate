@@ -741,6 +741,52 @@ specification:
             该行为只有 shared-paths.test.js 钉住、spec 未认领，契约与测试可发散）
           test_type: unit
 
+    # ============================================================
+    # REQ-DSH-020: detectPlatform() 必须能识别 DSH 平台
+    #
+    # #635 修的是 PLATFORM_PROFILES 缺 dsh 条目（getSkillsDirs('dsh') 回落到
+    # opencode 路径），但 detectPlatform() 本身仍只可能返回 qoder /
+    # claude-code / opencode。原注释的理由是「没有 opencode 不会也匹配的
+    # marker」——这对 <root>/skills 成立（每个平台都有），对
+    # ~/.dsh/profiles、~/.dsh/.shim 不成立：这两个目录只有 DSH 会创建。
+    #
+    # 后果在只有 DSH 的机器上实测成立：install-skill 用 detectPlatform() 的
+    # 结果定位目录，于是瞄向 ~/.config/opencode/skills —— 一个运行中的 agent
+    # 从不读取、且可能根本不存在的位置。checkDeps() 也在同一目录里找
+    # superpowers/gstack，直接报 "superpowers is required but not installed"，
+    # 12 个 skill 一个都装不上；getTemplateDir() 同样落到不存在的路径，
+    # doctor 把 templateDir 判为硬失败。
+    #
+    # 编号说明：仓库里另有一个同名的 REQ-635（normalize-lock-registry 的
+    # lockfile 嵌套路径），与 DSH 平台无关。detect-deps-dsh-profile.test.js
+    # 此前声明 @covers AC-635-04/05，而这两个 AC 在 spec 里从未存在。本条把
+    # 它们落到真实的 REQ-DSH-020 编号下，测试注释同步改指，消除悬空引用。
+    # ============================================================
+    - id: REQ-DSH-020
+      description: detectPlatform() 须识别 DSH 平台（以 ~/.dsh/profiles 或
+        ~/.dsh/.shim 为标记），使 install-skill / checkDeps / getTemplateDir
+        在 DSH-only 机器上定位到 ~/.dsh 而非回落到 ~/.config/opencode（#635）
+      priority: high
+      acceptance_criteria:
+        - id: AC-DSH-020-01
+          criteria: 存在 ~/.dsh/profiles 或 ~/.dsh/.shim 时 detectPlatform()
+            返回 'dsh'；两者都不存在时不返回 'dsh'（裸 ~/.dsh/skills 不算标记）
+          test_type: unit
+        - id: AC-DSH-020-02
+          criteria: DSH 标记与其他平台标记同时存在时，DSH 优先——用户实际在用的
+            agent 是 DSH，install-skill 必须写到它读取的 skills 目录；移除 DSH
+            标记后 qoder > claude-code > opencode 的旧优先级保持不变
+          test_type: unit
+        - id: AC-DSH-020-03
+          criteria: getSkillsDir() 不再维护第二份平台→目录表，改由
+            getSkillsDirs(detectPlatform())[0] 派生，与 PLATFORM_PROFILES 单一
+            事实源保持一致
+          test_type: unit
+        - id: AC-DSH-020-04
+          criteria: getTemplateDir() 对 dsh 返回 ~/.dsh/git-hooks-template，
+            不回落 ~/.config/opencode
+          test_type: unit
+
     - id: REQ-450
       description: 'Gate 0 的 [skip-version-check] 提示误导用户——实际 bypass 要求
         标记位于 commit message 首行开头、后接 chore:/docs:/release: 前缀、且

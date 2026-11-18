@@ -2,18 +2,24 @@ const fs = require('fs');
 const path = require('path');
 const { checkDeps, detectInstalledPlatforms, getSkillsDirs } = require('./detect-deps.js');
 const { rollback } = require('./rollback.js');
-const { HOME_DIR, CONFIG_DIR, detectPlatform } = require('./shared-paths.js');
+const { CONFIG_DIR, detectPlatform } = require('./shared-paths.js');
 const { copyDirRecursive } = require('./shared-utils');
 
+/**
+ * The skills directory for the platform `detectPlatform()` selects.
+ *
+ * This used to be a second, hand-written platform→directory table
+ * (`.qoder` / `.claude` / `~/.config/opencode`). It drifted from
+ * `PLATFORM_PROFILES` the moment `dsh` was added there in #635: the fallback row
+ * kept returning `~/.config/opencode` on a DSH-only machine, so a plain
+ * `install-skill` on a machine with no agent directory yet wrote the skill where
+ * the running agent never reads it. Delegate to `getSkillsDirs()` so the mapping
+ * has exactly one source of truth (Delphi R1 CI-01 / MA-01 on #635).
+ *
+ * @returns {string} absolute path to the detected platform's skills directory
+ */
 function getSkillsDir() {
-  const platform = detectPlatform();
-  if (platform === 'qoder') {
-    return path.join(HOME_DIR, '.qoder', 'skills');
-  }
-  if (platform === 'claude-code') {
-    return path.join(HOME_DIR, '.claude', 'skills');
-  }
-  return path.join(HOME_DIR, '.config', 'opencode', 'skills');
+  return getSkillsDirs(detectPlatform())[0];
 }
 
 /**

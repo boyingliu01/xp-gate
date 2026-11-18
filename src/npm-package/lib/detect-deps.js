@@ -278,9 +278,14 @@ const PLATFORM_PROFILES = {
   // plugins/dsh (`@boyingliu01/dsh-plugin-xp-gate`), and
   // scripts/sync-package-content.js lists `dsh` among PLUGINS — but this entry
   // was missing, so getSkillsDirs('dsh') fell through to the opencode paths and
-  // DSH skills were never resolved. detectPlatform() still never returns 'dsh'
-  // (there is no marker it could key on that opencode's would not also match),
-  // so callers that must cover DSH ask for it by name.
+  // DSH skills were never resolved.
+  //
+  // #635 follow-up: detectPlatform() now returns 'dsh' too (it keys on
+  // `~/.dsh/profiles` / `~/.dsh/.shim`, which no other platform writes). Before
+  // that, callers holding its result still targeted `~/.config/opencode` on a
+  // DSH-only machine, and `install-skill` failed its dependency check against
+  // that phantom directory. Callers that must cover every platform regardless
+  // of which one is "current" still ask by name, via detectInstalledPlatforms().
   dsh: {
     skillsDirs: [
       ['.dsh', 'skills'],

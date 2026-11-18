@@ -21,10 +21,35 @@ function resolveHomeDir() {
 /**
  * Detect which AI agent platform is currently in use.
  * This is the single implementation; detect-deps.js re-exports it (#424).
- * @returns {'opencode' | 'claude-code' | 'qoder'}
+ *
+ * #635 follow-up: DSH used to be undetectable here. The original reasoning was
+ * "there is no marker it could key on that opencode's would not also match",
+ * which is true of `<root>/skills` (every platform has one) but false of DSH's
+ * own bookkeeping directories. `~/.dsh/profiles` and `~/.dsh/.shim` are created
+ * by DSH alone. Without a `dsh` branch this function could never return 'dsh'
+ * even on a DSH-only machine, so every caller holding its result —
+ * `install-skill`, `checkDeps`, `getTemplateDir` — targeted `~/.config/opencode`
+ * instead: skills landed in a directory the running agent never reads, and
+ * `install-skill` failed outright with "superpowers is required but not
+ * installed" because the dependency check looked in that same phantom tree.
+ *
+ * DSH is checked BEFORE the others: a machine running DSH alongside Qoder or
+ * OpenCode must still resolve to DSH when `~/.dsh` carries its profile/shim
+ * state, because that is the agent whose `skills/` the user is actually reading.
+ *
+ * @returns {'opencode' | 'claude-code' | 'qoder' | 'dsh'}
  */
 function detectPlatform() {
   const homeDir = resolveHomeDir();
+  // DSH markers: `profiles` (profile system) and `.shim` (bash shims). Both are
+  // written by DSH itself and by nothing else, so unlike `<root>/skills` they
+  // cannot collide with opencode/qoder/claude installs (#635 follow-up).
+  if (
+    fs.existsSync(path.join(homeDir, '.dsh', 'profiles')) ||
+    fs.existsSync(path.join(homeDir, '.dsh', '.shim'))
+  ) {
+    return 'dsh';
+  }
   // Any ~/.qoder content counts as Qoder: a brand-new install has no skills/
   // subdirectory yet, so a skills-only marker misdetects it as opencode and
   // configureQoderDelphiAgents deploys zero Delphi agents (#424).
@@ -36,22 +61,33 @@ function detectPlatform() {
 /**
  * Get the git hooks template directory for the current platform.
  * Each AI agent platform has its own config directory:
- *   - opencode:   ~/.config/opencode/git-hooks-template
+ *   - opencode:    ~/.config/opencode/git-hooks-template
  *   - claude-code: ~/.claude/git-hooks-template
- *   - qoder:      ~/.qoder/git-hooks-template
+ *   - qoder:       ~/.qoder/git-hooks-template
+ *   - dsh:         ~/.dsh/git-hooks-template
  *
  * This prevents templateDir from pointing to a stale platform's directory
  * after migrating from one AI agent to another (e.g., OpenCode → Qoder).
  *
+ * #635 follow-up: `dsh` needs its own row rather than falling through to
+ * `~/.config/opencode`. On a DSH-only machine that fallback wrote the templates
+ * into a directory the agent never reads and left the config's `templateDir`
+ * pointing at a path that does not exist — `doctor` then reported `templateDir`
+ * as a hard FAIL on an otherwise healthy install.
+ *
  * @returns {string} Path to the platform-specific git hooks template directory
  */
+const PLATFORM_CONFIG_SEGMENTS = {
+  'claude-code': ['.claude'],
+  qoder: ['.qoder'],
+  dsh: ['.dsh'],
+  opencode: ['.config', 'opencode'],
+};
+
 function getTemplateDir() {
   const homeDir = resolveHomeDir();
-  const platform = detectPlatform();
-  const configDir = platform === 'claude-code' ? '.claude' :
-                    platform === 'qoder' ? '.qoder' :
-                    path.join('.config', 'opencode');
-  return path.join(homeDir, configDir, 'git-hooks-template');
+  const segments = PLATFORM_CONFIG_SEGMENTS[detectPlatform()] || ['.config', 'opencode'];
+  return path.join(homeDir, ...segments, 'git-hooks-template');
 }
 
 // ---------------------------------------------------------------------------
