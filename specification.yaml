@@ -6464,6 +6464,71 @@ specification:
             无工具支持的语言在审计中记录 SKIP 并带原因
           test_type: integration
 
+    - id: REQ-GATE7-BLOCK-AUDIT
+      description: >-
+        门禁 7 阻断时完全不写审计记录。
+
+        该文件的 record_gate_audit 调用位于文件末尾，而唯一的 exit 1 在它之前。
+        直接以桩记录器驱动被阻断的那条分支实测：记录器一次都没有被调用。
+
+        于是操作者最需要在日志里看到的那个结果——「门禁 7 挡住了这次提交」——
+        是唯一一个永远写不进去的，而 PASS 与 SKIP 都正常记录。xp-gate rework 与
+        gate-coverage 都读这份日志。
+
+        那个 exit 同时违反门禁体契约：门禁体应当 return，让驱动层保留唯一出口，
+        EXIT trap 以同一状态码触发。修可达性与修契约是同一处改动。
+
+        同一行的第二个缺陷：issues_found 在所有路径上都是字面量 0，包括被阻断
+        的那条——即便记录行可达，它也会为一个刚刚拒绝提交的门禁报告零问题。
+      acceptance_criteria:
+        - id: AC-GATE7-BLOCK-AUDIT-01
+          criteria: >-
+            审计调用之前不存在 exit，且被阻断的分支仍返回非零
+          test_type: integration
+        - id: AC-GATE7-BLOCK-AUDIT-02
+          criteria: >-
+            记录的问题数不是硬编码的零
+          test_type: integration
+        - id: AC-GATE7-BLOCK-AUDIT-02b
+          criteria: >-
+            端到端：适配器失败时该分支确实写入 FAIL 审计行并带真实问题数
+          test_type: integration
+
+    - id: REQ-GATE10-ZERO-RULES-PASS
+      description: >-
+        门禁 10 对一次没有加载任何规则的扫描报告 PASS，而 semgrep 自己的输出
+        已经说明了发生了哪种情况。
+
+        门禁从 JSON 正确区分三种状态：有 findings 判阻断、零 findings 零 errors
+        判干净、零 findings 有 errors 判无法判定。但一次没有加载任何规则的扫描
+        产出的是 results 与 errors 双空的合法报告，正好落进 PASS 分支。
+
+        这不是假想：#717 已经以一种语言的形式发现过它——p/security-audit 不含
+        C# 规则，一个带教科书式 SQL 注入的 .cs 文件得分为 0。当时以增加第二个
+        --config 修复；而「因为什么都没加载所以干净」这个形状，对其余所有成因
+        依然可达——registry 扫描中途不可达、缓存里是空规则集、--config 路径写错。
+
+        用哪个信号判定是测出来的，两个看似合理的信号都是错的：time.rules 是
+        semgrep 的逐规则性能剖析列表，健康的 225 条规则扫描同样报空；
+        paths.scanned 对空规则集正确，但对被 .semgrepignore 有意抑制的文件同样
+        为 0——实测中一个合法的「此文件被忽略」结果被报成了「什么都没检查」。
+
+        真正区分两者的是规则数量：空规则集打印 No code rules to run，正常扫描
+        打印 with 225 Code rules。
+      acceptance_criteria:
+        - id: AC-GATE10-ZERO-RULES-01
+          criteria: >-
+            门禁检查是否加载了规则，且不依赖 time.rules 或 paths.scanned
+          test_type: integration
+        - id: AC-GATE10-ZERO-RULES-02
+          criteria: >-
+            无规则时无法进入 PASS 分支，且真实 findings 不会被降级为 SKIP
+          test_type: integration
+        - id: AC-GATE10-ZERO-RULES-02b
+          criteria: >-
+            端到端：零规则扫描报告 SKIP 并携带可区分的原因
+          test_type: integration
+
     - id: REQ-BATS-RUNNER-TIMEOUT
       description: >-
         CI 的 bats runner 调用 spawnSync 时不传 timeout，套件挂死会一直阻塞到平台
