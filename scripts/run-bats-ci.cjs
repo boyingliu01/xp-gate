@@ -318,7 +318,54 @@ function runShard(files, jobs) {
   );
   for (const f of files) console.log(`  - ${f}`);
 
-  const result = spawnSync('bash', args, { cwd: ROOT, stdio: 'inherit' });
+  // No timeout was passed here for a long time, so a suite that hung blocked CI
+  // until the platform killed the whole job -- and the operator saw a job that
+  // never finished rather than a suite that never returned.
+  //
+  // The budget is derived from measurement, not taste. This is ONE spawnSync for
+  // the whole shard (bats gets every file at once), so the unit is the shard:
+  //
+  //   slowest known suite : 880 s  (gate-5a-block, 16 cases, measured in full)
+  //   a 1/4 shard holds   : ~4x that worst case in the pathological case
+  //
+  // A per-shard budget cannot be both tight and safe, because shards are
+  // unbalanced by size. The default is therefore generous -- it exists to turn
+  // "hangs forever" into "fails after 45 minutes with a message naming the
+  // suite" -- and is overridable for a genuinely larger shard.
+  //
+  // Per-suite granularity is deliberately NOT implemented here: bats handles
+  // --jobs internally on platforms that have a parallel runner, and splitting
+  // this call per file would duplicate that and serialise CI on Windows, where
+  // no parallel runner exists (measured: 18m47s of a 22m24s job is serial bats).
+  const timeoutMs = Number(process.env.XP_GATE_BATS_TIMEOUT_MS) > 0
+    ? Number(process.env.XP_GATE_BATS_TIMEOUT_MS)
+    : 45 * 60 * 1000;
+
+  const result = spawnSync('bash', args, {
+    cwd: ROOT,
+    stdio: 'inherit',
+    timeout: timeoutMs,
+  });
+  // A timeout surfaces in TWO different shapes depending on the platform and on
+  // whether a signal or the exit status is observed first, and the splitting
+  // was measured, not assumed: on Windows this run reports
+  //     result.error.code === 'ETIMEDOUT', error.message 'spawnSync bash ETIMEDOUT'
+  // while other paths set signal='SIGTERM' with a null status. Checking only
+  // the signal would have reported the Windows case as "could not start the
+  // runner" -- the opposite of what happened.
+  const timedOut =
+    result.error?.code === 'ETIMEDOUT' ||
+    (result.signal === 'SIGTERM' && (result.status === null || result.status !== 0));
+  if (timedOut) {
+    const budget = Math.round(timeoutMs / 1000);
+    console.error(
+      `❌ bats did not finish within ${budget}s (XP_GATE_BATS_TIMEOUT_MS). ` +
+        `A suite is hung rather than slow: the slowest measured suite takes 880s. ` +
+        `Re-run the shard with --print-only to see which files it contains, then ` +
+        `run them one at a time.`
+    );
+    return 1;
+  }
   if (result.error) {
     console.error(`❌ could not start the bats runner: ${result.error.message}`);
     return 1;
