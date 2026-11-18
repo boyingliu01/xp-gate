@@ -194,6 +194,11 @@ GATE_9_START=$(gate_start_ms)
 GATE_9_TS_STATUS="SKIP"
 GATE_9_JAVA_STATUS="SKIP"
 GATE_9_STATUS="SKIP"
+# Languages present in this change set that the gate cannot check. Empty means
+# "everything in the change set was either verified or not applicable"; a value
+# means "this commit contains code nobody built". Initialised empty rather than
+# left unset so the PASS warning below is safe under `set -u`.
+GATE_9_UNVERIFIED=""
 
 if [ "$DOCS_ONLY_COMMIT" = true ]; then
   # REQ-F2: tsc cannot observe a markdown edit. The commit-level docs-only
@@ -226,7 +231,22 @@ elif [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
   GATE_9_PROJECT_ROOT=$(to_native_path "$PROJECT_ROOT")
 
   if [ -n "$GATE_9_SCRIPT" ]; then
-    CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
+    # CHANGED_FILES is NEWLINE-separated (gate-0-entry.sh builds it with
+    # printf '%s\n'). This used to be `tr ' ' ','`, which did neither half of
+    # that correctly:
+    #
+    #   - it never converted the actual separator, so every newline survived
+    #     into the argument the checker received (splitChangedFiles only splits
+    #     on ','), and
+    #   - it converted any space INSIDE a path, so "src/my file.ts" arrived as
+    #     the two fragments "src/my" and "file.ts" -- neither of which exists.
+    #
+    # Measured: `--changed-files "src/my file.ts"` reached the checker as
+    # "src/my,file.ts" and the import scan reported a file it had never opened.
+    # The tsc half is unaffected (it compiles from projectRoot, not from this
+    # list), which is why the defect never blocked anything -- the import check
+    # simply stopped covering the file.
+    CHANGED_FILES_CSV=$(printf '%s' "$CHANGED_FILES" | tr '\n' ',')
     GATE_9_OUTPUT=$(mktemp)
     if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_9_SCRIPT" --changed-files "$CHANGED_FILES_CSV" --project-root "$GATE_9_PROJECT_ROOT" --timeout 115000 > "$GATE_9_OUTPUT" 2>&1; then
       GATE_9_TS_STATUS="PASS"
@@ -280,6 +300,17 @@ if echo "$CHANGED_FILES" | grep -q '\.java$'; then
         ;;
     esac
   elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+    # This arm printed a warning and set NOTHING. GATE_9_JAVA_STATUS kept its
+    # initial "SKIP", which the aggregation below cannot distinguish from "Java
+    # was not part of this change". Measured on a TS+Gradle fixture: tsc passed,
+    # the Java half was never built, and the gate reported PASS with no line
+    # saying that a language in the change set went unverified.
+    #
+    # Gradle support is genuinely backlog (#507 DR-003), so this must not block.
+    # But "we could not check your Java" is a different fact from "nothing to
+    # check", and it has to reach both the human and the journal.
+    GATE_9_JAVA_STATUS="SKIP"
+    GATE_9_UNVERIFIED="java:gradle_unsupported"
     echo "     ⚠️  Java changes staged but this is a Gradle project - build integrity for Gradle is not implemented yet"
     echo "     ⏭️  SKIPPED - Build integrity Java (Gradle backlog, #507 DR-003)"
   else
@@ -301,12 +332,33 @@ fi
 if [ "$GATE_9_TS_STATUS" = "BLOCK" ] || [ "$GATE_9_JAVA_STATUS" = "BLOCK" ]; then
   GATE_9_STATUS="BLOCK"
 fi
+# A PASS that leaves part of the change set unverified is still a PASS -- the
+# unverified language is backlog, not a defect in this commit -- but it must SAY
+# so. This is the same rule as everywhere else in this hook: never let the
+# absence of a verdict read as a positive one.
+if [ "$GATE_9_STATUS" = "PASS" ] && [ -n "${GATE_9_UNVERIFIED:-}" ]; then
+  echo "     ⚠️  Gate 9 PASSED for the languages it can check; NOT verified: ${GATE_9_UNVERIFIED}"
+fi
 
 GATE_9_END=$(gate_start_ms)
 GATE_9_DURATION_MS=$((GATE_9_END - GATE_9_START))
 GATE_9_DURATION=$((GATE_9_DURATION_MS / 1000))
-echo "✅ Gate 9 completed in ${GATE_9_DURATION}s"
-record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$GATE_9_START"
+# The tick used to be unconditional: `✅ Gate 9 completed` printed even when the
+# gate had just announced "not a TypeScript project - skipping". Measured on a
+# Python-only fixture:
+#     ℹ️  Not a TypeScript project - skipping build integrity check
+#     ⏭️  SKIPPED - Build integrity (not a TypeScript project)
+#     ✅ Gate 9 completed in 0s
+# status=SKIP
+# Two lines of "skipped" followed by a green tick is the exact shape this
+# codebase keeps having to remove: the journal said SKIP while the last line the
+# human reads said success. The tick now follows the verdict it summarises.
+case "$GATE_9_STATUS" in
+  PASS) echo "✅ Gate 9 completed in ${GATE_9_DURATION}s" ;;
+  SKIP) echo "⏭️  Gate 9 skipped in ${GATE_9_DURATION}s (nothing was verified)" ;;
+  *)    echo "❌ Gate 9 blocked in ${GATE_9_DURATION}s" ;;
+esac
+record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$GATE_9_START" "${GATE_9_UNVERIFIED:-}"
 echo ""
 # ============================================================================
   return 0

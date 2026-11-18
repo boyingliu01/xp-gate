@@ -1,5 +1,86 @@
 # Changelog
 
+## [0.38.15.0] - 2026-11-18
+
+**主轴：门禁 9 在两个地方把「没有验证」报成了「已验证」，还有一处一直在把文件名喂坏。**
+
+### 修复 1：SKIP 也打绿勾
+
+tick 是无条件打印的：`echo "✅ Gate 9 completed in ${GATE_9_DURATION}s"`。在纯 Python 工程上实测，
+完整输出只有三行：
+
+```
+     ℹ️  Not a TypeScript project - skipping build integrity check
+     ⏭️  SKIPPED - Build integrity (not a TypeScript project)
+✅ Gate 9 completed in 0s
+status=SKIP
+```
+
+**两行说「跳过」，最后一行打绿勾。** 日志是对的，而人读到的最后一行是错的——正是本仓库已从另外
+四个门禁里移除过的那个缺陷族。tick 现在跟随它所总结的判定。
+
+### 修复 2：Gradle 工程的 Java 从未构建，门禁却报 PASS
+
+Gradle 分支只打印警告，**什么都不记录**。`GATE_9_JAVA_STATUS` 保持初始值 `"SKIP"`，而聚合逻辑
+无法把它与「Java 不在本次变更里」区分开。在 TS+Gradle 工程上实测：tsc 通过、Java 半部从未构建，
+门禁报 `PASS`，**没有任何一行说明变更集里有一种语言没被验证**。
+
+Gradle 支持确实是 backlog（#507 DR-003），所以正确的修法不是阻断，而是让「无法检查你的 Java」
+同时到达人和日志：
+
+```
+     ⚠️  Gate 9 PASSED for the languages it can check; NOT verified: java:gradle_unsupported
+```
+
+审计 `detail` 字段同步记录原因。全部验证通过的变更不出现该提示——**每提交必响的警告会被忽略，
+只有会缺席的提示才有信息量**。
+
+### 修复 3：一直在把文件名喂坏
+
+`CHANGED_FILES` 是**换行分隔**的（`gate-0-entry.sh` 用 `printf '%s\n'` 构建），而门禁 9 用的是：
+
+```bash
+CHANGED_FILES_CSV=$(echo "$CHANGED_FILES" | tr ' ' ',')
+```
+
+两边都错：
+
+- 真正的分隔符（换行）从未被转换，于是每个换行都留在传给检查器的参数里
+- 路径**内部**的空格被当了分隔符，`src/my file.ts` 变成 `src/my` 和 `file.ts` 两个**都不存在**的片段
+
+实测：`--changed-files "src/my file.ts"` 到达检查器时是 `src/my,file.ts`，import 扫描报告
+"All relative imports in **2 file(s)** resolve"——为它从未打开过的路径。
+
+它从未阻断过任何东西，因为 tsc 半部从 `projectRoot` 全量编译、不读这个列表。后果比阻断更安静也
+更糟：**任何路径含空格的文件，import 检查悄悄不再覆盖它**。「什么也没发现」和「什么也没看」
+打印出同一句话。
+
+### 顺带修正：检查器的横幅自称 Gate 10
+
+`src/build-integrity/gate-10.ts` 服务于门禁 9（SAST 才是门禁 10），但它打印的横幅写着
+`Gate 10: Build Integrity Check`。在门禁 9 的输出里看到「Gate 10」正是 `#717` 那次把 C# SAST 修
+改写进 `gate-9.sh` 的原因。横幅改为 `Build Integrity Check (Gate 9)`。
+
+**文件名没有改**：`gate-10.ts` 被 `.architecture-baseline.json` 大量条目引用，改名的风险远高于
+收益。记为限制：这个名字是历史遗留，看输出而非文件名。
+
+### 语言覆盖（实测，非推断）
+
+| 语言 | 结果 |
+|---|---|
+| TypeScript | ✅ 类型错误被捕获并阻断（端到端验证） |
+| Java + Maven | ✅ 编译错误阻断并返回 2；正常工程通过；JDK 上下文诊断正确 |
+| Java + Gradle | ⚠️ backlog，现在会明确声明「未验证」 |
+| Python / Go / Rust / C# / Kotlin | ⏭️ SKIP（门禁 9 只覆盖 TS 和 Java） |
+
+### 记录为债务、未改动
+
+- 检查器的退出码把 PASS 和 SKIP 合并为 0（`Exit codes: 0 Pass or skip`）。门禁 9 因此只能靠
+  解析文本来区分二者，而它目前靠状态变量回避了这个问题。若将来直接读退出码，必须重新拆分。
+- 超时路径设 SKIP 且不打印诊断。这是「不能因超时阻断」的有意选择，但值得在输出里说明。
+- `record_gate_audit` 的 `issues_found` 对门禁 9 恒为 `"0"`：构建完整性本来就不产生「问题计数」，
+  这里记 0 是实话，与门禁 13 的缺陷不同。
+
 ## [0.38.14.0] - 2026-11-18
 
 **主轴：两处「没测过的值被当成测过且通过」，都是复发型缺陷。**
