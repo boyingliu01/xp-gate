@@ -424,6 +424,51 @@ console.log("");});
         # shellcheck disable=SC2034
         GATE_10_REASON="output_unparseable"
       fi
+    elif [ "${V_RESULTS:-0}" -eq 0 ] && printf '%s\n' "${SEMGREP_OUTPUT:-}" | grep -qi 'No code rules to run'; then
+      # A scan that loaded NO RULES reports results:[] and errors:[] -- a legal,
+      # successful, empty report, which is exactly what the PASS arm below is
+      # meant for. semgrep says so on stderr, and it is the only signal that
+      # separates this from a real clean scan:
+      #
+      #     rules: []         -> "No code rules to run."
+      #     p/security-audit  -> "with 225 Code rules:"
+      #
+      # TWO EARLIER DRAFTS OF THIS CHECK WERE WRONG, and both are recorded
+      # because each one looked reasonable:
+      #
+      #   1. time.rules. That is semgrep's per-rule PROFILING list, empty on every
+      #      healthy run -- a 225-rule scan reports time.rules:[]. Guarding on it
+      #      would have turned every good scan into a SKIP.
+      #   2. paths.scanned == 0. Right for the empty-ruleset case, but it ALSO
+      #      fires when the changed files are deliberately suppressed through
+      #      .semgrepignore: measured, AC-543-02 went red because a legitimate
+      #      "this file is ignored" result was reported as "nothing was examined".
+      #      Deliberate suppression is a decision, not a failure.
+      #
+      # The stderr message has neither problem: it reports the rule count, which
+      # is the thing that actually distinguishes "could not load a ruleset" from
+      # "loaded a ruleset and it had nothing to say".
+      #
+      # Findings take precedence (V_RESULTS -eq 0 is required). If semgrep DID
+      # report something, it obviously ran, and the blocking arm must see it.
+      #
+      # #717 already found this shape once, in one language: p/security-audit
+      # carries no C# rules, so a .cs file with a textbook SQL injection scored 0.
+      # That was fixed by adding a second --config; the SHAPE -- clean because
+      # nothing was loaded -- stayed reachable for every other cause (registry
+      # unreachable mid-scan, an empty cached ruleset, a bad --config path).
+      #
+      # A security gate reporting "clean" because it loaded nothing is the
+      # failure the fail-closed convention exists to prevent, so this SKIPs with
+      # its own reason rather than folding into the clean-scan PASS.
+      echo "     ⚠️  semgrep loaded no code rules — nothing was checked, so this is not a clean result"
+      echo "        The ruleset was empty or could not be resolved. Try:"
+      echo "          semgrep --config=p/security-audit <file>"
+      echo "     ⏭️  SKIPPED - SAST (no rules loaded, nothing verified)"
+      GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
+      GATE_10_REASON="zero_rules"
     elif [ "$V_RESULTS" -eq 0 ] && { [ "$V_ERRORS" -gt 0 ] || [ "$SEMGREP_EXIT" -ne 0 ]; }; then
       # Nothing was scanned to a verdict: semgrep either failed outright
       # (nonzero exit) or completed but reported scan errors for every input
