@@ -18,6 +18,64 @@
 # ============================================================================
 
 # ============================================================================
+# Is the coverage report on disk evidence for THIS commit?
+#
+# TOP-LEVEL on purpose, like generate_quality_report(): it is a predicate about a
+# file, not part of the gate's control flow, and keeping it out of gate_5_run is
+# what lets a test exercise it without triggering a full test run.
+#
+# The gate previously asked this question three different ways and answered it
+# inconsistently. #821 fixed the EVIDENCE check to ask the git index:
+#
+#     git cat-file -e ":coverage/coverage-summary.json"
+#
+# but the three sites that READ the report still asked the working directory with
+# `[ -f ... ]`. Those are different questions:
+#
+#   - coverage/ is gitignored, so a report produced by a local `--coverage` run
+#     is never in the index. Replacing `-f` with the index test outright would
+#     discard real local measurements -- which is why the `-f` sites survived.
+#   - a leftover report from an earlier run is also absent from the index, and
+#     `-f` accepts it just as readily.
+#
+# Reproduced 2026-11-18: a commit staging only hook shell sources was blocked by
+#     BLOCKED - TypeScript coverage 1% below 78% threshold
+# reading a five-hour-old partial report (574/45329 lines). The comment at the
+# evidence check records the same artifact family blocking a commit on
+# 2026-11-16, so this is a recurrence, not a one-off.
+#
+# Neither question is the right one. The right one is "was this report produced
+# by THIS run?", which the gate can answer because it stamps GATE_5_START before
+# running the tests. Staged evidence (#601) still wins outright: the commit
+# carries it deliberately, so its mtime is not an objection.
+#
+# Returns 0 when the report may be read, non-zero when it must be ignored.
+_gate5_coverage_usable() {
+  if [ "${GATE_5_COVERAGE_EVIDENCE:-false}" = "true" ]; then
+    return 0
+  fi
+  local start="${GATE_5_START:-}"
+  # No stamp means the gate is not mid-run; nothing can be attributed to it.
+  case "$start" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  local f mtime
+  for f in coverage/coverage-summary.json coverage/coverage-final.json; do
+    [ -f "$f" ] || continue
+    # GNU stat first, BSD stat second: the hooks run on both.
+    mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null) || continue
+    case "$mtime" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    # stat reports whole seconds, the stamp is milliseconds.
+    if [ $(( mtime * 1000 )) -ge "$start" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ============================================================================
 # Gate body. `return` is used instead of `exit` so the driver decides to
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
@@ -75,7 +133,19 @@ else
     if [ -n "$STAGED_TEST_FILES" ]; then
       while IFS= read -r _tf; do
         [ -n "$_tf" ] || continue
-        _tf_content=$(git show ":$tf" 2>/dev/null) || _tf_content=$(cat "$_tf" 2>/dev/null || true)
+        # `git show ":<path>"` reads the STAGED blob, which is what the commit
+        # will contain. The path variable here was `$tf` -- never assigned in this
+        # scope -- so the command was always `git show ":"`, which git rejects
+        # with "ambiguous argument", and every file fell through to the working
+        # tree copy. Measured: the fallback ran for 100% of files, so this gate
+        # has only ever inspected the working tree.
+        #
+        # That is the wrong direction for a commit gate: the user controls the
+        # working tree AND the index independently, so "clean in the index, marker
+        # still in the working copy" bypassed the focus check, and the reverse
+        # ("marker only in the index") was read as a false positive against a
+        # file the commit did not contain.
+        _tf_content=$(git show ":$_tf" 2>/dev/null) || _tf_content=$(cat "$_tf" 2>/dev/null || true)
         [ -n "$_tf_content" ] || continue
 
         # --- focus markers: BLOCK ---
@@ -989,8 +1059,16 @@ else
           # real unusable shape) and a staged 42% BOTH passed, because the
           # threshold comparison below never ran. "No evidence" and "evidence
           # says 42%" must not take the same branch.
-          if [ -f "coverage/coverage-summary.json" ] || [ -f "coverage/coverage-final.json" ]; then
+          if { [ -f "coverage/coverage-summary.json" ] || [ -f "coverage/coverage-final.json" ]; } \
+             && _gate5_coverage_usable; then
             echo "TypeScript coverage collected during test run."
+            COV_EXIT=$((COV_EXIT || 0))
+          elif [ -f "coverage/coverage-summary.json" ] || [ -f "coverage/coverage-final.json" ]; then
+            # Present but produced by a different run: saying "collected during
+            # test run" here is what made a five-hour-old report block a commit
+            # with a percentage that described neither this commit nor this tree.
+            echo "ℹ️  Coverage report on disk predates this run — ignored as stale."
+            echo "    Run 'npx vitest run --coverage' to measure this tree."
             COV_EXIT=$((COV_EXIT || 0))
           elif [ "${TESTS_SKIPPED:-false}" = "true" ]; then
             echo "ℹ️  No TypeScript tests were selected — no TS coverage to evaluate."
@@ -1214,7 +1292,7 @@ else
       # "no test/source files changed" was wrong, and it read as a pass. That is
       # the fail-open shape this whole issue exists to remove, sitting one branch
       # below a sibling that had already been fixed for it.
-      if [ -f "coverage/coverage-summary.json" ]; then
+      if [ -f "coverage/coverage-summary.json" ] && _gate5_coverage_usable; then
         # #594: reject NaN at the SOURCE, not after the fact. Math.round() does
         # not fail on a non-numeric input -- it returns NaN and console.log prints
         # "NaN" -- so istanbul's "Unknown" (a file with no executable lines) sailed
@@ -1314,6 +1392,15 @@ else
           fi
         fi
       else
+        # This arm is now reached for two different inputs: no report at all, and
+        # a report too old to describe this run. Name the second one before the
+        # #570/#823 decision, which stays exactly as it was -- "no measurement
+        # was produced" still blocks unless nothing was selected. Without this
+        # line an operator reads "not found" while the file is plainly there.
+        if [ -f "coverage/coverage-summary.json" ] && ! _gate5_coverage_usable; then
+          echo "ℹ️  Coverage report on disk predates this run — ignored as stale."
+          echo "    Run 'npx vitest run --coverage' to measure this tree."
+        fi
         # #570: the report file is absent, so nothing was measured. Warning and
         # continuing made "delete coverage/coverage-summary.json" an effective way
         # to switch this gate off.
@@ -1648,7 +1735,7 @@ else
       # Default: attempt to parse coverage from common formats regardless of language
       COVERAGE_ENFORCED=true
       COVERAGE_PERCENT=""
-      if [ -f "coverage/coverage-summary.json" ]; then
+      if [ -f "coverage/coverage-summary.json" ] && _gate5_coverage_usable; then
         COVERAGE_PERCENT=$(node -e "
           try {
             const fs = require('fs');

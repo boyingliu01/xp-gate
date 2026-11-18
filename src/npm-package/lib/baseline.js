@@ -22,6 +22,27 @@ function getBaselineFile() {
   return path.join(getXpGateDir(), 'lint-baseline.json');
 }
 
+/**
+ * Read the baseline currently on disk for use as a fallback while rebuilding.
+ *
+ * Returns `{}` when there is nothing to read. Both "no baseline yet" and "the
+ * existing baseline is corrupt" must behave the same way here: this value only
+ * ever RESTORES entries for files the rebuild could not evaluate, so a repair
+ * path is not needed. Note the difference from the readers elsewhere in this
+ * file, which fail loudly -- those answer "what is the baseline", and a wrong
+ * answer there changes a verdict. This one only decides whether to keep a row
+ * it already had.
+ */
+function readBaselineForMerge() {
+  try {
+    const raw = fs.readFileSync(getBaselineFile(), 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
@@ -61,13 +82,21 @@ const LINT_BATCH_SIZE = 100;
  * @param {string[]} files project-relative paths
  * @param {(batch: string[]) => string} buildCmd builds the command line for a batch
  * @param {string} jsonFlag flag that makes the tool emit JSON on stdout
- * @returns {{results: any[], errors: string[]}} parsed per-batch results, or a
- *   list of failure messages. An empty `results` with a non-empty `errors` means
- *   "not evaluated", never "clean".
+ * @returns {{results: any[], errors: string[], failedFiles: string[]}} parsed
+ *   per-batch results, a list of failure messages, and the files that were in a
+ *   batch which produced no usable output. An empty `results` with a non-empty
+ *   `errors` means "not evaluated", never "clean".
+ *
+ *   `failedFiles` exists because the caller must be able to tell an evaluated
+ *   file from an unevaluated one. Without it, a batch that crashed was
+ *   indistinguishable from a batch that reported nothing, and the baseline
+ *   writer treated both as "no issues here" -- then wrote that conclusion to
+ *   disk, overwriting the entries the previous successful run had recorded.
  */
 function runLintInBatches(files, buildCmd, jsonFlag) {
   const results = [];
   const errors = [];
+  const failedFiles = [];
 
   for (let i = 0; i < files.length; i += LINT_BATCH_SIZE) {
     const batch = files.slice(i, i + LINT_BATCH_SIZE);
@@ -83,20 +112,28 @@ function runLintInBatches(files, buildCmd, jsonFlag) {
       stdout = e.stdout;
       if (!stdout || !String(stdout).trim()) {
         errors.push(formatToolFailure(e));
+        failedFiles.push(...batch);
         continue;
       }
     }
     const trimmed = String(stdout).trim();
-    if (!trimmed) continue;
+    if (!trimmed) {
+      // No output at all for a batch the tool was asked about: nothing was
+      // evaluated, so these files must not be recorded as clean.
+      failedFiles.push(...batch);
+      continue;
+    }
     try {
       const parsed = JSON.parse(trimmed);
       if (Array.isArray(parsed)) results.push(...parsed);
+      else failedFiles.push(...batch);
     } catch {
       errors.push(`linter returned unparseable output for ${batch.length} file(s)`);
+      failedFiles.push(...batch);
     }
   }
 
-  return { results, errors };
+  return { results, errors, failedFiles };
 }
 
 /**
@@ -275,6 +312,23 @@ async function createBaseline() {
 
   const baseline = {};
 
+  // The baseline is a RATCHET: it records what was already known so a new issue
+  // stands out. Rebuilding it from an empty object is correct only for files that
+  // were actually evaluated. A batch whose linter could not run taught us nothing
+  // about its files, so writing them as "no entry" would silently lower the bar
+  // for every one of them -- and because the write is unconditional, a run in
+  // which every tool failed replaced a good baseline with `{}`. That is a
+  // measured recurrence in this repo: it presents as
+  //     BLOCKED - 50 NEW shellcheck issue(s) (baseline: 0, current: 50)
+  // on a tree where nothing had changed, and it cannot be distinguished from a
+  // genuine regression until the old baseline is reconstructed by hand.
+  //
+  // So: read what was on disk, and after the rebuild put back the entries for
+  // files this run could not evaluate. Files that WERE evaluated still shrink --
+  // that is the ratchet working -- because `baseline[file]` is set for them.
+  const previous = readBaselineForMerge();
+  const unevaluated = new Set();
+
   // TypeScript/JavaScript — ESLint
   const tsFiles = findFilesByExt(['.ts', '.tsx', '.js', '.jsx']);
   if (tsFiles.length > 0) {
@@ -296,12 +350,13 @@ async function createBaseline() {
 
     if (eslintConfigExists && eslintAvailable) {
       const eslintCmd = eslintBin ? quoteBin(eslintBin) : 'npx eslint';
-      const { results, errors } = runLintInBatches(
+      const { results, errors, failedFiles } = runLintInBatches(
         tsFiles,
         batch => `${eslintCmd} ${batch.map(f => `"${f}"`).join(' ')}`,
         '-f json --no-warn-ignored'
       );
       recordFailures('eslint', errors);
+      failedFiles.forEach(f => unevaluated.add(f));
       for (const fileResult of results) {
         const fileName = matchResultToFile(fileResult.filePath, tsFiles);
         if (!fileName) continue;
@@ -334,12 +389,13 @@ async function createBaseline() {
     }
 
     if (ruffAvailable) {
-      const { results, errors } = runLintInBatches(
+      const { results, errors, failedFiles } = runLintInBatches(
         pyFiles,
         batch => `ruff check ${batch.map(f => `"${f}"`).join(' ')}`,
         '--output-format json'
       );
       recordFailures('ruff', errors);
+      failedFiles.forEach(f => unevaluated.add(f));
       for (const fileResult of results) {
         // A result that names no file cannot be recorded against one. Skipping it
         // is the fix for the literal "undefined" key this used to write.
@@ -413,12 +469,13 @@ async function createBaseline() {
       // Same batching as the other tools: one argv for every shell script in the
       // repo is the same platform-limit hazard, even though this repo happens to
       // sit under the threshold today.
-      const { results, errors } = runLintInBatches(
+      const { results, errors, failedFiles } = runLintInBatches(
         shFiles,
         batch => `shellcheck -f json ${batch.map(f => `"${f}"`).join(' ')}`,
         ''
       );
       recordFailures('shellcheck', errors);
+      failedFiles.forEach(f => unevaluated.add(f));
       const warningsByFile = {};
       for (const item of results) {
         const matchedFile = matchResultToFile(item.file, shFiles);
@@ -445,6 +502,24 @@ async function createBaseline() {
         }
       }
     }
+  }
+
+  // Restore what this run could not evaluate, so a broken toolchain cannot
+  // rewrite known-bad files as clean. `baseline[file]` being set means some tool
+  // did evaluate it this run, and the fresh value wins -- that is the ratchet
+  // shrinking, not data loss.
+  let carried = 0;
+  for (const file of unevaluated) {
+    if (baseline[file]) continue;
+    if (!Object.prototype.hasOwnProperty.call(previous, file)) continue;
+    baseline[file] = previous[file];
+    carried++;
+  }
+  if (carried > 0) {
+    console.log(
+      `Kept ${carried} baseline entry/entries for files no linter could evaluate ` +
+      `(${unevaluated.size} file(s) affected) -- not evaluated is not clean.`
+    );
   }
 
   fs.writeFileSync(getBaselineFile(), JSON.stringify(baseline, null, 2));
