@@ -28,12 +28,18 @@
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_12_run() {
 if ! gate_enabled 12; then
-  echo "⏭️  SKIPPED - Gate 12: File hygiene (not selected by XP_GATE_ONLY_GATE)"
   # No GATE_12_DETAIL here (removed with #806 G12a): pre-commit's blocking-exit
   # journal reads GATE_<id>_DETAIL, but only on a blocking exit, and Gate 12 is
   # non-blocking -- so a detail variable for this gate is write-only. Gate 0/1
   # populate one legitimately because they CAN block.
+  #
+  # The audit line, by contrast, is exactly what #806 G12a says must not be
+  # omitted -- and this arm still omitted it: the status was set and the function
+  # returned, leaving no journal line. The sibling "script not found" arm below
+  # does record, so the two skip paths disagreed with each other.
+  echo "⏭️  SKIPPED - Gate 12: File hygiene (not selected by XP_GATE_ONLY_GATE)"
   GATE_12_STATUS="SKIP"
+  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$(gate_start_ms)"
   return 0
 fi
 

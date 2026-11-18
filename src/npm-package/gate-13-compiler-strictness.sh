@@ -1077,6 +1077,28 @@ gate13_run_cpp_analysis() {
     return "$GATE13_WARN"
   fi
 
+  # INPUT SHORTCIRCUIT FIRST. This block used to sit ~30 lines below, after the
+  # toolchain had already been selected, cross-compilation probed, flags compiled
+  # and the compiler version queried. Measured on a repo with no staged C/C++
+  # (the normal case for a TypeScript project), that order spent 1954 ms per
+  # commit before discovering there was nothing to compile:
+  #
+  #     select_cxx 192 + is_cross_compiling 501 + cpp_flags 112
+  #   + probe_flags 752 + compiler_id 397  = 1954 ms
+  #   gate13_classify_changed (the actual question) = 273 ms, asked last
+  #
+  # The project's rule is the reverse -- ask "is there anything here to check?"
+  # from the change set before asking "is the tool installed?". The Java and C#
+  # arms already do this; only this arm was inverted. Output changes as a result:
+  # on an empty change set the compiler/budget banner is no longer printed, which
+  # is desired -- it described a toolchain that was never used.
+  local classified
+  classified=$(gate13_classify_changed)
+  if [ -z "$classified" ]; then
+    echo "     ℹ️  No staged C/C++ source files — nothing to compile"
+    return "$GATE13_PASS"
+  fi
+
   budget=$(gate13_timeout_budget)
   cxx=$(gate13_select_cxx)
   local sel_rc=$?
@@ -1102,13 +1124,6 @@ gate13_run_cpp_analysis() {
 
   echo "compiler: ${cxx} ($(gate13_compiler_id "$cxx"))"
   echo "strictness: ${tier} | flags: ${flags} | budget: ${budget}s"
-
-  local classified
-  classified=$(gate13_classify_changed)
-  if [ -z "$classified" ]; then
-    echo "     ℹ️  No staged C/C++ source files — nothing to compile"
-    return "$GATE13_PASS"
-  fi
 
   if ! gate13_baseline_exists; then
     echo "     ⚠️  baseline missing — run 'xp-gate compiler-baseline create' to enable enforcement on modified files"

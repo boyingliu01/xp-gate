@@ -25,9 +25,15 @@
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_6_run() {
 if ! gate_enabled 6; then
+  # Recorded, not merely printed: this arm set the status and returned with no
+  # journal line, so wherever XP_GATE_ONLY_GATE selects a subset, "deselected on
+  # purpose" and "not part of this chain" were identical to every audit consumer.
+  # The stamp is taken in the arm itself so the normal path's measured duration is
+  # untouched -- a deselected gate genuinely does no work.
   echo "⏭️  SKIPPED - Gate 6: Architecture & tech debt (not selected by XP_GATE_ONLY_GATE)"
   GATE_6_STATUS="SKIP"
   GATE_6_DETAIL="not_selected"
+  record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "0" "$(gate_start_ms)"
   return 0
 fi
 

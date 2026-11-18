@@ -916,6 +916,52 @@ specification:
             gate-12c-entry.sh——双向断言，否则单纯删除也能算作修复
           test_type: integration
 
+    - id: REQ-GATE-DESELECT-AUDIT
+      description: '"SKIP 必须被记录，而不只是打印"是本项目的核心契约，也是上一个修复
+        （12b/12c）的主题。但那次测试只覆盖了"文件里完全没有 record_gate_audit"的情
+        形：一个在主路径记录、被取消选择时却静默的门禁能通过该测试。实测有五个门禁正
+        处于这个状态——gate-6/9/11/12/13 的 deselect 分支都是设置状态后直接 return 0，
+        不写任何审计行。后果是：使用 XP_GATE_ONLY_GATE 选择子集时，日志只记录真正执行
+        的门禁，"故意跳过"与"这条链里没有这个门禁"对消费者完全等价。Gate 13 尤其突
+        出——它有三条跳过路径（取消选择、XP_GATE_DISABLE_13 杀开关、脚本缺失），全部
+        静默，只有分析路径记录。*静态 grep 无法区分"每条路径都调用"和"只在一条路径调
+        用"，这正是这五个门禁逃过上一次检查的原因*'
+      priority: high
+      acceptance_criteria:
+        - id: AC-GATE-DESELECT-01
+          criteria: 逐个 source 门禁 entry、以桩环境调用 gate_<KEY>_run 并令其处于未选
+            中状态，断言 record_gate_audit 被调用——行为测试而非文本扫描；同时断言记录
+            的 gate id 是该门禁自己的 id（记到别人名下的跳过比不记录更糟，它会把跳过归
+            因给一道确实运行了的门禁）
+          test_type: integration
+        - id: AC-GATE-DESELECT-02
+          criteria: Gate 0 无法经 deselect 路径验证（受保护分支上它会在到达该分支前拒绝
+            任何合成的 XP_GATE_ONLY_GATE），故改为结构性断言其最终 record_gate_audit
+            位于状态 if/else 之外、无条件执行
+          test_type: integration
+
+    - id: REQ-GATE13-INPUT-SHORTCIRCUIT
+      description: 'Gate 13 的 C/C++ 分支把昂贵的操作排在廉价的检查之前。实测（无 C/C++
+        文件暂存时，对 TypeScript 项目而言是常态）：select_cxx 192ms + is_cross_compiling
+        501ms + cpp_flags 112ms + probe_flags 752ms + compiler_id 397ms = 1954ms 全部发
+        生在 gate13_classify_changed（那个 273ms 的"有没有东西要编译"）之前。项目自己
+        的规则恰好相反："先问有没有要检查的（廉价，来自变更集），再问工具在不在（昂
+        贵）"。Java 和 C# 分支已经正确短路，只有 C/C++ 分支被写反了——因此这是局部倒
+        置，不是全局风格。修复后 ABBA 交替实测（每轮记录负载，负载 11–50%）：
+        旧 2023–2603ms、新 687–929ms，两区间不重叠，均值 2240ms → 764ms'
+      priority: high
+      acceptance_criteria:
+        - id: AC-GATE13-SHORTCIRCUIT-01
+          criteria: 无暂存 C/C++ 文件时不得发生任何编译器探测——用标记文件证明探针未
+            被调用，因为本机负载 24–100% 且单次 git diff --cached 就要 273–328ms，计时
+            断言无法把 1.9 秒的探测与噪声区分开；标记文件证明的是"跑没跑"这个真正的命题
+          test_type: integration
+        - id: AC-GATE13-SHORTCIRCUIT-02
+          criteria: 暂存了 C/C++ 文件时必须仍然到达探测——配套的"不得被短路"测试；只断
+            言前一向的话，一个恒为真或写错对象的短路会通过测试却把"检查过"变成"什么都
+            没检查"
+          test_type: integration
+
     - id: REQ-431
       description: sprint-gate.test.bats 的 pre-commit resolution 用例与#476后的
         真实契约脱节（resolver 已移入 lib/sprint-gate-report.sh、tier 4 指向真实
