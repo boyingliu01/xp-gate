@@ -23,16 +23,33 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 /**
- * Tools that provably cannot modify a file. Everything else is gated.
+ * Tools the sprint guard must never block. Everything else is gated.
  *
  * This is an ALLOWLIST on purpose. The guard used to name the write tools
  * instead (`write`, `edit`, `str_replace_editor`), which let `bash` through —
  * one shell command writes a file, so the guard was bypassable by the very tool
  * a model reaches for first. A write-blacklist loses again on every new
- * file-touching tool; a read-only allowlist loses only by being too strict,
- * which surfaces as an over-eager denial rather than a silent hole.
+ * file-touching tool; an allowlist loses only by being too strict, which
+ * surfaces as an over-eager denial rather than a silent hole.
+ *
+ * Membership is NOT "cannot write" — it is "cannot be used to sidestep this
+ * guard". Two groups qualify:
+ *
+ *  1. Tools that cannot modify a file at all (read, grep, todo_write, ...).
+ *  2. Tools that ARE the guard's exit. `delphi-review` runs the review this
+ *     guard waits for, and `sprint`/`phase-transition` update the sprint state
+ *     that carries the verdict. Gating them is a deadlock: the only way to
+ *     satisfy the guard is to call a tool the guard rejects. Observed in
+ *     practice — a repository with `.sprint-state/` but no verdict could not
+ *     run `delphi-review` (or anything else) again, and had to be unblocked by
+ *     hand-editing the state directory outside the session.
+ *
+ * Exempting `delphi-review` does not open a hole. It does not accept a caller-
+ * supplied verdict; it runs the three seats and derives one. The gate still
+ * stands between a model and the code until that review actually returns
+ * APPROVED, which is the behaviour it was built to enforce.
  */
-const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+const UNGATED_TOOLS: ReadonlySet<string> = new Set([
   "read",
   "read_image",
   "grep",
@@ -47,6 +64,10 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "gate-check",
   "gate-principles",
   "gate-arch",
+  // The guard's own exit. See the block comment above: without these the guard
+  // cannot be satisfied in a sprint that has state but no recorded verdict.
+  "delphi-review",
+  "sprint",
 ])
 
 /** Where Sprint Flow records the review verdict. */
@@ -93,11 +114,13 @@ export function isEditTool(name: string): boolean {
 /**
  * Must this tool be gated by the sprint review guard?
  *
- * The inverse of {@link READ_ONLY_TOOLS}: an unrecognised tool is treated as
- * capable of writing, which is what closes the `bash` hole.
+ * The inverse of {@link UNGATED_TOOLS}: an unrecognised tool is treated as
+ * capable of writing, which is what closes the `bash` hole. The name is kept
+ * for its call sites even though an exempt tool such as `delphi-review` can
+ * write — see {@link UNGATED_TOOLS} for why membership is not "cannot write".
  */
 export function mayModifyFiles(name: string): boolean {
-  return !READ_ONLY_TOOLS.has(name)
+  return !UNGATED_TOOLS.has(name)
 }
 
 /**

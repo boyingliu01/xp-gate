@@ -133,3 +133,45 @@ describe("delphiGuardDecision tool classification", () => {
     }
   })
 })
+
+/**
+ * @test REQ-DSH-015 sprint-phase writes are gated the way the IDE plugin gates them
+ * @intent 复现并锁定「门禁自锁」：有 .sprint-state 但没有 verdict 时，
+ *         唯一能产生 verdict 的工具 delphi-review 自己也被门禁拦住，
+ *         导致仓库永久无法解封。sprint 工具同理。
+ * @covers AC-DSH-015-01 AC-DSH-015-03
+ *
+ * This is the regression that matters most in this file. The allowlist was
+ * originally "tools that provably cannot modify a file", which excluded the two
+ * tools that END the block — so a sprint with state but no recorded verdict
+ * deadlocked, and the only escape was editing `.sprint-state` outside the
+ * session. Reproduced against a real install before the fix.
+ */
+describe("delphiGuardDecision deadlock", () => {
+  /** The tools that can clear the block, and therefore must never be blocked. */
+  const UNBLOCKERS = ["delphi-review", "sprint"]
+
+  it("never gates the tools that clear the block", () => {
+    // "no-verdict" is the deadlocked state: state exists, verdict does not.
+    const root = project("no-verdict")
+    for (const tool of UNBLOCKERS) {
+      expect(delphiGuardDecision(root, tool), `${tool} must not be gated`).toBeUndefined()
+    }
+  })
+
+  it("still gates code writes in the same state", () => {
+    // Exempting the exit must not open the gate itself.
+    const root = project("no-verdict")
+    for (const tool of ["write", "edit", "bash"]) {
+      expect(delphiGuardDecision(root, tool), `${tool} must stay gated`).toBeDefined()
+    }
+  })
+
+  it("remains usable after a rejected review", () => {
+    // A rejection must leave the path to a re-review open.
+    const root = project("rejected")
+    for (const tool of UNBLOCKERS) {
+      expect(delphiGuardDecision(root, tool), `${tool} must not be gated`).toBeUndefined()
+    }
+  })
+})
