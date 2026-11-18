@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.38.16.0] - 2026-11-18
+
+**主轴：门禁 2 和 3 各有分支对「工具跑不起来」声称了 PASS。**
+
+### 门禁 2：三个分支里两个从不检查 jscpd 的结果
+
+Go 分支：
+
+```bash
+jscpd $FILES_TO_CHECK > "$GO_JSCPD_TMP" 2>&1
+JSCPD_GO_EXIT=$?
+if [ "$JSCPD_GO_EXIT" -ne 0 ]; then
+  echo "⚠️  jscpd (Go) exited with code $JSCPD_GO_EXIT"
+fi
+fi
+echo "✅ PASSED - Go duplicate code check completed."     # 无条件
+```
+
+generic 分支形状完全相同。实测（jscpd stub 分别退出 1 和 2）：
+
+```
+⚠️  jscpd (Go) exited with code 1
+✅ PASSED - Go duplicate code check completed.
+[审计] status=PASS
+```
+
+TypeScript 分支本来是对的（`#477` 用 `classify_jscpd_run` 区分「发现重复」与「运行错误」，
+错误时设 SKIP）。三个分支里两个从未得到这个处理，于是「工具跑不起来」被记成了「扫描干净」。
+
+**本修复不主张失败的 jscpd 应该 BLOCK**——不该，跑不起来的工具不是代码判定。它必须做的是
+停止声称通过：SKIP 判定加原因，写入审计 `detail`。
+
+### 门禁 2：Python 分支把 `pylint` 的任何非零退出当成「发现重复」
+
+`pylint` 的退出码是**位掩码**（1 fatal、2 error、4 warning、8 refactor、16 convention、
+32 usage）。`duplicate-code` 是 refactor 消息，即第 8 位——而致命错误或崩溃同样非零。旧代码
+把所有非零当作「发现重复（警告）」，把 0 当作 `✅ PASSED`，于是**连启动都失败的 pylint 也能
+走到 PASS 那一行**。
+
+现在按位判定：第 1 位（fatal）或第 32 位（usage error）→ SKIP 并记录原因。
+
+同时修了未加引号的 `$(echo "$CHANGED_FILES" | grep ".py$")`：变更集里没有 `.py` 文件时它
+展开成零参数，`pylint` 会对整个当前目录跑；路径含空格时又展开成两个不存在的路径。改为数组。
+
+### 门禁 3：ratchet 路径对从未发生的测量报 PASS（`#683` 只修了一半）
+
+`evaluate_ccn_ratchet` 可返回三类行：`BLOCK`（超基线）、`OK`（达标）、`UNVERIFIED`
+（完全没有可解析的 CCN 行）。最后一类正是为 `#683` 而加，其注释写着：
+
+> 零可解析行意味着 unverified，永远不是 clean。在此之前 verdict 返回空、所有计数器读 0，
+> 门禁 3 把一棵没人测量过的树判为合规。
+
+平阈值路径遵守了这一点（会探测 lizard 并输出 WARN「complexity not verified」）。ratchet
+路径没有——它只用 `grep -c BLOCK` 计数，`UNVERIFIED` 不含 `BLOCK` 字样，所以计数为 0，
+走 else 分支打印 `✅ PASSED`。
+
+**本仓库实测**，一次运行先打印：
+
+```
+UNVERIFIED no parsable CCN row (lizard produced no measurable function)
+✅ PASSED - Complexity within ratchet baseline.
+[审计] status=PASS issues=0
+```
+
+两行之后就是 PASS。同一提交可能读作干净，而实际什么都没被评分。现在 `UNVERIFIED` 走 WARN
+（不是 BLOCK——工具答不上来是环境问题，按约定记 SKIP/WARN；但它绝不能是 PASS）。
+
+### 我一度准备改、核查后确认不该改的两处
+
+- **`require_tool` 失败时阻断**看着违背「工具缺失 → SKIP」的约定，但 `git log -S` 显示
+  `9fe26fce` 是**刻意**改成 BLOCK 的（`Closes #14`，「零容忍政策」）。不是缺陷，未动。
+- **`GATE_3_REASON` 赋值后不读取**看着像 Gate 2 注释里点名的同款缺陷，但 `gate-3.sh` 里每处
+  赋值都带 `# Consumed by the sourcing parent (pre-commit report JSON), not here.` 而
+  `GATE_3_DETAIL`（真正喂给审计的那个）另有其变量。是设计，不是笔误。
+
+### 记录为债务、未改动
+
+- 门禁 2 的 Go 分支用 `head -20` 截断文件列表。超过 20 个 `.go` 文件时，其余文件不被扫描，
+  且没有任何提示。改成不截断需要先解决 argv 长度预算（门禁 3 的 `lizard_batches` 是现成范式）。
+- 门禁 2 的 PowerShell / shell 分支打印 SKIP 但不设 `GATE_2_STATUS`。它们没有吓人的绿勾，
+  但审计仍会因 `GATE_2_STATUS` 初值为 PASS 而记 PASS。属于同一缺陷族，与本次修的三个分支
+  不同点在于它们从不宣称自己扫描过。
+- 门禁 2 本身不阻断（重复代码是警告性质）。这是设计，`#477` 的注释已说明。
+
 ## [0.38.15.0] - 2026-11-18
 
 **主轴：门禁 9 在两个地方把「没有验证」报成了「已验证」，还有一处一直在把文件名喂坏。**
