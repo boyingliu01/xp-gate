@@ -509,6 +509,26 @@ ENDJSON
 }
 
 gate_13_run() {
+# Design rationale. This block used to sit at the bottom of gate-12c-entry.sh,
+# where it documented a different gate: the reasoning was invisible to whoever
+# edits this file, and gate 12c carried 20 lines of prose about a gate it does
+# not run. Moved here unchanged.
+#
+# The compiler is the first and cheapest static analyser for a compiled language
+# and XP-Gate never used it as one: cpp.sh only runs clang-tidy/cppcheck over the
+# first 20 files, and Gate 9's build-integrity half is TypeScript-and-Maven only.
+# A measured `g++ -Wall -Wextra` pass reports -Wnon-virtual-dtor, -Wreorder,
+# -Wparentheses and -Wclass-memaccess on an innocuous-looking file; bare `javac`
+# reports NOTHING for a raw type where `-Xlint:all` reports [rawtypes].
+#
+# Verdicts: 0 PASS, 1 FAIL (new findings -> blocked), 2 BLOCK (ran but output
+# untrustworthy), 3 WARN (tool absent / cross-compiling / timeout / warn-only).
+# A missing compiler is a SKIP-class WARN per the project convention, NOT a block.
+#
+# Escape hatches: XP_GATE_DISABLE_13=1 (kill switch),
+# XP_GATE_COMPILER_STRICTNESS=strict|balanced|warn-only,
+# XP_GATE_COMPILER_ANALYZER=1 (gcc -fanalyzer, C only, opt-in).
+# Design: docs/plans/2026-10-26-gate-13-compiler-strictness-design.md
 if ! gate_enabled 13; then
   echo "⏭️  SKIPPED - Gate 13: Compiler strictness (not selected by XP_GATE_ONLY_GATE)"
   GATE_13_STATUS="SKIP"

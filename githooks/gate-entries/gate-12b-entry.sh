@@ -34,10 +34,19 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_12b_run() {
+# #806 G12b: this body set GATE_12B_STATUS and never recorded it. Nothing in the
+# repository reads that variable either, so the gate's verdict went nowhere: it
+# could block a commit (that path does `return 1`, which the driver turns into an
+# exit status) but a PASS or a SKIP left no journal line at all. `xp-gate audit`
+# therefore showed 12 / 13 and never 12b, making "ran and passed" indistinguishable
+# from "does not exist" -- the defect family the githooks AGENTS.md records for
+# four other gates. One start stamp, recorded on every exit path below.
+GATE_12B_START=$(gate_start_ms)
 if ! gate_enabled 12b; then
   echo "⏭️  SKIPPED - Gate 12b: Vendor exclusion (not selected by XP_GATE_ONLY_GATE)"
   GATE_12B_STATUS="SKIP"
   GATE_12B_DETAIL="not_selected"
+  record_gate_audit "gate-12b" "mirror-parity" "$GATE_12B_STATUS" "0" "$GATE_12B_START"
   return 0
 fi
 
@@ -176,6 +185,12 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s
     fi
   fi
 fi
+  # Reached only when nothing blocked, so this is the PASS record. The blocking
+  # arms `return 1` before getting here, which is deliberate: the driver turns
+  # that into the hook's exit status, and an audit line written after an exit
+  # would never run (the same dead-assignment trap the block above documents).
+  GATE_12B_STATUS="PASS"
+  record_gate_audit "gate-12b" "mirror-parity" "$GATE_12B_STATUS" "0" "$GATE_12B_START"
   return 0
 }
 

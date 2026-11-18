@@ -76,6 +76,19 @@ GATE_REGISTRY_ROWS=(
   "sast|10|gate-10.sh|YES|pre-commit"
   "sprint-flow|11|sprint-gate.sh|YES|pre-commit"
   "file-hygiene|12|gate-12-file-hygiene.sh|NO|pre-commit"
+  # 12b and 12c were named in XP_GATE_ORDER and their bodies ran, but they had
+  # no row here. Everything that reads the registry therefore could not see them:
+  # `gate-list` and `gate-capability` omitted both, so nothing told a user the
+  # mirror-parity or probe-discipline checks existed. The project's own rule is
+  # explicit -- "an unregistered gate still runs ... the registry row is what
+  # makes it real" -- so the fix is the row, not prose elsewhere.
+  #
+  # `gate.sh` is the deciding file for both: each entry sources the real work
+  # from scripts/ (check-hook-mirror.sh, check-no-npx-probe.sh), and neither can
+  # run standalone in the sense the column asks about -- they need the staged
+  # change set the driver assembles.
+  "mirror-parity|12b|inline|NO|pre-commit"
+  "probe-discipline|12c|inline|NO|pre-commit"
   "compiler-strictness|13|gate-13-compiler-strictness.sh|YES|pre-commit"
   # pre-push. Registering these is identity bookkeeping only — pre-push keeps
   # deciding its own execution order and skip semantics. Before this the

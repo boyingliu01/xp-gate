@@ -26,17 +26,31 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_7_run() {
+# #806 G7x: two defects in one small body.
+#
+# (a) Every path that did not reach $GATE_DIR/gate-7.sh -- deselect, and "no IaC
+#     files changed" -- returned without a journal line, so `xp-gate audit`
+#     could not distinguish "skipped" from "never ran".
+# (b) The no-IaC arm printed "✅ PASSED". Nothing was scanned: there was nothing
+#     to scan. This is the exact wording rule this project keeps re-learning --
+#     "not checked" must never be printed as "passed". It is now SKIP with a
+#     reason, matching Gate 10's #536 precedent for the same situation.
+GATE_7_START=$(gate_start_ms)
 if ! gate_enabled 7; then
   echo "⏭️  SKIPPED - Gate 7: IaC security (not selected by XP_GATE_ONLY_GATE)"
   GATE_7_STATUS="SKIP"
   GATE_7_DETAIL="not_selected"
+  record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
   return 0
 fi
 
 if any_changed_files_match "\.tf$" "\.tfvars$" "Dockerfile" "\.kube/" "\.ya?ml$"; then
 source "$GATE_DIR/gate-7.sh"
 else
-  echo "✅ PASSED - No IaC files changed, skipping Gate 7."
+  echo "⏭️  SKIPPED - No IaC files changed, skipping Gate 7."
+  GATE_7_STATUS="SKIP"
+  GATE_7_REASON="no_iac_files_changed"
+  record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
 fi
   return 0
 }

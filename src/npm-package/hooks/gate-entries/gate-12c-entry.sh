@@ -22,6 +22,10 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_12c_run() {
+# #806 G12c: same defect as 12b -- the body set GATE_12C_STATUS and no consumer
+# ever read it, so a PASS or SKIP left no journal line. `xp-gate audit` showed
+# 12 and 13 but never 12c. One start stamp, recorded on every exit path below.
+GATE_12C_START=$(gate_start_ms)
 # Gate 12c: probe discipline
 #
 # A command that could not RUN is not a command that found problems. The hooks
@@ -40,6 +44,7 @@ if ! gate_enabled 12c; then
   echo "⏭️  SKIPPED - Gate 12c: Worktree hygiene (not selected by XP_GATE_ONLY_GATE)"
   GATE_12C_STATUS="SKIP"
   GATE_12C_DETAIL="not_selected"
+  record_gate_audit "gate-12c" "probe-discipline" "$GATE_12C_STATUS" "0" "$GATE_12C_START"
   return 0
 fi
 
@@ -59,26 +64,11 @@ if printf '%s\n' "$STAGED_FILES" 2>/dev/null | grep -qE '^githooks/(adapters/|li
     fi
   fi
 fi
-# ============================================================================
 
-# The compiler is the first and cheapest static analyser for a compiled language
-# and XP-Gate never used it as one: cpp.sh only runs clang-tidy/cppcheck over the
-# first 20 files, and Gate 9's build-integrity half is TypeScript-and-Maven only.
-# A measured `g++ -Wall -Wextra` pass reports -Wnon-virtual-dtor, -Wreorder,
-# -Wparentheses and -Wclass-memaccess on an innocuous-looking file; bare `javac`
-# reports NOTHING for a raw type where `-Xlint:all` reports [rawtypes].
-#
-# Verdicts: 0 PASS, 1 FAIL (new findings -> blocked), 2 BLOCK (ran but output
-# untrustworthy), 3 WARN (tool absent / cross-compiling / timeout / warn-only).
-# A missing compiler is a SKIP-class WARN per the project convention, NOT a block.
-#
-# Escape hatches: XP_GATE_DISABLE_13=1 (kill switch),
-# XP_GATE_COMPILER_STRICTNESS=strict|balanced|warn-only,
-# XP_GATE_COMPILER_ANALYZER=1 (gcc -fanalyzer, C only, opt-in).
-# Design: docs/plans/2026-10-26-gate-13-compiler-strictness-design.md
-#
-# NOTE: this block is a TAIL APPEND after Gate 12 and intentionally touches no
-# line of the gates above it.
+  # Nothing blocked, so this is the PASS record (see the note in 12b's body for
+  # why blocking paths return before reaching here).
+  GATE_12C_STATUS="PASS"
+  record_gate_audit "gate-12c" "probe-discipline" "$GATE_12C_STATUS" "0" "$GATE_12C_START"
   return 0
 }
 
