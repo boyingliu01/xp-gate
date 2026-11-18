@@ -24,10 +24,17 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_8_run() {
+# #806 G8x: the deselect arm set GATE_8_STATUS and returned without a journal
+# line. This is the fail-closed security gate, so an unrecorded skip is the worst
+# place to have one: "secret scanning was not selected" and "secret scanning does
+# not exist in this chain" must not look the same. The delegate
+# ($GATE_DIR/gate-8.sh) records its own verdicts; only this arm was silent.
+GATE_8_START=$(gate_start_ms)
 if ! gate_enabled 8; then
   echo "⏭️  SKIPPED - Gate 8: Secret scanning (not selected by XP_GATE_ONLY_GATE)"
   GATE_8_STATUS="SKIP"
   GATE_8_DETAIL="not_selected"
+  record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
   return 0
 fi
 

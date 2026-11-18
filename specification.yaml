@@ -887,6 +887,35 @@ specification:
             Windows 上必然失败
           test_type: integration
 
+    - id: REQ-GATE12BC-REGISTRATION
+      description: 'Gate 12b（镜像一致性）与 12c（探针纪律）在 XP_GATE_ORDER 里被命名、
+        函数体也确实执行，却从未在 gate-registry.sh 里登记，也不在 gate-runner 的
+        GATE_REGISTRY 里。后果是可观测的：gate-list 与 gate-capability 完全看不到它们
+        （capability 一度把二者标为 unreachable），用户没有任何途径知道镜像检查存在。
+        两者还都不写审计记录——实测 .xp-gate/audit.jsonl 里 gate-0/2/3/4/5/6/7/8/9/11/12/13
+        都在，唯独没有 gate-12b / gate-12c，于是"跑过并通过""被跳过""这条链里根本没这个
+        门禁"对日志消费者完全等价。同一缺陷还波及 gate-7/8/10 的跳过分支：它们设置了
+        状态变量却不记录，其中 gate-7 还把"没有 IaC 文件"打印成 "✅ PASSED"——那是
+        "没检查"被写成"通过"。另外 gate-12c 的文件里残留着 Gate 13 的完整设计注释
+        （verdict 0/1/2/3、XP_GATE_DISABLE_13、XP_GATE_COMPILER_ANALYZER、设计文档链接），
+        Gate 13 自己的文件里反而没有'
+      priority: high
+      acceptance_criteria:
+        - id: AC-GATE12BC-01
+          criteria: 12b 与 12c 在 gate-registry.sh 有登记行，且在 gate-runner 的
+            GATE_REGISTRY 里有对应条目——两侧都登记才算可达，只登记一侧会让
+            gate-capability 报 unreachable
+          test_type: integration
+        - id: AC-GATE12BC-02
+          criteria: 每个会打印 "not selected by XP_GATE_ONLY_GATE" 的门禁文件都必须
+            调用 record_gate_audit——只设置状态变量而无人读取，等于判定无人消费；
+            该断言为全仓扫描，新增门禁遗漏时自动变红
+          test_type: integration
+        - id: AC-GATE12BC-03
+          criteria: Gate 13 的设计注释必须存在于 gate-13-entry.sh 且不得残留在
+            gate-12c-entry.sh——双向断言，否则单纯删除也能算作修复
+          test_type: integration
+
     - id: REQ-431
       description: sprint-gate.test.bats 的 pre-commit resolution 用例与#476后的
         真实契约脱节（resolver 已移入 lib/sprint-gate-report.sh、tier 4 指向真实

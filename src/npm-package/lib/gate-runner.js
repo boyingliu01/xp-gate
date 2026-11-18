@@ -697,6 +697,20 @@ const GATE_REGISTRY = {
     preCommitOnly: true,
     reason: 'File hygiene inspects the staged diff, which only exists inside the hook',
   },
+  '12b': {
+    name: 'Mirror Parity',
+    description: 'canonical hook sources match their published src/npm-package mirrors (#654)',
+    aliases: ['mirror', 'mirror-parity', '12b'],
+    preCommitOnly: true,
+    reason: 'Mirror parity compares the staged pair of files against their canonical copies',
+  },
+  '12c': {
+    name: 'Probe Discipline',
+    description: 'no gate answers "is this tool installed?" by querying a registry',
+    aliases: ['probe', 'probe-discipline', '12c'],
+    preCommitOnly: true,
+    reason: 'Probe discipline scans hook sources in the staged change set',
+  },
   '13': {
     name: 'Compiler Strictness',
     description: 'gcc/g++ -Wall -Wextra, javac -Xlint, Maven/Gradle warnings on changed files',
