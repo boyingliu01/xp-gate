@@ -6394,6 +6394,66 @@ specification:
             gate-5-entry.sh 通过 git show ":$_tf" 读取暂存 blob，而不是工作区；
             若笔误回归或读取源被改动而无测试更新，此条变红
           test_type: integration
+    - id: REQ-GATE2-TOOL-ERROR-NOT-PASS
+      description: >-
+        门禁 2 有一个分支检查了 jscpd 的结果，另一些没有，而没检查的仍然打印通过。
+
+        Go 分支：
+            jscpd $FILES_TO_CHECK > "$GO_JSCPD_TMP" 2>&1
+            JSCPD_GO_EXIT=$?
+            if [ "$JSCPD_GO_EXIT" -ne 0 ]; then
+              echo "⚠️  jscpd (Go) exited with code $JSCPD_GO_EXIT"
+            fi
+          fi
+          echo "✅ PASSED - Go duplicate code check completed."      <-- 无条件
+
+        generic 分支形状相同。实测（jscpd stub 退出 1 / 2）：
+            ⚠️  jscpd (Go) exited with code 1
+            ✅ PASSED - Go duplicate code check completed.
+            [审计] status=PASS
+
+        TypeScript 分支本来是对的（#477 用 classify_jscpd_run 区分"发现重复"与"运行错误"，
+        错误时设 SKIP）。三个分支里有两个从未得到这个处理，于是"工具跑不起来"被记成了"扫描干净"。
+
+        注意本要求不主张失败的 jscpd 应该 BLOCK——不该，跑不起来的工具不是代码判定。
+        它必须做的是停止声称通过，即 SKIP 判定加原因。
+      acceptance_criteria:
+        - id: AC-GATE2-TOOL-ERROR-01
+          criteria: >-
+            Go 分支在 jscpd 失败时不得打印 PASSED，且审计记录 SKIP
+          test_type: integration
+        - id: AC-GATE2-TOOL-ERROR-02
+          criteria: >-
+            generic 分支在 jscpd 失败时不得打印 PASSED，且审计记录 SKIP
+          test_type: integration
+
+    - id: REQ-GATE3-UNVERIFIED-PASS
+      description: >-
+        门禁 3 在 ratchet 路径上对一次从未发生的测量声称了 PASS，而 ratchet 正是本仓库实际运行
+        的路径。
+
+        evaluate_ccn_ratchet 可返回三类行，分别是 BLOCK（超基线）、OK（达标）与 UNVERIFIED
+        （完全没有可解析的 CCN 行）。最后一类正是为 #683 而加，其注释写明零可解析行意味着
+        unverified、永远不是 clean，因为在此之前 verdict 返回空、所有计数器读 0，门禁 3 把一棵
+        没人测量过的树判为合规。
+
+        平阈值路径遵守了这一点，它会探测 lizard 并输出 WARN 表示复杂度未验证。ratchet 路径没有：
+        它只用 grep 数 BLOCK 行的条数，UNVERIFIED 不含 BLOCK 字样，所以计数为 0，于是走 else
+        分支打印 PASSED。
+
+        本仓库实测，一次运行先打印 UNVERIFIED no parsable CCN row，两行之后打印 PASSED，而审计
+        里 issues_found 为 0。同一个提交可能读作干净，而实际什么都没被评分。#683 的修复落在两条
+        路径中的一条上，本要求钉住它漏掉的那条。
+      acceptance_criteria:
+        - id: AC-GATE3-UNVERIFIED-01
+          criteria: >-
+            前提：ratchet 库对不可解析输入确实返回 UNVERIFIED，且不把它报成 BLOCK
+          test_type: integration
+        - id: AC-GATE3-UNVERIFIED-02
+          criteria: >-
+            ratchet 分支在到达 PASS 之前必须检查 UNVERIFIED；不可解析时报 WARN，不得报 PASS
+          test_type: integration
+
     - id: REQ-GATE9-VERDICT-HONESTY
       description: >-
         门禁 9 在两种情况下把"没有验证"报成了"已验证"。

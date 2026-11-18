@@ -104,16 +104,52 @@ EOF_CHANGED
     python)
   if command -v pylint &> /dev/null; then
     echo "Running pylint duplicate detection..."
-    pylint --disable=all --enable=duplicate-code $(echo "$CHANGED_FILES" | grep "\.py$")
-    DUPLICATE_EXIT=$?
-    if [ "$DUPLICATE_EXIT" -ne 0 ]; then
-      echo "ℹ️  pylint found duplicate code (warning, not typically blocking)"
+    # Array, not an unquoted substitution: with no .py file in the change set the
+    # old form expanded to zero arguments and pylint was invoked on the whole
+    # cwd; with a path containing a space it expanded to two bogus paths. The
+    # `if ! require` guard keeps this arm from running on an empty list.
+    PYLINT_FILES=()
+    while IFS= read -r _pf; do
+      [ -n "$_pf" ] || continue
+      PYLINT_FILES+=("$_pf")
+    done <<PYLINT_LIST
+$(echo "$CHANGED_FILES" | grep "\.py$" || true)
+PYLINT_LIST
+    if [ "${#PYLINT_FILES[@]}" -eq 0 ]; then
+      echo "ℹ️  No .py files in this change set — nothing to scan."
     else
-      echo "✅ PASSED - pylint found no duplicates."
+      pylint --disable=all --enable=duplicate-code "${PYLINT_FILES[@]}"
+      DUPLICATE_EXIT=$?
+      if [ "$DUPLICATE_EXIT" -ne 0 ]; then
+        # pylint's exit status is a BITMASK (1 fatal, 2 error, 4 warning,
+        # 8 refactor, 16 convention, 32 usage error). duplicate-code is a
+        # REFACTOR message, so "found duplicates" is bit 8 -- and a fatal error
+        # or a crash also exits non-zero. The old code treated every non-zero as
+        # "found duplicates (warning)" and every zero as "✅ PASSED", so a pylint
+        # that could not even start still reached the PASS line below.
+        if [ $(( DUPLICATE_EXIT & 1 )) -ne 0 ]; then
+          echo "⏭️  SKIPPED - Duplicate code (pylint fatal error, exit $DUPLICATE_EXIT)"
+          GATE_2_STATUS="SKIP"
+          GATE_2_DETAIL="pylint_fatal"
+        elif [ $(( DUPLICATE_EXIT & 32 )) -ne 0 ]; then
+          echo "⏭️  SKIPPED - Duplicate code (pylint usage error, exit $DUPLICATE_EXIT)"
+          GATE_2_STATUS="SKIP"
+          GATE_2_DETAIL="pylint_usage_error"
+        elif [ $(( DUPLICATE_EXIT & 8 )) -ne 0 ]; then
+          echo "ℹ️  pylint found duplicate code (warning, not typically blocking)"
+        else
+          echo "ℹ️  pylint reported other messages (exit $DUPLICATE_EXIT); duplicate-code was not among them."
+        fi
+      else
+        echo "✅ PASSED - pylint found no duplicates."
+      fi
     fi
   else
     echo "ℹ️  pylint not found — skipping Python duplicate code check."
     echo "   Install pylint: pip install pylint"
+    echo "⏭️  SKIPPED - Duplicate code (pylint not installed)"
+    GATE_2_STATUS="SKIP"
+    GATE_2_DETAIL="pylint_not_installed"
   fi
     ;;
     
@@ -133,10 +169,23 @@ EOF_CHANGED
     head -10 "$GO_JSCPD_TMP"
     rm -f "$GO_JSCPD_TMP"
     if [ "$JSCPD_GO_EXIT" -ne 0 ]; then
-      echo "⚠️  jscpd (Go) exited with code $JSCPD_GO_EXIT"
+      # This used to print the warning and then fall through to "✅ PASSED -
+      # Go duplicate code check completed." below, unconditionally. Measured with
+      # a jscpd stub exiting 1:
+      #     ⚠️  jscpd (Go) exited with code 1
+      #     ✅ PASSED - Go duplicate code check completed.
+      #     [audit] status=PASS
+      # A tool that failed to run is not a clean result, and the Go half is the
+      # one place in this gate that never consulted an outcome at all.
+      echo "⏭️  SKIPPED - Duplicate code (jscpd Go run error, exit $JSCPD_GO_EXIT)"
+      GATE_2_STATUS="SKIP"
+      GATE_2_DETAIL="jscpd_go_run_error"
+    elif [ "$GATE_2_STATUS" = "PASS" ]; then
+      echo "✅ PASSED - Go duplicate code check completed."
     fi
+  else
+    echo "ℹ️  No .go files in this change set — nothing to scan."
   fi
-  echo "✅ PASSED - Go duplicate code check completed."
     ;;
     
     powershell)
@@ -176,10 +225,18 @@ EOF_GENERIC
       head -15 "$GENERIC_JSCPD_TMP" || true
       rm -f "$GENERIC_JSCPD_TMP"
       if [ "${GENERIC_JSCPD_EXIT:-0}" -ne 0 ]; then
-        echo "⚠️  jscpd exited with code $GENERIC_JSCPD_EXIT (see output above)"
+        # Same shape as the Go arm: a warning, then an unconditional "✅ PASSED"
+        # on the next line. Measured with a jscpd stub exiting 2:
+        #     ⚠️  jscpd exited with code 2 (see output above)
+        #     ✅ PASSED - jscpd check completed.
+        echo "⏭️  SKIPPED - Duplicate code (jscpd run error, exit $GENERIC_JSCPD_EXIT)"
+        GATE_2_STATUS="SKIP"
+        GATE_2_DETAIL="jscpd_run_error"
       fi
     fi
-    echo "✅ PASSED - jscpd check completed."
+    if [ "$GATE_2_STATUS" = "PASS" ]; then
+      echo "✅ PASSED - jscpd check completed."
+    fi
   else
     echo "✅ PASSED - No source files detected for duplicate checking."
   fi
