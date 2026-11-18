@@ -836,7 +836,7 @@ export function parseGate10Args(args: string[]): Gate10Args {
 // ─── CLI Result Formatting ─────────────────────────────────────────────────────
 
 function printHelp(): void {
-  console.log(`Gate 10: Build Integrity Check
+  console.log(`Build Integrity Check (Gate 9)
 
 Usage:
   npx tsx src/build-integrity/gate-10.ts --changed-files <files> [options]
@@ -854,7 +854,7 @@ Exit codes:
 
 function printGate10Result(result: Gate10Result): void {
   console.log('');
-  console.log('Gate 10: Build Integrity Check');
+  console.log('Build Integrity Check (Gate 9)');
   console.log('─'.repeat(50));
   console.log(
     `  tsc:     ${formatStatus(result.checks.tsc.status)}  ${result.checks.tsc.message.split('\n')[0]} (${result.checks.tsc.durationMs}ms)`

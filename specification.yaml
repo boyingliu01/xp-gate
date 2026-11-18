@@ -6394,6 +6394,45 @@ specification:
             gate-5-entry.sh 通过 git show ":$_tf" 读取暂存 blob，而不是工作区；
             若笔误回归或读取源被改动而无测试更新，此条变红
           test_type: integration
+    - id: REQ-GATE9-VERDICT-HONESTY
+      description: >-
+        门禁 9 在两种情况下把"没有验证"报成了"已验证"。
+
+        A —— tick 是无条件打印的：echo "✅ Gate 9 completed in ${GATE_9_DURATION}s"。
+        在纯 Python 工程上实测，完整输出只有三行：
+            ℹ️  Not a TypeScript project - skipping build integrity check
+            ⏭️  SKIPPED - Build integrity (not a TypeScript project)
+            ✅ Gate 9 completed in 0s
+            status=SKIP
+        两行说"跳过"，最后一行却打绿勾。日志是对的，而人读到的最后一行是错的——
+        正是本仓库已从另外四个门禁里移除过的那个缺陷族。
+
+        B —— Gradle 分支什么都没记录。GATE_9_JAVA_STATUS 保持初始值 SKIP，
+        而聚合逻辑无法把它与"Java 不在本次变更里"区分开。在 TS+Gradle 工程上实测：
+        tsc 通过、Java 半部从未构建，门禁报 PASS，且没有任何一行说明变更集里
+        有一种语言没被验证。
+
+        Gradle 支持确实是 backlog（#507 DR-003），所以正确的修法不是阻断，
+        而是让"无法检查你的 Java"同时到达人和日志，而不是悄悄折进一个通过。
+      acceptance_criteria:
+        - id: AC-GATE9-VERDICT-01
+          criteria: >-
+            结果为 SKIP 时不得打印成功 tick；tick 必须跟随它所总结的判定
+          test_type: integration
+        - id: AC-GATE9-VERDICT-02
+          criteria: >-
+            PASS 时若变更集中有语言未被验证，输出必须显式列出，且审计 detail 记录原因
+          test_type: integration
+        - id: AC-GATE9-VERDICT-03
+          criteria: >-
+            全部验证通过的变更不出现该提示——每提交必响的警告会被忽略，只有会缺席的提示才有信息量
+          test_type: integration
+        - id: AC-GATE9-VERDICT-04
+          criteria: >-
+            CHANGED_FILES 是换行分隔的，转成逗号时必须保留路径内的空格；
+            "src/my file.ts" 不得被切成两个不存在的片段
+          test_type: integration
+
     - id: REQ-BASELINE-UNEVALUATED
       description: 'xp-gate baseline create 从空对象重建基线后无条件写盘，于是"linter 没能运行"
         的文件被记成"没有条目"，而门禁把"没有条目"读作"没有已知问题"。又因为写盘总是发生，一次
