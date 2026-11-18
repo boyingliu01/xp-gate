@@ -6346,3 +6346,70 @@ specification:
             多个 artifact 同时存在时同样不得按目录顺序挑选（与 -01 同一事实的
             另一触发路径）。
           test_type: unit
+    - id: REQ-GATE5-COVERAGE-FRESHNESS
+      description: 'Gate 5 用两种互不相容的方式回答"这份覆盖率报告算不算本次提交的证据"。#821
+        把检索"证据是否存在"改成了查 git 索引（git cat-file -e :coverage/coverage-summary.json），
+        这个判据是对的；但真正读取报告的三处仍在查工作区（[ -f ... ]）。这是两个不同的问题：
+        coverage/ 被 gitignore，本地新跑出的报告永远不在索引里（所以那三处 -f 不能直接换掉，否则
+        丢弃真实的本地测量），而上次运行的残留同样不在索引里、却被 -f 一视同仁地接受。实测
+        2026-11-18：一次只暂存 hook shell 源文件的提交被 "BLOCKED - TypeScript coverage 1% below
+        78% threshold" 拦下，读的是五小时前一次残缺运行（574/45329 行）留下的 1.26%。证据检查处
+        的注释记录了 2026-11-16 同一族残留也拦过一次提交，因此这是复发而非孤例。修复保留两个既有
+        性质，只加一个问题——"这份报告是不是本次审计跑出来的"：门禁本就在跑测试前打 GATE_5_START
+        时间戳，比它旧的文件描述的是别的某次运行。已暂存的报告仍然无条件采信（#601：用户是刻意
+        暂存的，mtime 不构成异议）。'
+      acceptance_criteria:
+        - id: AC-GATE5-FRESHNESS-01
+          criteria: >-
+            早于 GATE_5_START 的报告被判为陈旧并拒收（复现：5 小时前的 1% 报告不得
+            作为本次测量）
+          test_type: unit
+        - id: AC-GATE5-FRESHNESS-02
+          criteria: >-
+            本次门禁运行期间写出的报告被接受——只拒收不接受的谓词会让本地覆盖率检查
+            永久失效，因此这条与 -01 成对存在
+          test_type: unit
+        - id: AC-GATE5-FRESHNESS-03
+          criteria: >-
+            已暂存的报告无论 mtime 多旧都被采信，索引判据优先（#601 不回归）
+          test_type: unit
+    - id: REQ-GATE5-STAGED-CONTENT
+      description: '门禁 5 的 focus-marker 检查读的是工作区，不是将要提交的内容，而且对每个文件都如此。那一行是
+        _tf_content=$(git show ":$tf" ...) || _tf_content=$(cat "$_tf" ...)，而 $tf 在此作用域从未
+        赋值（循环变量是 $_tf）。因此命令永远是 git show ":"，git 以 "ambiguous argument" 拒绝它。
+        实测：每次都以 128 退出，所以 || 回退分支对 100% 的文件都会执行——暂存 blob 的读取从未成功过一次。
+        这要紧是因为提交门禁必须评判那次提交。工作区与索引可被独立控制，两个方向都会伤人：工作区残留 it.only
+        而索引已清干净时，提交携带的是干净文件、什么也不报（假通过，且标记还留在开发者的树里等着被重新加回）；
+        反过来 it.only 只在索引里、工作区已清时，门禁会报告一个提交并不包含的标记（假阻断）。
+        这个缺陷是被 "shellcheck 基线被清空" 的噪声带出来的，但那不是重点：SC2154 指向一个未定义变量，
+        即使基线才是抱怨的那一方，这条线索也值得追。'
+      acceptance_criteria:
+        - id: AC-GATE5-STAGED-CONTENT-01
+          criteria: >-
+            索引与工作区可以不同：索引里是干净版本时，git show ":<path>" 不得包含标记，
+            而工作区副本包含标记——这条前提事实使"读错了源"可被观测
+          test_type: integration
+        - id: AC-GATE5-STAGED-CONTENT-02
+          criteria: >-
+            gate-5-entry.sh 通过 git show ":$_tf" 读取暂存 blob，而不是工作区；
+            若笔误回归或读取源被改动而无测试更新，此条变红
+          test_type: integration
+    - id: REQ-BASELINE-UNEVALUATED
+      description: 'xp-gate baseline create 从空对象重建基线后无条件写盘，于是"linter 没能运行"
+        的文件被记成"没有条目"，而门禁把"没有条目"读作"没有已知问题"。又因为写盘总是发生，一次
+        所有工具都失败的运行会用 {} 覆盖掉一份好基线。本仓库实测到的表现是
+        "BLOCKED - 50 NEW shellcheck issue(s) (baseline: 0, current: 50)"，而树其实没变。
+        两个必须永不混淆的状态被混淆了："linter 什么也没发现"与"linter 从未作答"，后者被当作
+        前者写进了磁盘。修复让 runLintInBatches 返回失败批次的文件列表，重建时把这些文件在旧
+        基线里的条目原样保留；被成功评估的文件仍正常改写，因此棘轮两个方向都保持诚实。'
+      acceptance_criteria:
+        - id: AC-BASELINE-05
+          criteria: >-
+            linter 无法运行（非零退出且 stdout 为空）时，该文件在旧基线中的条目被保留，
+            不得消失
+          test_type: unit
+        - id: AC-BASELINE-06
+          criteria: >-
+            linter 正常作答时旧计数仍被新值替换（含降为 0）——"保留一切"的修法会让基线
+            永久无法收紧，因此与 -05 成对存在
+          test_type: unit
