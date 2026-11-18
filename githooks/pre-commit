@@ -987,10 +987,27 @@ record_gate_audit() {
   esac
 
   # Determine gate result: PASS or FAIL based on status variable
+  #
+  # `gate_result` answers "did this gate block?", which is the question the retry
+  # streak asks (it greps the journal for "passed":false). SKIP therefore stays
+  # "true" -- changing it would make every skip inflate the attempt index and
+  # rewrite every historical metric.
+  #
+  # But that leaves PASS and SKIP byte-identical in the journal, and pass_pct is
+  # computed as passed/total -- so a gate that skipped on every run reported a
+  # 100% pass rate while never having evaluated anything. The verdict the gate
+  # actually reached is recorded separately as gate_status, so a consumer can
+  # tell the three states apart without moving the numbers that already exist.
   local gate_result="true"
   if [ "$passed" != "PASS" ] && [ "$passed" != "SKIP" ]; then
     gate_result="false"
   fi
+  # Only forward a status the caller actually named; an empty/unknown value is
+  # omitted rather than recorded as a guess.
+  local gate_status_arg=""
+  case "$passed" in
+    PASS|SKIP|WARN|BLOCK) gate_status_arg="--gate-status $passed" ;;
+  esac
 
   # Fire-and-forget: audit must never block the commit
   #
@@ -1026,6 +1043,7 @@ record_gate_audit() {
       --trigger commit \
       ${_XP_GATE_ATTEMPT:+--attempt "$_XP_GATE_ATTEMPT"} \
       ${detail:+--detail "$detail"} \
+      $gate_status_arg \
       2>/dev/null
   } &
   disown 2>/dev/null || true
@@ -1057,7 +1075,12 @@ _record_blocking_exit() {
   # the one that actually called exit.
   local _bg_id="" _bg_name="" _bg_status="" _bg_detail=""
   local _i _st_var _st
-  for _i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+  # Every gate key, not every NUMBER. 12b and 12c were missing from this list,
+  # so a block raised by either one left _bg_id empty and the journal recorded
+  # gate "unknown" with no reason -- the one case where knowing WHICH gate
+  # stopped the commit matters most. The keys are strings here on purpose: they
+  # match the registry and the GATE_N_STATUS variable names, not ordinals.
+  for _i in 0 1 2 3 4 5 6 7 8 9 10 11 12 12b 12c 13; do
     _st_var="GATE_${_i}_STATUS"
     _st="${!_st_var:-}"
     case "$_st" in
@@ -1086,6 +1109,8 @@ _record_blocking_exit() {
     10) _bg_name="SAST Security" ;;
     11) _bg_name="Sprint Flow" ;;
     12) _bg_name="File Hygiene" ;;
+    12b) _bg_name="Mirror Parity" ;;
+    12c) _bg_name="Probe Discipline" ;;
     13) _bg_name="Compiler Strictness" ;;
     *)  _bg_name="unknown" ;;
   esac

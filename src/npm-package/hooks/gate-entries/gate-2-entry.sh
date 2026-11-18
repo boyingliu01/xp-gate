@@ -159,13 +159,44 @@ PYLINT_LIST
   fi
   
   echo "Running jscpd for Go duplicate code detection..."
-  FILES_TO_CHECK=$(echo "$CHANGED_FILES" | grep "\.go$" | head -20)
-  if [ -n "$FILES_TO_CHECK" ]; then
+  # Reading one path per line into an ARRAY fixes two defects that shared this
+  # one line:
+  #   - `head -20` silently dropped every .go file past the twentieth. Measured
+  #     in a 30-file fixture: jscpd was handed 20 paths and the other 10 were
+  #     never scanned, with no message saying so. A scan that quietly covers part
+  #     of the change set is the same lie as one that covers none of it.
+  #   - unquoted `$FILES_TO_CHECK` relied on word splitting, which also splits a
+  #     path containing a space -- handing jscpd two bogus paths (#457 class,
+  #     same fix gate 3's lizard call already carries).
+  # Chunked rather than one argv for the whole list: Windows caps a command line
+  # at 32,767 characters, and an oversized argv fails without scanning anything.
+  GO_JSCPD_FILES=()
+  while IFS= read -r _gof; do
+    [ -n "$_gof" ] || continue
+    GO_JSCPD_FILES+=("$_gof")
+  done <<GO_LIST
+$(echo "$CHANGED_FILES" | grep "\.go$" || true)
+GO_LIST
+  if [ "${#GO_JSCPD_FILES[@]}" -gt 0 ]; then
     # #392-#9: capture jscpd's real exit code via temp file instead of piping
     # through head (which would swallow the exit status under pipefail analysis).
     GO_JSCPD_TMP=$(mktemp)
-    jscpd $FILES_TO_CHECK > "$GO_JSCPD_TMP" 2>&1
-    JSCPD_GO_EXIT=$?
+    JSCPD_GO_EXIT=0
+    GO_ARGV_BUDGET="${XP_GATE_JSCPD_ARGV_BUDGET:-8000}"
+    GO_BATCH=()
+    GO_SIZE=0
+    for _gof in "${GO_JSCPD_FILES[@]}"; do
+      if [ "${#GO_BATCH[@]}" -gt 0 ] && [ $((GO_SIZE + ${#_gof} + 1)) -gt "$GO_ARGV_BUDGET" ]; then
+        jscpd "${GO_BATCH[@]}" >> "$GO_JSCPD_TMP" 2>&1 || JSCPD_GO_EXIT=$?
+        GO_BATCH=()
+        GO_SIZE=0
+      fi
+      GO_BATCH+=("$_gof")
+      GO_SIZE=$((GO_SIZE + ${#_gof} + 1))
+    done
+    if [ "${#GO_BATCH[@]}" -gt 0 ]; then
+      jscpd "${GO_BATCH[@]}" >> "$GO_JSCPD_TMP" 2>&1 || JSCPD_GO_EXIT=$?
+    fi
     head -10 "$GO_JSCPD_TMP"
     rm -f "$GO_JSCPD_TMP"
     if [ "$JSCPD_GO_EXIT" -ne 0 ]; then
@@ -191,11 +222,20 @@ PYLINT_LIST
     powershell)
   echo "ℹ️  No PowerShell-native duplicate detector (jscpd does not support .ps1)"
   echo "⏭️  SKIPPED - Duplicate code (no tool for PowerShell)"
+  # These two arms printed SKIP prose and set nothing. GATE_2_STATUS kept its
+  # initial "PASS", so the journal recorded a pass for a language that was never
+  # scanned -- the same defect the TypeScript/Go/generic arms just had removed,
+  # surviving here because these arms never claimed to have scanned anything.
+  # They still do not claim it; but "no verdict" was being recorded as "passed".
+  GATE_2_STATUS="SKIP"
+  GATE_2_DETAIL="no_tool_for_powershell"
     ;;
     
     shell)
   echo "ℹ️  Duplicate detection not typically used for shell scripts"
   echo "⏭️  SKIPPED - Duplicate code (no tool for shell scripts)"
+  GATE_2_STATUS="SKIP"
+  GATE_2_DETAIL="no_tool_for_shell"
     ;;
     
     *)

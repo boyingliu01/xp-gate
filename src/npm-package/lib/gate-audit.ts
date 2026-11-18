@@ -58,6 +58,19 @@ export interface GateAuditEntry {
   attempt?: number;
   /** True when this row describes a test that is quarantined as flaky (#603). */
   quarantined?: boolean;
+  /**
+   * The verdict the gate actually reached: PASS / WARN / SKIP / BLOCK.
+   *
+   * `passed` answers "did this gate block?" and is deliberately kept -- the
+   * retry streak reads `"passed":false` from the journal and every historical
+   * metric is defined on it. But it cannot separate a real pass from a skip,
+   * because both are `passed: true`. A gate that skipped on every run therefore
+   * reported a 100% pass rate while never having evaluated anything.
+   *
+   * Absent on rows written before this field existed. Consumers must treat
+   * "absent" as unknown, never as a pass.
+   */
+  gate_status?: string;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -236,16 +249,40 @@ function parseAuditEntries(logPath: string): GateAuditEntry[] {
 /**
  * Aggregate audit entries by gate_id, computing sums for passed/ms/issues.
  */
-function aggregateByGate(entries: GateAuditEntry[]): Map<string, { total: number; passed: number; ms: number; issues: number; anomaly_count: number }> {
-  const buckets = new Map<string, { total: number; passed: number; ms: number; issues: number; anomaly_count: number }>();
+interface GateBucket {
+  total: number;
+  passed: number;
+  ms: number;
+  issues: number;
+  anomaly_count: number;
+  /** Rows whose gate_status was SKIP -- nothing was evaluated. */
+  skipped: number;
+  /** Rows whose gate_status says something really was evaluated. */
+  verified: number;
+}
+
+export function aggregateByGate(entries: GateAuditEntry[]): Map<string, GateBucket> {
+  const buckets = new Map<string, GateBucket>();
 
   for (const e of entries) {
     // Tolerate malformed/legacy rows: a missing gate_id would otherwise create
     // an `undefined` bucket key (and crash the sort comparing it to a string).
     const gateId = typeof e.gate_id === 'string' && e.gate_id ? e.gate_id : 'unknown';
-    const b = buckets.get(gateId) ?? { total: 0, passed: 0, ms: 0, issues: 0, anomaly_count: 0 };
+    const b = buckets.get(gateId) ?? { total: 0, passed: 0, ms: 0, issues: 0, anomaly_count: 0, skipped: 0, verified: 0 };
     b.total += 1;
     if (e.passed) b.passed += 1;
+    // `passed` cannot tell a pass from a skip (both are true). Count the real
+    // verdict alongside it rather than redefining `passed`, which the retry
+    // streak and every historical metric already depend on.
+    //
+    // Absent status is UNKNOWN, not verified. Legacy rows predate the field;
+    // counting them as verified would reproduce the defect this field exists to
+    // fix, just in the other direction.
+    if (e.gate_status === 'SKIP') {
+      b.skipped += 1;
+    } else if (e.gate_status === 'PASS' || e.gate_status === 'WARN') {
+      b.verified += 1;
+    }
     // Issue #370: exclude anomalous durations from ms aggregation. REQ-B: a
     // null duration is the honest sibling of that flag — deliberately not
     // measurable, so it stays out of the sums (and out of the denominator).
@@ -438,6 +475,10 @@ function runCli(): void {
       // to what earlier versions wrote.
       ...(opts['attempt'] ? { attempt: Number.parseInt(String(opts['attempt']), 10) || 1 } : {}),
       ...(opts['quarantined'] === 'true' ? { quarantined: true } : {}),
+      // Only set when provided, so records from callers that do not supply it
+      // stay byte-identical. `passed` cannot separate a pass from a skip; this
+      // carries the verdict the gate actually reached.
+      ...(opts['gate-status'] ? { gate_status: String(opts['gate-status']).slice(0, 20) } : {}),
     };
     // Pre-commit (trigger=commit) is staging for a commit that does not exist
     // yet: park it in the pending sidecar so post-commit can stamp the real

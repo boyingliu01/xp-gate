@@ -6394,6 +6394,102 @@ specification:
             gate-5-entry.sh 通过 git show ":$_tf" 读取暂存 blob，而不是工作区；
             若笔误回归或读取源被改动而无测试更新，此条变红
           test_type: integration
+    - id: REQ-AUDIT-SKIP-DISTINGUISHABLE
+      description: >-
+        审计日志无法区分 PASS 与 SKIP，而两者都计入「通过」。
+
+        record_gate_audit 收到了门禁的真实状态作为第三个参数，然后把它丢掉：它只判断
+        该值是否为 PASS 或 SKIP，两者都映射成 passed 为 true。于是 aggregateByGate 里
+        pass_pct 等于 passed 除以 total，一个每次都跳过的门禁会报告 100% 通过率，
+        而它从未评估过任何东西。
+
+        实测：一个被取消选中的门禁 11 写入 passed 为 true，除此之外与真实通过无法区分。
+
+        修复保留 passed 的语义不变，它回答的是这个门禁是否阻断了提交，这也正是重试
+        连击逻辑所依赖的（其 awk 读 passed 为 false）。新增的是门禁实际达到的判定，
+        让消费方能区分三种状态。缺失该字段的旧记录必须按未知处理，绝不可当作通过。
+      acceptance_criteria:
+        - id: AC-AUDIT-SKIP-01
+          criteria: >-
+            SKIP 行与 PASS 行在聚合结果中可区分（skipped 与 verified 分别计数）
+          test_type: integration
+        - id: AC-AUDIT-SKIP-02
+          criteria: >-
+            只跳过的门禁其 verified 为 0，且既有 passed 计数保持不变
+          test_type: integration
+
+    - id: REQ-AUDIT-BLOCKING-EXIT-KEYS
+      description: >-
+        由门禁 12b 或 12c 抛出的阻断被记为未知门禁且没有原因。
+
+        _record_blocking_exit 通过扫描状态变量找出调用 exit 的门禁，而它的列表枚举的
+        是门禁编号，12b 与 12c 不是编号。由它们抛出的阻断使 _bg_id 为空，落到
+        unknown 分支，日志记录的门禁名与原因双双缺失——恰恰在最需要知道是哪个门禁
+        拦住提交的那种情形。
+
+        修复前已验证：bash 的间接展开对含字母的变量名有效，所以这是列表缺陷，
+        不是 bash 限制。
+      acceptance_criteria:
+        - id: AC-AUDIT-BLOCKING-01
+          criteria: >-
+            扫描列表覆盖注册表里的每一个门禁 key
+          test_type: integration
+        - id: AC-AUDIT-BLOCKING-02
+          criteria: >-
+            12b 与 12c 在日志名称表中有条目，不会被记成 unknown
+          test_type: integration
+
+    - id: REQ-GATE2-DEBT-CLOSURE
+      description: >-
+        门禁 2 的两处遗留债务。
+
+        债务 A：Go 分支用 head 截断自己的文件列表。超过二十个 .go 文件时，其余文件
+        从未传给 jscpd 且毫无提示。一次悄悄只覆盖部分变更集的扫描，与一次什么都没
+        覆盖的扫描是同一种谎言。同一行还用了未加引号的展开，路径含空格时会被拆成
+        两个不存在的路径。
+
+        债务 B：PowerShell 与 shell 分支打印 SKIP 却不设置状态，GATE_2_STATUS 保持
+        初值 PASS，于是日志为一种从未被扫描的语言记录了通过。与先修的三个分支不同，
+        这两处从未声称自己扫过任何东西，但「没有判定」仍被记成了「通过」。
+
+        两处修复的方向都不是让门禁 2 阻断：A 让它扫描被问到的全部文件，B 让它说
+        「什么都没检查」而不是「一切正常」。
+      acceptance_criteria:
+        - id: AC-GATE2-TOOL-ERROR-03
+          criteria: >-
+            三十个 .go 文件全部交给 jscpd，而非前二十个；且成功扫描仍报通过
+          test_type: integration
+        - id: AC-GATE2-TOOL-ERROR-04
+          criteria: >-
+            无工具支持的语言在审计中记录 SKIP 并带原因
+          test_type: integration
+
+    - id: REQ-BATS-RUNNER-TIMEOUT
+      description: >-
+        CI 的 bats runner 调用 spawnSync 时不传 timeout，套件挂死会一直阻塞到平台
+        杀掉整个作业。操作者看到的是一个永不结束的 CI 作业，而不是一个不再返回的
+        套件，也就拿不到定位所需的唯一事实：是哪一个套件卡住了。
+
+        这不是假设。实测 gate-5a-block 的十六个用例耗时 880 秒；更小的机器或负载
+        更高的机器，看上去会与挂死无异。
+
+        预算由实测推导：已知最慢套件为 880 秒，而一次 spawnSync 覆盖整个分片，
+        因此默认值刻意宽松。它的职责是把「永远挂起」变成「带信息地失败」，
+        而不是规训套件时长。
+      acceptance_criteria:
+        - id: AC-BATS-TIMEOUT-01
+          criteria: >-
+            分片 spawn 带超时预算，且可通过环境变量覆盖并有不依赖环境的默认值
+          test_type: integration
+        - id: AC-BATS-TIMEOUT-02
+          criteria: >-
+            超时被报告为超时，而非普通测试失败（覆盖 ETIMEDOUT 与 SIGTERM 两种形态）
+          test_type: integration
+        - id: AC-BATS-TIMEOUT-02b
+          criteria: >-
+            端到端：极小预算下 runner 快速失败并打印超时说明，而不是跑完套件
+          test_type: integration
+
     - id: REQ-GATE2-TOOL-ERROR-NOT-PASS
       description: >-
         门禁 2 有一个分支检查了 jscpd 的结果，另一些没有，而没检查的仍然打印通过。
