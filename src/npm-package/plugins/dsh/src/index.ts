@@ -1,6 +1,6 @@
-import { writeFile } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import type { CredentialProvider } from "@deepseek-ai/dsh-credentials"
@@ -76,6 +76,18 @@ const DELPHI_TIMEOUT_MS = 900_000
 
 /** The document Gate MW reads at push time. */
 const EVIDENCE_FILE = ".code-walkthrough-result.json"
+
+/**
+ * The document the sprint review guard reads before every write.
+ *
+ * Distinct from {@link EVIDENCE_FILE} on purpose: Gate MW wants a push-time
+ * artifact at the repo root, while the sprint guard wants a phase-time verdict
+ * inside `.sprint-state/`. Writing only the former left the guard permanently
+ * unsatisfiable — it denied every write in a sprint that no review could ever
+ * unblock, because nothing in the plugin ever produced this path. Both are
+ * written from the same {@link ReviewOutcome}, so they cannot disagree.
+ */
+const SPRINT_VERDICT_FILE = join(".sprint-state", "delphi-reviewed.json")
 
 /**
  * Files already reported on in this process.
@@ -185,6 +197,40 @@ function gateArchTool(shell: Context["shell"], dialect: ShellDialect) {
 // Boy Scout (#447): the review body used to sit inline in execute() at 5 brace
 // levels (defineTool → execute → try → runReview options). Module scope keeps
 // the try/catch semantics identical while dropping two levels.
+/** The verdict string shared by both artifacts. */
+function verdictLabel(outcome: ReviewOutcome): "APPROVED" | "REQUEST_CHANGES" {
+  return outcome.consensus ? "APPROVED" : "REQUEST_CHANGES"
+}
+
+/**
+ * Record the review verdict where the sprint guard looks for it.
+ *
+ * Runs on every review, unlike {@link writeWalkthroughEvidence}: the guard is
+ * consulted before each write, so a missing verdict here is not a cosmetic gap
+ * but a permanent denial. It is written even when the review rejected the
+ * change, because "reviewed and rejected" is information the guard relays back
+ * to the model; only an absent file means "not reviewed".
+ *
+ * Best-effort like its sibling: a review that succeeded must still return its
+ * text if the filesystem refuses the write, and the caller reports the failure.
+ */
+async function writeSprintVerdict(cwd: string, outcome: ReviewOutcome): Promise<string> {
+  try {
+    const target = join(cwd, SPRINT_VERDICT_FILE)
+    await mkdir(dirname(target), { recursive: true })
+    const record = {
+      verdict: verdictLabel(outcome),
+      timestamp: new Date().toISOString(),
+      consensusRatio: outcome.finalRatio,
+      rounds: outcome.rounds.length,
+    }
+    await writeFile(target, `${JSON.stringify(record, null, 2)}\n`, "utf8")
+    return `\nSprint verdict: ${SPRINT_VERDICT_FILE} recorded as ${record.verdict}.`
+  } catch (error) {
+    return `\nSprint verdict: not written — ${(error as Error).message}`
+  }
+}
+
 /**
  * Write .code-walkthrough-result.json for Gate MW, or explain why it cannot.
  *
@@ -209,7 +255,7 @@ async function writeWalkthroughEvidence(
       head: git.head,
       branch: git.branch,
       seats,
-      verdict: outcome.consensus ? "APPROVED" : "REQUEST_CHANGES",
+      verdict: verdictLabel(outcome),
       now: new Date(),
       baseUrl: cfg.baseUrl,
       consensusRatio: outcome.finalRatio,
@@ -370,10 +416,15 @@ async function runDelphiReview(subject: string, request: ReviewRequest): Promise
   try {
     const { options, provider, described, cfg } = await reviewOptions(request, resolveApiKey)
     const outcome = await runReview(options, subject, addressed, signal)
+    // The sprint verdict is unconditional: the review guard reads it before every
+    // write, so an unwritten verdict keeps the sprint blocked no matter how good
+    // this review was. The push-time evidence below stays opt-in because it is a
+    // repo-root side effect the caller asked not to have by default.
+    const sprintVerdict = await writeSprintVerdict(cwd, outcome)
     const suffix = writeEvidence && cfg !== undefined
       ? await writeWalkthroughEvidence(cwd, cfg, outcome)
       : ""
-    return `${formatOutcome(outcome)}\n\n${formatPluginFooter(provider, described)}${suffix}`
+    return `${formatOutcome(outcome)}\n\n${formatPluginFooter(provider, described)}${sprintVerdict}${suffix}`
   } catch (e) {
     // Config problems are the common failure; report them as guidance
     // rather than a stack trace.

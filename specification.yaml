@@ -6464,6 +6464,49 @@ specification:
             无工具支持的语言在审计中记录 SKIP 并带原因
           test_type: integration
 
+    - id: REQ-GATE10-RULES-OFFLINE
+      description: >-
+        门禁 10 平均每次运行 43.6 秒，而长尾全部来自 semgrep registry。
+
+        审计日志 420 条 gate-10 记录实测：p10 为 314 毫秒，p50 为 10231 毫秒，
+        p90 为 180118 毫秒，均值 43620 毫秒。243 次在 15 秒以内，但有 106 次超过
+        60 秒，42 次触及 180 秒超时。分布是双峰的，而长的那一半不是分析工作。
+
+        本机 ABBA 交替测量（单文件，两臂交替以抵消负载趋势）：
+        网络正常时 5498 与 5370 毫秒（组内波动 2.4%）；模拟断网时 108926 与
+        108791 毫秒（组内波动 0.1%）。20 倍差异且组内几乎无波动，是真实效应。
+
+        那 109 秒是 urllib3 对 semgrep.dev 的重试退避，不是扫描：registry 名称
+        形式的 config 每次调用都要取规则集，本地没有可复用的规则文件。
+
+        修复方式是只取一次规则集并传入文件路径。实测断网情形从 109 秒降到
+        5754 毫秒，且网络正常时不变慢。这不是纯粹的耗时优化，而是可用性修复：
+        网络不可用时门禁原来是空等 109 秒然后降级为 SKIP，现在 6 秒内正常完成
+        扫描并给出真实判定。
+
+        陈旧缓存是这里的主要风险，因此显式处理：缓存未超过时限直接使用；超过
+        时限则尝试刷新，刷新失败仍使用旧副本但必须声明，因为「用一周前的规则
+        检查过」和「用当前规则检查过」是两个不同的结论。既无缓存又无网络时回退
+        到 registry 名称，让 semgrep 以自己的方式失败并由既有的运行时错误分支
+        报告 SKIP——加载不到规则的门禁绝不可判 PASS。
+      acceptance_criteria:
+        - id: AC-GATE10-RULES-OFFLINE-01
+          criteria: >-
+            门禁可以把本地规则文件传给 semgrep，而非只能使用 registry 名称
+          test_type: integration
+        - id: AC-GATE10-RULES-OFFLINE-02
+          criteria: >-
+            缓存新鲜时按路径使用，而不是回落到 registry 名称
+          test_type: integration
+        - id: AC-GATE10-RULES-OFFLINE-03
+          criteria: >-
+            无缓存且无网络时回退到 registry 名称，不伪造规则集也不判通过
+          test_type: integration
+        - id: AC-GATE10-RULES-OFFLINE-04
+          criteria: >-
+            解析器真的接入了扫描参数，而不是仅定义未使用
+          test_type: integration
+
     - id: REQ-GATE7-BLOCK-AUDIT
       description: >-
         门禁 7 阻断时完全不写审计记录。
