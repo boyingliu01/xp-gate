@@ -129,6 +129,13 @@ EOF
   unset CC
   export CXX="$TEST_DIR/bin/g++"
   echo 'int main(){return 0;}' > a.cpp
+  # The change set must be non-empty for the toolchain probe to be reached at
+  # all: gate13_run_cpp_analysis now asks "is there anything to compile?" BEFORE
+  # "is the compiler usable?" (the project's input-short-circuit rule -- the Java
+  # and C# arms already worked this way). Without this line the gate answers PASS
+  # because there is nothing to compile, and the broken-toolchain arm this test
+  # exists for is unreachable.
+  git add a.cpp
 
   load_gate
   run gate13_run_cpp_analysis
@@ -178,6 +185,9 @@ EOF
 @test "AC-001-03: cross-compilation skips the gate with WARN, never a host-compiler compile" {
   export CROSS_COMPILE="aarch64-linux-gnu-"
   echo 'int main(){return 0;}' > a.cpp
+  # Non-empty change set: the cross-compilation check runs only once there is
+  # something to compile (input short-circuit before tool probe).
+  git add a.cpp
 
   load_gate
   run gate13_run_cpp_analysis
@@ -197,6 +207,9 @@ EOF
   export PATH="$TEST_DIR/bin:$PATH"
   export CXX="$TEST_DIR/bin/does-not-exist-cxx"
   echo 'int main(){return 0;}' > a.cpp
+  # Non-empty change set: the compiler is only selected once there is something
+  # to compile (input short-circuit before tool probe).
+  git add a.cpp
 
   load_gate
   run gate13_run_cpp_analysis

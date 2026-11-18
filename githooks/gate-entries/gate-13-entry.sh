@@ -529,10 +529,15 @@ gate_13_run() {
 # XP_GATE_COMPILER_STRICTNESS=strict|balanced|warn-only,
 # XP_GATE_COMPILER_ANALYZER=1 (gcc -fanalyzer, C only, opt-in).
 # Design: docs/plans/2026-10-26-gate-13-compiler-strictness-design.md
+# This gate has THREE skip paths and all three were silent: deselect, kill switch
+# and missing-script. Only the analysis path recorded. Recorded: "a gate that
+# cannot run must set the status AND write an audit line" -- otherwise a skip is
+# indistinguishable from a gate the chain does not contain.
 if ! gate_enabled 13; then
   echo "⏭️  SKIPPED - Gate 13: Compiler strictness (not selected by XP_GATE_ONLY_GATE)"
   GATE_13_STATUS="SKIP"
   GATE_13_DETAIL="not_selected"
+  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)"
   return 0
 fi
 
@@ -540,6 +545,8 @@ GATE_13_STATUS="SKIP"
 if [ "${XP_GATE_DISABLE_13:-}" = "1" ]; then
   echo "⏭️  SKIPPED - Gate 13: Compiler Strictness (XP_GATE_DISABLE_13=1)"
   GATE_13_STATUS="SKIP"
+  GATE_13_DETAIL="kill_switch"
+  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)"
 elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-13-compiler-strictness.sh" ]; then
   echo "⚙️  Gate 13: Compiler Strictness Check..."
   GATE13_START=$(gate_start_ms)
@@ -599,6 +606,8 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
 else
   echo "⏭️  SKIPPED - Gate 13: Compiler Strictness (gate-13-compiler-strictness.sh not found)"
   GATE_13_STATUS="SKIP"
+  GATE_13_DETAIL="script_missing"
+  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)"
 fi
 echo ""
 # ============================================================================

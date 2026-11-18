@@ -27,9 +27,13 @@
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_11_run() {
 if ! gate_enabled 11; then
+  # Recorded, not merely printed: this arm set the status and returned with no
+  # journal line, so wherever XP_GATE_ONLY_GATE selects a subset, "deselected on
+  # purpose" and "not part of this chain" were identical to every audit consumer.
   echo "⏭️  SKIPPED - Gate 11: Sprint flow (not selected by XP_GATE_ONLY_GATE)"
   GATE_11_STATUS="SKIP"
   GATE_11_DETAIL="not_selected"
+  record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$(gate_start_ms)"
   return 0
 fi
 

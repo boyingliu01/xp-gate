@@ -31,9 +31,13 @@ gate_9_run() {
 # removes. Verdict codes (mirror of the java.sh G1 contract):
 #   0=PASS 2=BLOCK(compile failed) 3=SKIP+WARN(reason printed)
 if ! gate_enabled 9; then
+  # Recorded, not merely printed: this arm set the status and returned with no
+  # journal line, so wherever XP_GATE_ONLY_GATE selects a subset, "deselected on
+  # purpose" and "not part of this chain" were identical to every audit consumer.
   echo "⏭️  SKIPPED - Gate 9: Build integrity (not selected by XP_GATE_ONLY_GATE)"
   GATE_9_STATUS="SKIP"
   GATE_9_DETAIL="not_selected"
+  record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$(gate_start_ms)"
   return 0
 fi
 
