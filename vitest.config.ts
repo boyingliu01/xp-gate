@@ -78,6 +78,18 @@ export default defineConfig({
         '**/*.test.ts',
         '**/*.test.js',
         '**/__tests__/**',
+        // `.spec.` was recognised as a test everywhere EXCEPT here: gate 5a's own
+        // detection regex is \.(test|spec)\.(ts|tsx|js|...)$, so a `foo.spec.ts`
+        // satisfied the "this source file has a test" rule while its own lines
+        // were measured as production code. The repo contains zero `.spec.` files
+        // today, which is exactly why nothing has gone wrong yet -- and why the
+        // first person to use that naming would have deflated the coverage figure
+        // with lines no source change could ever cover. Same shape as #562, where
+        // 11688 mirror lines at 0% dragged the total from 82.77% to 62.19%.
+        // Pinned by githooks/__tests__/coverage-test-exclusion.test.bats, which
+        // asserts these two lists agree rather than restating one of them.
+        '**/*.spec.ts',
+        '**/*.spec.js',
         '**/*.d.ts',
         'node_modules/**',
         '.worktrees/**',

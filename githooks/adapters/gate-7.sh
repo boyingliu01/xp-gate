@@ -15,6 +15,9 @@ IAC_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -
 # Consumed by the sourcing parent, not here (see #548).
 # shellcheck disable=SC2034
 GATE_7_SCANNED_FILES=0
+# Initialised here, not only inside the adapter branch: the journal line at the
+# bottom runs on EVERY path, and an unset variable there is an error under set -u.
+IAC_ISSUE_COUNT=0
 if [ -z "$IAC_FILES" ]; then
   # #800: "nothing to scan" must never be rendered as "scanned and clean".
   # This branch used to print PASSED and set GATE_7_STATUS=PASS, while the report
@@ -59,13 +62,27 @@ else
     if [ $IAC_EXIT -eq 0 ]; then
       echo "✅ PASSED - IaC security scan."
       GATE_7_STATUS="PASS"
+      IAC_ISSUE_COUNT=0
     else
       echo ""
       echo "❌ BLOCKED - IaC security issues detected"
       echo "Fix the security issues above before committing."
       echo "Tip: Install checkov for comprehensive IaC scanning: pip install checkov"
       GATE_7_STATUS="FAIL"
-      exit 1
+      # Counted from the adapter's own output instead of the hardcoded 0 this
+      # gate used to journal on every path, including the blocked one.
+      IAC_ISSUE_COUNT=$(printf '%s\n' "$IAC_OUTPUT" | grep -cE '^[[:space:]]*(❌|FAIL|ERROR|Critical|HIGH)' || true)
+      # The journal line must be reached ON THIS PATH, and the single call site at
+      # the bottom of the file is not reached: sourcing this file means `return 1`
+      # leaves before the bottom. The earlier `exit 1` had the same effect for a
+      # different reason. Measured by driving the arm with a stubbed recorder and
+      # a failing adapter: no AUDIT row at all, on the one outcome an operator
+      # most needs to find in the journal.
+      #
+      # So record here, then `return` -- not `exit` -- so the driver keeps its
+      # single exit point and the EXIT trap fires with the same status.
+      record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "${IAC_ISSUE_COUNT:-0}" "$GATE_7_START"
+      return 1
     fi
   else
     echo "ℹ️  SKIP - IaC adapter not found"
@@ -73,4 +90,6 @@ else
     GATE_7_STATUS="SKIP"
   fi
 fi
-record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
+# The single exit point for the journal, reached on every path now that the
+# blocked arm returns instead of exiting.
+record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "${IAC_ISSUE_COUNT:-0}" "$GATE_7_START"

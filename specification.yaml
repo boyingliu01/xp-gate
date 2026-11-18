@@ -6464,6 +6464,34 @@ specification:
             无工具支持的语言在审计中记录 SKIP 并带原因
           test_type: integration
 
+    - id: REQ-COVERAGE-TEST-EXCLUSION
+      description: >-
+        测试代码必须从覆盖率中排除，而且排除规则必须与各门禁识别测试代码的规则
+        是同一套。
+
+        项目原则是：测试代码在除覆盖率之外的每个地方都是一等公民。门禁 5a 要求源
+        文件有配套测试、门禁 5b 度量测试文件里的 mock 密度，两者都必须把测试文件
+        视为变更集的一部分。覆盖率是唯一必须排除它们的度量，因为测试代码度量自己
+        会抬高那个本应用来描述源码的数字。
+
+        实测缺口：覆盖率的 exclude 列出 **/*.test.ts、**/*.test.js、**/__tests__/**，
+        而门禁 5a 自己的测试识别正则是 \.(test|spec)\.(ts|tsx|js|...)$，也就是说
+        .spec.ts 在除覆盖率之外的每一处都被当作测试。
+
+        仓库当前恰好没有 .spec. 文件，这正是至今未出问题的原因，也是这个不对称仍是
+        潜伏缺陷的原因：第一个用那种命名的人，会让一个测试文件被计为生产代码，用
+        任何源码改动都不可能覆盖的行稀释覆盖率数字。这与 #562 是同一形状——11688 行
+        镜像代码在 0% 处把总数从 82.77% 拖到 62.19%。
+      acceptance_criteria:
+        - id: AC-COVERAGE-TEST-EXCLUSION-01
+          criteria: >-
+            覆盖率排除覆盖了门禁所能识别的每一种测试文件模式
+          test_type: integration
+        - id: AC-COVERAGE-TEST-EXCLUSION-02
+          criteria: >-
+            覆盖率排除规则与门禁 5a 的测试识别规则保持一致
+          test_type: integration
+
     - id: REQ-GATE10-RULES-OFFLINE
       description: >-
         门禁 10 平均每次运行 43.6 秒，而长尾全部来自 semgrep registry。
