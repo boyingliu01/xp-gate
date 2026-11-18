@@ -370,6 +370,46 @@ adapter_declares_coverage_runs_tests() {
   ( coverage_runs_tests ) >/dev/null 2>&1
 }
 
+# Ask the adapter whether its test suite is executed somewhere else (CI), so the
+# commit-time gate must not run it.
+#
+# Same shape and same reasoning as `adapter_declares_coverage_runs_tests` above,
+# and the asymmetry is again the whole design: a wrong "yes" removes test
+# verification from the commit, so the default for an undeclared adapter is to
+# RUN the tests. The reason the shell adapter declares it is measurable, not
+# stylistic -- its `run_tests` has no selection and discovers every *.bats in the
+# repo (284 here), which is a multi-hour job at commit time.
+#
+# What the declaration must NOT do is make the skip silent. Callers report where
+# the suite actually runs; see gate-5's delegation branch.
+adapter_delegates_tests_to_ci() {
+  local scope="${1:-}"
+  if [ -n "$scope" ]; then
+    (
+      # shellcheck disable=SC2086  # $scope is a single command name, deliberately unquoted for eval-free invocation
+      $scope >/dev/null 2>&1 || exit 1
+      command -v tests_delegated_to_ci >/dev/null 2>&1 || exit 1
+      tests_delegated_to_ci >/dev/null 2>&1
+    )
+    return $?
+  fi
+  command -v tests_delegated_to_ci >/dev/null 2>&1 || return 1
+  ( tests_delegated_to_ci ) >/dev/null 2>&1
+}
+
+# Where a delegating adapter's suite runs, for the report line.
+adapter_test_delegation_target() {
+  if command -v tests_delegated_to_ci_target >/dev/null 2>&1; then
+    local target
+    target="$( tests_delegated_to_ci_target 2>/dev/null )"
+    if [ -n "$target" ]; then
+      printf '%s\n' "$target"
+      return 0
+    fi
+  fi
+  printf '%s\n' "CI"
+}
+
 # Gate scripts directory — falls back to project githooks if ADAPTER_DIR doesn't have them.
 # #505: the probe file and the tier order come from the generated data file, so
 # this cascade cannot drift from what doctor.js reports.
