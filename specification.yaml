@@ -768,6 +768,47 @@ specification:
             （Round 2 架构席位 MA-01）"
           test_type: integration
 
+    - id: REQ-GATE-SHELLBATS
+      description: 'shell adapter 的 run_tests() 只用 command -v bats 探测执行器，
+        而 bats 是 devDependency，真实安装在 node_modules/.bin/bats——git hook 运行时
+        PATH 里没有它（git 不加载 shell profile，npm 只对 npm run 脚本加
+        node_modules/.bin）。实测：command -v bats 为空，而
+        node_modules/.bin/bats 存在且可执行。于是每次真实调用都打印
+        "bats not available" 并 return 0，把"装了套件但没跑"记成跳过/通过。
+        修好解析之后暴露出更严重的问题：run_tests 无选择机制，
+        _shell_test_files 会发现全仓所有 *.bats（实测 284 个），bats 会全部执行，
+        于是每次提交变成数小时——旧的探测失败其实一直在无意中挡住这次运行。
+        范围说明：.bats 契约由 CI 的 bats-contracts 作业分片承担
+        （quality-gates.yml 明写 "do not re-add a silent copy here"，串行实测
+        18m47s/22m24s）。因此解析修复保留，同时由 adapter 声明委托、Gate 5
+        不再在提交期调用 run_tests'
+      priority: high
+      acceptance_criteria:
+        - id: AC-SHELLBATS-01
+          criteria: bats 不在 PATH 时，run_tests 仍能从 node_modules/.bin 解析并执行
+            本地安装的 bats；祖先目录的 node_modules/.bin 同样被搜索（npm 提升依赖）
+          test_type: integration
+        - id: AC-SHELLBATS-02
+          criteria: 放宽解析不得掩盖真实缺失或吞掉失败——真正未安装时仍如实报告
+            "bats not available"；本地找到的套件失败时 run_tests 退出码非零；
+            系统级 PATH 上的 bats 仍然可用
+          test_type: integration
+        - id: AC-SHELLBATS-03
+          criteria: 解析修好后必须同时阻止提交期执行——shell adapter 以能力声明
+            tests_delegated_to_ci 声明其套件由 CI 承担，Gate 5 的 delegation 判断
+            位于 shell 可达分支内、且先于该分支的 run_tests 调用；未声明的 adapter
+            默认仍然执行测试（错误方向的代价不对称）
+          test_type: integration
+        - id: AC-SHELLBATS-04
+          criteria: delegation 必须是"有理由的未检查"而非静默跳过——输出须点名 CI 的
+            bats-contracts 作业；同时 run_tests 本身对直接调用者仍可用，不被削弱
+          test_type: integration
+        - id: AC-SHELLBATS-05
+          criteria: adapter 声明不得跨语言泄漏——Gate 5 在来源下一个 adapter 前清除
+            tests_delegated_to_ci / tests_delegated_to_ci_target / coverage_runs_tests，
+            否则前一个 adapter 的"是"会让后一个语言被误判为已委托、悄悄丢掉验证
+          test_type: integration
+
     - id: REQ-431
       description: sprint-gate.test.bats 的 pre-commit resolution 用例与#476后的
         真实契约脱节（resolver 已移入 lib/sprint-gate-report.sh、tier 4 指向真实
