@@ -809,6 +809,38 @@ specification:
             否则前一个 adapter 的"是"会让后一个语言被误判为已委托、悄悄丢掉验证
           test_type: integration
 
+    - id: REQ-BASELINE-ESLINT
+      description: 'xp-gate baseline create 对 TypeScript/JavaScript 从未记录任何数据，
+        而它同时打印 "✅ Baseline created" 宣称成功。实测本仓：652 个 TS/JS 文件被拼成
+        一条命令行（31,917 字符，Windows 上限约 8,191），调用必然失败，并被一个注释为
+        "ESLint unavailable — skip" 的裸 catch 吞掉。结果基线里 eslint 条目为 0、
+        shellcheck 条目 70，于是 Gate 1 拿"什么都没有"当作 652 个文件的基线。
+        这是最糟的形状：基线看起来权威、被提交、被反复重建，却恰好放行了本包自身的
+        语言。并列的第二个缺陷是 fs.existsSync("node_modules/.bin/eslint") 在 Windows
+        上无法执行（cmd 不认相对路径、无扩展名条目是 POSIX sh），第三个是结果无法匹配
+        文件时把 Array.find 的返回值当对象键，写出字面量 "undefined" 键，使
+        "71 files tracked" 与实际 70 个文件不符'
+      priority: high
+      acceptance_criteria:
+        - id: AC-BASELINE-01
+          criteria: 文件数量不得导致单条命令行超长——必须按批调用 linter，
+            且测试须证明桩真的被调用过（否则"没有超长调用"在根本没调用时也成立，
+            这正是原缺陷：工具找到了、调用失败了、失败被吞掉）
+          test_type: integration
+        - id: AC-BASELINE-02
+          criteria: 评估失败不得被记成"没有发现问题"——linter 存在但报错时基线必须
+            给出可见告警，说明哪些文件未被覆盖且"absent from the baseline, not clean"
+          test_type: integration
+        - id: AC-BASELINE-03
+          criteria: 任何情况下都不得写出 "undefined" 键——工具结果无法匹配到文件时
+            跳过该结果，而不是用 Array.find 的返回值当对象键
+          test_type: integration
+        - id: AC-BASELINE-04
+          criteria: node_modules/.bin 下的工具必须按平台解析成 execSync 真实可执行的
+            绝对路径（Windows 取 .cmd，POSIX 取无扩展名脚本）；硬编码相对路径在
+            Windows 上必然失败
+          test_type: integration
+
     - id: REQ-431
       description: sprint-gate.test.bats 的 pre-commit resolution 用例与#476后的
         真实契约脱节（resolver 已移入 lib/sprint-gate-report.sh、tier 4 指向真实

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.38.11.0] - 2026-11-18
+
+**主轴：一个用来检查别人代码质量的工具，从来没检查过自己最主体的那门语言。**
+
+### Fixed
+
+- **`xp-gate baseline create` 从未记录任何 ESLint 结果，却一直报告成功。**
+  实测本仓的基线：71 个条目里 **70 个是 shellcheck、0 个是 eslint**，而仓库有
+  652 个 TS/JS 文件。于是 Gate 1 拿"关于这些文件什么都没有"当基线。四个独立缺陷，
+  任何一个都足以造成这个状态：
+
+  1. **所有文件拼成一条命令行。** 652 个文件拼出 31,917 字符，Windows 上限约
+     8,191 —— 这次调用不可能成功。现按每批 100 个路径分批。
+  2. **失败被当成"工具不存在"。** 一个注释写着 "ESLint unavailable — skip" 的裸
+     `catch {}`，连"工具明明装了、找到了、但调用失败"也一起吞掉。"跑了没发现问题"
+     和"根本没评估"这两种状态完全无法区分。现在会打印
+     `⚠️  eslint: could not evaluate N batch(es) — <原因>`，并说明受影响的文件
+     "absent from the baseline, not clean"。
+  3. **`node_modules/.bin` 在 Windows 上根本不能被 execSync 执行。** 对同一个
+     eslint@10.3.0 实测四种写法：
+     `node_modules/.bin/eslint` → "not recognized"；
+     `node node_modules/.bin/eslint` → SyntaxError（无扩展名的是 POSIX sh 包装）；
+     `node_modules/.bin/eslint.cmd` → "not recognized"；
+     **绝对路径 + .cmd → 正常**。现在解析成绝对路径并按平台选启动器。
+  4. **写出字面量 `"undefined"` 键。** `baseline[files.find(...)]` 在匹配不到时把
+     `undefined` 转成键名，使 "71 files tracked" 覆盖了 70 个真实文件。
+
+  修复后：674 个文件，604 个 eslint + 70 个 shellcheck，无 `undefined` 键。
+  对两个改动文件跑 ESLint 干净——而这正是修复前**根本跑不起来**的检查。
+
+### Notes
+
+- **这条记录的测试本身差点再次说谎。** 最初三个断言在**旧代码**下都是绿的，原因和
+  缺陷能存活至今的原因一模一样：linter 被一个不可执行的路径调用，于是它从未运行，
+  于是"没有超长调用"、"没有抛错"、"没有产生无法匹配的结果"全部成立。现在每个测试都
+  先证明自己的桩**真的被执行过**（marker 文件或非空调用日志），再断言性质本身。
+  双向验证：对 HEAD 的 `baseline.js` 是 6/6 红，加上修复是 6/6 绿。
+- AC-BASELINE-01..04 注册进 `specification.yaml`。
+
 ## [0.38.10.0] - 2026-11-17
 
 **主轴：修好"找不到 bats"之后，才发现它一直在无意中挡着一个更严重的问题。**
