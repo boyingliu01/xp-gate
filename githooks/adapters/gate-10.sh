@@ -91,6 +91,125 @@ case "${XP_GATE_SASTD:-direct}" in
     ;;
 esac
 
+# ============================================================================
+# SEMGREP RULESET CACHE
+#
+# `--config=p/security-audit` is a REGISTRY name: semgrep fetches the ruleset
+# from semgrep.dev on every invocation. Nothing local is reused (~/.semgrep is
+# settings only), so the gate waits on the network on every commit.
+#
+# Measured over the 420 gate-10 rows in .xp-gate/audit.jsonl:
+#     p10 314 ms | p50 10231 ms | p90 180118 ms | mean 43620 ms
+#     243 runs <= 15 s, but 106 over 60 s and 42 at the 180 s timeout.
+# The distribution is bimodal and the long half is not analysis. ABBA on this
+# machine, one small file, alternating arms:
+#     A registry, network up    : 5498 ms / 5370 ms   (spread 2.4%)
+#     B registry, network DOWN  : 108926 ms / 108791 ms (spread 0.1%)
+# A 20x effect with near-zero within-arm spread. The 109 s is urllib3 retry
+# backoff (MaxRetryError) against semgrep.dev, not scanning.
+#
+# Fetching the ruleset ONCE and passing the FILE removes the network entirely:
+#     local file, network up   : 5578 ms
+#     local file, network DOWN : 5754 ms
+# So the offline case drops 109 s -> 5.8 s, the online case is unchanged within
+# noise, and verdicts are identical (a command-injection file reports 1 finding
+# either way).
+#
+# The ruleset is a plain YAML document served at https://semgrep.dev/c/<name>
+# (measured: 492566 bytes for p/security-audit).
+#
+# STALENESS IS THE RISK, and it is handled explicitly rather than ignored:
+#   - a cache younger than XP_GATE_SEMGREP_RULES_TTL_H (default 168 = 7 days) is
+#     used as-is;
+#   - an older cache is refreshed, and if the refresh fails the stale copy is
+#     still used BUT the gate announces it, because "checked with week-old rules"
+#     and "checked with current rules" are different claims and the operator has
+#     to be able to tell them apart;
+#   - no cache and no network falls back to the registry NAME so semgrep fails on
+#     its own terms and the existing runtime-error arm reports SKIP. A gate that
+#     cannot load rules must never PASS.
+#
+# The cache only ever holds a fetched document. It is not a place to hand-edit a
+# ruleset and then be graded against it.
+# @@RULES-RESOLVER-START@@
+gate10_rules_cache_dir() {
+  printf '%s' "${XP_GATE_SEMGREP_RULES_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/xp-gate/semgrep-rules}"
+}
+
+# Download one registry ruleset to a file. Returns non-zero on any failure so the
+# caller can decide, rather than leaving a truncated file behind that semgrep
+# would reject as an unparseable config.
+gate10_download() {
+  local ruleset="$1" dest="$2" url tmp
+  # p/security-audit -> https://semgrep.dev/c/p/security-audit
+  url="https://semgrep.dev/c/${ruleset}"
+  tmp="${dest}.part.$$"
+  if command -v curl >/dev/null 2>&1; then
+    # --fail so an HTTP error is a non-zero exit instead of an HTML body written
+    # to a file named .yml. Bounded timeouts: an unreachable registry must cost
+    # seconds, not the 109 s urllib3 backoff this whole block exists to avoid.
+    curl -fsS --max-time 30 --connect-timeout 10 -o "$tmp" "$url" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 30 -O "$tmp" "$url" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  else
+    return 1
+  fi
+  # A ruleset is a YAML document whose top level is a `rules:` list. Validate
+  # before installing, so a captive-portal page can never become the ruleset.
+  if [ ! -s "$tmp" ] || ! grep -q '^rules:' "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv -f "$tmp" "$dest" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# Resolve a registry name to a local file when possible.
+#
+# Prints the path to use for --config. Falls back to the registry name itself
+# when no usable cache exists, which keeps semgrep's own diagnostics intact.
+gate10_resolve_ruleset() {
+  local ruleset="$1" dir file ttl now age_days
+  dir=$(gate10_rules_cache_dir)
+  # Registry names contain '/', so flatten them: p/security-audit ->
+  # p__security-audit.yml. A flat name keeps the cache portable and greppable.
+  file="$dir/$(printf '%s' "$ruleset" | tr '/' '_').yml"
+  ttl="${XP_GATE_SEMGREP_RULES_TTL_H:-168}"
+
+  if [ -f "$file" ]; then
+    now=$(date +%s)
+    local mtime
+    mtime=$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || echo 0)
+    age_days=$(( (now - mtime) / 86400 ))
+    if [ "$mtime" -gt 0 ] && [ "$age_days" -lt "$ttl" ]; then
+      printf '%s' "$file"
+      return 0
+    fi
+    # Stale: try to refresh, and fall back to the stale copy with a warning.
+    if gate10_download "$ruleset" "$file" 2>/dev/null; then
+      printf '%s' "$file"
+      return 0
+    fi
+    echo "     ⚠️  semgrep ruleset cache is ${age_days}d old and could not be refreshed;" >&2
+    echo "        scanning with the cached ruleset (${file##*/})." >&2
+    printf '%s' "$file"
+    return 0
+  fi
+
+  # No cache: fetch once. This is the only path that pays a network round trip,
+  # and it happens once per TTL rather than once per commit.
+  if mkdir -p "$dir" 2>/dev/null && gate10_download "$ruleset" "$file" 2>/dev/null; then
+    printf '%s' "$file"
+    return 0
+  fi
+
+  # Nothing local and nothing fetchable: hand the registry name back so semgrep
+  # fails visibly and the runtime-error arm reports SKIP with its own output.
+  printf '%s' "$ruleset"
+  return 0
+}
+# @@RULES-RESOLVER-END@@
+
 # Semgrep availability check
 SEMGREP_CMD=""
 if command -v semgrep >/dev/null 2>&1; then
@@ -241,10 +360,13 @@ EOF
     # identical "filter looks like coverage" defect this issue removed from
     # Gate 4. p/csharp is loaded IN ADDITION so the security-audit rules still
     # cover the other languages in a mixed commit.
-    SEMGREP_RULES=(--config=p/security-audit)
+    # Resolved through the cache above: a local FILE when one is available, else
+    # the registry name so semgrep fails on its own terms. Measured effect on the
+    # unreachable-registry case is 109 s -> 5.8 s.
+    SEMGREP_RULES=(--config="$(gate10_resolve_ruleset "p/security-audit")")
     if printf '%s
 ' "$SEMGREP_FILES" | grep -qE ".cs$"; then
-      SEMGREP_RULES+=(--config=p/csharp)
+      SEMGREP_RULES+=(--config="$(gate10_resolve_ruleset "p/csharp")")
     fi
     SEMGREP_TIMEOUT_S="${XP_GATE_SEMGREP_TIMEOUT:-180}"
     SEMGREP_TIMED_OUT=false
@@ -424,6 +546,51 @@ console.log("");});
         # shellcheck disable=SC2034
         GATE_10_REASON="output_unparseable"
       fi
+    elif [ "${V_RESULTS:-0}" -eq 0 ] && printf '%s\n' "${SEMGREP_OUTPUT:-}" | grep -qi 'No code rules to run'; then
+      # A scan that loaded NO RULES reports results:[] and errors:[] -- a legal,
+      # successful, empty report, which is exactly what the PASS arm below is
+      # meant for. semgrep says so on stderr, and it is the only signal that
+      # separates this from a real clean scan:
+      #
+      #     rules: []         -> "No code rules to run."
+      #     p/security-audit  -> "with 225 Code rules:"
+      #
+      # TWO EARLIER DRAFTS OF THIS CHECK WERE WRONG, and both are recorded
+      # because each one looked reasonable:
+      #
+      #   1. time.rules. That is semgrep's per-rule PROFILING list, empty on every
+      #      healthy run -- a 225-rule scan reports time.rules:[]. Guarding on it
+      #      would have turned every good scan into a SKIP.
+      #   2. paths.scanned == 0. Right for the empty-ruleset case, but it ALSO
+      #      fires when the changed files are deliberately suppressed through
+      #      .semgrepignore: measured, AC-543-02 went red because a legitimate
+      #      "this file is ignored" result was reported as "nothing was examined".
+      #      Deliberate suppression is a decision, not a failure.
+      #
+      # The stderr message has neither problem: it reports the rule count, which
+      # is the thing that actually distinguishes "could not load a ruleset" from
+      # "loaded a ruleset and it had nothing to say".
+      #
+      # Findings take precedence (V_RESULTS -eq 0 is required). If semgrep DID
+      # report something, it obviously ran, and the blocking arm must see it.
+      #
+      # #717 already found this shape once, in one language: p/security-audit
+      # carries no C# rules, so a .cs file with a textbook SQL injection scored 0.
+      # That was fixed by adding a second --config; the SHAPE -- clean because
+      # nothing was loaded -- stayed reachable for every other cause (registry
+      # unreachable mid-scan, an empty cached ruleset, a bad --config path).
+      #
+      # A security gate reporting "clean" because it loaded nothing is the
+      # failure the fail-closed convention exists to prevent, so this SKIPs with
+      # its own reason rather than folding into the clean-scan PASS.
+      echo "     ⚠️  semgrep loaded no code rules — nothing was checked, so this is not a clean result"
+      echo "        The ruleset was empty or could not be resolved. Try:"
+      echo "          semgrep --config=p/security-audit <file>"
+      echo "     ⏭️  SKIPPED - SAST (no rules loaded, nothing verified)"
+      GATE_10_STATUS="SKIP"
+      # Consumed by the sourcing parent (pre-commit report JSON), not here.
+      # shellcheck disable=SC2034
+      GATE_10_REASON="zero_rules"
     elif [ "$V_RESULTS" -eq 0 ] && { [ "$V_ERRORS" -gt 0 ] || [ "$SEMGREP_EXIT" -ne 0 ]; }; then
       # Nothing was scanned to a verdict: semgrep either failed outright
       # (nonzero exit) or completed but reported scan errors for every input

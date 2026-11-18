@@ -547,6 +547,19 @@ CC_POP_EOF
         RATCHET_VERDICT=$(printf '%s\n' "$CC_CSV" | evaluate_ccn_ratchet ".ccn-baseline.json")
         CC_VIOLATIONS=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^BLOCK ' || true)
         CC_LOWER=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^LOWER ' || true)
+        # #683 landed on the flat-threshold arm below and not here. The library
+        # emits a third kind of line -- UNVERIFIED -- for "no parsable CCN row at
+        # all", and this arm counted only BLOCK lines. An UNVERIFIED verdict
+        # therefore arrived as CC_VIOLATIONS=0 and took the PASS branch:
+        #
+        #     UNVERIFIED no parsable CCN row (lizard produced no measurable function)
+        #     ✅ PASSED - Complexity within ratchet baseline.
+        #
+        # Measured live in this repo: both lines came from one run, with
+        # issues_found=0 in the journal. The library's own comment states the
+        # rule this branch was breaking -- "'unverified' means never 'clean'".
+        # The ratchet cannot claim a verdict over rows it could not read.
+        CC_UNVERIFIED=$(printf '%s\n' "$RATCHET_VERDICT" | grep -c '^UNVERIFIED' || true)
         printf '%s\n' "$RATCHET_VERDICT" | grep -v '^OK ' || true
         if [ "${CC_LOWER:-0}" -gt 0 ]; then
           echo "ℹ️  $CC_LOWER function(s) improved below baseline — refresh with: node scripts/ccn-report.cjs --write-baseline"
@@ -557,6 +570,17 @@ CC_POP_EOF
           echo "❌ BLOCKED - $CC_VIOLATIONS function(s) violate the complexity ratchet (.ccn-baseline.json)."
           echo "Revert the increase, or refactor; refresh the baseline only via ccn-baseline-refresh commits."
           exit 1
+        elif [ "${CC_UNVERIFIED:-0}" -gt 0 ]; then
+          # WARN, not BLOCK: a tool that could not answer is an environment
+          # fault, and the convention for a missing tool is SKIP/WARN. What it
+          # must not be is a pass.
+          echo "⚠️  WARN - complexity ratchet could not grade the change set; nothing was verified."
+          echo "   Run 'npx lizard --csv <files>' by hand to see why the rows are missing."
+          GATE_3_STATUS="WARN"
+          # Consumed by the sourcing parent (pre-commit report JSON), not here.
+          # shellcheck disable=SC2034
+          GATE_3_REASON="ratchet_no_parsable_rows"
+          GATE_3_DETAIL="mode=ratchet unverified=1"
         else
           echo "✅ PASSED - Complexity within ratchet baseline."
           GATE_3_STATUS="PASS"
