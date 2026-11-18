@@ -3427,12 +3427,16 @@ async function doctorDelphi(options = {}) {
   // an old local repo" became a downgrade (#414 B4). Every bundled file is
   // compared, not just SKILL.md — the install script copies *.json and
   // references/ too, and B4-style drift hits those equally (#414 R1 MI-03).
+  //
+  // #635 follow-up: this was a THIRD hand-written platform→directory table
+  // (after PLATFORM_PROFILES and install-skill's own), and it had no `dsh` arm,
+  // so on a DSH machine it resolved to `~/.config/opencode/skills/delphi-review`
+  // — a directory that does not exist. `otherDeployedSkillDirs()` below rescued
+  // the parity check, but the runner-locate check further down read this path
+  // directly and never consulted the full platform set. Derive it instead, so
+  // the mapping has one source of truth and a new platform needs no edit here.
   const platform = detectPlatform();
-  const installedSkillDir = platform === 'qoder'
-    ? path.join(HOME_DIR(), '.qoder', 'skills', 'delphi-review')
-    : platform === 'claude-code'
-      ? path.join(HOME_DIR(), '.claude', 'skills', 'delphi-review')
-      : path.join(HOME_DIR(), '.config', 'opencode', 'skills', 'delphi-review');
+  const installedSkillDir = path.join(getSkillsDirs(platform)[0], 'delphi-review');
   // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
   // real failure mode and must be drivable without mutating the package.
   const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
