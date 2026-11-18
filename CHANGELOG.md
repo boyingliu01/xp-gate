@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.38.10.0] - 2026-11-17
+
+**主轴：修好"找不到 bats"之后，才发现它一直在无意中挡着一个更严重的问题。**
+
+### Fixed
+
+- **shell adapter 解析不到本地安装的 `bats`。** `run_tests()` 只用
+  `command -v bats` 探测，而 bats 是 devDependency，真实装在
+  `node_modules/.bin/bats` —— git hook 跑的时候 PATH 里没有它（git 不加载 shell
+  profile，npm 只对 `npm run` 脚本加 `node_modules/.bin`）。实测：`command -v bats`
+  为空，而 `node_modules/.bin/bats` 存在且可执行。于是每次真实调用都打印
+  "bats not available" 并 `return 0`，把"装了套件但没跑"记成跳过。
+
+  修法与 `typescript.sh` 的 `_local_bin` 一致：先项目自己的 `node_modules/.bin`，
+  再有限深度向上找祖先（npm 会提升到工作区根），最后才落到 PATH。
+
+- **解析修好后，Gate 5 开始真的跑全部 284 个 `.bats` 套件。**
+  `_shell_test_files` 用 `find` 发现仓库里所有套件，bats 自己没有选择机制。实测：
+
+  | 暂存内容 | 结果 |
+  |---|---|
+  | 空暂存区 | 100 秒内正常完成，exit 0 |
+  | 只暂存 `shell.sh` 和它的测试 | 100 秒以上无任何输出，进程必须被 kill |
+
+  真实 `git commit` 在 Gate 5 输出之后停了 43 分钟，只剩一个孤儿 bash 在累积 CPU,
+  审计日志最后一条是 `gate-7`。换句话说：**旧的探测失败不是在制造 bug，而是在
+  意外地挡住一次没人承担得起的运行**。只修解析，等于把"静默跳过"换成了"静默挂死"。
+
+  修法是让 adapter 用**能力声明**（`tests_delegated_to_ci()`，#794 的范式而不是在
+  门禁里写语言名）说明它的套件由别处执行，Gate 5 据此不调用 `run_tests`。
+  `run_tests` 本身仍然可用、仍然能正确解析 bats —— 直接调用者不受影响。
+
+  这套件并不是被放弃了：CI 的 `bats-contracts` 作业按 runner 分片执行它们。
+  `quality-gates.yml` 明确写了不要在本地 hook 里再加一份（"do not re-add a silent
+  copy here"），因为串行跑实测占 18m47s / 22m24s。
+
+  跳过是**有理由的未检查**，不是静默通过 —— 门禁会打印
+  `shell: tests run in CI bats-contracts job ... not at commit time` 并写进
+  `GATE_5_DETAIL`。未声明的 adapter 保持原行为（默认**执行**测试），因为一个错误的
+  "是"会移除验证，而一个错误的"否"只花时间。
+
+- **测试过程中发现的第二个缺陷：adapter 声明会向后泄漏。**
+  adapter 是被 source 进同一个 shell 的，函数在循环进入下一个语言时依然存在。
+  实测：shell 声明之后，**powershell 也被报告为已委托**，尽管 `powershell.sh`
+  什么都没声明。一个陈旧的"是"会悄悄移除一个从未要求豁免的语言的验证 —— 正是声明
+  默认值想防的那个失败模式。Gate 5 现在在 source 每个 adapter 前清除
+  `tests_delegated_to_ci` / `tests_delegated_to_ci_target` / `coverage_runs_tests`；
+  对不存在的函数 `unset -f` 是 no-op，所以不声明的 adapter 不受影响。
+
+### Notes
+
+- 顺带修正了一个自己写错的测试：第一版顺序断言比较的是文件里**第一个**
+  `run_tests`，而那个在 TypeScript 分支里、shell 根本到不了 —— 断言会因与 shell
+  无关的原因时绿时红。现在它定位 delegation 检查**之后**的那个调用，并额外确认该
+  检查位于 shell 实际进入的分支内。
+- AC-SHELLBATS-01..05 注册进 `specification.yaml`。编号特意用单段形式：
+  守卫的正则是 `AC-[A-Za-z0-9]+-<数字>`，两段式的 `AC-SHELL-BATS-01` 根本匹配
+  不上，引用会不被扫描、守卫以错误的理由放行。
+
 ## [0.38.9.0] - 2026-11-17
 
 **主轴：0.38.8.0 把 CI 从"全红"降到"两个红"，这一版解决剩下这两个 —— 而它们的成因是同一个。**

@@ -626,6 +626,16 @@ else
   # Route to appropriate test runner via adapter
   for CURRENT_LANG in $PROJECT_LANGS; do
     ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
+    # Drop declarations left behind by the PREVIOUS adapter before sourcing this
+    # one. Adapters are sourced into one shell, so a function one adapter defines
+    # stays callable while the next language is being handled -- measured: after
+    # shell.sh declared its delegation, powershell was reported as delegating too,
+    # even though powershell.sh declares nothing. The consequence is not cosmetic:
+    # a stale "yes" removes test verification for a language that never asked for
+    # it, which is the exact failure mode the declaration's default is meant to
+    # prevent. `unset -f` on an absent function is a no-op, so this is safe for
+    # adapters that declare nothing.
+    unset -f tests_delegated_to_ci tests_delegated_to_ci_target coverage_runs_tests 2>/dev/null || true
     if [ "${CURRENT_LANG}" != "unknown" ] && [ -n "$ADAPTER_FILE" ]; then
     if source "$ADAPTER_FILE" 2>/dev/null; then
       # TypeScript: vitest with smart test selection
@@ -819,7 +829,28 @@ else
         # declare it runs the tests here as well. Double-running costs time; not
         # running them would cost verification, and #794's precedent is that the
         # slower mistake is the acceptable one for an undeclared adapter.
-        if adapter_declares_coverage_runs_tests; then
+        # An adapter may declare that its suite runs elsewhere. Checked FIRST,
+        # because for such an adapter the question below ("does coverage also run
+        # the tests?") is moot -- neither branch may call run_tests.
+        #
+        # Why this exists for shell specifically: `run_tests` has no selection and
+        # discovers every *.bats in the repo (284, measured), so calling it here is
+        # a multi-hour commit. That was masked by a failing `command -v bats`
+        # probe that returned 0 before the run; once the probe was fixed, a
+        # shell.sh-only commit hung with no output for 100s+ and had to be killed.
+        #
+        # The report line is required, not decorative: removing the run must not
+        # make the check indistinguishable from one that passed, and the reader
+        # has to be told where it IS verified (CI's sharded bats-contracts job,
+        # per quality-gates.yml -- "do not re-add a silent copy here").
+        if adapter_delegates_tests_to_ci; then
+          local _delegated_to
+          _delegated_to="$(adapter_test_delegation_target)"
+          echo "ℹ️  ${CURRENT_LANG}: tests run in ${_delegated_to}, not at commit time."
+          echo "   Not checked by this gate -- verified on push/PR instead."
+          GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests delegated to ${_delegated_to}"
+          DELEGATED_LANGS="${DELEGATED_LANGS:+${DELEGATED_LANGS} }${CURRENT_LANG}"
+        elif adapter_declares_coverage_runs_tests; then
           echo "ℹ️  ${CURRENT_LANG}: coverage run includes the tests — deferring test execution to a single pass."
           TESTS_DEFERRED=true
         else
