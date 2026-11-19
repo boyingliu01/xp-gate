@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.38.62.0] - 2026-11-20
+
+**控制台说 BLOCKED，机器可读的记录说「跳过，没有原因」。**
+
+Gate 5 的覆盖率分支是 fail-closed 的：找不到标准覆盖率报告文件时，
+打印 `BLOCKED - Could not determine <lang> coverage percentage` 并 `return 1`。
+**判定是对的。**
+
+但记录没拿到这个判定。实测（PHP fixture）：
+
+| 位置 | 内容 |
+|---|---|
+| 控制台 | `❌ BLOCKED - Could not determine php coverage percentage.` |
+| 报告 | `gate5_tests {"status": "SKIP", "reason": ""}` |
+| 汇总 | `verdict PARTIAL`, `gatesFailed 0` |
+
+`GATE_5_STATUS` 和 `GATE_5_DETAIL` 在 `return 1` 之前**都没有被赋值**，
+双双保持了进入门禁前的值。
+
+### 影响
+
+机器可读记录是 `xp-gate audit`、技术债追踪和耗时基线**唯一**能看到的东西。
+它记录的是「跳过且无原因」，而真相是「阻断」。
+
+### 修复后的实测
+
+| 字段 | 修复前 | 修复后 |
+|---|---|---|
+| `gate5 status` | `SKIP` | **`BLOCK`** |
+| `gate5 reason` | `""` | **`coverage_not_determined: no standard report file for php`** |
+| `verdict` | `PARTIAL` | **`FAIL`** |
+| `gatesFailed` | `0` | **`1`** |
+
+同时，链现在正确地**停在 Gate 5**（`Chain stopped at Gate 5`），
+此前它静默继续往下跑。
+
+### 这是本系列第 10 处同类缺陷
+
+前 9 处是「判定没能到达正确的状态」，这一处是**「判定没能到达任何状态」**。
+
+测试 `gate-5-record-matches-verdict.test.bats` 断言的正是这个：
+
+1. `BLOCKED - Could not determine` 分支必须给 `GATE_5_STATUS` 赋值
+2. 赋值必须在 `return` **之前**（不是 `return` 之后的死代码）
+3. 报告模板确实读这两个变量
+
+### 证伪
+
+移除两行赋值 → 测试 1/2 变红；恢复后 3/3 绿。
+
 ## [0.38.61.0] - 2026-11-20
 
 **适配器拒绝评估时，必须说明为什么。**
