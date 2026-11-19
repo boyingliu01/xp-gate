@@ -72,6 +72,7 @@ gate_5c_alignment() {
     echo "  ⏭️  Gate 5c: spec/test alignment NOT CHECKED — $req_ids_file missing"
     echo "     Run 'xp-gate check-alignment' to generate it and enable this gate."
     GATE_5C_STATUS="SKIP"
+    GATE_5C_REASON="no_req_ids"
     return 0
   fi
 
@@ -81,6 +82,7 @@ gate_5c_alignment() {
     echo "  ⏭️  Gate 5c: spec/test alignment NOT CHECKED — req-ids.json is stale"
     echo "     specification.yaml is newer. Run 'xp-gate check-alignment' to regenerate."
     GATE_5C_STATUS="SKIP"
+    GATE_5C_REASON="stale_req_ids"
     return 0
   fi
 
@@ -91,6 +93,13 @@ gate_5c_alignment() {
     # "nothing to check" from "the gate is broken" (#585).
     echo "  ℹ️  Gate 5c: no test files among the staged changes — nothing to align."
     GATE_5C_STATUS="SKIP"
+    # Consumed by the sourcing gate body: gate-5-entry.sh folds it into
+    # GATE_5_DETAIL for the audit row. shellcheck analyses this file alone, and
+    # this is the last assignment in the function, so it reads it as dead -- the
+    # two earlier ones are followed by reads on the same path. Same contract as
+    # GATE_5C_STATUS directly above.
+    # shellcheck disable=SC2034
+    GATE_5C_REASON="no_staged_test_files"
     return 0
   fi
 

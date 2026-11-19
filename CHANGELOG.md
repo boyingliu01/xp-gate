@@ -1,5 +1,86 @@
 # Changelog
 
+## [0.38.21.0] - 2026-11-18
+
+**门禁 5 的 5b / 5c / FOCUS / DELETE 审查完成。找到并修掉 2 个缺陷。**
+
+### 5a 与 5b 实测通过，未改动
+
+**5a 新文件配对**：新源文件没有测试就阻断，提示给出期望的文件名与 `@no-test-required`
+出口。
+
+**5b mock 密度**：用 70% 的真实测试文件驱动，正确报出 `⚠️  MOCK DENSITY ... 70.0%
+(exceeds 50%)`，并且**不阻断提交**——符合它「advisory」的设计。加上
+`@mock-justified:` 注释后变为 `📝 (justified)`，豁免链路有效。
+
+### 意外发现：一个先于 5b 触发的检查是有效的
+
+我第一次构造 fixture 时随手写了 `expect(1).toBe(1)` 来凑断言，门禁 5 直接阻断：
+
+```
+❌ BLOCKED - tautological assertion(s) added by this change in src/mocky.test.ts (cannot fail)
+```
+
+这个「同义反复断言」检查是真的在工作——它识别出那条断言不可能失败。这是我测试写得
+草率，反而顺便验证了另一个门禁分支。
+
+### 5c：算出了判定，没有任何地方读它
+
+`gate-5c-alignment.sh` 在每条路径上把 `GATE_5C_STATUS` 设为 PASS / SKIP / BLOCK，
+文件头还专门写明「绝不为空」，因为此前版本在新克隆上什么都不打印、**沉默被读成了成功**
+（#585）。
+
+实测：`GATE_5C_STATUS` **在 gate-5c-alignment.sh 之外没有任何地方被读取**。
+
+| 路径 | 后果 |
+|---|---|
+| BLOCK | 仍然阻断（靠 `\|\| return 1`），这一条是好的 |
+| SKIP | 原因只打印到控制台；审计行只记 `GATE_5_DETAIL`，而 5c 从不设置它 |
+| PASS | 与「从未运行」无法区分 |
+
+修复：把判定折进 `GATE_5_DETAIL`，并为三个跳过分支各加一个可区分原因
+（`no_req_ids` / `stale_req_ids` / `no_staged_test_files`）。**折进 detail 而不是
+改写 `GATE_5_STATUS`**，因为 5c 是子检查——它跑不了，不代表它旁边的测试与覆盖率也没被
+度量，用 SKIP 盖掉一个真实测试运行换来的 PASS 等于用一个错记录换另一个错记录。
+
+### FOCUS 有效，DELETE 对最需要它的提交不可达
+
+**`.only` 检测正常**：暂存 `test.only(...)` 后阻断并给出精确行号。
+
+**删除测试的告警是坏的**。只提交一个测试文件的删除时，门禁 5 报告：
+
+```
+⏱️  Gate 5: 2124ms (skipped — no code changes)
+Gate 5: Tests + Coverage    SKIP (coverage: N/A%)
+```
+
+完全不提被删除的文件。原因：删除扫描位于 `if [ -n "$STAGED_TEST_FILES" ]` **内部**，
+而那个列表由 `--diff-filter=ACM` 构建，**按定义永远不含被删除的文件**。于是「只删测试」
+恰好是守卫唯一无法运行的情形，而那正是它被写出来的情形。
+
+**这比缺一条告警更严重**：提交随后进入「没有代码文件变更」的提前跳过，记录的
+`no_code_files_changed` 并不假，正因如此才危险——日志显示门禁因一个无害原因主动让开，
+而安全网已经消失了。
+
+修复：把扫描移到守卫之外，改为按**函数**是否存在来守卫（空删除列表是常态，缺分类器不是）。
+端到端验证后，同样的提交现在报出：
+
+```
+⚠️  WARN - test file(s) deleted with no same-named replacement:
+     Deleting a test removes the safety net (指南 §9.5)
+```
+
+### 两次假绿，都是同一族的
+
+**第一次**：`AC-GATE5-DELETE-02` 第一版直接调用 `classify_deleted_tests`，修复前就是绿的
+——它证明分类器能用，从未证明门禁会调用它。改成驱动真实钩子后才有意义。
+
+**第二次**：证伪时我用 node 的内联字符串做替换，`$1` 被 shell 展开，替换静默失败，
+于是「回退后测试仍绿」被我误读为测试无效。用 heredoc 重新执行、确认 `grep -c` 计数为 1
+之后，AC-02 才正确变红并报出 `the safety net vanished silently`。
+
+这是本会话第九、第十次假绿。共同点始终是：**断言的对象与被断言的对象不是一回事**。
+
 ## [0.38.20.0] - 2026-11-18
 
 **门禁 5 审查开始。核心安全属性实测全部正确，但覆盖率排除漏了 `.spec.`。**
