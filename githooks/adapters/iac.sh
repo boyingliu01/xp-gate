@@ -76,6 +76,112 @@ run_static_analysis() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   
   local exit_code=0
+
+  # ── Parse/type validation, before the security scanners ────────────────────
+  #
+  # checkov and tflint are SECURITY scanners. They answer "is this configuration
+  # dangerous", never "is this configuration parseable" -- and a file nothing can
+  # parse has no dangers to report, so they pass it. Measured on a one-file
+  # fixture whose closing brace was missing:
+  #
+  #   checkov:  "Parsing errors: 1 / Error parsing file ...\bad.tf"   exit 0
+  #   adapter:  "✅ PASSED - Language-specific code quality checks."   exit 0
+  #   terraform: "Error: Unclosed configuration block"                 exit 1
+  #
+  # So the gate reported a positive verdict for a file its own toolchain refuses
+  # to load. Gate 1 does exactly this parse step for TypeScript (tsc) and C++
+  # (the compiler); IaC was the gap.
+  #
+  # Scope is deliberately narrow:
+  #   - only when .tf files are in the change set (input short-circuit first)
+  #   - only when terraform is resolvable locally (no network -- a gate must
+  #     never install what it was asked to detect)
+  #   - `-backend=false` so init cannot reach for a remote state backend
+  #   - a bounded timeout, and a failure to RUN is reported as such rather than
+  #     scored as "found nothing"
+  # `iac_files` is the three-line TERRAFORM:/KUBERNETES:/DOCKER: summary that
+  # detect_iac_files returns; take the Terraform line and drop the prefix.
+  local _tf_list
+  _tf_list=$(printf '%s\n' "$iac_files" | sed -n 's/^TERRAFORM://p')
+  if [ -n "${_tf_list// /}" ] && command -v terraform >/dev/null 2>&1; then
+    local _tf_attempted=0 _tf_bad=0
+    local _tf_dir
+    # Validate once per distinct directory: terraform resolves a whole module
+    # directory, so validating file by file would re-init the same module N times
+    # and report the same error N times.
+    #
+    # The list is split on whitespace deliberately (detect_iac_files emits
+    # space-separated paths) but goes into an ARRAY rather than straight into a
+    # `for`, so each element stays one path and a directory name containing a
+    # space cannot become two. shellcheck's SC2086 is right that a bare unquoted
+    # expansion here would be a latent word-splitting bug.
+    local _tf_dirs=()
+    local _tf_f
+    while IFS= read -r _tf_f; do
+      [ -n "$_tf_f" ] || continue
+      local _tf_d
+      _tf_d=$(dirname "$_tf_f")
+      # Dedupe without relying on IFS: compare against what is already there.
+      local _tf_seen=0 _tf_e
+      for _tf_e in ${_tf_dirs[@]+"${_tf_dirs[@]}"}; do
+        [ "$_tf_e" = "$_tf_d" ] && { _tf_seen=1; break; }
+      done
+      [ "$_tf_seen" -eq 0 ] && _tf_dirs+=("$_tf_d")
+    done <<TFEOF
+$(printf '%s\n' "$_tf_list" | tr ' ' '\n' | sed '/^$/d')
+TFEOF
+    for _tf_dir in ${_tf_dirs[@]+"${_tf_dirs[@]}"}; do
+      [ -d "$_tf_dir" ] || continue
+      _tf_attempted=$((_tf_attempted + 1))
+      local _tf_out _tf_rc
+      # Validate FIRST, without init.
+      #
+      # `terraform validate` answers the parse/type question on its own; it only
+      # needs init to resolve the provider SCHEMA, and a file that does not parse
+      # never gets that far. Measured on the unclosed-block fixture:
+      #
+      #   terraform validate, no init       0.27 s  -> "Unclosed configuration block"
+      #   terraform init + validate         4.8 s   -> same answer
+      #
+      # So init was 94% of the cost of a verdict it did not influence. It is run
+      # only when validate says it cannot proceed without it ("Missing required
+      # provider" / "Module not installed" / an uninitialized-directory warning),
+      # which is the clean-file case where the provider schema really is needed.
+      #
+      # `-backend=false` keeps init off any remote state backend: a gate must
+      # never wait on the network.
+      if command -v timeout >/dev/null 2>&1; then
+        _tf_out=$( cd "$_tf_dir" && timeout 120 terraform validate -no-color 2>&1 )
+        _tf_rc=$?
+        if [ "$_tf_rc" -ne 0 ] && printf '%s' "$_tf_out" | grep -qiE 'must be initialized|Missing required provider|Module not installed|run .terraform init'; then
+          ( cd "$_tf_dir" && timeout 120 terraform init -backend=false -input=false -no-color >/dev/null 2>&1 )
+          _tf_out=$( cd "$_tf_dir" && timeout 120 terraform validate -no-color 2>&1 )
+          _tf_rc=$?
+        fi
+      else
+        _tf_out=$( cd "$_tf_dir" && terraform validate -no-color 2>&1 )
+        _tf_rc=$?
+        if [ "$_tf_rc" -ne 0 ] && printf '%s' "$_tf_out" | grep -qiE 'must be initialized|Missing required provider|Module not installed|run .terraform init'; then
+          ( cd "$_tf_dir" && terraform init -backend=false -input=false -no-color >/dev/null 2>&1 )
+          _tf_out=$( cd "$_tf_dir" && terraform validate -no-color 2>&1 )
+          _tf_rc=$?
+        fi
+      fi
+      if [ "$_tf_rc" -ne 0 ]; then
+        _tf_bad=$((_tf_bad + 1))
+        echo "   ❌ terraform validate rejected $_tf_dir:"
+        printf '%s\n' "$_tf_out" | grep -vE '^\s*$' | head -12 | sed 's/^/      /'
+      fi
+    done
+    if [ "$_tf_attempted" -gt 0 ] && [ "$_tf_bad" -gt 0 ]; then
+      echo "   ❌ $_tf_bad Terraform module(s) failed validation."
+      exit_code=1
+    fi
+    if [ "$_tf_attempted" -eq 0 ]; then
+      echo "   ⚠️  .tf files staged but no containing directory could be resolved;"
+      echo "       syntax validation did not run."
+    fi
+  fi
   # #803: counts scanner/file pairs that actually ran, independent of their
   # verdict. `exit_code == 0` answers "did anything fail?"; it cannot answer "did
   # anything run?", and using it for both made a clean scan indistinguishable from

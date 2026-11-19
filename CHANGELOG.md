@@ -1,5 +1,197 @@
 # Changelog
 
+## [0.38.30.0] - 2026-11-19
+
+**PHP 接入，以及 C# 复盘查出的「Dart 表面支持、实际不评分」。**
+
+### Dart 并没有被支持
+
+复盘 C# 接入时提出「Dart 到底支不支持」，答案是**不支持**：
+
+```
+$ xp-gate language-capability dart
+dart: 9/13 surfaces checked, 3 not implemented, 1 unknown   ← 看似 9 面接线
+```
+
+但 `.ccn-baseline.json` 的 `population.extensions` 是
+`[.cjs, .js, .mjs, .py, .ts]`，不含 `.dart`——一个真实的 `lib/foo.dart`
+被 `ccn_file_in_population` 判为 **DROPPED**，永不评分。门禁显示 ✅，
+实际上一个文件都没看过。
+
+调查还推翻了一个想当然的修法：`population` 不是手写清单，而是
+`baselinePopulation()` **从实际扫到的文件推导**的。所以「往 xp-gate 仓库的
+baseline 里加 `.dart`」是错的——本仓库没有 Dart 代码，加了等于宣称有。
+正确做法是让写入器能扫到它。实测在真含 Dart 的临时仓库里
+`--write-baseline` 得到的正是 `{"roots":["lib","scripts"],"extensions":[".cjs",".dart"]}`，
+`ccn_file_in_population .ccn-baseline.json lib/complex.dart` → **GRADED**。
+
+### #848：错误的 CCN 比没有 CCN 更危险
+
+`--csv-verified` 对五种语言实测（同一复杂度、同一形状）：
+
+| 语言 | lizard CCN | `--csv-verified` | 判定 |
+|---|---|---|---|
+| Go | 8 | **1** | ❌ |
+| Dart | 8 | **1** | ❌ |
+| Python | 8 | 8 | ✅ |
+| Java | 8 | 8 | ✅ |
+| C# | 8 | 8 | ✅ |
+
+根因不在语言词表（原 issue 的猜测），而在：
+
+```js
+const body = findFunctionBody(slice, name);   // 返回 [start, end] 下标对
+classifyUnverifiedRow({ body, ... })          // 期望「行数组」
+```
+
+`ccnOfBody([0,3])` 遍历两个数字，`BRANCH_RE` 一个都不匹配，于是返回初值 `1`。
+危险方向是把真实热点改写成看起来微不足道，ratchet 永远咬不住它——而 stderr
+还打印「rescued by name」，让这一行看起来比未验证的行**更**可信。
+
+修复：`rescueBodyLines()` 把下标对还原成真实行。修复后五种语言全部 8→8。
+
+**反向对照**：只回退这一处，vitest 立刻 `2 failed | 35 passed`，红的正是
+`.go` 和 `.dart`，Python/Java/C# 保持绿——与上表缺陷分布完全吻合。
+
+### PHP 接入：九个面，零 NOT WIRED
+
+```
+$ xp-gate language-capability php
+php: 9/13 surfaces checked, 3 not implemented, 1 unknown
+```
+
+适配器的每条判据都是实测的，不是照抄 C#：
+
+| 工具 | 实测契约 | 适配器怎么做 |
+|---|---|---|
+| phpcs | 0=干净、2=有错、**3=工具跑不起来** | 3 → BLOCK(2)，不是 FAIL(1) |
+| phpstan | 0=无错、1=有错、**1 也用于坏路径/坏配置** | 退出码无法区分，改数 `--error-format=raw` 的诊断行 |
+| phpunit | 0=通过、1=失败、2=错误/中止、255=起不来 | 直接映射 |
+| 覆盖率 | 原生支持 `--coverage-cobertura` | **必须 cobertura**：Gate 5 Stage 2 只解析 `<coverage line-rate>`（#768），clover 是它读不懂的合法报告 |
+| 覆盖率驱动 | 无 pcov/xdebug 时 PHPUnit **不写文件且退出 0** | 先探测驱动，缺失 → BLOCK，绝不报 0% |
+
+端到端（真实 composer 项目，非 mock）：热点从 CCN 9 调到 13 →
+`BLOCK src/Hotspot.php:9 CCN=13 baseline=9`；phpstan 抓到 3 条真实错误；
+phpcs 抓到 6 条 PSR12 违规；`XP_GATE_PHPCS_STANDARD=NoSuchStandard` → rc=2（BLOCK），
+而真实违规是 rc=1（FAIL）——两者可区分。
+
+`PhpAdapter` + `adapterMap` 是**被既有测试逼出来的**：`.php` 一进
+`PRINCIPLES_FILES`，`language-capability` 立刻报
+`php: FILTER ACCEPTS IT, analyzer.ts adapterMap has no entry`——正是 #717 的形状，
+换了个门复发。
+
+### 接入过程又暴露两个会让 Gate 3 空转的缺陷
+
+1. **`SOURCE_EXT` 没有 `php`** —— `findSourceFiles()` 返回 **0 个文件**，
+   `--write-baseline` 照样写出一个空基线。与 #847 的 Dart 遗漏同形。
+2. **`skipDirs` 没有 `vendor`** —— composer 官方建议**提交** `vendor/`，
+   所以「只扫 git 跟踪文件」挡不住它。实测两个源文件的 fixture 把
+   `vendor/phpunit/.../bootstrap.bundle.min.js` 当成本项目生产代码评分。
+
+两者各有独立反向对照，互不掩盖。
+
+### 顺带修好两个既有的能力报告 bug
+
+拆分那个被 Gate 4 判违规的 264 行 `inspectLanguage()` 时发现：
+
+- `inspectRegistry()` 的正则 `^\s{2}${lang}:\s*\{` **从来没匹配成功过**：
+  `m` 标志下 `\s` 会吃掉 `^` 刚锚定的换行，于是要求「一空行 + 又一段空白」。
+  实测对 `  csharp: {` 返回 false。**每个语言都被误报 NOT WIRED**，
+  真缺口与假缺口长得一样。改成 `[ \t]{2}`。
+- `inspectGate6()` 读 `gate-6-layers.sh`，而门禁体在 `gate-6-entry.sh`。
+
+> 一个讲「怎么把门禁接全」的报告自己过不了 Gate 4（`long-function`，上限 50），
+> 是没有资格讲这件事的。已拆成 `language-capability-surfaces.js`，一门禁一函数。
+
+回归：74 vitest + 19 bats 全绿；gate-3.sh / gate-4.sh 各自五份副本 md5 唯一。
+
+## [0.38.30.0] - 2026-11-19
+
+**门禁 1 对一个 terraform 自己拒绝解析的文件报了 PASS。**
+
+### 实测
+
+单文件 fixture，缺一个闭合花括号：
+
+```hcl
+resource "aws_security_group" "broken" {
+  ingress {
+    from_port = 22
+}
+```
+
+门禁 1 的输出：
+
+```
+   ── Checking iac ──
+Running static analysis for iac...
+✅ PASSED - Language-specific code quality checks.
+```
+
+同一个文件，terraform 自己的判断：
+
+```
+Error: Unclosed configuration block
+  on bad.tf line 1, in resource "aws_security_group" "broken":
+```
+
+### 根因
+
+IaC 适配器只调 checkov 和 tflint。**两个都是安全扫描器**——它们问的是「这个配置危险吗」，
+从不是「这个配置能解析吗」。一个谁都解析不了的文件没有任何危险可报，于是扫描器放行，
+`iac_scans_completed` 非零、`exit_code` 为 0，门禁给出肯定判定。
+
+有意思的是 checkov **其实报了这个错**：
+
+```
+Passed checks: 0, Failed checks: 0, Skipped checks: 0, Parsing errors: 1
+Error parsing file ...ad.tf
+```
+
+但退出码是 0，而适配器只读退出码。**「运行了一个检查」被当成了「检查过了」。**
+
+### 修复
+
+在任何安全扫描之前加一层 `terraform validate`——它正是 tsc 对 TypeScript、
+编译器对 C++ 所扮演的「解析 + 类型」层，门禁 1 对那两种语言早就这么做了，IaC 是漏网。
+
+范围刻意收窄：只在变更集里有 `.tf` 时跑、只在本地能解析到 terraform 时跑、
+`-backend=false` 不碰远程后端、120 秒上限。**先 validate 再按需 init**：
+
+| 步骤 | 耗时 |
+|---|---|
+| `terraform validate`（不 init） | **0.36 s** → `Error: Unclosed configuration block` |
+| `terraform init` + validate | 4.8 s → 同样答案 |
+
+init 占了一个它并不影响的判定的 94% 时间，所以只在 validate 报「需要初始化」时才跑。
+
+### 新增开销
+
+**约 1 秒**。同一 fixture 的总耗时分解：语法验证 1 s，checkov 15 s。
+checkov 是既有开销，不属于本次改动。
+
+### 顺带修掉的诊断缺陷
+
+第一版用 `init && validate` 串联。而 `init` 在真正坏掉的文件上**自己就返回非零且不打印
+任何东西**，于是 `&&` 短路，输出变成：
+
+```
+❌ terraform validate rejected .:
+```
+
+——指错了命令，还扣下了证据。改为 `init ; validate`：init 只是为了让模块可加载，
+加载不了本身就是模块坏了的证明。
+
+### 测试
+
+- `AC-IAC-SYNTAX-01` 适配器必须存在 terraform 验证调用（结构性）
+- `AC-IAC-SYNTAX-02` 不可解析的 `.tf` 必须让适配器返回非零（行为性）
+- `anti-vacuity` 安全扫描器仍须被调用——修复是**加**一层，不是**换**一层
+
+`AC-02` 第一版只 grep 输出里的 `/error|syntax|parse/` 就通过了，因为 checkov 确实打印了
+`Parsing errors: 1`，而适配器照样 exit 0。**断言了扫描器的词汇，没断言门禁的判定。**
+改成断言退出码后立刻变红（`rc=0`）。已通过整体回退验证。
+
 ## [0.38.29.0] - 2026-11-19
 
 **`audit --stats` 把历史坏值加进了平均值，报出「单次门禁 5842895372 毫秒」。**
