@@ -351,6 +351,13 @@ export const javaParse = {
 };
 
 export class JavaAdapter extends BaseAdapter implements Adapter {
+  /**
+   * This adapter implements rules of its own, so the gate may report its files
+   * as genuinely examined. Adapters that only make a language detectable leave
+   * this at the BaseAdapter default (`false`) and are reported as unanalysed.
+   */
+  readonly declaresRuleCoverage: boolean = true;
+
   detectLanguage(): string {
     const ext = this.filePath.toLowerCase();
     if (ext.endsWith('.java')) {

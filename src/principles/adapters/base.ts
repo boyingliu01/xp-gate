@@ -72,6 +72,32 @@ export abstract class BaseAdapter implements Adapter {
     return measureDuplication(this.fileContent);
   }
 
+  /**
+   * Does this adapter really support the clean-code rules, or does it only make
+   * the language DETECTABLE?
+   *
+   * `false` is the SAFE default here, and the direction is worth stating plainly
+   * because it is the opposite of the usual instinct: `false` makes the gate say
+   * "this language was not analysed", which is a loss of claimed coverage, while
+   * `true` makes it say "clean", which is a claim about code nobody looked at.
+   * The first is a limitation; the second is a lie.
+   *
+   * So an adapter opts IN by overriding this to return `true` once it implements
+   * rules of its own. A new shallow adapter — detect the language, extract
+   * functions with a regex — inherits the honest answer without its author
+   * needing to know this member exists.
+   *
+   * Measured before this: a Go file with 6-level nesting produced
+   * `✓ No violations found / Files checked: 1 / Rules run: 21`, and all 21 rules
+   * ran against a file none of them can read. TypeScript with the same nesting is
+   * reported correctly, which is precisely why the gap survived — the gate looked
+   * like it worked.
+   * - a `readonly` property rather than a method, because the value is a static
+   *   fact about the adapter and this class already sat at the 15-method
+   *   God-Class threshold; a 16th method was a genuine warning, not a formality.
+   */
+  readonly declaresRuleCoverage: boolean = false;
+
   protected readFileContent(filePath: string): string {
     try {
       return readFileSync(filePath, 'utf-8');

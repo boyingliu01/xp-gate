@@ -134,7 +134,7 @@ function adapterReportingLines(totalLines: number): Adapter {
     extractClasses: () => [],
     extractExports: () => [],
     countLines: () => totalLines,
-    getDuplication: () => ({ percentage: 0, blocks: [] }),
+    getDuplication: () => ({ percentage: 0, blocks: [] }), declaresRuleCoverage: true
   };
 }
 

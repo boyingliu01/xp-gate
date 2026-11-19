@@ -92,7 +92,7 @@ describe('types.ts - Core Interfaces', () => {
         extractClasses: () => [],
         extractExports: () => [],
         countLines: () => 0,
-        getDuplication: () => ({ percentage: 0, blocks: [] }),
+        getDuplication: () => ({ percentage: 0, blocks: [] }), declaresRuleCoverage: true,
       };
 
       expect(adapter.detectLanguage).toBeDefined();

@@ -81,6 +81,13 @@ function countMemberDeclarations(body: string): number {
  * problem (braces inside literals/comments) applies verbatim.
  */
 export class CSharpAdapter extends BaseAdapter implements Adapter {
+  /**
+   * This adapter implements rules of its own, so the gate may report its files
+   * as genuinely examined. Adapters that only make a language detectable leave
+   * this at the BaseAdapter default (`false`) and are reported as unanalysed.
+   */
+  readonly declaresRuleCoverage: boolean = true;
+
   detectLanguage(): string {
     const lower = this.filePath.toLowerCase();
     if (lower.endsWith('.cs') || lower.endsWith('.csx')) {

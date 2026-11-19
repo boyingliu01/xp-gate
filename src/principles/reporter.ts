@@ -98,12 +98,40 @@ function getRuleLevel(ruleId: string): string {
 }
 
 function formatEmptyResult(result: AnalysisResult, lines: string[]): string {
-  lines.push('✓ No violations found');
+  lines.push(...emptyResultHeadline(result.summary.unanalysedLanguages));
   lines.push('');
   lines.push(`Files checked: ${result.summary.filesChecked}`);
   lines.push(`Rules run: ${result.summary.rulesRun}`);
   lines.push(`Execution time: ${result.executionTimeMs}ms`);
   return lines.join('\n');
+}
+
+/**
+ * The headline of an empty result, which must not claim more than the run did.
+ *
+ * When some files belong to languages no rule can read, "✓ No violations found"
+ * on its own reads as "examined and clean" for code nobody examined — measured
+ * before this existed: a Go file with 6-level nesting produced exactly that line
+ * beside "Files checked: 1".
+ *
+ * The count stays visible either way, because the file WAS read and its language
+ * WAS identified; what has to change is the implication that rules looked at it.
+ *
+ * Split out of formatEmptyResult so the branch does not raise that function's
+ * cyclomatic complexity: it is a formatting decision, not an additional path
+ * through the reporting.
+ */
+function emptyResultHeadline(unanalysed: string[]): string[] {
+  if (unanalysed.length > 0) {
+    return [
+      '✓ No violations found in the files that were analysed',
+      '',
+      `⚠️  NOT ANALYSED: ${unanalysed.join(', ')} — an adapter exists (the language ` +
+        'is detected and counted below) but no clean-code rule can read it. These ' +
+        'files were not checked; their absence from the list above is not a pass.',
+    ];
+  }
+  return ['✓ No violations found'];
 }
 
 function formatViolationLines(violation: Violation): string[] {

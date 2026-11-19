@@ -78,4 +78,33 @@ export interface Adapter {
    * not default into silence.
    */
   getDuplication: () => DuplicationReport;
+  /**
+   * Can this adapter actually support the clean-code rules, or does it only make
+   * the language DETECTABLE?
+   *
+   * Per `src/principles/AGENTS.md` the two are not the same and the difference is
+   * deliberate: this engine covers languages it can parse meaningfully, while the
+   * shell adapters cover languages it can lint or test. An adapter with no
+   * TS-side rule support is not a bug — but reporting its files as "✓ No
+   * violations found" is, because that reads as "examined and clean".
+   *
+   * Measured before this member existed: a Go file with 6-level nesting produced
+   * `✓ No violations found / Files checked: 1 / Rules run: 21`. All 21 rules ran
+   * against a file none of them can read. The same content in TypeScript is
+   * reported correctly, which is what made it invisible.
+   *
+   * REQUIRED, for the same reason `getDuplication` is: an optional member plus an
+   * `undefined`-means-analysed branch would reproduce the defect it fixes.
+   *
+   * The default lives in `BaseAdapter` and must be the SAFE side. Safe here is the
+   * opposite of instinct: `false` makes the gate say "not analysed", which is a
+   * loss of claimed coverage; `true` would make it say "clean", which is a claim
+   * about code nobody read. An adapter that genuinely implements rules opts in.
+   *
+   * A boolean property rather than a method — the value is a static fact about the
+   * adapter, not something that varies per call, and `BaseAdapter` already sat at
+   * the 15-method God-Class threshold, so a 16th method was a real warning rather
+   * than a formality.
+   */
+  declaresRuleCoverage: boolean;
 }
