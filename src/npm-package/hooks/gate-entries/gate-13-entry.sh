@@ -542,6 +542,11 @@ if ! gate_enabled 13; then
 fi
 
 GATE_13_STATUS="SKIP"
+# Cleared here, not only set on the arms that need it: the audit call below passes
+# this as the detail, and an inherited value from a previous gate would attribute
+# one gate's reason to another.
+GATE_13_DETAIL=""
+
 if [ "${XP_GATE_DISABLE_13:-}" = "1" ]; then
   echo "⏭️  SKIPPED - Gate 13: Compiler Strictness (XP_GATE_DISABLE_13=1)"
   GATE_13_STATUS="SKIP"
@@ -561,10 +566,16 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
 
     _g13_worst=0
     _g13_rc=0
+    # True when at least one arm answered GATE13_SKIP (4). Kept separately from
+    # _g13_worst because SKIP is not a severity -- it is "this arm had nothing to
+    # evaluate", so it must not beat a WARN or a BLOCK, but it must survive an
+    # arm that answered PASS.
+    _g13_any_skip=0
     _g13_note() {
       case "$1" in
         1|2) _g13_worst=$1 ;;
         3) [ "$_g13_worst" -eq 0 ] && _g13_worst=3 ;;
+        4) _g13_any_skip=1 ;;
       esac
       return 0
     }
@@ -577,6 +588,18 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
     gate13_run_csharp_analysis; _g13_rc=$?; _g13_note "$_g13_rc"
     gate13_run_analyzer;       _g13_rc=$?; _g13_note "$_g13_rc"
 
+    # A clean worst of PASS means no arm found a problem -- but that is only a real
+    # PASS if every arm actually evaluated something. If any arm reported SKIP and
+    # none reported a finding, the honest verdict is SKIP, not PASS: nothing was
+    # compiled anywhere.
+    #
+    # Without this, the C/C++ arm's new GATE13_SKIP would be erased by the analyzer
+    # arm answering 0 on the same empty change set -- which is exactly what the
+    # first end-to-end run showed: the reason line printed, and the verdict was
+    # still PASS.
+    if [ "$_g13_worst" -eq 0 ] && [ "$_g13_any_skip" -eq 1 ]; then
+      exit 4
+    fi
     exit "$_g13_worst"
   )
   GATE_13_RC=$?
@@ -586,10 +609,16 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
     0) GATE_13_STATUS="PASS" ;;
     1) GATE_13_STATUS="FAIL" ;;
     2) GATE_13_STATUS="BLOCK" ;;
+    # GATE13_SKIP: at least one arm had nothing to evaluate, and no arm found a
+    # problem. Before this case existed, 4 fell through to WARN -- which said "we
+    # looked at your C/C++ and it is not clean" about a change set containing no
+    # C/C++ at all.
+    4) GATE_13_STATUS="SKIP"
+       GATE_13_DETAIL="no_sources_for_any_arm" ;;
     *) GATE_13_STATUS="WARN" ;;
   esac
   echo "   Gate 13 ($GATE_13_STATUS) completed in ${GATE_13_DURATION}s"
-  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$GATE13_START"
+  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$GATE13_START" "${GATE_13_DETAIL:-}"
   # Every other gate blocks by exiting immediately (e.g. Gate 1's
   # "❌ BLOCKED ... exit 1"); there is no aggregate-then-exit shared with
   # gates 0-12, so Gate 13 must do the same or its FAIL would only be cosmetic

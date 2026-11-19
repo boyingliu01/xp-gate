@@ -44,6 +44,13 @@ GATE13_FAIL=1
 GATE13_BLOCK=2
 # shellcheck disable=SC2034  # public contract
 GATE13_WARN=3
+# "Nothing to evaluate", as a verdict distinct from WARN. WARN means "looked at it
+# and it is not clean"; SKIP means "there was nothing here". Conflating them is the
+# defect family this codebase keeps repeating, and until now the C/C++ arm answered
+# PASS -- the worst of the three -- when no C/C++ file was staged, recording
+# "nothing to compile" as "compiled and clean".
+# shellcheck disable=SC2034  # public contract: the entry maps this to SKIP
+GATE13_SKIP=4
 
 GATE13_DEFAULT_TIMEOUT=120
 
@@ -468,10 +475,26 @@ gate13_baseline_exists() {
 # Prints the diagnostics on stderr; the COUNT goes to stdout.
 # ---------------------------------------------------------------------------
 gate13_count_warnings() {
-  local cc="$1" flags="$2" file="$3" out
+  local cc="$1" flags="$2" file="$3" out warnings errors
   # shellcheck disable=SC2086  # flags is a deliberately word-split flag list
   out=$("$cc" -fsyntax-only $flags "$file" 2>&1)
-  printf '%s\n' "$out" | grep -E 'warning:' | grep -vcE '^\s*$' || true
+  warnings=$(printf '%s\n' "$out" | grep -E 'warning:' | grep -vcE '^\s*$' || true)
+  # ERRORS COUNT TOO, AND THEY ARE THE POINT.
+  #
+  # This used to be `grep 'warning:' | grep -vc`. A file that does not COMPILE emits
+  # `error:` lines and no `warning:` lines, so it scored 0 -- identical to a clean
+  # file -- and the added-file branch below blocks only on cnt > 0. Measured on a
+  # new file containing `int broken( { return 0; }`:
+  #
+  #     g++ says:  bad.cpp:1:11: error: Unmatched '('
+  #     gate said: (nothing) -- PASS
+  #
+  # while the banner two functions up promises "new files are still -Werror".
+  # Counting errors alongside warnings is the minimum honest reading: the caller's
+  # question is "is this file worse than clean", and a file that does not parse is
+  # worse than one that merely warns.
+  errors=$(printf '%s\n' "$out" | grep -E 'error:' | grep -vcE '^\s*$' || true)
+  printf '%s\n' "$(( ${warnings:-0} + ${errors:-0} ))"
 }
 
 # ============================================================================
@@ -1095,8 +1118,23 @@ gate13_run_cpp_analysis() {
   local classified
   classified=$(gate13_classify_changed)
   if [ -z "$classified" ]; then
+    # SKIP, not PASS, and not WARN either.
+    #
+    # PASS said "compiled and clean" about a change set this arm never read. WARN
+    # would say "looked at it and it is not clean", which is also false. The only
+    # honest answer to "there is no C/C++ here" is "there is no C/C++ here", which
+    # is what GATE13_SKIP is for -- the entry maps it to a SKIP verdict carrying
+    # this reason, instead of the WARN that every unrecognised code used to become.
+    #
+    # Measured consequence of the old answer (2026-11-19): a Go file with
+    # `var x int = "not an int"` staged on a Go-only project produced
+    #     Gate 9  : SKIP  (not a TypeScript project -- correct, with a reason)
+    #     Gate 13 : PASS  ("No staged C/C++ source files")
+    # so the chain reported a passing compiler-strictness gate on a commit whose
+    # compiler-level error it had not looked for.
+    gate13_reason "Gate 13: no staged C/C++ source files -- nothing to compile"
     echo "     ℹ️  No staged C/C++ source files — nothing to compile"
-    return "$GATE13_PASS"
+    return "$GATE13_SKIP"
   fi
 
   budget=$(gate13_timeout_budget)
@@ -1144,7 +1182,10 @@ gate13_run_cpp_analysis() {
         if [ "$tier" = "warn-only" ]; then
           echo "     ⚠️  ${f}: ${cnt} warning(s) (warn-only tier, not blocking)"
         else
-          echo "     ❌ ${f}: ${cnt} warning(s) in a NEW file"
+          # "diagnostic(s)" not "warning(s)": since errors are counted too, a file
+          # that does not compile reports here, and calling that a warning would
+          # understate what has to be fixed.
+          echo "     ❌ ${f}: ${cnt} diagnostic(s) in a NEW file"
           blocking=$((blocking + 1))
         fi
       fi
@@ -1387,6 +1428,8 @@ gate13_csharp_changed_warning_count() {
   #   - the separators differ, so the diagnostic path is folded to "/" first.
   # Comparing raw strings matched nothing and reported 0 warnings on a file that
   # has two.
+  # shellcheck disable=SC1003  # see the tr below: the backslash pairs are tr escapes,
+  # and single quotes already keep the shell from touching them.
   printf '%s\n' "$out" \
     | grep -E ': (warning|error) [A-Z]+[0-9]+' \
     | sed -n 's/^\(.*\)(.*$/\1/p' \
