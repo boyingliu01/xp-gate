@@ -29,6 +29,40 @@
 
 **有效门禁：14/14 全部能给出真实判定**（其中 3 个在本次扫描中被发现并修复）。
 
+
+### 门禁 1 × 15 语言（第三轮补全）
+
+门禁 1 是 commit-only（`check 1` 恒定 SKIP），所以探针必须驱动真实 `pre-commit`。
+新增 `scripts/probe-gate1-languages.sh`，每门语言种一个该语言工具链必须报出的缺陷：
+
+```
+PASS: 15   SKIP: 0   FAIL: 0
+```
+
+| 语言 | 植入的缺陷 | 判定 | 证据 |
+|---|---|---|---|
+| python | 未定义名 | BLOCK（门禁 1） | `RUFF ERRORS detected` |
+| go | 声明未使用 | BLOCK（门禁 1） | `typechecking error` |
+| shell | 引用未赋值变量 | BLOCK（门禁 1） | `never_defined_variable_xyz is referenced but not assigned` |
+| powershell | 赋值给未定义变量 | BLOCK（门禁 1） | `PSUseDeclaredVarsMoreThanAssignments` |
+| java | 类型不匹配 | BLOCK（门禁 1） | 编译器报错 |
+| kotlin | 返回类型不匹配 | BLOCK（门禁 1） | `Analysis failed with 1 weighted issues` |
+| iac | 未闭合块 | BLOCK（门禁 1） | `Error: Unclosed configuration block` |
+| dart | 类型不匹配 | BLOCK（门禁 1） | `A value of type 'String' can't be assigned` |
+| php | 未定义变量 | BLOCK（门禁 1） | 检出 |
+| swift | 返回类型不匹配 | BLOCK（门禁 1） | 检出 |
+| flutter | 类型不匹配 | BLOCK（门禁 1） | 同 dart |
+| typescript | 语法错误 | BLOCK（**门禁 9** 先拦） | `Build integrity check failed` |
+| csharp | 类型不匹配 | BLOCK（**门禁 4** 先拦） | `1 changed C# file(s) with compiler warning` |
+| cpp | 未声明标识符 | BLOCK（**覆盖率**先拦） | `Could not determine cpp coverage` |
+| objectivec | 未声明标识符 | BLOCK（**门禁 5** 先拦） | `Tests FAILED` |
+
+**11 个由门禁 1 亲自检出，4 个被更早顺序的门禁拦下**——都是有效判定，归属不同。
+
+> 这份矩阵的价值不在于「全绿」，而在于它**逼出两个真实缺陷**：
+> IaC 缺语法验证层、以及 IaC 适配器在钩子里从未拿到文件列表。
+> 后者尤其值得记：上一版修复正确、测试也绿，但生产路径根本不带参数，**修复从未执行过**。
+
 ### 本轮修复的三个缺陷
 
 #### 门禁 6：`check 6` 比它自己的钩子更宽松
@@ -310,15 +344,19 @@ else if (typeof e.duration_ms === 'number') { ms += e.duration_ms }   // 坏值�
 仍待办：
 
 1. **门禁 4、5 的专项深挖**（前轮已验基本有效性，未做全语言覆盖）
-2. **pre-push 专项门禁**（M / M2 / ML / UI / MW / S）——探针无法覆盖，需真实 push 验证
-3. **剩余 13 个语言的适配器逐个验证**（本次以 TypeScript/C++/Go/Python/Shell 为主）
+2. ~~pre-push 专项门禁~~ → **已验证**：本轮两次真实 push 中 M / M2 / ML / UI / MW / S
+   全部给出明确原因（无对应语言源文件 → SKIP；推 main → MW 预审跳过），无一静默通过。
+3. ~~剩余 13 个语言~~ → **已完成**：15/15 全部产生真实判定（见上表）
 4. **测试套件权重表更新**（238/284 个套件无实测权重，13 个钉在 50000ms）
 5. **审计键名不统一**：6 条旧记录用裸数字键（`7`/`10`/`11`/`99`），导致统计表出现
    `10` 与 `gate-10` 两行并存、旧行显示 `Pass% 0.0%`。数量少但会误导读表的人。
    归一化时应保留原始行，只在读取侧合并。
 6. **门禁 MP 仍然在 push 时检查工作区镜像**——本轮已补上「暂存区」这一半，但他人未提交
    的 canonical 改动仍会让别人的推送失败（本轮实测被阻塞 6 次）。是否应让 MP 只看
-   暂存区而不看工作区，是一个需要单独决定的设计问题：工作区检查能发现「镜像重生了但
-   根本没暂存」，暂存区检查能发现「暂存了一半」——两者都保留才完整，但会互相干扰并行开发。
-7. **`principles-csharp-coverage.test.js` 有 1 条失败**——与本轮改动无关（C# 适配器工作），
+   暂存区而不看工作区，是一个需要单独决定的设计问题。
+7. **shellcheck 基线漂移**：`.xp-gate/lint-baseline.json` 记录 `iac.sh` 有 13 个问题，
+   实际 15 个（**本轮改动之前就如此**）。门禁据此报「4 NEW」，其中 2 个是漂移、2 个是
+   新增脚本未入基线。已确认本人改动零新增（改前 13、改后 13），**未刷新基线掩盖**。
+   
+8. **`principles-csharp-coverage.test.js` 有 1 条失败**——与本轮改动无关（C# 适配器工作），
    未触碰，留给该工作的 owner。
