@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.38.25.0] - 2026-11-19
+
+**报表把「从未运行」的门禁显示成「跳过」，与主动跳过的无法区分。**
+
+### 实测
+
+一个暂存了 shell 文件的仓库，门禁 1 失败。控制台只显示实际执行过的门禁：
+
+```
+→ Gate 11: Sprint Flow Enforcement...
+→ Gate 12: File hygiene check...
+→ Gate 9: Build integrity...
+→ Gate 1: Code Quality (static analysis + linting)...
+```
+
+然后报表却给每个门禁都打了一行：
+
+```
+  Gate 1: Code Quality        FAIL
+  Gate 2: Duplicate Code      SKIP
+  Gate 3: Complexity          SKIP (warnings: 0)
+  Gate 4: Principles          SKIP (warnings: 0)
+  Gate 5: Tests + Coverage    SKIP (coverage: N/A%)
+  Gate 6: Architecture        SKIP
+  Gate 7: IaC Security        SKIP
+  Gate 8: Secret Scanning     SKIP
+  Gate 10: SAST Security      SKIP
+```
+
+**门禁 2-8、10 根本没有运行。** `githooks/gate-driver.sh` 在第一个非零返回处
+`exit`——fail-fast 是有意的——所以这些门禁体从未被调用，一直保持着函数开头的
+`GATE_N_STATUS="SKIP"` 初值。
+
+于是报表对一个**从未被提问**的门禁回答了「跳过」。这是「没检查不可与通过无法区分」
+的同一族，只是最安静的一种：那一行不是绿的，但它与一个真正决定跳过的门禁完全一样，
+读报表的人无法知道链条提前停了。
+
+顺序让这件事更有分量：11/12/9 排在 1 **之前**，所以门禁 1 一失败，整条中间最贵的
+部分（2,3,4,5,6,7,8,10）就静默地不再出现在报告里。门禁 9 在前一轮已经修过、会标注
+`skipped in 0s (nothing was verified)`；驱动没走到的那些门禁什么都没有。
+
+### 修复
+
+fail-fast 时明确点名：
+
+```
+⚠️  Chain stopped at Gate 1 — these gates were NOT reached: 2 3 8 10 7 5 6 4
+```
+
+### 测试写法的一个小陷阱
+
+`AC-GATE-CHAIN-NOT-RUN-01` 第一次是红的——不是产品没修好，而是我的 grep 用了
+`-qE`，而实现输出的是大写的 `NOT reached`。改用 `-qiE` 后通过。**这是本会话第四次
+「断言与被断言的东西不是一回事」**，只不过这回错在断言本身。
+
 ## [0.38.24.0] - 2026-11-19
 
 **门禁 2：花了大部分时间把自己生成的文件互相比对，并报出上千条不是代码的克隆。**
