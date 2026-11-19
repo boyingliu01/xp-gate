@@ -1577,3 +1577,79 @@ Run 'xp-gate baseline reset' after fixing to update the baseline.
 
 **门禁在拦我，说明它们在工作。** 这一轮修掉的是"门禁的自我报告不可信"，
 而不是"门禁不会拦"。
+
+---
+
+## 十一、第十八轮：拒绝评估必须说明为什么
+
+### 11.1 32 处 fail-closed，零原因
+
+Gate 1 的适配器契约是 `0=通过 / 1|2=阻断 / 3=警告`，原因**只能**通过
+`XP_G1_REASON: ` 这个 stdout 行跨子 shell 边界传出来。
+
+实测（PHP fixture，无 composer.json）：
+
+```
+❌ BLOCKED - php toolchain could not execute — NOT a pass (fail-closed): unknown
+```
+
+门禁拒绝了——这是对的——但它告诉操作者 `unknown`。适配器向控制台打印了
+完全可用的一句话，**却没记录任何机器可读的东西**。
+
+| 适配器 | `return 2` | 修复前原因 |
+|---|---|---|
+| php | 18 | 0 |
+| csharp | 9 | 0 |
+| cpp | 4 | 0 |
+| iac | 1 | 0 |
+| java | 3 | 5 ✅ |
+| powershell | 2 | 9 ✅ |
+
+**32 处拒绝评估，一处原因都没有。** 现已全部补齐。
+
+### 11.2 Gate 5：判定从未到达记录
+
+同一个 fixture 暴露了更严重的问题：
+
+| 位置 | 内容 |
+|---|---|
+| 控制台 | `❌ BLOCKED - Could not determine php coverage percentage.` |
+| 报告 | `gate5_tests {"status": "SKIP", "reason": ""}` |
+| 汇总 | `verdict PARTIAL`，`gatesFailed 0` |
+
+`GATE_5_STATUS` 和 `GATE_5_DETAIL` 在 `return 1` 之前**都没有被赋值**，
+双双保持了进入门禁前的值。
+
+> 前 9 处同类缺陷是「判定没能到达**正确**的状态」。
+> 这一处是「判定没能到达**任何**状态」——后者更糟，
+> 因为错误的状态至少在记录里可见，缺失的状态完全不可见。
+
+修复后：`status=BLOCK`、`reason=coverage_not_determined: ...`、
+`verdict=FAIL`、`gatesFailed=1`，且链正确停在 Gate 5。
+
+### 11.3 一个必须记录的探针教训
+
+第一次植入 `SuperSecret123ABC!` 时 Gate 8 报 PASS，我一度以为是漏检。
+gitleaks 直接扫描也未检出——**它匹配特定格式**（AWS key / GitHub token），
+不是通用的「password = 字符串」。
+
+第二次用 `AKIAIOSFODNN7EXAMPLE` 仍未检出——那是 **AWS 官方文档的示例 key**，
+在 gitleaks 白名单里。
+
+第三次用 `AKIAZ7XQ4WYPMKN2VTSB`，**立刻检出**。
+
+**三次里两次是探针错，不是产品错。** 若当时就下「Gate 8 漏检」的结论，
+会去修一个不存在的问题，并可能因此削弱一个本来有效的门禁。
+
+### 11.4 门禁在这一轮里拦住了我几次
+
+| 门禁 | 阻断原因 | 判断 |
+|---|---|---|
+| Gate 0 | 改生产代码未升版本 | ✅ 对 |
+| Gate 1 | shellcheck 超基线 | ✅ 对（但基线原本无法生成）|
+| Gate 3 | `recordAudit` CCN 3→4 | ✅ 对 |
+| Gate 12b | 只改 canonical 未同步镜像 | ✅ 对 |
+| Gate 5 | php 覆盖率无法确定 | ✅ 对（此前不记录）|
+
+**五处阻断全部正确。** 这一轮修的不是「门禁不肯拦」，
+而是「门禁拦了却说不清、或记录里看不见」。
