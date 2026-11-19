@@ -33,7 +33,11 @@ if ! gate_enabled 6; then
   echo "⏭️  SKIPPED - Gate 6: Architecture & tech debt (not selected by XP_GATE_ONLY_GATE)"
   GATE_6_STATUS="SKIP"
   GATE_6_DETAIL="not_selected"
-  record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "0" "$(gate_start_ms)"
+  # GATE_6_DETAIL used to be assigned here and then dropped: record_gate_audit
+  # was called with five arguments, so the reason never reached the journal and
+  # the variable read as dead (shellcheck SC2034). Passing it is the fix; deleting
+  # the assignment would have kept the audit line reasonless.
+  record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "0" "$(gate_start_ms)" "$GATE_6_DETAIL"
   return 0
 fi
 
@@ -42,8 +46,9 @@ fi
 GATE_6_START=$(gate_start_ms)
 
 # First Part: Architecture Validation (previously Gate 9)
-2>&1 echo "   └─ Architecture validation:"
-
+# shellcheck disable=SC2153  # PROJECT_LANG is set by gate-0-entry.sh and reaches
+# this file through the driver; shellcheck analyses one file at a time, so the
+# note is a false positive. The variable is required.
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "     ✅ Skipped (documentation project)."
 
@@ -92,7 +97,6 @@ else
   # scope at least still checks something.
   # ---------------------------------------------------------------------------
   GATE_6_STAGED_SNAPSHOT=""
-  GATE_6_STAGED_SNAPSHOT_AVAILABLE=0
 
   _gate6_snapshot() {
     local _tree _commit
@@ -103,7 +107,6 @@ else
     _commit=$(git -C "$PROJECT_ROOT" commit-tree "$_tree" -m "xp-gate: staged snapshot for Gate 6" 2>/dev/null) || return 1
     [ -n "$_commit" ] || return 1
     GATE_6_STAGED_SNAPSHOT="$_commit"
-    GATE_6_STAGED_SNAPSHOT_AVAILABLE=1
     return 0
   }
 
@@ -190,6 +193,24 @@ else
       GATE_6_LAYER_REASON="layer_checker_missing"
       echo "     ⚠️  [WARN:LAYER_CHECKER_MISSING] gate-6-layers.sh not found — layer boundaries NOT checked."
     fi
+    # GATE_6_LAYER_STATUS is the layer dimension's own verdict, and until now
+    # nothing read it. `grep -c GATE_6_LAYER_STATUS` found 6 assignments and 0
+    # reads anywhere in the repository -- shellcheck SC2034 was reporting a real
+    # defect, not a false positive, which is the more interesting half of this
+    # find.
+    #
+    # Consequence: the FAIL and BLOCK cases set GATE_6_STATUS themselves, but the
+    # WARN case ("the layer checker is missing, so layer boundaries are NOT
+    # checked") set only this variable. It printed a warning line and the gate
+    # could still finish PASS -- an unmeasured dimension scored as a measured one.
+    #
+    # The flag is consumed at the FINAL verdict (~line 634), not here: an earlier
+    # attempt assigned GATE_6_STATUS at this point and was silently overwritten by
+    # the `GATE_6_STATUS="PASS"` upgrade further down. Order matters, and reading
+    # only the local block would not have shown it.
+    if [ "$GATE_6_LAYER_STATUS" = "WARN" ]; then
+      GATE_6_LAYERS_WARNED=1
+    fi
     if [ "${GATE_6_LAYER_CRASHED:-0}" = "1" ]; then
       echo "     ❌ [BLOCK:LAYER_CHECKER_CRASHED] gate-6-layers.sh exited $LAYER_RC without a verdict."
       echo "        A checker that did not finish has not checked anything — fail closed."
@@ -234,6 +255,7 @@ else
         else
           echo "     ❌ BLOCKED - archlint not installed"
           echo "     Install with: npm install --save-dev @archlinter/cli"
+          GATE_6_STATUS="FAIL"
           return 1
         fi
          echo "     Running archlint for TypeScript..."
@@ -303,6 +325,7 @@ else
              echo "Fix the architecture violations above before committing."
              echo "Or generate a baseline for gradual adoption: npx @archlinter/cli snapshot -o .architecture-baseline.json"
            fi
+           GATE_6_STATUS="FAIL"
            return 1
          fi
            if [ -f "$PROJECT_ROOT/.architecture-baseline.json" ]; then
@@ -326,12 +349,14 @@ else
               echo ""
               echo "❌ BLOCKED - Python architecture contract violations (import-linter)"
               echo "Fix the broken contracts above before committing."
+              GATE_6_STATUS="FAIL"
               return 1
             fi
             echo "     ✅ Python architecture validation completed."
           else
             echo "     ❌ BLOCKED - import-linter not installed"
             echo "     Install with: pip install import-linter"
+            GATE_6_STATUS="FAIL"
             return 1
           fi
         else
@@ -367,12 +392,14 @@ else
               echo "❌ BLOCKED - Go architecture contract violations (arch-go, exit $_go_arch_rc)"
               echo "Fix the layering violation(s) above before committing."
               GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_tests_failed"
+              GATE_6_STATUS="FAIL"
               return 1
             fi
             echo "     ✅ Go architecture validation completed."
           else
             echo "     ❌ BLOCKED - arch-go not installed"
             echo "     Install with: go install github.com/arch-go/arch-go@latest"
+            GATE_6_STATUS="FAIL"
             return 1
           fi
         else
@@ -451,6 +478,7 @@ JAVAARCHROOTS
             echo "❌ BLOCKED - Java architecture test(s) failed (exit $_java_arch_rc)"
             echo "Fix the layering violation(s) above before committing."
             GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_tests_failed"
+            GATE_6_STATUS="FAIL"
             return 1
           fi
           echo "     ✅ Java architecture validation completed."
@@ -516,6 +544,7 @@ CSARCHPROJ
               if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
                 GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_tests_failed"
               fi
+              GATE_6_STATUS="FAIL"
               return 1
             fi
             echo "     ✅ C# architecture validation completed."
@@ -601,6 +630,14 @@ CSARCHPROJ
     if [ -z "$GATE_6_LANG_REASONS" ] && [ -n "$PROJECT_LANGS" ]; then
       GATE_6_STATUS="PASS"
     fi
+    # ...unless the layer dimension itself was unmeasured. This is where
+    # GATE_6_LAYER_STATUS finally reaches a verdict; see the long note beside its
+    # assignment. The upgrade above is the reason the flag exists instead of an
+    # inline assignment: anything set earlier is overwritten here.
+    if [ "${GATE_6_LAYERS_WARNED:-0}" = "1" ] && [ "$GATE_6_STATUS" = "PASS" ]; then
+      GATE_6_STATUS="WARN"
+      GATE_6_REASON="${GATE_6_REASON:-${GATE_6_LAYER_REASON:-layers_not_measured}}"
+    fi
   else
     # Architecture config is REQUIRED — BLOCK if missing
     if [ -f "$PROJECT_ROOT/.architecture-skip" ]; then
@@ -636,6 +673,24 @@ CSARCHPROJ
       echo ""
       echo "   After creating the config, retry the commit."
       echo "   (To skip with warning, create .architecture-skip file)"
+      # The status must be set BEFORE returning.
+      #
+      # This branch printed "COMMIT BLOCKED" and returned 1, which does block the
+      # commit -- but it never assigned GATE_6_STATUS, so the value stayed at the
+      # "SKIP" it was initialised with. Measured 2026-11-19 on a Kotlin fixture
+      # with XP_GATE_ONLY_GATE=6:
+      #
+      #     stdout : ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED
+      #     rc     : 1  (the commit really was refused)
+      #     report : gate6_arch_boyscout.status = "SKIP", reason ""
+      #              overall.gatesFailed = 0, failedGates = []
+      #
+      # Same shape as the Gate 9 defect fixed in e9cf2e23, one file over: the
+      # behaviour was right and the record said something else. The reason string
+      # is set too, because a SKIP with no reason is itself a defect here -- and a
+      # FAIL with no reason is no better.
+      GATE_6_STATUS="FAIL"
+      GATE_6_REASON="architecture_config_missing"
       return 1
     fi
   fi
@@ -700,6 +755,7 @@ else
           echo "  - NEW files: must have zero warnings"
           echo "  - MODIFIED files: cannot increase warnings from baseline"
           echo "  - Files with ≤5 warnings: must clear to zero"
+          GATE_6_STATUS="FAIL"
           return 1
         fi
         
@@ -710,6 +766,7 @@ else
           echo "$BOY_SCOUT_OUTPUT"
           echo ""
           echo "❌ BLOCKED - Boy Scout Rule violations detected ($VIOLATION_COUNT)"
+          GATE_6_STATUS="FAIL"
           return 1
         fi
 

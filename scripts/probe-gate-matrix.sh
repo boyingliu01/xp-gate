@@ -103,18 +103,18 @@ write_fixture() {
       ;;
     kotlin)
       if [ "$bad" = 1 ]; then
-        printf 'fun f(): Int { return "not an int" }\nfun main() {}\n' > a.kt
+        printf 'fun intOf(v: Int): Int = v\n\nfun main() {\n    println(intOf("not an int"))\n}\n' > a.kt
       else
-        printf 'fun f(): Int { return 1 }\nfun main() {}\n' > a.kt
+        printf 'fun intOf(v: Int): Int = v\n\nfun main() {\n    println(intOf(1))\n}\n' > a.kt
       fi
       ;;
     dart)
       printf 'name: probe\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\n' > pubspec.yaml
       mkdir -p lib
       if [ "$bad" = 1 ]; then
-        printf 'int f() { return "not an int"; }\n' > lib/a.dart
+        printf 'int f() {\n  return "not an int";\n}\n' > lib/a.dart
       else
-        printf 'int f() { return 1; }\n' > lib/a.dart
+        printf 'int f() {\n  return 1;\n}\n' > lib/a.dart
       fi
       ;;
     cpp)
@@ -178,9 +178,9 @@ write_fixture() {
       printf 'name: probe\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\ndependencies:\n  flutter:\n    sdk: flutter\n' > pubspec.yaml
       mkdir -p lib
       if [ "$bad" = 1 ]; then
-        printf 'import "package:flutter/material.dart";\nint f() { return "not an int"; }\n' > lib/a.dart
+        printf 'import "package:flutter/material.dart";\n\nint f() {\n  return "not an int";\n}\n' > lib/a.dart
       else
-        printf 'import "package:flutter/material.dart";\nint f() { return 1; }\n' > lib/a.dart
+        printf 'import "package:flutter/material.dart";\n\nint f() {\n  return 1;\n}\n' > lib/a.dart
       fi
       ;;
     *)
@@ -222,19 +222,29 @@ first_source() {
 # githooks/AGENTS.md states the rule this follows: "Verdicts must come from
 # structured output, not exit codes." The same applies to a probe reading a gate.
 run_case() {
-  local lang="$1" mode="$2"
+  local lang="$1" mode="$2" only="${3:-}"
   local dir="$WORK_ROOT/$lang"
-  local out rc
+  local out rc tag
 
-  out=$(cd "$dir" && timeout 900 git commit -m "$mode" 2>&1)
+  tag="${mode}${only:+-only-$only}"
+  if [ -n "$only" ]; then
+    # XP_GATE_ONLY_GATE isolates one gate. Needed because Gate 5 (tests +
+    # coverage) blocks every minimal fixture -- one source file with no test suite
+    # and no coverage report cannot satisfy an 80% floor. Without this second
+    # pass, Gates 6 and 4 were never reached for ANY language, and the matrix
+    # showed them as "not run" in every row.
+    out=$(cd "$dir" && XP_GATE_ONLY_GATE="$only" timeout 900 git commit -m "$tag" 2>&1)
+  else
+    out=$(cd "$dir" && timeout 900 git commit -m "$tag" 2>&1)
+  fi
   rc=$?
 
   # Keep the raw run for diagnosis. Without this, every wrong conclusion about
   # "the gate reported X" had to be re-derived by hand from a fixture that no
   # longer exists.
-  printf '%s\n' "$out" > "$WORK_ROOT/${lang}-${mode}.log"
+  printf '%s\n' "$out" > "$WORK_ROOT/${lang}-${tag}.log"
 
-  PROBE_LANG="$lang" PROBE_MODE="$mode" PROBE_RC="$rc" PROBE_REPORT="$out" \
+  PROBE_LANG="$lang" PROBE_MODE="$tag" PROBE_RC="$rc" PROBE_REPORT="$out" \
     PROBE_DIR="$dir" \
     python - <<'PY'
 import os, re, json, glob
@@ -346,6 +356,19 @@ probe_language() {
   write_fixture "$lang" dirty >/dev/null 2>&1
   git add -A >/dev/null 2>&1
   run_case "$lang" dirty
+
+  # SECOND PASS, gates 6 and 4 only.
+  #
+  # Gate 5 (tests + coverage) blocks every minimal fixture: one source file with
+  # no test suite and no coverage report cannot clear an 80% floor, and the gate
+  # is fail-closed by design. That is correct behaviour and it is also why Gates 6
+  # and 4 were never reached for ANY language -- the matrix showed them "not run"
+  # in every single row, which told us nothing about them.
+  #
+  # XP_GATE_ONLY_GATE isolates them. It is refused on protected branches, which is
+  # why every fixture lives on its own probe-* branch.
+  run_case "$lang" dirty 6
+  run_case "$lang" dirty 4
 }
 
 mkdir -p "$WORK_ROOT"
