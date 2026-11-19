@@ -550,6 +550,44 @@ function arch(args) {
   }
 
   const projectRoot = findProjectRoot(process.cwd());
+
+  // Architecture config is REQUIRED, exactly as gate-6-entry.sh says: without an
+  // explicit constraint file there is nothing to validate against, and a scan
+  // that scores 1.3/10 "Critical" while reporting "no high/critical findings" is
+  // the worst kind of green -- a number nobody can act on, printed next to a
+  // checkmark.
+  //
+  // Measured before this check existed, on a repo holding only package.json and
+  // two .ts files:
+  //
+  //   git commit      -> ❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED
+  //   xp-gate check 6  -> ✅ arch: no high/critical architecture findings, exit 0
+  //
+  // `check 6` is the command a user runs to PRE-FLIGHT the gate, so being more
+  // forgiving than the gate it previews is precisely backwards.
+  //
+  // Only when no explicit --use-config/--config was given: an explicit path is
+  // already validated below, and second-guessing it here would block a
+  // deliberate one-off scan.
+  if (!config) {
+    const CONFIG_NAMES = ['.archlint.yaml', 'architecture.yaml', '.architecturerc'];
+    const hasConfig = CONFIG_NAMES.some((name) => fs.existsSync(path.join(projectRoot, name)));
+    if (!hasConfig) {
+      // The hook's escape valve, honoured here too so the two agree.
+      if (fs.existsSync(path.join(projectRoot, '.architecture-skip'))) {
+        console.warn('[xp-gate arch] ⚠️  Architecture config missing but .architecture-skip present — skipping.');
+        return Promise.resolve(0);
+      }
+      console.error('');
+      console.error('[xp-gate arch] ❌ ARCHITECTURE CONFIG MISSING');
+      console.error(`[xp-gate arch]    Required: one of ${CONFIG_NAMES.join(' / ')} in ${projectRoot}`);
+      console.error('[xp-gate arch]    Without it there are no declared constraints to validate against.');
+      console.error('[xp-gate arch]    Create one with: npx archlint init --no-interactive');
+      console.error('[xp-gate arch]    Or accept that it is not checked: create .architecture-skip');
+      return Promise.resolve(1);
+    }
+  }
+
   const resolved = resolveArchlint(projectRoot);
 
   if (config) {

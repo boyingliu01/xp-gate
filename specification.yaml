@@ -6464,6 +6464,44 @@ specification:
             无工具支持的语言在审计中记录 SKIP 并带原因
           test_type: integration
 
+    - id: REQ-GATE6-CONFIG-PARITY
+      description: >-
+        `xp-gate check 6` 与提交钩子对同一个仓库给出相反的判定，且分歧偏向宽松。
+
+        实测：一个只有 package.json + 两个 .ts 文件、没有任何 .archlint.yaml 或
+        architecture.yaml 的仓库：
+
+          git commit（真实钩子，gate-6-entry.sh）:
+            ❌ ARCHITECTURE CONFIG MISSING - COMMIT BLOCKED
+
+          xp-gate check 6（lib/arch.js）:
+            [xp-gate arch] Architecture quality: 1.3/10 (Critical)
+            [xp-gate arch] Findings: 4 total, 0 high/critical
+            ✅ arch: no high/critical architecture findings
+            exit 0
+
+        两个入口，同一个仓库，相反的判定。钩子是权威（「Architecture config is
+        REQUIRED - BLOCK if missing」，并带 .architecture-skip 显式豁免）。
+        check 6 是用户用来「预演门禁」的命令，所以恰恰是最不该比它所预演的门禁
+        更宽松的那一个。
+
+        这造成的失效：开发者跑 check 6 看到绿色，提交却被阻断；更糟的是，在一个
+        从未真正度量过架构的仓库里，他学到的是「这个门禁是绿的」，而唯一提示
+        有东西被打分的，只有那行 1.3/10 (Critical)。
+
+        另注：质量分是无条件打印的。1.3/10 标着 Critical，紧挨着
+        「✅ no high/critical findings」，无论配置问题是否存在，这句话本身自相
+        矛盾；但配置缺口是能改变提交结果的那部分，所以在这里钉住的是它。
+      acceptance_criteria:
+        - id: AC-GATE6-CONFIG-01
+          criteria: >-
+            check 6 在缺少架构配置文件时不得报告成功退出 0
+          test_type: integration
+        - id: AC-GATE6-CONFIG-02
+          criteria: >-
+            独立路径真的检查配置文件存在，而非仅在注释里提到文件名
+          test_type: integration
+
     - id: REQ-GATE5C-SKIP-RECORDED
       description: >-
         门禁 5c 在每条路径上都算出一个判定，而没有任何地方读取它。
