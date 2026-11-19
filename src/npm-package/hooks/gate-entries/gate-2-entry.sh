@@ -96,6 +96,22 @@ EOF_CHANGED
     echo "⚠️  jscpd exited with code $JSCPD_EXIT without a report — the output above is its real error"
     echo "⏭️  SKIPPED - Duplicate code (jscpd run error)"
     GATE_2_STATUS="SKIP"
+  elif [ "$JSCPD_OUTCOME" = "no_files" ]; then
+    # jscpd ran, exited 0, and examined nothing -- its own stderr says so. That is
+    # not a clean scan: "Found 0 clones" over zero files is a statement about the
+    # filter, not about the code. Measured 2026-11-19 on a Dart fixture, where the
+    # change set named a .dart file that jscpd's --format set did not cover: the
+    # table read "Total: 0 files" and Gate 2 still recorded PASS.
+    #
+    # SKIP, not BLOCK: the project may legitimately contain no file of a type
+    # jscpd understands, and blocking would punish a language for jscpd's format
+    # list. SKIP with this reason keeps it distinguishable from "checked, clean".
+    echo "⏭️  SKIPPED - Duplicate code (jscpd analysed no files)"
+    echo "   jscpd exited 0 but examined 0 files, so its 'Found 0 clones' is not a"
+    echo "   verdict on this change set. Check that the changed file extensions are"
+    echo "   covered by jscpd's --format set (or the project's jscpd config)."
+    GATE_2_STATUS="SKIP"
+    GATE_2_DETAIL="jscpd_analysed_no_files"
   else
     echo "✅ PASSED - jscpd duplicate code check completed."
   fi

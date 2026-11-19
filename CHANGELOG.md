@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.38.36.0] - 2026-11-19
+
+**门禁 2 把「一个文件都没分析」记为干净，门禁 5 把委托给 CI 的测试记为 PASS。**
+
+### 门禁 2：jscpd 分析了 0 个文件，判定 PASS
+
+`classify_jscpd_run` 从一行决定判定：只要没解析出「Found N clones」且 N>0，就归成 `clean`。
+
+「Found 0 clones」的意思是「没找到重复」，只有当**确实分析了东西**时才等于「没有重复」。
+jscpd 把两者的区别写在 stderr 上，却仍然 exit 0：
+
+```
+Warning: jscpd analyzed no files: check the paths and the --format,
+--ignore and --pattern filters
+Found 0 clones.
+```
+
+2026-11-19 在 Dart 夹具上实测：表格读数是 `Total: 0 files / 0 lines / 0 tokens`，
+门禁 2 打印 `PASSED - jscpd duplicate code check completed`，汇总记为 PASS。
+**一个什么都没检查的门禁，和一个检查了变更集且干净的门禁，从外面看完全一样。**
+
+第二种形态更隐蔽——跑完只有一行时间：
+
+```
+$ jscpd --ignore "**/*" lib.dart ; echo $?
+time: 0.156ms
+0
+```
+
+无表格、无计数、无警告。旧代码的兜底把这种情况也归成 `clean`，注释写着
+「leave the gate's verdict as it was」——但它留下的 verdict 就是 PASS。
+
+两种形态现在都归成 `no_files`，门禁记 SKIP 并带上原因。**SKIP 而非 BLOCK**：
+项目可能合理地不含任何 jscpd `--format` 覆盖的文件类型，阻断等于因为 jscpd 的
+格式清单去惩罚一门语言。
+
+两条反向守卫，防止矫枉过正：
+
+| 测试 | 钉住的行为 |
+|---|---|
+| AC-GATE2-NO-FILES-06 | **有内容**但无法解析的报告仍算「扫描发生过」。把每种不认识的格式都变成 SKIP 会让门禁对任何 jscpd 改版失效——比原缺陷更糟 |
+| AC-GATE2-NO-FILES-02 | 真实扫描了真实文件、找到 0 个克隆，仍然是 `clean`。没有它，这个修复只是把静默通过换成了永久跳过 |
+
+分类器内部的**顺序也是契约**，一并钉住：非零退出压过 no-files 警告（崩溃是更具体的事实，
+叫它 no_files 会把它藏起来）；解析出的「Found N clones」压过空报告检查（那是扫描发生过的证据）。
+
+### 门禁 5：委托给 CI 的测试，状态里记的还是 PASS
+
+上一版修了正文，没修变量。在 shell 夹具上，门禁打印
+`No test verdict was produced here -- absence of a failure is not a pass.`，
+紧接其下的汇总行仍是 `Gate 5: Tests + Coverage   PASS (coverage: N/A%)`。
+
+汇总行才是人保留的、也是审计 journal 记录的，所以那条假声明只是往下挪了一层。
+现在状态默认先看 `DELEGATED_LANGS`，记 SKIP 并在 `GATE_5_DETAIL` 里点名是哪些语言。
+与同块 #554 是同一条规则：自己记录了判定的分支，不该被块尾语重新裁决。
+
+端到端已验证，同一夹具现在的汇总行是 `Gate 5: Tests + Coverage  SKIP (coverage: N/A%)`。
+
+### 一处纠正：我把三个「死变量」说错了，而且错了两个方向
+
+上一版的注释断言 `TESTS_DEFERRED` / `PY_TEST_SKIPPED` / `GATE_5_COVERAGE_APPLIES_TO`
+是死存储。那基于 grep 了 pre-commit、gate-driver 和 lib/。**三个里有两个有活的读取方**：
+
+| 变量 | 读取方 |
+|---|---|
+| `PY_TEST_SKIPPED` | `githooks/lib/coverage-total.sh:54` —— `enforce_python_coverage` 拒绝消费子集运行留下的陈旧 `.coverage`。**该防护有效** |
+| `GATE_5_COVERAGE_APPLIES_TO` | `githooks/gate-entries/gate-13-entry.sh` 两处：持久化的 `applies_to` 字段与子集豁免 |
+
+我随后「修复」了 `GATE_5_COVERAGE_APPLIES_TO`——把它发布进 `GATE_5_DETAIL`、为它写了测试、
+看着它变绿，**然后才**扩大 grep 范围，发现 gate-13 的两处读取。改动已回退，测试已删除。
+
+这件事值得记下来恰恰因为它全绿：**一个证明「本不该存在的性质」的绿测试**，正是这些测试
+本该防止的失效模式；唯一抓住它的是「写完修复后再核对前提」这一步。
+
+只有 `TESTS_DEFERRED` 确实无人读取（已对 *.sh、pre-commit、*.bats、*.cjs、*.js 全仓核实）。
+它保留原样：删一个变量是独立的提交，不是这次提交的脚注。
+
+### 那个状态测试错了两次才生效
+
+| 版本 | 锚点 | 回退修复后 |
+|---|---|---|
+| v1 | 在文件任意位置匹配短语 | **绿**（被修复自己的注释满足） |
+| v2 | grep 守卫那一行 | **绿**（被四十行外**另一处** `if [ -n "${DELEGATED_LANGS:-}" ]` 满足，那是打印正文的那个） |
+| v3 | 定位含 PASS 默认值的块，要求 DELEGATED_LANGS 在同一块内 | **红** ✓ |
+
+两次「全绿但什么都没证明」，来自两种不同的错误锚定策略。这是本系列里对
+「必须真的跑一次证伪，而不是相信一个通过的测试」最强的支持。
+
 ## [0.38.35.0] - 2026-11-19
 
 **门禁 4 对 8 个语言报「✓ No violations found」——它对其中 6 个一条规则都跑不了。**
