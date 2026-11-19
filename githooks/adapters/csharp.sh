@@ -137,6 +137,7 @@ run_static_analysis() {
     # non-zero return to "tools unavailable" which it reports honestly.
     echo "dotnet SDK not found"
     echo "   Install: winget install Microsoft.DotNet.SDK.8 | brew install --cask dotnet-sdk | apt-get install dotnet-sdk-8.0"
+    echo "XP_G1_REASON: dotnet_sdk_missing"
     return 2
   }
 
@@ -185,6 +186,7 @@ run_static_analysis() {
     126|127)
       echo "dotnet format could not execute (exit ${format_rc}) — NOT a source verdict"
       echo "   The 'dotnet' on PATH is missing or not executable."
+      echo "XP_G1_REASON: dotnet_format_could_not_execute"
       return 2
       ;;
   esac
@@ -206,7 +208,7 @@ run_static_analysis() {
   # Same reasoning for the build: 126/127 means the build never ran, so there is
   # no "compiles / does not compile" answer to report.
   case "$build_rc" in
-    126|127) echo "dotnet build could not execute (exit ${build_rc}) — NOT a build verdict"; return 2 ;;
+    126|127) echo "dotnet build could not execute (exit ${build_rc}) — NOT a build verdict"; echo "XP_G1_REASON: dotnet_build_could_not_execute"; return 2 ;;
   esac
   return "$build_rc"
 }
@@ -237,13 +239,14 @@ _has_test_project() {
 run_tests() {
   local dotnet_root dotnet out rc
   dotnet_root=$(_detect_dotnet_root) || { echo "No .NET project marker found"; return 0; }
-  dotnet=$(_detect_dotnet) || { echo "dotnet SDK not found"; return 2; }
+  dotnet=$(_detect_dotnet) || { echo "dotnet SDK not found"; echo "XP_G1_REASON: dotnet_sdk_missing"; return 2; }
 
   local test_proj
   test_proj=$(_has_test_project "$dotnet_root")
   if [ -z "$test_proj" ]; then
     echo "No test project found in ${dotnet_root}"
     echo "   A .csproj must reference Microsoft.NET.Test.Sdk / xunit / NUnit / MSTest to run under dotnet test"
+    echo "XP_G1_REASON: no_dotnet_test_project"
     return 2
   fi
   echo "Test project: ${test_proj}"
@@ -259,6 +262,7 @@ run_tests() {
     # the adapters already use (java.sh's G1 contract).
     echo "dotnet test could not start the test host (environment fault, not a test verdict)"
     echo "   Known on this host: VSTest testhost aborts with Win32Exception (5) even when invoked outside git-bash"
+    echo "XP_G1_REASON: dotnet_test_host_fault"
     return 2
   fi
   return "$rc"
@@ -305,6 +309,7 @@ run_coverage() {
   test_proj=$(_has_test_project "$dotnet_root")
   if [ -z "$test_proj" ]; then
     echo "No test project found in ${dotnet_root} — coverage not measurable"
+    echo "XP_G1_REASON: no_dotnet_test_project_for_coverage"
     return 2
   fi
 
@@ -364,6 +369,7 @@ run_coverage() {
   if [ -z "$report" ]; then
     echo "coverage.cobertura.xml not produced — coverage NOT measured"
     echo "   Requires coverlet.collector in the test project"
+    echo "XP_G1_REASON: cobertura_not_produced"
     return 2
   fi
   echo "Coverage report: ${report}"

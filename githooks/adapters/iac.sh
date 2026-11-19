@@ -391,6 +391,7 @@ TFEOF
         echo "⚠️  XP_GATE_IAC_SOFT=1: unusable scanner downgraded to WARN"
         return 3
       fi
+      echo "XP_G1_REASON: checkov_could_not_run"
       return 2
     fi
 
