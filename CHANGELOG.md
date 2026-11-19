@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.38.57.0] - 2026-11-20
+
+**审计日志有两个写入者，它们写的字段名不一样；而且测试在往生产日志里写。**
+
+### 缺陷 1：同一个文件，两套 schema
+
+`src/gates/common.ts` 的 `recordAudit()` 写：
+
+```
+{timestamp, gate, name, status, details}
+```
+
+而 bash 的 `record_gate_audit()` 写：
+
+```
+{timestamp, gate_id, gate_name, passed, issues_found, duration_ms}
+```
+
+它的注释写着「**Schema must match bash version**」。**它没有 match。**
+
+实测：本仓库 20538 行审计里，**315 行没有 `gate_id`**。所有按
+`gate_id` 索引的读取方——`xp-gate audit`、决定 `attempt` 的失败连续计数、
+耗时基线——都把它们当成**匿名的行**。
+
+### 为什么只改字段名不够
+
+`passed` 必须是**真布尔值**，不是状态字符串：bash 侧用
+`index($0, passed:false)` 判失败。字符串 `false` 的引号位置不同，
+**永远匹配不上**——只改键名而保留字符串，等于把这个缺陷原样保留下来。
+
+### 缺陷 2：测试往开发者的真实日志里写
+
+`common.test.ts` 直接对 `process.cwd()` 调 `recordAudit()`，而它的
+`afterEach` **是空的**——函数体只有一句注释「Just verify it doesn't throw」。
+
+每跑一次测试，就往仓库自己的 `audit.jsonl` 追加一行真正的 `gate-test`。
+实测：**215 行**。
+
+> 一个往生产状态写入、却只断言「没抛异常」的测试，
+> 把破坏留在原地，然后报告这一轮是干净的。
+
+### 修复
+
+`afterEach` 现在逐字节快照并还原文件。验证：套件运行前后审计文件都是
+16662 行，没有新增 `gate-test` 或 `schema-probe`。
+
+新增一个测试钉住 schema 本身——字段名、`typeof passed === 'boolean'`、
+以及**旧键必须不存在**——两个写入者不能再无声漂移。
+
+证伪：把字段名还原成旧版，测试变红（19 个里 1 个失败）。
+
 ## [0.38.56.0] - 2026-11-20
 
 **门禁没检查，但记了 PASS。**

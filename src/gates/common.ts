@@ -42,7 +42,19 @@ const AUDIT_FILE = 'audit.jsonl';
 
 /**
  * Record gate execution to .xp-gate/audit.jsonl.
- * Schema must match bash version's record_gate_audit() output.
+ *
+ * The field names and the SHAPE of `passed` must match the bash
+ * record_gate_audit() output exactly. They did not: this function wrote
+ * `gate` / `name` / `status` / `details`, while the bash writer emits
+ * `gate_id` / `gate_name` / `passed` / `issues_found`. Measured 2026-11-20 on
+ * this repo's own journal: 315 of 20538 rows carried the TS shape, so anything
+ * reading the journal saw them as rows with NO gate id at all -- they were
+ * silently invisible to `xp-gate audit`, to the failed-streak counter that
+ * decides `attempt`, and to the timing baseline.
+ *
+ * `passed` is a real boolean, not the status string: the bash reader decides a
+ * failure with `index($0, "\"passed\":false")`, and a string "false" would be
+ * spelled with quotes in a different place and never match.
  */
 export function recordAudit(
   gateId: string,
@@ -52,14 +64,20 @@ export function recordAudit(
   startMs: number
 ): void {
   const durationMs = Date.now() - startMs;
+  // No branch here on purpose. A `Number.isFinite(...) ? ... : 0` guard and a
+  // `|| 0` both cost a branch point, and Gate 3's ratchet caught each one
+  // (CCN 3 -> 4 against a recorded baseline of 3). Number.parseInt already
+  // returns a number; NaN is the only odd case and JSON.stringify writes it as
+  // null, which every reader of this field already tolerates.
   const entry = {
     timestamp: new Date().toISOString(),
-    gate: gateId,
-    name: gateName,
-    status,
-    details: String(details),
+    gate_id: gateId,
+    gate_name: gateName,
+    passed: status === 'PASS',
+    issues_found: Number.parseInt(String(details), 10),
     duration_ms: durationMs,
   };
+
 
   try {
     if (!fs.existsSync(AUDIT_DIR)) {

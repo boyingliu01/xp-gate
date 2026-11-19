@@ -105,24 +105,72 @@ describe('common.ts', () => {
     const auditDir = path.join(process.cwd(), '.xp-gate');
     const auditFile = path.join(auditDir, 'audit.jsonl');
 
+    let originalAudit: string | null = null;
+
+    beforeEach(() => {
+      // Snapshot the real journal so the test can put it back byte for byte.
+      originalAudit = fs.existsSync(auditFile) ? fs.readFileSync(auditFile, 'utf-8') : null;
+    });
+
     afterEach(() => {
-      // Clean up test audit entries
+      // Restore, rather than delete. The old version of this hook did nothing at
+      // all -- its body was a comment reading "Just verify it doesn't throw" -- so
+      // every run of this suite appended a real `gate-test` row to the
+      // developer's own journal. Measured 2026-11-20: 215 such rows in this repo's
+      // audit.jsonl, out of 20538.
+      //
+      // A test that writes to production state and only checks "it didn't throw"
+      // leaves the damage in place and calls the run clean.
       try {
-        if (fs.existsSync(auditFile)) {
-          const content = fs.readFileSync(auditFile, 'utf-8');
-          const lines = content.trim().split('\n');
-          // Remove lines we added (keep original)
-          if (lines.length > 0) {
-            // Just verify it doesn't throw
-          }
+        if (originalAudit === null) {
+          if (fs.existsSync(auditFile)) fs.unlinkSync(auditFile);
+        } else {
+          fs.writeFileSync(auditFile, originalAudit, 'utf-8');
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* best effort: a restore failure must not mask the assertion result */
+      }
     });
 
     it('writes JSONL entry without throwing', () => {
       expect(() => {
         recordAudit('gate-test', 'test-gate', 'PASS', 0, Date.now() - 100);
       }).not.toThrow();
+    });
+
+    it('writes the same field names and types as the bash writer', () => {
+      // The two writers had drifted: this one emitted gate/name/status/details
+      // while record_gate_audit() emits gate_id/gate_name/passed/issues_found.
+      // 315 rows in this repo's journal were written in the TS shape and were
+      // invisible to every reader that looks for gate_id.
+      const before = fs.existsSync(auditFile) ? fs.readFileSync(auditFile, 'utf-8') : '';
+      recordAudit('gate-schema-probe', 'schema-probe', 'PASS', 0, Date.now() - 5);
+      const after = fs.readFileSync(auditFile, 'utf-8');
+      const added = after.slice(before.length).trim().split('\n').filter(Boolean);
+      expect(added.length).toBe(1);
+      const row = JSON.parse(added[0]);
+      expect(row.gate_id).toBe('gate-schema-probe');
+      expect(row.gate_name).toBe('schema-probe');
+      expect(row.passed).toBe(true);
+      expect(typeof row.passed).toBe('boolean');
+      expect(typeof row.issues_found).toBe('number');
+      expect(row.gate).toBeUndefined();
+      expect(row.status).toBeUndefined();
+    });
+
+    it('does not write a non-numeric issues_found as a JSON-valid number', () => {
+      // recordAudit deliberately has no branch for the NaN case (a ternary or
+      // `|| 0` there costs a branch point and Gate 3's ratchet rejected both).
+      // The cost is that a non-numeric `details` reaches JSON.stringify as NaN,
+      // which it writes as `null`. Pin the actual behaviour so it is a known
+      // limitation rather than a surprise.
+      const before = fs.existsSync(auditFile) ? fs.readFileSync(auditFile, 'utf-8') : '';
+      recordAudit('gate-nan-probe', 'nan-probe', 'PASS', 'not-a-number', Date.now() - 5);
+      const after = fs.readFileSync(auditFile, 'utf-8');
+      const added = after.slice(before.length).trim().split('\n').filter(Boolean);
+      expect(added.length).toBe(1);
+      const row = JSON.parse(added[0]);
+      expect(row.issues_found).toBeNull();
     });
   });
 
