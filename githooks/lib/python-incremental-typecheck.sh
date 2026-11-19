@@ -65,10 +65,38 @@ python_typecheck_incremental() {
 
   # If a scope file is declared but yields nothing, every staged .py is out of
   # scope -> SKIP (exit 0), mirroring the full pass.
+  #
+  # AN EMPTY SCOPE IS NOT A PASS. Measured 2026-11-19 with the language matrix: a
+  # Python project with no src/, no scripts/ and no .xp-gate-mypy-scope, editing a
+  # file that does not type-check:
+  #
+  #     a.py : def f() -> int: return "not an int"
+  #     mypy : error: Incompatible return value type (got "str", expected "int")
+  #     gate : "PASSED - mypy type checking."
+  #     commit ALLOWED
+  #
+  # The loop below runs only when SCOPE_DIRS is non-empty, so with no declared type
+  # surface TYPECHECK_FILES stayed empty, mypy was never invoked, and the final
+  # `return 0` was read by Gate 1 as a clean type check. Nothing said "I did not
+  # look", which is what made it invisible.
+  #
+  # Gate 1 prints "PASSED - mypy type checking" on exit 0 and cannot see the
+  # difference, so the distinction has to be stated here, loudly, in the log.
   local _in_scope=false
   local -a TYPECHECK_FILES=()
   local f
-  if [ "${#SCOPE_DIRS[@]}" -gt 0 ]; then
+  if [ "${#SCOPE_DIRS[@]}" -eq 0 ]; then
+    # No declared surface: check the staged files themselves.
+    #
+    # Skipping was the old behaviour and is indefensible here -- these are the
+    # exact files the author is asking to commit. Narrowing the scope exists to
+    # keep a LARGE repo's pre-commit fast and free of unrelated noise (tests/,
+    # vendored code); it was never meant to mean "a small project gets no type
+    # checking at all", which is what it did.
+    echo "  ⚠ mypy incremental: no type surface declared (no .xp-gate-mypy-scope, no src/ or scripts/)" >&2
+    echo "    checking the staged .py files directly; declare .xp-gate-mypy-scope to narrow this" >&2
+    TYPECHECK_FILES=("$@")
+  else
     for f in "$@"; do
       _in_scope=false
       for target in "${SCOPE_DIRS[@]}"; do
