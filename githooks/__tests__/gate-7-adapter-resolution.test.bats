@@ -56,19 +56,31 @@ drive() {
   [[ "$output" == *"STATUS=PASS"* ]]
 }
 
-@test "gate-7 prefers the global tier over a project copy (route_to_adapter parity)" {
-  # Both tiers present: order must match route_to_adapter() in
-  # adapter-common.sh — global first (machine-wide single source of truth).
+@test "gate-7 prefers a PROJECT copy over the global tier" {
+  # This test used to assert the opposite, "prefers the global tier over a
+  # project copy (route_to_adapter parity)". That rationale expired:
+  # route_to_adapter() was REMOVED in #688 as a dispatcher with zero production
+  # callers, so there was no parity left to preserve -- but the order it had
+  # dictated stayed behind, and it meant a repository could not decide how it
+  # was checked.
+  #
+  # Measured on this machine: repo v0.38.26 against a global install at v0.38.9
+  # (17 releases behind), with 6 adapters differing between the two. A fixture
+  # carrying its own adapters/iac.sh was bypassed outright.
+  #
+  # The global tier still exists and is still reachable (test 1 and test 3 cover
+  # that); it is now the FALLBACK rather than the first choice.
   mkdir -p githooks/adapters
   cat > githooks/adapters/iac.sh <<'ADAPTER'
 run_static_analysis() { echo "project adapter ran"; return 0; }
 ADAPTER
-  printf 'resource "x" "y" {}\n' > main.tf
+  printf 'resource "x" "y" {}
+' > main.tf
   git add main.tf
   run drive
   [ "$status" -eq 0 ]
-  [[ "$output" == *"fake checkov ran"* ]]
-  [[ "$output" != *"project adapter ran"* ]]
+  [[ "$output" == *"project adapter ran"* ]]
+  [[ "$output" != *"fake checkov ran"* ]]
 }
 
 @test "gate-7 falls back to the project adapter when no global install exists" {
