@@ -326,6 +326,101 @@ worktree 单独验证过，与本轮改动无关），所以这是一个先于�
 > 不一致」并声称已用 `--csv-verified` 修好，但 `stripNonCode` 仍然不认识正则字面量。
 > **注释描述的是意图，不是状态**——判断依据只能是「回退修复后测试是否精确变红」。
 
+### 3.5 门禁 5：一个「永不失败」的测试，和五种各说各话的 SKIP
+
+门禁 5 此前从未按语言验证过，而它的耗时排第二（35.5s），验证成本高，于是
+「跑得动」被当成了「跑得对」。本轮做了 9 语言夹具，**每个夹具带一个故意失败的测试**。
+
+选失败测试而不是缺失测试，是因为「跑不了」和「没找到问题」从外面看一模一样——
+`githooks/AGENTS.md` 的裁决契约整段都在讲这件事。失败断言是唯一能让两者分开的输入。
+
+**Bug 1：Go 套件失败了，门禁报 PASSED。**
+
+```bash
+go test -coverprofile=coverage.out ./... 2>/dev/null   # 退出码从未捕获
+TOTAL_COVERAGE=$(go tool cover -func ...)
+if [ -n "$TOTAL_COVERAGE" ] && (( TOTAL_COVERAGE < 80 )); then return 1; fi
+COV_EXIT=$((COV_EXIT || 0))                            # 无条件零
+```
+
+实测夹具只有一个断言 `Add(1,1)==3`：
+
+```
+--- FAIL: TestDeliberatelyFailing (0.00s)
+FAIL    p       0.044s
+coverage: 100.0% of statements
+Go coverage: 100.0%
+PASSED - Coverage check completed.
+```
+
+失败测试只能通过它**顺带留下的覆盖率数字**抵达裁决，而失败的测试照样覆盖得满。
+往下十行的 `shell` 分支做同一件事、却写对了（`COV_EXIT=$((COV_EXIT || $?))`）——
+**相邻两个适配器、相反的正确性**，这正是它长期没被发现的形状，也是门禁 3 那个
+缺陷的同一个形状。
+
+**Bug 2：除了 TypeScript，每个 SKIP 都被记成 PASS。**
+
+门禁靠 grep 一句话来判断「到底跑了没有」：
+
+```bash
+printf '%s' "$TESTS_OUTPUT" | grep -q "No test runner installed locally"
+```
+
+那是 **TypeScript 适配器的措辞**。其余语言的措辞各不相同，于是每一个都被记成通过：
+
+| 适配器 | 它说的话 | 门禁给的判定 |
+|---|---|---|
+| typescript | `No test runner installed locally` | SKIP ✓ |
+| shell | `bats not available, skipping shell test suite` | **PASSED** |
+| php | `No phpunit.xml(.dist) found -- test suite not discoverable` | **PASSED** |
+| powershell | `No Pester tests found` | **PASSED** |
+| swift | `No Swift test framework detected` | **PASSED** |
+| objectivec | `No Objective-C test framework detected` | **PASSED** |
+
+一份措辞清单只能装下**有人记得读过的那些句子**——这正是本代码库到处在删
+手写语言列表的原因。改为**声明式契约**：适配器输出一次 `XP_GATE_TESTS_SKIPPED`，
+门禁读这个标记；旧的 TS 句子保留为兼容回退。
+
+**Bug 3：TypeScript 项目声明了自己的测试命令，适配器不读。**
+
+`run_tests()` 只探 `node_modules/.bin/{vitest,jest}`，都没有就报
+`No test runner installed locally` ——而这个理由**经常是假的**，因为 Node 18+ 自带
+`node --test`。实测 `"test": "node --test"` 且断言故意失败的夹具：报 SKIP，
+提交走过去，测试从未运行。改为把项目声明的 `scripts.test` 当兜底（本地执行、不装任何东西，
+不是适配器头部警告的 npx 问题）；具名 runner 仍然优先，现有项目的输出形状不变。
+
+**Bug 4：委托给 CI 的门禁，六行之后报 PASSED。**
+
+shell 适配器把测试委托给 CI，并明确说「Not checked by this gate -- verified on
+push/PR instead」，然后门禁无条件打印 `PASSED - Coverage check completed.`。
+委托本身是对的（239 个 bats 套件串行实测 18m47s，所以由 CI 承担），
+错的只是**契约为它自己写了判决**。与「SKIP 必须记录、不能只打印」同族，极性相反：
+SKIP 打印了，然后 PASS 盖在上面。
+
+**修复后的 9 语言矩阵**（`XP_GATE_ONLY_GATE=5` 隔离）：
+
+| 语言 | 判定 | 说明 |
+|---|---|---|
+| typescript | BLOCK | 声明式 runner 生效 |
+| python | BLOCK | `assert 2 == 3` |
+| go | BLOCK | 修复后 |
+| powershell | BLOCK | Pester `Expected 3, but got 2` |
+| java | BLOCK | |
+| cpp | BLOCK | |
+| dart | BLOCK | |
+| php | BLOCK | |
+| shell | 委托 CI（已诚实标注） | 不再是假 PASSED |
+
+**探针自己也错了两次**，两次都表现为「像产品缺陷的探针缺陷」：
+
+- 第一次把输出赋值写在 `( … )` 子 shell 里，全部语言报 `NONE`；
+- 第二次只 stage 一个非源码文件，门禁 5 正确地判「无代码变更跳过」，
+  探针把它记成产品缺陷。**门禁是对的，夹具是错的。**
+
+第三次才是真的：改用 `XP_GATE_ONLY_GATE=5` 隔离后，发现此前 python 和 java 的
+「失败」其实是 Gate 1 的 Ruff / lint 先拦下了，门禁 5 根本没被走到——
+**探针在为一个它没观察到的裁决作证**。
+
 ---
 
 ## 四、我自己的验证抓住的错误
@@ -385,7 +480,9 @@ worktree 单独验证过，与本轮改动无关），所以这是一个先于�
 
 1. ~~门禁 4 的专项深挖~~ → **已完成**（见 3.1 后续与 CHANGELOG 0.38.35.0）：
    10/10 语言现在给出真实判定——2 个报真实违规，6 个显式声明「未分析」，
-   java/kotlin 早已诚实报 INFO。**门禁 5 的全语言深挖仍未开始**。
+   java/kotlin 早已诚实报 INFO。
+2. ~~门禁 5 的全语言深挖~~ → **已完成**（见 3.5）。9 语言实测，修了 4 类缺陷。
+   剩下的 `dart`/`php`/`java` 等语言在夹具里仍需补依赖才能全跑，属环境而非产品问题。
 2. ~~pre-push 专项门禁~~ → **已验证**：本轮两次真实 push 中 M / M2 / ML / UI / MW / S
    全部给出明确原因（无对应语言源文件 → SKIP；推 main → MW 预审跳过），无一静默通过。
 3. ~~剩余 13 个语言~~ → **已完成**：15/15 全部产生真实判定（见上表）
@@ -406,3 +503,18 @@ worktree 单独验证过，与本轮改动无关），所以这是一个先于�
 9. **`extractClasses` 基线是 lizard 的漏洞值**（见 3.4 第 4 点）。同类「lizard 漏算箭头
    函数体 `&&`」的函数可能还有别的未暴露——只在被改动时才浮现。若要系统性排查，需要
    一次全库 lizard-vs-复算 对比，本轮未做。
+
+10. **门禁 5 汇总表仍显示 `PASS`**：委托给 CI 的 shell 现在正文诚实了
+    （`No test verdict was produced here`），但 `GATE_5_STATUS` 仍是 `PASS`，
+    所以汇总行写着 `Gate 5: PASS (coverage: N/A%)`。同一矛盾在变量层还留着——
+    要让状态变 `SKIP` 得改 `record_gate_audit` 的取值路径，影响面比正文大，
+    本轮只修了人读的那一半。
+
+11. **门禁 5 的三个死变量**：`TESTS_DEFERRED` / `PY_TEST_SKIPPED` /
+    `GATE_5_COVERAGE_APPLIES_TO` 只写不读（grep 过 pre-commit、gate-driver、lib/）。
+    尤其最后一个算出了有一个 `subset`/`project` 的区分却从不到达审计记录，
+    看着像**没写完的意图**而不是噪声。删之前要先决定那个区分该不该进 journal。
+
+12. **PHP 的 skip 返回 2 而非 0**，会走 `handle_test_failure` 的真实失败路径，
+    属于**过度阻断**（与 Go/shell 的漏检相反）。优先级低：过度阻断会立刻被人发现，
+    漏检不会。修法同 Bug 2——补 `XP_GATE_TESTS_SKIPPED` 标记。
