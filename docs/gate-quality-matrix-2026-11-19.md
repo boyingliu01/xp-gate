@@ -880,6 +880,70 @@ Java 和 C# 分支在同样条件下都返回 WARN，只有 C/C++ 分支回答 P
 关掉盲区需要 adapter 能力声明（本项目的规则：能力由 adapter 声明，门禁里绝不枚举语言），
 那是另一个更大的改动，本轮没有做。
 
+
+### 3.14 门禁 13 的语言盲区：改成 adapter 声明
+
+上一节写的是「盲区没有关闭」。这一节把它关掉了。
+
+#### 一个 Go 类型错误穿过了全部 13 个门禁
+
+```go
+var x int = "not an int"
+```
+
+| 门禁 | 判定 |
+|---|---|
+| 门禁 9 | SKIP（not a TypeScript project — 正确，带原因）|
+| 门禁 13 | SKIP（上一轮的诚实性修复）|
+| 其余 11 个 | 没有一个在看编译器错误 |
+
+而 `go vet` 检测它只要 **1.4 秒**，编译器就在机器上。
+
+门禁 13 原本覆盖的 C/C++、Java、C#，**恰好是有人接过线的那三种语言**。
+
+#### 修复方式是声明，不是清单
+
+`githooks/AGENTS.md` 明确禁止显然的做法：
+
+> "Declare capabilities on the adapter, never enumerate language names. A hand
+> written list of languages can only ever contain what someone remembered; this
+> was patched twice before becoming a rule."
+
+契约因此是 adapter 里的一个函数：
+
+```bash
+compiler_check_command() { printf "%s" "go vet ./..."; }
+```
+
+**门禁里不出现任何语言名。** 加 Rust/Dart 只是改各自的 adapter。
+
+#### 端到端
+
+| 场景 | 判定 | 耗时 |
+|---|---|---|
+| Go 类型错误 | **BLOCK** | 1.4s |
+| Go 代码正确 | **PASS** | 1.4s |
+| Ruby（未声明）| **SKIP + 原因** | 0.0s |
+
+#### 接线之后，又暴露出三处同一形状的缺陷
+
+功能跑起来之后，一个 Ruby 项目报了 **PASS**。原因：Java、C#、-fanalyzer 三个 arm
+在**自己没有源码时都返回 PASS**。三处，一个形状——**没评估却claim干净**。
+
+全部改为 SKIP。
+
+**这是跑真实 commit 抓到的，当时 7 个单测全绿**，因为它们没有一个覆盖那些 arm 的空路径。
+
+#### 第二个语义 bug 也来自同一次运行
+
+一旦某个 arm 真的评估过，SKIP 就不该再传染——否则一个**干净的 Go 项目会报 SKIP**，
+读起来就像「不支持你的语言」。entry 现在分开跟踪 `_g13_any_pass` 与 `_g13_any_skip`。
+
+#### Kotlin 故意没接
+
+`kotlinc` 需要文件列表参数，不是项目级命令，不符合契约。它有自己已验证的
+`run_static_analysis` 路径。**宁可不接，也不接一个半对的。**
+
 ## 四、我自己的验证抓住的错误
 
 每一个都「看起来像成功」。记录在此，因为它们比结论更能说明问题。
