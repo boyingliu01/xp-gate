@@ -3,30 +3,33 @@
 run_static_analysis() {
   if command -v dart &>/dev/null; then
     dart analyze 2>&1 | sed -n '1,30p; 30q'
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: dart: Dart SDK not installed -- nothing was checked"
     echo "Dart SDK not available"
-    return 1
+    return 3
   fi
 }
 
 run_lint() {
   if command -v dart &>/dev/null; then
     dart format --output=none --set-exit-if-changed . 2>&1 | sed -n '1,30p; 30q'
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: dart: Dart SDK not installed -- nothing was checked"
     echo "Dart SDK not available"
-    return 1
+    return 3
   fi
 }
 
 run_tests() {
   if command -v dart &>/dev/null; then
     dart test 2>&1 | tail -20
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: dart: Dart SDK not installed -- nothing was checked"
     echo "Dart SDK not available"
-    return 1
+    return 3
   fi
 }
 
@@ -51,9 +54,10 @@ compiler_check_command() { printf "%s" "dart analyze"; }
 run_coverage() {
   if command -v dart &>/dev/null; then
     dart test --coverage=coverage 2>&1 | tail -10
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: dart: Dart SDK not installed -- nothing was checked"
     echo "Dart SDK not available"
-    return 1
+    return 3
   fi
 }
