@@ -117,6 +117,11 @@ probe_gate0() {   # version consistency
 }
 
 probe_gate2() {   # duplicate code
+  # Gate 2's output has no PASS/FAIL keyword at all: it prints jscpd's table and
+  # "Found N clones." A probe that classifies purely on those keywords records
+  # NONE for a gate that worked perfectly (measured: this probe failed on the
+  # probe author's own fixture while `check 2` printed "Found 1 clones").
+  # The verdict here is therefore read from the report itself.
   local d="$WORK/g2"
   make_project "$d" typescript s.ts 'export function a(x:number){return x*2;}' || return
   local big
@@ -125,7 +130,25 @@ probe_gate2() {   # duplicate code
   stage_change "$d" dup2.ts "$big"
   # Gate 2 is REPORT-ONLY by design: every language arm prints findings as info
   # and never sets FAIL. Verified: no path in gate-2-entry.sh assigns GATE_2_STATUS=FAIL.
-  record "gate-2 reports duplicates (advisory)" PASS "$(run_gate "$d" 2)"
+  local out
+  out="$(run_gate "$d" 2)"
+  # A clone report IS the gate doing its job. "Found 0" on this fixture would be
+  # the failure -- the same shape as the absolute-path defect: a clean-looking
+  # zero produced by not looking.
+  # Counted directly rather than through record(): record() classifies on
+  # PASS/FAIL keywords, and this gate's output contains neither.
+  if printf '%s' "$out" | grep -qE 'Found [1-9][0-9]* clones'; then
+    PASS_N=$((PASS_N + 1))
+    printf '  ✅ %-42s %-6s (expected %s)
+' "gate-2 reports duplicates (advisory)" "PASS" "PASS"
+  else
+    FAIL_N=$((FAIL_N + 1))
+    FAILURES+=("gate-2 reports duplicates (advisory): found no clone on a fixture with an exact duplicate")
+    printf '  ❌ %-42s %-6s (expected %s)
+' "gate-2 reports duplicates (advisory)" "NONE" "PASS"
+    printf '%s
+' "$out" | tail -4 | sed 's/^/       | /'
+  fi
 }
 
 probe_gate3() {   # complexity
