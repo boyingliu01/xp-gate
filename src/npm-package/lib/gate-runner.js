@@ -601,7 +601,16 @@ const GATE_REGISTRY = {
     aliases: ['duplicates', 'dup', '2'],
     run: (targetPath) => {
       const jscpdConfig = findConfig(targetPath, 'jscpd.conf.json');
-      const args = [targetPath || '.'];
+      // The scan root is '.' whenever we are running inside the target.
+      //
+      // jscpd 4.x does not apply its glob ignore rules to an ABSOLUTE scan path:
+      // measured on a fixture with three byte-identical files, one of them under
+      // .xp-gate/, `jscpd <abs-path> --ignore "**/.xp-gate/**,..."` reported 0
+      // clones while `jscpd . --ignore <same>` reported 2 (the copy excluded, the
+      // real duplicate kept). Passing '.' and running with cwd = target keeps both
+      // the ignore rules and the discovery working.
+      const scanRoot = !targetPath || path.resolve(targetPath) === path.resolve(process.cwd()) ? '.' : targetPath;
+      const args = [scanRoot];
       if (jscpdConfig) args.push('--config', jscpdConfig);
       // The ignore set is passed ONLY when the project has no config of its own.
       //
@@ -789,49 +798,46 @@ function getAliases(gateId) {
 }
 
 /**
- * The duplicate-scan ignore set, read from the bash library that owns it.
+ * The duplicate-scan ignore set for a project that has no jscpd.conf.json.
  *
- * Two implementations of Gate 2 exist -- the hook runs githooks/gate-2.sh and
- * `xp-gate check 2` runs this file -- and they had drifted on exactly this: the
- * hook excluded build output, this path excluded nothing and scanned `.xp-gate/`,
- * the tree xp-gate itself writes one report per gate per run into. Reading the
- * pattern from githooks/lib/jscpd-run.sh instead of restating it here means the
- * two paths cannot disagree again about what counts as project source.
+ * jscpd 4.x takes --ignore as a GLOB (star-star/node_modules/star-star), not a
+ * first version of this function copied the regex from githooks/lib/jscpd-run.sh
+ * and passed it straight through, which silently matched nothing: measured on a
+ * fixture whose .xp-gate/reports copy was byte-identical to a source file,
+ * --ignore with the regex reported 3 clones (copy included) while a glob form
+ * reported 2 (copy excluded). A gate that prints an ignore flag and ignores
+ * nothing is worse than one with no flag.
  *
- * Returns '' when the library cannot be found (a consumer install without the
- * hooks tree): the scan then runs unfiltered rather than inventing a set here.
+ * Written without literal star-slash sequences on purpose: inside a block
+ * comment a glob like star-star/name/star-star closes the comment early and the
+ * rest of the file is parsed as code (measured: "node_modules is not defined" at
+ * module load).
+ *
+ * The directory list is kept here in glob form on purpose: the bash side uses a
+ * regex for a different consumer (its own file-list filter), so the two are not
+ * interchangeable and must not be copy-pasted between each other. The names,
+ * though, are the same set.
  */
 function jscpdDefaultIgnorePatterns() {
-  const candidates = [
-    path.join(__dirname, '..', '..', '..', 'githooks', 'lib', 'jscpd-run.sh'),
-    path.join(__dirname, '..', 'hooks', 'lib', 'jscpd-run.sh'),
-    path.join(process.cwd(), 'githooks', 'lib', 'jscpd-run.sh'),
-  ];
-  for (const c of candidates) {
-    let text;
-    try {
-      text = fs.readFileSync(c, 'utf8');
-    } catch (_) {
-      continue;
-    }
-    // The assignment is single-quoted and comes before any use of the variable.
-    const m = /^JSCPD_DEFAULT_IGNORE_PATTERNS='([^']+)'/m.exec(text);
-    if (m) return m[1];
-  }
-  return '';
+  return [
+    '**/node_modules/**',
+    '**/dist/**',
+    '**/build/**',
+    '**/target/**',
+    '**/coverage/**',
+    '**/out/**',
+    '**/.next/**',
+    '**/.nuxt/**',
+    '**/vendor/**',
+    '**/.xp-gate/**',
+    '**/*.log',
+    '**/*.txt',
+    '**/*.yaml',
+    '**/*.yml',
+    '**/*.md',
+  ].join(',');
 }
 
-/**
- * Run jscpd without reaching for the network.
- *
- * The previous implementation was `execFileSync('npx', ['-y', 'jscpd', ...])`, and
- * `-y` means "install it if it is not here" -- a gate that installs the tool it
- * was asked to detect, changing the environment it is measuring. It is also
- * where a concurrent run produced "Gate 2 FAILED: Command failed: npx -y jscpd .".
- * A project-local or global binary is used when present; `--no-install` keeps the
- * npx fallback from installing anything, and failing to find jscpd is reported as
- * "not available" instead of being retried over the network.
- */
 function runJscpd(args, targetPath) {
   // Invoke jscpd's JS entry through `node` rather than going through .bin/.
   //
@@ -880,7 +886,12 @@ function runJscpd(args, targetPath) {
       ];
   for (const [cmd, cmdArgs] of attempts) {
     try {
-      execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
+      // cwd must be the scan target. Without it jscpd runs in whatever directory
+      // the CLI was started from, so `xp-gate check 2 <path>` scanned the CURRENT
+      // directory and the path argument only affected its display name. Measured:
+      // a 3-copy fixture reported 0 clones because the scan happened in the xp-gate
+      // repo instead of the fixture.
+      execFileSync(cmd, cmdArgs, { stdio: 'inherit', cwd: targetPath || process.cwd() });
       return;
     } catch (err) {
       lastErr = err;
