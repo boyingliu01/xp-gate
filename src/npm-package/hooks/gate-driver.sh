@@ -111,6 +111,26 @@ _xp_gate_run_chain() {
     "$fn"
     rc=$?
     if [ "$rc" -ne 0 ]; then
+      # Fail-fast is intended: the first blocking gate stops the commit. But the
+      # report prints a row for EVERY gate in XP_GATE_ORDER, so the gates below
+      # were being shown as plain "SKIP" -- indistinguishable from gates that
+      # decided to skip. Measured on a repo whose Gate 1 failed: gates 2-8 and 10
+      # appeared as "SKIP (warnings: 0)" and "SKIP (coverage: N/A%)" while their
+      # bodies had never been invoked at all.
+      #
+      # Name them. One line, before the exit, so the reader can tell "the chain
+      # stopped here" from "each later gate chose to skip".
+      local _rest="" _k="" _seen=0
+      for _k in $XP_GATE_ORDER; do
+        if [ "$_seen" = "1" ]; then
+          _rest="$_rest $_k"
+          continue
+        fi
+        [ "$_k" = "$key" ] && _seen=1
+      done
+      if [ -n "$_rest" ]; then
+        echo "⚠️  Chain stopped at Gate $key — these gates were NOT reached:$_rest"
+      fi
       exit "$rc"
     fi
 
