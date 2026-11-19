@@ -775,9 +775,21 @@ else
             echo "✅ PASSED - PowerShell code quality (PSScriptAnalyzer)."
             ;;
           1)
+            # Name the rules, not just the fact. Measured 2026-11-20 on a fixture
+            # with an unused variable: the table printed the rule name
+            # (PSUseDeclaredVarsMoreThanAssignments) but the verdict line and
+            # GATE_1_DETAIL both said only "violations". Anyone reading the journal,
+            # the report, or the one-line summary learned that something was wrong
+            # and not what -- the same shape as the mypy arm that reported
+            # "PASSED - mypy" for a check it never ran.
+            PS_RULES=$(printf '%s
+' "$PS_G1_OUTPUT"               | awk 'NF>3 && $1 ~ /^PS[A-Z]/ {print $1}' | sort -u | paste -sd, - 2>/dev/null)
             echo "❌ BLOCKED - PSScriptAnalyzer violations (fix or add suppressions)"
+            if [ -n "$PS_RULES" ]; then
+              echo "   Rules: $PS_RULES"
+            fi
             GATE_1_STATUS="BLOCK"
-            GATE_1_DETAIL="powershell: PSScriptAnalyzer findings"
+            GATE_1_DETAIL="powershell: PSScriptAnalyzer findings${PS_RULES:+ ($PS_RULES)}"
             return 1
             ;;
           2)
