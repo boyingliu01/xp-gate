@@ -90,6 +90,11 @@ write_fixture() {
     typescript)
       printf '{"compilerOptions":{"strict":true,"noEmit":true},"include":["*.ts"]}\n' > tsconfig.json
       printf '{"name":"probe","version":"1.0.0"}\n' > package.json
+      # One source file has no architecture to violate, and archlint god_module
+      # flags any single-file project (measured: 1 smell on a four-line file).
+      # Gate 6 fails closed on a missing config by design, so the fixture
+      # declares the exemption the design provides.
+      : > .architecture-skip
       if [ "$bad" = 1 ]; then
         printf 'const x: number = "not a number";\nexport default x;\n' > a.ts
       else
