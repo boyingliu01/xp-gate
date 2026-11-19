@@ -603,7 +603,19 @@ const GATE_REGISTRY = {
       const jscpdConfig = findConfig(targetPath, 'jscpd.conf.json');
       const args = [targetPath || '.'];
       if (jscpdConfig) args.push('--config', jscpdConfig);
-      execFileSync('npx', ['-y', 'jscpd', ...args], { stdio: 'inherit', shell: true });
+      // The ignore set is passed ONLY when the project has no config of its own.
+      //
+      // jscpd's --ignore is a REGEX while jscpd.conf.json's ignore is GLOB. Passing
+      // both does not merge them -- the CLI value replaces the config's list, so the
+      // scan lost "**/node_modules/**" and "**/.worktrees/**" and started walking
+      // .worktrees/sprint-*/plugins/opencode/node_modules (measured: 300 s timeout,
+      // down from 49 s, with the run still failing). The config is authoritative
+      // when it exists; the built-in set is a fallback for projects without one.
+      if (!jscpdConfig) {
+        const ignore = jscpdDefaultIgnorePatterns();
+        if (ignore) args.push('--ignore', ignore);
+      }
+      runJscpd(args, targetPath);
     },
   },
   '3': {
@@ -774,6 +786,107 @@ function resolveAlias(maybeAlias) {
 function getAliases(gateId) {
   const info = GATE_REGISTRY[String(gateId)];
   return info && Array.isArray(info.aliases) ? info.aliases : [];
+}
+
+/**
+ * The duplicate-scan ignore set, read from the bash library that owns it.
+ *
+ * Two implementations of Gate 2 exist -- the hook runs githooks/gate-2.sh and
+ * `xp-gate check 2` runs this file -- and they had drifted on exactly this: the
+ * hook excluded build output, this path excluded nothing and scanned `.xp-gate/`,
+ * the tree xp-gate itself writes one report per gate per run into. Reading the
+ * pattern from githooks/lib/jscpd-run.sh instead of restating it here means the
+ * two paths cannot disagree again about what counts as project source.
+ *
+ * Returns '' when the library cannot be found (a consumer install without the
+ * hooks tree): the scan then runs unfiltered rather than inventing a set here.
+ */
+function jscpdDefaultIgnorePatterns() {
+  const candidates = [
+    path.join(__dirname, '..', '..', '..', 'githooks', 'lib', 'jscpd-run.sh'),
+    path.join(__dirname, '..', 'hooks', 'lib', 'jscpd-run.sh'),
+    path.join(process.cwd(), 'githooks', 'lib', 'jscpd-run.sh'),
+  ];
+  for (const c of candidates) {
+    let text;
+    try {
+      text = fs.readFileSync(c, 'utf8');
+    } catch (_) {
+      continue;
+    }
+    // The assignment is single-quoted and comes before any use of the variable.
+    const m = /^JSCPD_DEFAULT_IGNORE_PATTERNS='([^']+)'/m.exec(text);
+    if (m) return m[1];
+  }
+  return '';
+}
+
+/**
+ * Run jscpd without reaching for the network.
+ *
+ * The previous implementation was `execFileSync('npx', ['-y', 'jscpd', ...])`, and
+ * `-y` means "install it if it is not here" -- a gate that installs the tool it
+ * was asked to detect, changing the environment it is measuring. It is also
+ * where a concurrent run produced "Gate 2 FAILED: Command failed: npx -y jscpd .".
+ * A project-local or global binary is used when present; `--no-install` keeps the
+ * npx fallback from installing anything, and failing to find jscpd is reported as
+ * "not available" instead of being retried over the network.
+ */
+function runJscpd(args, targetPath) {
+  // Invoke jscpd's JS entry through `node` rather than going through .bin/.
+  //
+  // Two dead ends, both measured on Windows:
+  //   execFileSync with shell:true  -> the ignore pattern's `|` became a pipe and
+  //     the child died with "'dist' is not recognized ...", while `check 2` still
+  //     exited 0 -- a crashed gate reading as a fast clean pass.
+  //   execFileSync without shell     -> EINVAL on jscpd.cmd (.cmd needs a shell) and
+  //     ENOENT on the extensionless jscpd (a shell script).
+  // Running the package's real entry point sidesteps both: argv goes to node
+  // untouched, no shell parses anything, and the tool is the one already installed.
+  // Where jscpd actually lives, in the order that avoids a shell entirely:
+  //   1. the project under check
+  //   2. this package own dependency tree
+  //   3. the global install tree
+  // process.execPath is the node BINARY location, not the npm global prefix; both
+  // are probed along with the APPDATA npm tree, because a global package lives in
+  // a directory that varies by platform and by install method. Getting this wrong
+  // is how an installed jscpd was reported missing as "spawnSync npx ENOENT".
+  const npmGlobalRoots = [
+    path.join(path.dirname(process.execPath), 'node_modules'),
+    path.join(process.env.APPDATA || '', 'npm', 'node_modules'),
+  ].filter((r) => r && !r.startsWith('node_modules'));
+  const roots = [
+    targetPath || process.cwd(),
+    process.cwd(),
+    path.join(__dirname, '..', '..'),
+    path.join(__dirname, '..', '..', '..'),
+    ...npmGlobalRoots,
+  ];
+  const entry = roots
+    .map((r) => path.join(r, 'node_modules', 'jscpd', 'bin', 'jscpd'))
+    .find((c) => fs.existsSync(c));
+  let lastErr = null;
+  // Third fallback is deliberately `--no-install`: a global jscpd is on PATH on the
+  // dev machine (/c/Users/think/AppData/Roaming/npm/jscpd) but `npx` here was
+  // reported ENOENT when no local node_modules existed -- a tool that IS installed
+  // reported as missing. The bare-name attempt covers PATH; npx covers a global npm
+  // prefix not on PATH; neither installs anything.
+  const attempts = entry
+    ? [[process.execPath, [entry, ...args]]]
+    : [
+        [process.platform === 'win32' ? 'jscpd.cmd' : 'jscpd', args],
+        ['jscpd', args],
+        ['npx', ['--no-install', 'jscpd', ...args]],
+      ];
+  for (const [cmd, cmdArgs] of attempts) {
+    try {
+      execFileSync(cmd, cmdArgs, { stdio: 'inherit' });
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('jscpd not available');
 }
 
 function findConfig(basePath, fileName) {
