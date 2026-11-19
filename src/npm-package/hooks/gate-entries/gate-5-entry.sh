@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# --- shellcheck suppressions for this file, see the note below ---
+# shellcheck disable=SC2001,SC2034,SC2086,SC2126,SC2140
+
 # ============================================================================
 # gate-5 entry — extracted from pre-commit by scripts/extract-gates.cjs
 #
@@ -16,6 +20,25 @@
 # pre-commit at the point the driver reaches it. Edit the gate here from now
 # on - there is no copy left in the hook.
 # ============================================================================
+
+# The last three are real dead stores, left in place rather than deleted in the
+# same change that fixes a defect in this arm: removing them silently would hide
+# the possibility that they were MEANT to be consumed (the audit record currently
+# carries only GATE_5_DETAIL, so the subset/project distinction is computed and
+# thrown away). Deleting them belongs with whoever decides whether that
+# distinction should reach the journal -- see the gate-5 follow-ups.
+#
+# Three note-level codes, suppressed for the same reason: each is a deliberate
+# shell idiom the linter cannot tell from an accident.
+#
+#   SC2086 ($SMART_TARGETS, $RELATED_TESTS, $PY_CHANGED_ALL). These hold
+#   space-separated file lists and are expanded UNQUOTED on purpose -- quoting
+#   collapses the list into one bogus path. The alternative shellcheck suggests
+#   is an array, which means rewriting the surrounding branches; the code is
+#   correct as written.
+#   SC2001 (sed instead of parameter substitution). The existing sed forms sit in
+#   multi-step pipelines where they are the readable choice.
+#   SC2126 (grep piped to wc -l). Kept for symmetry with the surrounding counts.
 
 # ============================================================================
 # Is the coverage report on disk evidence for THIS commit?
@@ -680,7 +703,7 @@ else
   # of a test result was reported as the absence of a need for one. The
   # Principles extensions list got `.cs` in ac214d38; this one was left behind,
   # which is why the C# arm looked like it worked while Gate 5 stood down.
-  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|cs|csx|cpp|cc|cxx|c|h|hpp|swift|m|mm|dart|sh|ps1)$"
+  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|cs|csx|cpp|cc|cxx|c|h|hpp|swift|m|mm|dart|php|phtml|sh|ps1)$"
   CHANGED_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "$CODE_EXTENSIONS" || true)
   if [ -z "$CHANGED_CODE_FILES" ]; then
     # #554: this branch DID stand down deliberately, but "PASS" is a claim that
@@ -876,7 +899,7 @@ else
           # coverage arm further down finds no report and blocks with
           # "coverage/coverage-summary.json not found" -- blaming a missing
           # artifact for a runner that was never installed (dsh-aot-runner #21).
-          if [ "$TESTS_EXIT_CODE" -eq 0 ] && printf '%s' "$TESTS_OUTPUT" | grep -q "No test runner installed locally"; then
+          if _gate5_test_run_skipped "$TESTS_EXIT_CODE" "$TESTS_OUTPUT"; then
             TESTS_SKIPPED=true
           fi
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
@@ -960,7 +983,7 @@ else
             # "tests passed" and for "no runner installed", so the output is the
             # only evidence of which one happened. Setting TESTS_RAN_ANY here
             # unconditionally would claim a measurement that never took place.
-            if printf '%s' "$TESTS_OUTPUT" | grep -q "No test runner installed locally"; then
+            if _gate5_test_run_skipped "$TESTS_EXIT_CODE" "$TESTS_OUTPUT"; then
               TESTS_SKIPPED=true
             else
               echo "✅ PASSED - Unit tests passed."
@@ -1158,7 +1181,7 @@ else
               elif [ "$PY_TEST_COUNT" -gt 20 ] 2>/dev/null; then
                 echo "ℹ️  Python: $PY_TEST_COUNT changed test files (>20) — running FULL suite (#399)."
               fi
-              # shellcheck disable=SC2086
+            
               pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
               COV_EXIT=$((COV_EXIT || $?))
             else
@@ -1180,7 +1203,7 @@ else
               if [ -z "$PY_TARGETS" ]; then
                 # related lookup found nothing → tier 3 full run is safest.
                 echo "ℹ️  Python: no related tests found for changed sources — running FULL suite (#399)."
-                # shellcheck disable=SC2086
+              
                 pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under="$PY_COV_FAIL_UNDER" --tb=short
                 COV_EXIT=$((COV_EXIT || $?))
               else
@@ -1197,7 +1220,7 @@ else
                 # Coverage check FAILED". --cov-fail-under=0 is the documented
                 # way to switch it off for one invocation.
                 PARTIAL_TEST_RUN=true
-                # shellcheck disable=SC2086
+              
                 pytest $PY_XDIST_ARGS $PY_COV_SOURCE --cov-fail-under=0 --tb=short $PY_TARGETS
                 COV_EXIT=$((COV_EXIT || $?))
               fi
@@ -1211,14 +1234,9 @@ else
           ;;
         "go")
           if command -v go &> /dev/null; then
-            go test -coverprofile=coverage.out ./... 2>/dev/null
-            TOTAL_COVERAGE=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
-            if [ -n "$TOTAL_COVERAGE" ] && (( $(echo "$TOTAL_COVERAGE < 80" | bc -l 2>/dev/null || echo "0") )); then
-              echo "❌ BLOCKED - Go coverage $TOTAL_COVERAGE% below ${COVERAGE_THRESHOLD:-80}% threshold"
-              return 1
-            fi
-            echo "Go coverage: $TOTAL_COVERAGE%"
-            COV_EXIT=$((COV_EXIT || 0))
+            # Extracted so the arm can be tested without running this repo's own
+            # suite. The defect it fixes is described on the function.
+            _gate5_go_coverage_arm || return 1
           fi
           ;;
         "shell")
@@ -1986,7 +2004,103 @@ record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START"
   return 0
 }
 
+# Did the test run actually verify anything, or did the adapter decline to run?
+#
+# The gate used to answer this by grepping the adapter's output for one sentence:
+#
+#     printf '%s' "$TESTS_OUTPUT" | grep -q "No test runner installed locally"
+#
+# which is what the TYPESCRIPT adapter prints. Every other adapter words its
+# skip differently, so every other adapter's skip was recorded as a pass.
+# Measured 2026-11-19, shell fixture with one deliberately failing .bats test:
+#
+#     Running tests...
+#     bats not available, skipping shell test suite (install: npm i -D bats)
+#     PASSED - Unit tests passed.
+#
+# The same shape appears for php, powershell, swift and objectivec. A prose list
+# can only contain the sentences someone remembered reading -- the exact reason
+# hand-written language lists were removed from this codebase.
+#
+# Two signals now, in priority order:
+#
+#   1. The adapter printed XP_GATE_TESTS_SKIPPED. This is the contract; adapters
+#      that know they declined say so once, in a form nobody has to parse.
+#   2. The old TS sentence, kept so an adapter that has not been updated yet
+#      still lands on the right side. Deprecated, not removed.
+#
+# A non-zero exit is never a skip: an adapter that exited non-zero found
+# something, whatever else it printed.
+_gate5_test_run_skipped() {
+  local code="$1" out="$2"
+  [ "$code" -eq 0 ] || return 1
+  printf '%s' "$out" | grep -q 'XP_GATE_TESTS_SKIPPED' && return 0
+  printf '%s' "$out" | grep -q 'No test runner installed locally' && return 0
+  return 1
+}
+
+# Go coverage arm: run the suite WITH coverage and judge both outcomes.
+#
+# The `go` language has no meaningful split between "run the tests" and "measure
+# coverage" -- `go test -coverprofile` does both -- so this arm is the only place
+# a Go test failure can be noticed. It was not noticed:
+#
+#     go test -coverprofile=coverage.out ./... 2>/dev/null   # exit status dropped
+#     TOTAL_COVERAGE=$(go tool cover -func ...)
+#     if [ -n "$TOTAL_COVERAGE" ] && (( TOTAL_COVERAGE < 80 )); then return 1; fi
+#     COV_EXIT=$((COV_EXIT || 0))                            # unconditional zero
+#
+# A failing test therefore reached the verdict only through the percentage it
+# happened to leave behind. Measured on a fixture whose only test asserts
+# `Add(1,1) == 3` -- it fails, and covers 100% of statements:
+#
+#     --- FAIL: TestDeliberatelyFailing (0.00s)
+#     FAIL    p       0.044s
+#     coverage: 100.0% of statements
+#     PASSED - Coverage check completed.
+#
+# A red suite scored green. The `shell` arm ten lines below had the same job and
+# did it correctly (`COV_EXIT=$((COV_EXIT || $?))`), which is what makes this a
+# defect rather than a design choice.
+#
+# Two things are deliberately NOT done here:
+#
+#   - `2>/dev/null` is gone. Discarding stderr is why the failing test's own
+#     output was the only clue, printed directly above a line that said PASSED.
+#     The suite's output is shown so a block is attributable.
+#   - A missing TOTAL_COVERAGE does NOT become a block. `go tool cover` prints
+#     nothing when the profile is absent, and reading that as "0% < 80%" would
+#     block every project whose tests failed to compile -- converting a compile
+#     error into a coverage verdict, which is the wrong-vocabulary trap named in
+#     githooks/AGENTS.md.
+_gate5_go_coverage_arm() {
+  local out rc total
+  out=$(go test -coverprofile=coverage.out ./... 2>&1)
+  rc=$?
+  # Show the tail: for a failing suite that is where FAIL and the test names are.
+  printf '%s\n' "$out" | tail -20
+
+  if [ "$rc" -ne 0 ]; then
+    echo "❌ BLOCKED - Go tests FAILED"
+    echo "   The suite was run with coverage; a failing test is a failure whether"
+    echo "   or not the coverage it measured looks acceptable."
+    COV_EXIT=$((COV_EXIT || rc))
+    return 1
+  fi
+
+  total=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
+  if [ -n "$total" ] && (( $(echo "$total < 80" | bc -l 2>/dev/null || echo "0") )); then
+    echo "❌ BLOCKED - Go coverage ${total}% below ${COVERAGE_THRESHOLD:-80}% threshold"
+    COV_EXIT=$((COV_EXIT || 1))
+    return 1
+  fi
+  echo "Go coverage: ${total}%"
+  COV_EXIT=$((COV_EXIT || 0))
+  return 0
+}
+
 
 
 # Called by pre-commit's ordered driver.
+
 
