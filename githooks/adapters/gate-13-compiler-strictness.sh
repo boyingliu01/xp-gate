@@ -798,7 +798,11 @@ gate13_run_java_analysis() {
 
   srcs=$(gate13_java_sources)
   if [ -z "$srcs" ]; then
-    return "$GATE13_PASS"
+  # SKIP, not PASS: no sources for this arm means it evaluated nothing.
+  # Answering PASS here made the arm claim a clean result it never computed, and
+  # it suppressed the whole gate's SKIP verdict (measured: a Ruby-only project
+  # with no declared checker reported Gate 13 PASS).
+    return "$GATE13_SKIP"
   fi
 
   if [ "${GATE13_FORCE_NO_JAVA_TOOLCHAIN:-}" = "1" ]; then
@@ -1028,29 +1032,218 @@ gate13_analyzer_supported() {
   return 1
 }
 
+# ============================================================================
+# DECLARED ADAPTER CHECKS (REQ-GATE13-CAPABILITY)
+#
+# Gate 13 used to cover exactly C/C++, Java and C# -- the three languages whose
+# compiler somebody wired in here. Every other language with a compiler or type
+# checker (Go, Rust, Dart, Kotlin, Swift, PHP, Ruby, ...) was simply not asked.
+# Measured 2026-11-19: a Go file containing `var x int = "not an int"` passed the
+# entire chain, and the one gate whose subject is compiler errors reported PASS on
+# a project it had not looked at.
+#
+# The fix is deliberately NOT a list of languages here. githooks/AGENTS.md:
+#
+#     "Declare capabilities on the adapter, never enumerate language names. A hand
+#      written list of languages can only ever contain what someone remembered;
+#      this was patched twice before becoming a rule. The default is the safe side."
+#
+# So a language opts in by defining ONE function in its adapter:
+#
+#     compiler_check_command() { printf '%s' 'go vet ./...'; }
+#
+# printing a command that compiles or type-checks the project and exits non-zero
+# when it finds an error. An adapter that does not define it is not asked, and the
+# gate contains no notion of which languages those are. Adding Go, Rust or Dart is
+# a change to that adapter alone.
+#
+# Two deliberate choices:
+#
+#   * The command runs from the PROJECT root, not per file. Compilers are
+#     whole-project by nature -- `tsc --noEmit`, `go vet ./...`, `cargo check` --
+#     and a per-file invocation would need the gate to know each tool's argument
+#     shape. The project root is what the gate already runs in.
+#
+#   * A declared checker that fails BLOCKS. That is the opposite of the C/C++ arm's
+#     baseline ratchet (which only blocks a RISE in warning count) and it is
+#     correct: these commands report errors, not warnings, so there is no existing
+#     count to be tolerant of.
+# ============================================================================
+
+# Print the command an adapter declares for compile-time checking, or nothing.
+# Resolution order matches the gate's existing adapter lookup: the adapter is
+# already sourced by the time this is called (pre-commit sources the language
+# adapter first), so a defined function is the answer and an undefined one is the
+# absence of a claim.
+gate13_declared_checker() {
+  # An adapter may already be sourced by the caller (a test, or a future gate
+  # driver that shares one scope). Honour that first -- it is the cheap path and
+  # it keeps the function usable without a repository.
+  if declare -f compiler_check_command >/dev/null 2>&1; then
+    local cmd
+    cmd=$(compiler_check_command 2>/dev/null || true)
+    [ -n "$cmd" ] && printf '%s' "$cmd"
+    return 0
+  fi
+
+  # Otherwise SOURCE the adapter for each detected language and ask it.
+  #
+  # This branch is the difference between the capability existing and the
+  # capability working. pre-commit sources adapter-common.sh only; language
+  # adapters are sourced by Gate 1 inside its own subshell, so by the time Gate 13
+  # runs there is no adapter in scope. The first end-to-end run of this feature
+  # therefore printed "no compiler/type-checker declared" on a Go project whose Go
+  # adapter DID declare one -- the declaration existed and nothing loaded it.
+  #
+  # PROJECT_LANGS is the authority for which languages this repository has
+  # (githooks/AGENTS.md). It is used to FIND the adapter, never to decide what a
+  # language can do -- that decision stays with compiler_check_command.
+  local lang path cmd
+  for lang in ${PROJECT_LANGS:-}; do
+    path=$(gate13_adapter_path "$lang") || continue
+    [ -n "$path" ] && [ -f "$path" ] || continue
+    # Subshell per adapter: sourcing a language adapter defines run_lint,
+    # run_static_analysis and friends, and the LAST one sourced would silently
+    # overwrite the ones before it.
+    cmd=$(
+      # shellcheck source=/dev/null
+      . "$path" >/dev/null 2>&1 || exit 0
+      if declare -f compiler_check_command >/dev/null 2>&1; then
+        compiler_check_command 2>/dev/null || true
+      fi
+    )
+    if [ -n "$cmd" ]; then
+      printf '%s' "$cmd"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Find the adapter file for a language, using the same resolution the hook uses.
+# Returns non-zero (and prints nothing) when the language has no adapter file.
+gate13_adapter_path() {
+  local lang="$1" dir
+
+  # The hook's own resolver, when present. It encodes the 3-tier order in one
+  # place so the gate and `xp-gate doctor` cannot disagree.
+  if declare -f resolve_adapter_path >/dev/null 2>&1; then
+    local p
+    p=$(resolve_adapter_path "$lang" 2>/dev/null) || p=""
+    [ -n "$p" ] && [ -f "$p" ] && { printf '%s' "$p"; return 0; }
+  fi
+
+  # Fallback for direct invocation (tests, `xp-gate check`): the global install
+  # first, then this file's own directory, which is the tracked tree.
+  for dir in "$HOME/.config/xp-gate/adapters" \
+             "$(dirname "${BASH_SOURCE[0]}")" \
+             "${ADAPTER_DIR:-}"; do
+    [ -n "$dir" ] || continue
+    if [ -f "$dir/${lang}.sh" ]; then
+      printf '%s' "$dir/${lang}.sh"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Run the declared checker for whichever language adapter defines one.
+#
+# Returns GATE13_PASS when the checker ran and reported no error, GATE13_BLOCK when
+# it reported one, and GATE13_SKIP when nothing was declared -- never PASS for the
+# last case, which is the whole defect this function exists to end.
+gate13_run_declared_checks() {
+  local cmd out rc
+
+  cmd=$(gate13_declared_checker) || cmd=""
+  if [ -z "$cmd" ]; then
+    # No adapter claimed a compile-time checker. Say so plainly rather than
+    # inventing a tool: this is the arm that used to report PASS on languages it
+    # never looked at.
+    gate13_reason "Gate 13: no compiler/type-checker declared for this language -- compiler errors not checked"
+    echo "     i  No compile-time checker declared by this project's language adapter."
+    return "$GATE13_SKIP"
+  fi
+
+  echo "     -> declared compile-time checker: ${cmd}"
+
+  # `eval` on a string is normally a smell. It is what the adapter contract asks
+  # for -- a command with arguments, chosen by the adapter -- and the alternative
+  # (tuple-encoding it through a function call) would force every adapter to
+  # implement the same quoting. Bounded by: the string comes from our own tracked
+  # adapters, never from the change set or from config.
+  # shellcheck disable=SC2086  # $cmd is a deliberately word-split command line
+  out=$(cd "$(gate13_project_root)" && eval "$cmd" 2>&1)
+  rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    echo "     X Declared compile-time check FAILED (${cmd})"
+    local line shown=0
+    # Show the first lines that look like diagnostics, plus a bounded tail, so a
+    # failed run is actionable without dumping a whole build log into the commit.
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      case "$line" in
+        *error*|*Error*|*cannot*|*undefined*|*mismatch*)
+          echo "       ${line}"
+          shown=$((shown + 1))
+          [ "$shown" -ge 10 ] && break
+          ;;
+      esac
+    done <<EOF
+$out
+EOF
+    if [ "$shown" -eq 0 ]; then
+      printf '%s\n' "$out" | tail -5 | sed 's/^/       /'
+    fi
+    return "$GATE13_BLOCK"
+  fi
+
+  echo "     OK Declared compile-time check passed (${cmd})"
+  return "$GATE13_PASS"
+}
+
+# The directory the declared command should run in. Uses the same root the rest of
+# the gate uses so a repository check and a hook check agree on scope.
+gate13_project_root() {
+  if [ -n "${PROJECT_ROOT:-}" ]; then
+    printf '%s' "$PROJECT_ROOT"
+    return 0
+  fi
+  git rev-parse --show-toplevel 2>/dev/null || printf '.'
+}
+
 gate13_run_analyzer() {
   local cc
   local files=""
   local f cnt total=0 blocking=0
   local workdir
 
-  gate13_analyzer_enabled || return 0
+  # Not enabled is "this arm has nothing to say", not "the analysis was clean".
+  gate13_analyzer_enabled || return "$GATE13_SKIP"
 
   cc=$(gate13_select_cc)
   [ -n "$cc" ] || {
     echo "     ⚠️  -fanalyzer requested but no C compiler is usable; analyzer stage skipped"
-    return 0
+    # WARN, not SKIP: the arm was asked to run and could not. That is a degraded
+    # result the reader must see, not a quiet "nothing here".
+    return "$GATE13_WARN"
   }
 
   if ! gate13_analyzer_supported "$cc"; then
     echo "     ℹ️  $(gate13_compiler_id "$cc") has no -fanalyzer support; analyzer stage skipped"
-    return 0
+    # The compiler exists but cannot do this analysis: degraded, not clean.
+    return "$GATE13_WARN"
   fi
 
   files=$(gate13_analyzer_files)
   if [ -z "$files" ]; then
     echo "     ℹ️  -fanalyzer: no staged .c files"
-    return 0
+    # SKIP, not PASS: this arm evaluated nothing. Returning 0 here made it look
+    # like a successful analysis, which then suppressed the SKIP verdict for the
+    # whole gate (measured: a Ruby-only project with no checker declared reported
+    # Gate 13 PASS because this arm answered "clean").
+    return "$GATE13_SKIP"
   fi
 
   workdir="${TMPDIR:-/tmp}/gate13_analyzer_$$"
@@ -1461,7 +1654,11 @@ gate13_run_csharp_analysis() {
 
   sources=$(gate13_csharp_sources)
   if [ -z "$sources" ]; then
-    return "$GATE13_PASS"
+  # SKIP, not PASS: no sources for this arm means it evaluated nothing.
+  # Answering PASS here made the arm claim a clean result it never computed, and
+  # it suppressed the whole gate's SKIP verdict (measured: a Ruby-only project
+  # with no declared checker reported Gate 13 PASS).
+    return "$GATE13_SKIP"
   fi
 
   if ! gate13_csharp_has_manifest; then

@@ -43,6 +43,11 @@ run_tests() {
 # slower, but never silently dropping test verification.
 coverage_runs_tests() { return 0; }
 
+# Gate 13 capability: `dart analyze` type-checks the project. Measured
+# 2026-11-19: exits 0 on clean code, 3 on a type error -- and it reports type
+# mismatches that no other gate in this chain looks for in Dart.
+compiler_check_command() { printf "%s" "dart analyze"; }
+
 run_coverage() {
   if command -v dart &>/dev/null; then
     dart test --coverage=coverage 2>&1 | tail -10
