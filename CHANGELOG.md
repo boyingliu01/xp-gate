@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.38.27.0] - 2026-11-19
+
+**门禁 7 优先加载全局适配器，于是仓库无法决定自己如何被检查——而全局安装落后 17 个版本。**
+
+### 实测
+
+```
+仓库版本     v0.38.26
+全局安装     v0.38.9      （落后 17 个版本）
+两者不一致的适配器：
+  gate-12-file-hygiene.sh  gate-13-compiler-strictness.sh  gate-3.sh
+  gate-4.sh                gate-6-layers.sh                shell.sh
+```
+
+直接演示：给 fixture 放入它**自己的** `.git/hooks/adapters/iac.sh` 并标记，门禁 7
+依然打印
+
+```
+IaC adapter resolved from: /c/Users/think/.config/xp-gate/adapters/iac.sh
+```
+
+项目副本被完全绕过。
+
+### 根因：一个理由已经消失的排序
+
+这正是两份 AGENTS.md 都写过的陷阱「陈旧适配器覆盖新版」——只不过这次是**代码主动
+造成的**，而不只是受其影响。解析顺序是：
+
+```
+"$HOME/.config/xp-gate/adapters/iac.sh"    ← 全局，排第一
+"githooks/adapters/iac.sh"
+"${SCRIPT_DIR:-}/adapters/iac.sh"
+```
+
+既有测试把这个顺序钉住了，测试名叫
+`prefers the global tier over a project copy (route_to_adapter parity)`。
+**而那个理由已经失效**：`route_to_adapter()` 在 #688 里被移除了——它是个零生产
+调用者的调度器。没有 parity 需要保持了，但它规定的顺序留了下来。
+
+### 修复
+
+顺序改为**项目优先、全局兜底**：
+
+```
+"githooks/adapters/iac.sh"
+"${SCRIPT_DIR:-}/adapters/iac.sh"
+"$HOME/.config/xp-gate/adapters/iac.sh"    ← 仍是兜底
+```
+
+全局层保留在最后，因为它存在的原始理由仍然成立：**一个没有 in-repo githooks/ 目录的
+消费方仓库，绝不能静默 SKIP 掉 IaC 安全检查**（2026-10-17 e2e 扫描，由
+`gate-7-adapter-resolution.test.bats` 钉住）。
+
+### 关于那条既有测试
+
+它变红了，因为实现的正是它要保护的旧行为。我**改写**而不是删除它——标题改为
+`gate-7 prefers a PROJECT copy over the global tier`，并把废弃理由写进注释。另外三条
+（全局兜底可达、无全局时的回退、无任何层时报 not-found）原样通过，**证明兜底没有
+被破坏**。
+
 ## [0.38.26.0] - 2026-11-19
 
 **`check 2 <绝对路径>` 在一个满是重复的项目上报出 0 个克隆——因为 jscpd 的 glob 忽略规则对绝对扫描根不生效，忽略集把一切都排除了，于是没有东西可比较。**
