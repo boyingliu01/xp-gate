@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.38.60.0] - 2026-11-20
+
+**Gate 1 报告了违规，但没说是什么规则。**
+
+在 PowerShell fixture 里放一个未使用的变量，Gate 1 打印：
+
+```
+RuleName                             Severity ScriptName Line Message
+PSUseDeclaredVarsMoreThanAssignments Warning  leak.ps1   1    ...
+❌ BLOCKED - PSScriptAnalyzer violations (fix or add suppressions)
+```
+
+**规则名就在表格第一列**，但结论行和 `GATE_1_DETAIL` 都只有常量字符串
+`"powershell: PSScriptAnalyzer findings"`。
+
+读 journal、读报告、读单行摘要的人，知道了「有错」，**不知道错在哪**。
+
+这与 `af701f63` 修的那个 mypy 缺陷同形：**信息存在，结论没带上它。**
+
+### 修复
+
+从表格里解析 `PS*` 规则名，写进结论行和 detail：
+
+```
+❌ BLOCKED - PSScriptAnalyzer violations (fix or add suppressions)
+   Rules: PSUseDeclaredVarsMoreThanAssignments
+```
+
+### 顺带：powershell 语言用例补测完成
+
+此前矩阵里 powershell 标着「未跑（批次超时）」。本轮实测：
+
+| 用例 | 结果 |
+|---|---|
+| clean（`Write-Output`） | ✅ 提交成功 |
+| dirty（植入真实 AWS key） | ✅ 被 Gate 8 BLOCKED |
+
+### 一个探针缺陷（第四类的第四例）
+
+第一次植入 `SuperSecret123ABC!` 时 Gate 8 报 PASS，我一度以为是漏检。
+实测 gitleaks 直接扫描也未检出——因为那**不匹配任何规则**（gitleaks 针对特定
+格式如 AWS key / GitHub token，不是通用的「password = 字符串」）。
+
+第二次用 `AKIAIOSFODNN7EXAMPLE` 仍未检出——那是 **AWS 官方文档的示例 key**，
+在 gitleaks 白名单里。
+
+换成非示例格式的 `AKIAZ7XQ4WYPMKN2VTSB` 才检出。
+
+**三次里两次是探针错，不是产品错。** 如果当时就下「Gate 8 漏检」的结论，
+会去修一个不存在的问题。
+
 ## [0.38.59.0] - 2026-11-20
 
 **三个门禁在注册表里有、在报告里有、在代码里没有。**
