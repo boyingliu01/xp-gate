@@ -380,7 +380,26 @@ ENDJSON
   fi
 
   # ── Persistent per-run report (Issue #101) ────────────────────────────────────────
-  local REPORTS_DIR=".xp-gate/reports/pre-commit"
+  #
+  # The report directory is resolved against the REPOSITORY ROOT, not the current
+  # working directory.
+  #
+  # Measured 2026-11-19: this was `local REPORTS_DIR=".xp-gate/reports/pre-commit"`.
+  # It worked in the repository it was written in -- and silently wrote the report
+  # into /d/projects/xp-gate/.xp-gate/ when the hook ran from a different project
+  # (a fixture under /tmp). The commit itself was graded correctly; only the report
+  # went somewhere nobody would look, so a reader of the fixture saw "no report"
+  # and concluded the gates never ran.
+  #
+  # That is the same failure shape as the rest of this file: the behaviour was
+  # right and the record was unreachable. `generate_quality_report` is called from
+  # the EXIT trap, where the working directory is whatever the last gate left
+  # behind -- it is not a place to depend on relativity.
+  local _xp_report_root="${PROJECT_ROOT:-}"
+  if [ -z "$_xp_report_root" ] || [ ! -d "$_xp_report_root" ]; then
+    _xp_report_root=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+  fi
+  local REPORTS_DIR="${_xp_report_root}/.xp-gate/reports/pre-commit"
   local REPORT_TS
   REPORT_TS=$(date -u +"%Y-%m-%d-%H%M%S")
   local PERSISTED_REPORT_FILE="${REPORTS_DIR}/${REPORT_TS}.json"

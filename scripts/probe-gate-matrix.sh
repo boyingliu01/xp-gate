@@ -32,7 +32,18 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The work root must be a NATIVE path, because python (which parses the reports)
+# is a Windows program here and resolves "/tmp/..." to "C:\tmp\...", while MSYS
+# bash resolves the same string to "C:\Users\<user>\AppData\Local\Temp\...".
+#
+# Measured cost of getting this wrong: every row in the matrix read "NO_REPORT",
+# which the analyzer reported as "gate never ran" for all fourteen gates on every
+# language -- a spectacular false finding produced by a path separator.
 WORK_ROOT="${TMPDIR:-/tmp}/xpgate-matrix"
+if command -v cygpath >/dev/null 2>&1; then
+  WORK_ROOT="$(cygpath -m "$WORK_ROOT")"
+fi
 LANGS=()
 
 for arg in "$@"; do
@@ -307,13 +318,30 @@ PY
 probe_language() {
   local lang="$1"
   local dir="$WORK_ROOT/$lang"
-  rm -rf "$dir"
+
+  # rm -rf can fail with "Device or resource busy" when a previous probe run still
+  # has the directory as its cwd. That failure used to be INVISIBLE: mkdir -p
+  # happily reused the residue, `git init` then failed inside a directory it could
+  # not own, its stderr went to /dev/null, and every subsequent run in that
+  # language produced "no report" -- which the analyzer reported as "gate never
+  # ran" for all fourteen gates. A cleanup failure must stop the language, not
+  # silently produce fourteen false findings.
+  rm -rf "$dir" 2>/dev/null
+  if [ -e "$dir" ]; then
+    echo "cannot clear $dir -- a previous probe may still be running there" >&2
+    return 0   # skip this language; the others are still worth measuring
+  fi
   mkdir -p "$dir" || return 1
   cd "$dir" || return 1
 
   write_fixture "$lang" clean >/dev/null 2>&1 || { echo "no fixture for $lang" >&2; return 1; }
 
-  git init -q -b "probe-$lang" . >/dev/null 2>&1
+  # git init must be checked. A silent failure here produced a language whose
+  # every row read "no report", with nothing in the output saying why.
+  if ! git init -q -b "probe-$lang" . >/dev/null 2>&1; then
+    echo "git init failed in $dir" >&2
+    return 1
+  fi
   git config user.email "probe@example.com"
   git config user.name "probe"
   git config commit.gpgsign false
