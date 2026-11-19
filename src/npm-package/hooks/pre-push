@@ -451,12 +451,81 @@ MP_START_MS="$(_mp_now_ms)"
 MP_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || MP_ROOT=""
 MP_ROOT=$(printf '%s' "$MP_ROOT" | tr -d '
 '); [ -n "$MP_ROOT" ] || MP_ROOT="."
+# Two different questions, and only the first one was being asked.
+#
+#   check-hook-mirror.sh compares the WORKING TREE. It catches "a mirror was never
+#   regenerated". It cannot catch "a mirror was regenerated but never staged",
+#   because the directory it reads is already correct by then.
+#
+# Measured on this repository: two commits edited githooks/gate-driver.sh and
+# githooks/gate-7.sh, ran sync-mirrors, passed this gate, and pushed. The mirrors
+# in those commits were still the pre-fix files:
+#
+#   git show HEAD:src/npm-package/hooks/gate-driver.sh | grep -c "NOT reached"  ->  0
+#
+# npm publishes src/npm-package/**, so every consumer received the unfixed gate
+# while the repository looked repaired, and CI (which checks the committed tree)
+# would have disagreed with local -- the direction AGENTS.md tells the reader to
+# blame on a stale local install.
+#
+# So ask the change-set question too: for every staged canonical file that has a
+# mirror, does the STAGED mirror equal the STAGED canonical?
+_mp_staged_drift() {
+  local _canon _mirror _pairs=0 _drift=""
+  # Only paths staged in THIS commit, so an unrelated dirty file cannot block.
+  while IFS= read -r _canon; do
+    [ -n "$_canon" ] || continue
+    case "$_canon" in
+      githooks/*) _mirror="src/npm-package/${_canon#githooks/}" ;;
+      src/principles/*) _mirror="src/npm-package/${_canon#src/}" ;;
+      *) continue ;;
+    esac
+    # A pair exists only when the mirror is tracked; otherwise this file has no
+    # mirror to fall out of step with.
+    git -C "$MP_ROOT" ls-files --error-unmatch "$_mirror" >/dev/null 2>&1 || continue
+    _pairs=$((_pairs + 1))
+    local _c _m
+    _c=$(git -C "$MP_ROOT" show ":$_canon" 2>/dev/null) || continue
+    _m=$(git -C "$MP_ROOT" show ":$_mirror" 2>/dev/null) || continue
+    [ "$_c" = "$_m" ] || _drift="$_drift $_canon<->$_mirror"
+  done <<EOF
+$(git -C "$MP_ROOT" diff --cached --name-only --diff-filter=d 2>/dev/null)
+EOF
+  if [ -n "$_drift" ]; then
+    printf '%s\n' "$_drift"
+    return 1
+  fi
+  MP_STAGED_PAIRS=$_pairs
+  return 0
+}
+
 if [ -f "$MP_ROOT/scripts/check-hook-mirror.sh" ]; then
   if (cd "$MP_ROOT" && bash scripts/check-hook-mirror.sh); then
+    if ! MP_STAGED_DRIFT="$(_mp_staged_drift)"; then
+      GATE_MP_STATUS="FAIL"
+      MP_DURATION_MS=$(( $(_mp_now_ms) - MP_START_MS ))
+      [ "$MP_DURATION_MS" -lt 0 ] 2>/dev/null && MP_DURATION_MS=0
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ GATE MP FAILED — PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "The working tree is consistent, but the STAGED tree is not:"
+      for _d in $MP_STAGED_DRIFT; do
+        echo "   staged canonical and staged mirror differ: $_d"
+      done
+      echo ""
+      echo "This is the case a working-tree comparison cannot see: the mirror was"
+      echo "regenerated on disk (so check-hook-mirror.sh passes) but the"
+      echo "regenerated file was never staged, so the commit carries the old one."
+      echo "npm publishes src/npm-package/** -- shipping it would give every"
+      echo "consumer the unfixed gate while the repository looks repaired."
+      echo "Fix: git add src/npm-package/... for the files listed above, then push."
+      exit 1
+    fi
     GATE_MP_STATUS="PASS"
     MP_DURATION_MS=$(( $(_mp_now_ms) - MP_START_MS ))
     [ "$MP_DURATION_MS" -lt 0 ] 2>/dev/null && MP_DURATION_MS=0
-    echo "✅ Gate MP: gate-script mirror parity OK (${MP_DURATION_MS}ms)"
+    echo "✅ Gate MP: gate-script mirror parity OK (${MP_DURATION_MS}ms, working tree + ${MP_STAGED_PAIRS:-0} staged pairs)"
   else
     MP_DURATION_MS=0
     echo ""
