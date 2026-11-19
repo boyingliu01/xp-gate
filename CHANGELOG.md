@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.38.28.0] - 2026-11-19
+
+**`xp-gate audit` 的 tsx 加载器为四个子命令而写，只接上了一个。**
+
+### 实测
+
+```
+$ xp-gate audit --stats
+Error computing stats: require is not defined in ES module scope
+
+$ xp-gate audit --tail 5
+Error reading audit entries: require is not defined in ES module scope
+
+$ xp-gate audit --check
+（正常）
+```
+
+这个缺陷**已经在同一个文件里被诊断并写进注释了**：`evalGateAuditModule()` 存在的
+唯一目的就是用 tsx 求值该模块，它上方的注释明确写着四个入口
+「were ALL unusable」、为什么一直没人发现（CI 的门禁 5c 会回退到 `npx tsx`，
+所以坏路径从未被执行）、以及失败长什么样。**但四个入口里只有 `--check` 被改写。**
+
+**一个被自己的注释描述成「已完成」的半成品修复，比没修更糟**——下一个读者会相信
+那段注释，于是不再去看。
+
+### 为什么这件事不止影响它自己
+
+`audit` 正是**产生本项目性能决策所依赖的耗时数据的那个命令**。它在这轮测量工作中
+是坏的——`docs/gate-quality-matrix-2026-11-19.md` 里的分位数表只能靠手写脚本解析
+`audit.jsonl` 算出来，而那恰恰是这个子命令存在的原因。
+
+### 修复
+
+`--tail`、`--stats`、`record` 全部改走加载器；值以 JSON 传递，绝不拼接进被求值的代码。
+
+两条测试：
+
+- `AC-01` 任何 audit 子命令都不得直接 `require()` 该 `.ts` 模块——**排除注释**，
+  因为该文件用散文记录了这个旧故障，天真的 grep 会匹配到那段解释而不是代码
+- `AC-02` `--stats` 与 `--tail` 必须真的产出输出，使结构性守卫无法靠删掉功能来满足
+
+`AC-01` 已通过重新引入 `require(auditPath)` 证伪。
+
 ## [0.38.27.0] - 2026-11-19
 
 **门禁 7 优先加载全局适配器，于是仓库无法决定自己如何被检查——而全局安装落后 17 个版本。**

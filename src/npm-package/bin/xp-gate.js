@@ -527,6 +527,18 @@ const COMMANDS = {
     },
     usage: 'xp-gate sprint-audit [--dir <path>] [--json]'
   },
+  'language-capability': {
+    description: 'Report which gate surfaces actually wire each language, derived from the code (REQ-LANG-CAPABILITY)',
+    run: subargs => {
+      const { handleLanguageCapability } = require('../lib/language-capability.js');
+      // Exit 1 when any surface is NOT WIRED: this command exists to gate
+      // language onboarding, and a report that cannot fail is a report nobody
+      // reads. A declared "not implemented" surface does not fail it -- a
+      // declared gap is a decision, a missing wire is a bug.
+      process.exit(handleLanguageCapability(subargs));
+    },
+    usage: 'xp-gate language-capability [<language>...] [--json]'
+  },
   'detect-languages': {
     description: 'Detect project languages and generate .xp-gate-config.json',
     run: subargs => {
@@ -633,8 +645,12 @@ function handleAuditTail(args, auditPath) {
   const tailIdx = args.indexOf('--tail');
   const count = parseInt(args[tailIdx + 1] || '20', 10);
   try {
-    const { readTailEntries } = require(auditPath);
-    const entries = readTailEntries(count);
+    // gate-audit.ts is TypeScript; `require()` cannot load it (the message is
+    // "require is not defined in ES module scope", Node having parsed the .ts as
+    // ESM). This path kept its require() after evalGateAuditModule() was added for
+    // --check, so --tail and --stats stayed broken while the comment above that
+    // helper described all four entry points as fixed.
+    const entries = evalGateAuditModule(`m.readTailEntries(${Math.trunc(count)})`);
     if (entries.length === 0) {
       console.log('No audit entries found.');
       return;
@@ -648,14 +664,13 @@ function handleAuditTail(args, auditPath) {
 
 function handleAuditStats(auditPath) {
   try {
-    const { computeStats, computeAnomalies } = require(auditPath);
-    const stats = computeStats();
+    const stats = evalGateAuditModule('m.computeStats()');
     if (stats.length === 0) {
       console.log('No audit data found.');
       return;
     }
     printStatsTable(stats);
-    printAnomalies(computeAnomalies());
+    printAnomalies(evalGateAuditModule('m.computeAnomalies()'));
   } catch (err) {
     console.error('Error computing stats:', err.message);
     process.exit(1);
@@ -725,7 +740,6 @@ function handleAuditCheck(args = []) {
 
 function handleAuditRecord(args, auditPath) {
   try {
-    const { appendAuditEntry } = require(auditPath);
     const rest = args.slice(1);
     const opts = {};
     for (let i = 0; i < rest.length; i++) {
@@ -745,7 +759,9 @@ function handleAuditRecord(args, auditPath) {
       repo_path: process.cwd(),
       commit_hash: opts['commit-hash'] || 'HEAD',
     };
-    appendAuditEntry(entry);
+    // Same reason as --tail/--stats: require() cannot load the .ts module. The
+    // entry travels as JSON so nothing is interpolated into the evaluated code.
+    evalGateAuditModule(`m.appendAuditEntry(${JSON.stringify(entry)})`);
   } catch (err) {
     console.error('Error recording audit entry:', err.message);
     process.exit(1);
