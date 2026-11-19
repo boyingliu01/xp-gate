@@ -196,6 +196,34 @@ resolve_jscpd_config() {
 # stay a warning). This only stops the gate from naming the wrong reason.
 classify_jscpd_run() {
   local _exit="$1" _out="$2" _report _count
+  # A failed run outranks everything else: it is the most specific fact, and
+  # calling a crash "no_files" would hide the crash.
+  if [ "$_exit" -ne 0 ] 2>/dev/null; then
+    printf 'error\n'
+    return 0
+  fi
+  # "Found 0 clones" means "no duplicate was found", which equals "no duplicate
+  # exists" only if something was examined. jscpd reports the difference on stderr
+  # and still exits 0:
+  #
+  #     Warning: jscpd analyzed no files: check the paths and the --format,
+  #     --ignore and --pattern filters
+  #     Found 0 clones.
+  #
+  # Measured 2026-11-19 on a Dart fixture: the table read Total: 0 files /
+  # 0 lines / 0 tokens, Gate 2 printed "PASSED - jscpd duplicate code check
+  # completed" and the summary recorded PASS. A gate that examined nothing was
+  # indistinguishable from one that examined the change set and found it clean.
+  #
+  # The reason it happens on a Dart project is itself worth naming: the file list
+  # the gate hands jscpd is built from the change set, and jscpd only accepts the
+  # extensions its `--format` set covers. When the two disagree the scan is empty,
+  # which is an environment/configuration fact, not a verdict. `no_files` reaches
+  # the gate as SKIP with this name attached.
+  if printf '%s' "$_out" | grep -qiE 'analy[sz]ed no files|analy[sz]e[sd]? (no|zero) files'; then
+    printf 'no_files\n'
+    return 0
+  fi
   _report=$(printf '%s' "$_out" | grep -oE 'Found [0-9]+ (clones?|duplicates?)' | tail -1)
   if [ -n "$_report" ]; then
     _count=$(printf '%s' "$_report" | sed -E 's/^Found ([0-9]+).*/\1/')
@@ -206,12 +234,32 @@ classify_jscpd_run() {
     fi
     return 0
   fi
-  if [ "$_exit" -ne 0 ] 2>/dev/null; then
-    printf 'error\n'
+  # Exit 0 with no report at all. Two sub-cases, and they are not the same:
+  #
+  #   - Nothing but a timing line: measured by running jscpd with an --ignore that
+  #     excludes everything --
+  #           $ jscpd --ignore "**/*" lib.dart ; echo $?
+  #           time: 0.156ms
+  #           0
+  #     No table, no counts, no warning. The scan examined nothing, so "leave the
+  #     verdict as it was" leaves it as PASS -- a clean bill for a codebase nobody
+  #     looked at.
+  #   - Anything else (an unfamiliar format, a version banner, a partial report):
+  #     the run did produce evidence we cannot parse. Turning that into a SKIP
+  #     would disable the gate for every project whose jscpd prints something new,
+  #     which is why this fallback existed in the first place.
+  #
+  # Only the first is a "nothing happened" run. Strip ANSI, drop blank lines and
+  # the timing line, and see whether anything remains.
+  local _meaningful
+  _meaningful=$(printf '%s' "$_out" \
+    | sed -E 's/\x1b\[[0-9;]*m//g' \
+    | grep -vE '^[[:space:]]*$' \
+    | grep -viE '^[[:space:]]*(time|duration)[[:space:]]*:' \
+    | head -1)
+  if [ -z "$_meaningful" ]; then
+    printf 'no_files\n'
     return 0
   fi
-  # Exit 0 with no report: the run said nothing we can stand behind, but calling
-  # it an error would turn every unfamiliar jscpd format into a SKIP. Leave the
-  # gate's verdict as it was.
   printf 'clean\n'
 }
