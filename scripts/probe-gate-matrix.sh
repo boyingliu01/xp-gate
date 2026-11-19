@@ -182,10 +182,19 @@ write_fixture() {
       fi
       ;;
     iac)
+      # The config must not reference a PROVIDER. `terraform validate` requires
+      # `terraform init`, which downloads the provider from the registry; offline
+      # that fails no matter how correct the HCL is, and Gate 1 then blocks on
+      # "requires provider registry.terraform.io/hashicorp/aws" -- an environment
+      # limit reported as a code defect.
+      #
+      # Variables, locals and outputs are validated by the same parser with no
+      # plugins involved, so they exercise the gate's real question ("does this HCL
+      # parse and type-check?") without needing the network.
       if [ "$bad" = 1 ]; then
-        printf 'resource "aws_s3_bucket" "b" {\n  bucket = "probe"\n  acl    = "not-a-real-acl-value"\n}\n' > main.tf
+        printf 'variable "n" {\n  type    = number\n  default = "not a number"\n}\n\noutput "o" {\n  value = var.n\n}\n' > main.tf
       else
-        printf 'resource "aws_s3_bucket" "b" {\n  bucket = "probe-ok-1"\n}\n' > main.tf
+        printf 'variable "n" {\n  type    = number\n  default = 1\n}\n\noutput "o" {\n  value = var.n\n}\n' > main.tf
       fi
       ;;
     flutter)
@@ -196,12 +205,20 @@ write_fixture() {
       #     error - test\a_test.dart:4:3 - The function 'test' isn't defined
       # and Gate 13 blocked correctly. A fixture defect that reads exactly like a
       # product defect -- which is the whole reason the fixture rule exists.
+      #
+      # The source deliberately does NOT import package:flutter. That import needs
+      # `flutter pub get` to materialise the SDK packages, which needs the network;
+      # offline it produces uri_does_not_exist against code that is perfectly valid,
+      # and Gate 13 blocks correctly on unresolvable imports. What this fixture
+      # exercises is the DETECTION path (a pubspec mentioning flutter: is classified
+      # as the flutter language, so flutter.sh answers Gate 13 instead of dart.sh),
+      # and for that the source only has to be checkable Dart.
       printf 'name: probe\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\ndependencies:\n  flutter:\n    sdk: flutter\ndev_dependencies:\n  test: any\n' > pubspec.yaml
       mkdir -p lib
       if [ "$bad" = 1 ]; then
-        printf 'import "package:flutter/material.dart";\n\nint f() {\n  return "not an int";\n}\n' > lib/a.dart
+        printf 'int f() {\n  return "not an int";\n}\n' > lib/a.dart
       else
-        printf 'import "package:flutter/material.dart";\n\nint f() {\n  return 1;\n}\n' > lib/a.dart
+        printf 'int f() {\n  return 1;\n}\n' > lib/a.dart
       fi
       ;;
     *)

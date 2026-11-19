@@ -771,6 +771,15 @@ if [ -z "$PROJECT_LANGS" ] && [ -z "$_CONFIG_LANGS" ]; then
   if [ "$(_detect_ext_lang "cs" "csx")" = "1" ]; then
     PROJECT_LANGS="$PROJECT_LANGS csharp"
   fi
+  # #731: same shape as the C# arm above, and for the same reason -- without it
+  # the per-language routing loop has no `php` turn and adapters/php.sh is
+  # unreachable however correct it is. Detection is on EXTENSIONS, never on
+  # composer.json: that file is not exclusive (a JS repo can carry one for a
+  # single build step), so treating it as the PHP signal would relabel a whole
+  # repository as PHP. A staged .php is the only thing that means PHP work.
+  if [ "$(_detect_ext_lang "php" "phtml")" = "1" ]; then
+    PROJECT_LANGS="$PROJECT_LANGS php"
+  fi
   # IaC: .tf, .tfvars, Dockerfile, docker-compose*, .yaml/.yml in kube context
   if echo "$CHANGED_FILES" | grep -qE '(\.tf$|\.tfvars$|Dockerfile|docker-compose)' 2>/dev/null; then
     PROJECT_LANGS="$PROJECT_LANGS iac"
