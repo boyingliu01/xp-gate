@@ -94,7 +94,7 @@ kotlin python shell typescript。
 
 | 语言 | 原因 |
 |---|---|
-| php | 工具链不全（phpstan/composer 缺失） |
+| php | ✅ 已验证：clean 提交成功；无覆盖率报告时 Gate 5 正确 BLOCK 并记录原因 |
 | powershell | ✅ 已验证：clean 提交成功；植入 AWS key 被 Gate 8 BLOCKED |
 | swift | 本机无 `swift`/`swiftlint`，无法验证真实行为 |
 | objectivec | 本机无 Objective-C 运行时（Windows） |
