@@ -212,3 +212,102 @@ EOF
     return 1
   }
 }
+
+# ============================================================================
+# The temporary tsconfig this pass generates must be a VALID tsconfig.
+#
+# `exclude` and `include` do not accept the same globs: TypeScript allows a
+# trailing `**` in `exclude` but rejects it in `include` (TS5010, "File
+# specification cannot end in a recursive directory wildcard"). The pass copied
+# the project's `exclude` patterns -- `src/**/__tests__/**` is the common shape --
+# straight into `include`, so the generated config was ALWAYS invalid and tsc
+# aborted before checking a single file.
+#
+# The result was the exact defect this repository exists to remove: a checker
+# that could not run, reported as "your code has type errors". Measured on a
+# project whose every file type-checks cleanly:
+#
+#   .wt.json(7,5): error TS5010 ... 'src/**/__tests__/**'
+#   ❌ BLOCKED - TYPE ERRORS in test files
+#
+# So the fix has two obligations, and the second is the one that matters: the
+# config must be valid, AND the pass must still catch a real test-file error.
+# A test asserting only "exit 0 on a clean tree" would go green on a pass that
+# silently checks nothing.
+# ============================================================================
+
+@test "generated test tsconfig is valid and still reports real test-file errors" {
+  # Project whose production code is type-clean and whose test file is NOT.
+  # The only way out of this test is a valid config that actually checks tests.
+  cat > tsconfig.json <<'EOF'
+{
+  "compilerOptions": { "strict": true },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "src/**/*.spec.ts"]
+}
+EOF
+
+
+  # Isolate from setup()'s fixtures: this test asserts on WHICH file the compiler
+  # reports, so an inherited test file with its own type error would satisfy the
+  # assertion for the wrong reason.
+  rm -rf src/__tests__ && mkdir -p src/__tests__
+  cat > src/index.ts <<'EOF'
+export const n: number = 1;
+EOF
+
+  cat > src/__tests__/index.test.ts <<'EOF'
+import { n } from "../index";
+export const wrong: string = n;
+EOF
+
+  # Reproduce the pass's own temp-config construction, then assert on the
+  # compiler's answer rather than on which branch produced it.
+  node -e "
+    const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
+    delete cfg.exclude;
+    cfg.include = cfg.include || ['src/**/*'];
+    cfg.include.push('src/**/__tests__/*','src/**/*.test.ts','src/**/*.spec.ts');
+    require('fs').writeFileSync('.wt.json', JSON.stringify(cfg, null, 2));
+  "
+
+  run node "$REPO_NODE_MODULES/typescript/bin/tsc" --noEmit --project .wt.json --skipLibCheck
+  echo "$output"
+
+  # No TS5010/TS5xxx config complaint: the config itself must be usable.
+  [[ "$output" != *"TS5010"* ]] || {
+    echo "the generated tsconfig is invalid — tsc aborted before checking:"; echo "$output"; return 1;
+  }
+  # And it must still see the test file, or the pass is green by not looking.
+  [[ "$output" == *"index.test.ts"* ]] || {
+    echo "the generated tsconfig did not include the test file — nothing was checked:"; echo "$output"; return 1;
+  }
+  [ "$status" -ne 0 ]
+}
+
+@test "a clean project passes the generated test tsconfig" {
+  # Anti-over-reach counterpart: the valid config must not invent findings.
+  # setup() seeds this fixture with test files that reference symbols this test's
+  # src/index.ts does not export, so clear them first -- otherwise the assertion
+  # measures leftover fixtures instead of the config under test.
+  rm -rf src/__tests__ && mkdir -p src/__tests__
+  cat > src/index.ts <<'EOF'
+export const n: number = 1;
+EOF
+  cat > src/__tests__/index.test.ts <<'EOF'
+import { n } from "../index";
+export const ok: number = n;
+EOF
+
+  node -e "
+    const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
+    delete cfg.exclude;
+    cfg.include = cfg.include || ['src/**/*'];
+    cfg.include.push('src/**/__tests__/*','src/**/*.test.ts','src/**/*.spec.ts');
+    require('fs').writeFileSync('.wt.json', JSON.stringify(cfg, null, 2));
+  "
+
+  run node "$REPO_NODE_MODULES/typescript/bin/tsc" --noEmit --project .wt.json --skipLibCheck
+  echo "$output"
+  [ "$status" -eq 0 ]
+}

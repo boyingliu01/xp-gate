@@ -97,16 +97,62 @@ run_test_file_pass() {
   else
     echo "Checking test files for type errors..."
     local temp_tsconfig=".tsconfig.withtests.json"
+    # `exclude` and `include` do NOT accept the same globs. TypeScript allows a
+    # trailing `**` in `exclude` but rejects it in `include` with TS5010
+    # ("File specification cannot end in a recursive directory wildcard").
+    #
+    # This block used to push `src/**/__tests__/**` -- copied from the exclude
+    # list, where it is legal and common -- into `include`. The generated config
+    # was therefore ALWAYS invalid, and tsc aborted before checking a single
+    # file. Every commit in a project with the standard
+    #
+    #     "exclude": ["src/**/__tests__/**", ...]
+    #
+    # was blocked with "❌ TYPE ERRORS in test files" while its code was clean.
+    # A checker that cannot run was reporting as if it had run and found
+    # problems -- the failure mode this whole gate exists to remove.
+    #
+    # `src/**/__tests__/*` reaches the same files and is a legal include form.
     node -e "
       const cfg = JSON.parse(require('fs').readFileSync('tsconfig.json','utf8'));
       delete cfg.exclude;
       cfg.include = cfg.include || ['src/**/*'];
-      cfg.include.push('src/**/__tests__/**','src/**/*.test.ts','src/**/*.spec.ts');
+      cfg.include.push('src/**/__tests__/*','src/**/*.test.ts','src/**/*.spec.ts');
       require('fs').writeFileSync('$temp_tsconfig', JSON.stringify(cfg, null, 2));
     " 2>/dev/null
-    _tsc_command --noEmit --project "$temp_tsconfig" --skipLibCheck 2>&1 | head -30
-    test_pass_exit=${PIPESTATUS[0]}
+    local tsc_out tsc_exit
+    tsc_out=$(_tsc_command --noEmit --project "$temp_tsconfig" --skipLibCheck 2>&1)
+    tsc_exit=$?
+    # The shared verdict below reads test_pass_exit; both tsc branches must feed
+    # it or this one silently inherits whatever the previous branch left behind.
+    test_pass_exit=$tsc_exit
+    printf '%s\n' "$tsc_out" | head -30
     rm -f "$temp_tsconfig"
+    # Distinguish "tsc evaluated the project and found type errors" from "tsc
+    # rejected the config we generated and evaluated nothing". The verdict
+    # contract requires those to be different states; conflating them spends the
+    # user's time on our config and hides the real answer.
+    #
+    # Measured: with an INVALID config, tsc still checks every file it can see
+    # and reports real errors ALONGSIDE the config complaint. So a TS5xxx line
+    # alone does not mean "nothing was checked" -- it means nothing was checked
+    # only when it is the ONLY thing reported. Which is why the test below is
+    # "config error AND no type error", not "config error".
+    if [ "$tsc_exit" -ne 0 ] && printf '%s\n' "$tsc_out" | grep -qE 'TS5[0-9][0-9][0-9]'; then
+      # grep -E has no negative lookahead, so count instead of excluding:
+      # every diagnostic is `error TS<digits>`, and a 5xxx code is a
+      # configuration complaint rather than a type finding. If the totals match,
+      # the only thing tsc said was "your config is bad".
+      local all_err code_err
+      all_err=$(printf '%s\n' "$tsc_out" | grep -cE 'error TS[0-9]+')
+      code_err=$(printf '%s\n' "$tsc_out" | grep -cE 'error TS5[0-9][0-9][0-9]')
+      if [ "$all_err" -gt 0 ] && [ "$all_err" -eq "$code_err" ]; then
+        echo ""
+        echo "⚠️  Gate 1: the generated test tsconfig was rejected by tsc — test files NOT checked."
+        echo "   This is a defect in xp-gate's test-file pass, not in your code."
+        return 2
+      fi
+    fi
   fi
 
   if [ "$test_pass_exit" -ne 0 ]; then
