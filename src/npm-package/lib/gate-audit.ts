@@ -286,10 +286,30 @@ export function aggregateByGate(entries: GateAuditEntry[]): Map<string, GateBuck
     // Issue #370: exclude anomalous durations from ms aggregation. REQ-B: a
     // null duration is the honest sibling of that flag — deliberately not
     // measurable, so it stays out of the sums (and out of the denominator).
+    //
+    // The flag alone is not enough. It was introduced AFTER the field it
+    // guards, so rows written before it carry a raw value with no marker:
+    // measured 397 such rows (gate-1: 191, gate-11: 206, 2026-07-20 to
+    // 2026-10-19) whose duration_ms is an absolute epoch timestamp rather than a
+    // duration. They summed into a "gate-1 average 5842895372 ms" — a number no
+    // reader can act on and which silently destroys the one table the
+    // `audit --stats` command exists to produce.
+    //
+    // So apply the same plausibility bound the anomaly detector uses, rather
+    // than trusting a marker a legacy row was never written with.
     if (e.duration_anomaly === true) {
       b.anomaly_count += 1;
-    } else if (typeof e.duration_ms === 'number') {
+    } else if (
+      typeof e.duration_ms === 'number'
+      && Number.isFinite(e.duration_ms)
+      && e.duration_ms >= 0
+      && e.duration_ms <= MAX_PLAUSIBLE_DURATION_MS
+    ) {
       b.ms += e.duration_ms;
+    } else if (typeof e.duration_ms === 'number') {
+      // Present but implausible: counted so the exclusion is visible, never
+      // summed.
+      b.anomaly_count += 1;
     }
     // A malformed/legacy row with a non-numeric issues_found must not turn
     // the whole gate's average into NaN.
