@@ -81,6 +81,12 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
     skip)
       echo "⏭️  SKIPPED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-no reason given})"
       GATE_11_STATUS="SKIP"
+      # The reason was printed and then dropped: the single audit call at the end
+      # of this body passed no detail argument, so every SKIP row landed in the
+      # journal with an empty reason. "SKIP must be recorded, not merely printed"
+      # is the most repeated rule in githooks/AGENTS.md, and it was violated here
+      # for all three declining arms.
+      GATE_11_DETAIL="${SPRINT_GATE_DETAIL:-sprint_gate_skipped}"
       ;;
     allow)
       # #584: `allow` covered three different outcomes and all of them became
@@ -90,9 +96,13 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
       SPRINT_GATE_ALLOW_REASON=$(sprint_gate_allow_reason "$SPRINT_GATE_OUTPUT")
       if [ "$SPRINT_GATE_ALLOW_REASON" = "checks-passed" ]; then
         echo "✅ PASSED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint state validated})"
+        GATE_11_DETAIL="checks-passed: ${SPRINT_GATE_DETAIL:-sprint state validated}"
       else
         echo "⏭️  SKIPPED - Gate 11: Sprint Flow (${SPRINT_GATE_ALLOW_REASON}: ${SPRINT_GATE_DETAIL:-not evaluated})"
         GATE_11_STATUS="SKIP"
+        # WHICH allow it was is the fact that matters: "phase-not-reached" and
+        # "checks-passed" are opposite statements about the sprint.
+        GATE_11_DETAIL="${SPRINT_GATE_ALLOW_REASON}: ${SPRINT_GATE_DETAIL:-not evaluated}"
       fi
       ;;
     deny)
@@ -107,6 +117,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
       # defensive -- it exists for a consumer's older/patching/failing copy, which
       # is exactly the copy a gate cannot inspect.
       GATE_11_STATUS="BLOCK"
+      GATE_11_DETAIL="{SPRINT_GATE_DETAIL:-sprint gate denied}"
       echo "❌ BLOCKED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint gate denied})"
       echo "   sprint-gate.sh reported decision=deny but exited 0; blocking because a"
       echo "   deny that contradicts its exit status cannot be treated as consent."
@@ -127,6 +138,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
       # keeps the raw output visible rather than inventing a decision. Exit 1 was
       # already handled above and still BLOCKs, so this does not weaken it.
       GATE_11_STATUS="SKIP"
+      GATE_11_DETAIL="no recognisable decision in the gate output"
       echo "⏭️  SKIPPED - Gate 11: Sprint Flow (no recognisable decision in the gate output — not evaluated)"
       printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
       ;;
@@ -148,7 +160,7 @@ if [ "$GATE_11_DURATION_MS" -lt 0 ] 2>/dev/null; then
 fi
 GATE_11_DURATION=$((GATE_11_DURATION_MS / 1000))
 echo "   Gate 11 ($GATE_11_STATUS) completed in ${GATE_11_DURATION}s"
-record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$GATE_11_START"
+record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$GATE_11_START" "${GATE_11_DETAIL:-}"
 echo ""
 # ============================================================================
   return 0

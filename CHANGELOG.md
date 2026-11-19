@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.38.38.0] - 2026-11-19
+
+**门禁 11 把 SKIP 的原因打印出来，然后在写进记录时把它丢掉。**
+
+### 实测
+
+三个「拒绝评估」的分支各自都算出了原因并打印：
+
+```
+⏭️  SKIPPED - Gate 11: Sprint Flow (not a sprint project)
+⏭️  SKIPPED - Gate 11: Sprint Flow (phase-not-reached: ...)
+⏭️  SKIPPED - Gate 11: Sprint Flow (no recognisable decision in the gate output — not evaluated)
+```
+
+但整个门禁只有**一处**汇总的 `record_gate_audit`，调用时没传第六个参数：
+
+```bash
+record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$GATE_11_START"
+```
+
+于是每一条 SKIP 都以**空原因**落进审计记录。而 `githooks/AGENTS.md` 把这条列为
+全项目最常复发的缺陷：「SKIP must be recorded, not merely printed」，并且明说
+**一行带绿、却没有原因的 SKIP 是缺陷不是通过**。
+
+对一个只读 `xp-gate audit` 的消费者，「故意跳过」和「这条链里根本没有这个门禁」
+完全一样。
+
+### 修复
+
+四个判定分支各自设置 `GATE_11_DETAIL`，汇总调用把它传下去：
+
+| 分支 | 记录的原因 |
+|---|---|
+| `skip` | 门禁给出的原因 |
+| `allow` + 未通过检查 | **哪一种 allow**（`phase-not-reached` 与 `checks-passed` 是关于冲刺的相反陈述） |
+| `deny` | 拒绝理由 |
+| `*`（无可识别判定） | `no recognisable decision in the gate output` |
+
+`allow` + `checks-passed` 这条真实 PASS 也带上它验证过什么，这样「PASS」与
+「恰好含相同字样的 SKIP」在记录里仍然可区分。
+
+### 我的测试也错了两次
+
+1. 测试桩的 `record_gate_audit` 只打印 `$3|issues=$4`，把 detail 丢掉——
+   不改桩，这条缺陷在测试里根本不可能被观测到。
+2. 反证测试先用了 `{"decision":"allow","reason":"checks-passed"}`，而分类器读的是
+   `allow_reason` 字段，于是期望 PASS 却得到 SKIP。**是我写的夹具错了，不是产品错了**。
+
+第二次尤其值得记：它离「报一个假缺陷」只差一步。
+
+### 本轮另外两处核查，结论是「实现是对的」
+
+| 检查项 | 结论 |
+|---|---|
+| 门禁 1 是否把「无适配器语言」记成 PASS | **否**。`.rb` 夹具输出 `No specific adapter for ruby` + `SKIPPED - Code quality (no specific checks for ruby)`，SKIP 带原因。15 个适配器的扩展名全部在门禁 1 的输入检测列表里 |
+| 门禁 1 的扩展名列表是否漏语言 | 逐个核对 22 个扩展名，全覆盖（`.pl` 在列表内，`.tf` 是独立 pattern） |
+
+3 个新测试，21/21 门禁 11 测试绿，全部经过证伪：回退修复后精确变红两条，其余八条保持绿。
+
 ## [0.38.37.0] - 2026-11-19
 
 **门禁 9 承诺了「这个提交里有代码没人构建」，却只在 Java+Gradle 这一种情况下兑现。**
