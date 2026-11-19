@@ -3,40 +3,44 @@
 run_static_analysis() {
   if command -v flutter &>/dev/null; then
     flutter analyze 2>&1 | sed -n '1,30p; 30q'
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: flutter: Flutter SDK not installed -- nothing was checked"
     echo "Flutter SDK not available"
-    return 1
+    return 3
   fi
 }
 
 run_lint() {
   if command -v flutter &>/dev/null; then
     flutter format --output=none --set-exit-if-changed . 2>&1 | sed -n '1,30p; 30q'
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: flutter: Flutter SDK not installed -- nothing was checked"
     echo "Flutter SDK not available"
-    return 1
+    return 3
   fi
 }
 
 run_tests() {
   if command -v flutter &>/dev/null; then
     flutter test 2>&1 | tail -20
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: flutter: Flutter SDK not installed -- nothing was checked"
     echo "Flutter SDK not available"
-    return 1
+    return 3
   fi
 }
 
 run_coverage() {
   if command -v flutter &>/dev/null; then
     flutter test --coverage 2>&1 | tail -10
-    return $?
+    return "${PIPESTATUS[0]}"
   else
+    echo "XP_G1_REASON: flutter: Flutter SDK not installed -- nothing was checked"
     echo "Flutter SDK not available"
-    return 1
+    return 3
   fi
 }
 
