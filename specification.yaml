@@ -6464,6 +6464,42 @@ specification:
             无工具支持的语言在审计中记录 SKIP 并带原因
           test_type: integration
 
+    - id: REQ-GATE1-BLOCKING-STATUS
+      description: >-
+        门禁 1 会阻断提交，却把「通过」写进日志——15 条阻断路径没有一条记录判定。
+
+        实测（真实仓库、真实钩子，暂存一个含 debugger 的 TypeScript 文件）：
+
+          控制台:
+            ❌ BLOCKED - 'debugger' statements detected:
+            src/bad.ts:2:  debugger;
+                Gate 1: Code Quality                          PASS
+
+        提交确实被拦住了——该分支 return 1，从语言循环内直接退出 gate_1_run()。
+        错的是被记录的判定：这些分支从不给 GATE_1_STATUS 赋值，于是它保持函数
+        开头设的 "PASS"。审计行与质量报表随后都写着 PASS。
+
+        这是「没检查不能与通过无法区分」的另一个方向，而且更响：一个**确实发现了
+        问题**的检查，被记录成没发现。控制台与日志互相矛盾，而事后被反复查阅的是
+        日志。
+
+        规模：不只 debugger。逐条扫过全部 return 1 之后，有 **15 条**阻断路径从未
+        设置状态（含 lint 错误、Biome 失败、mypy 类型错误、wc-java-lint 不可用等）。
+        另有 4 条用的是 GATE_1_STATUS="BLOCK"——它们是对的，扫描一开始把它们误判为
+        遗漏，因为测试只认 FAIL。
+
+        修复：15 条全部补上 GATE_1_STATUS="FAIL"。端到端复核后，同一提交的报表行
+        从 PASS 变为 FAIL。
+      acceptance_criteria:
+        - id: AC-GATE1-DEBUGGER-01
+          criteria: >-
+            debugger 阻断分支在返回前设置判定，而不只是返回 1
+          test_type: integration
+        - id: AC-GATE1-DEBUGGER-02
+          criteria: >-
+            门禁体内不存在「返回 1 但未设置判定」的分支
+          test_type: integration
+
     - id: REQ-GATE6-CONFIG-PARITY
       description: >-
         `xp-gate check 6` 与提交钩子对同一个仓库给出相反的判定，且分歧偏向宽松。

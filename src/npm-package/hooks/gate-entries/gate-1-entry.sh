@@ -135,6 +135,8 @@ else
     TS_CHECK_EXIT=$?
   fi
   if [ "$TS_CHECK_EXIT" -eq 1 ]; then
+    # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+    GATE_1_STATUS="FAIL"
     return 1
   fi
     
@@ -174,6 +176,8 @@ else
               echo ""
               echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
               echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+              # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+              GATE_1_STATUS="FAIL"
               return 1
             else
               REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
@@ -189,6 +193,8 @@ else
             echo "❌ BLOCKED - LINT ERRORS detected"
             echo "Fix the lint errors above before committing."
             echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+            # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+            GATE_1_STATUS="FAIL"
             return 1
           fi
         else
@@ -313,6 +319,8 @@ else
           echo "Fix the errors above before committing."
           echo "Tip: Run 'npx biome check --write .' to auto-fix formatting and safe lint issues."
           echo "     Run 'npx biome check --write --unsafe .' to also fix unsafe lint issues."
+          # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+          GATE_1_STATUS="FAIL"
           return 1
         fi
       else
@@ -364,6 +372,12 @@ else
         echo "$DEBUGGER_HITS" | head -10
         echo ""
         echo "Remove debugger statements before committing."
+        # The return blocks the commit; the assignment is what the journal and
+        # the quality report read. Without it the status kept the "PASS" set at
+        # the top of the body, so the run recorded "found nothing" for a gate
+        # that had just found a debugger statement -- console and audit
+        # disagreeing, with the audit being the one anybody re-reads.
+        GATE_1_STATUS="FAIL"
         return 1
       fi
     fi
@@ -423,6 +437,8 @@ else
             echo ""
             echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
             echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+            # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+            GATE_1_STATUS="FAIL"
             return 1
           else
             REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
@@ -445,6 +461,8 @@ else
         echo "Fix the lint errors above before committing."
         echo "Tip: Run 'ruff check --fix' to auto-fix some issues."
         echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+        # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+        GATE_1_STATUS="FAIL"
         return 1
       fi
     else
@@ -467,6 +485,8 @@ else
           echo ""
           echo "❌ BLOCKED - Ruff format check failed"
           echo "Fix formatting: run 'ruff format .' to auto-format."
+          # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+          GATE_1_STATUS="FAIL"
           return 1
         fi
         echo "✅ PASSED - Ruff format check."
@@ -488,6 +508,8 @@ else
         echo "$DEBUG_HITS" | head -10
         echo ""
         echo "Remove breakpoint()/pdb.set_trace() before committing."
+        # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+        GATE_1_STATUS="FAIL"
         return 1
       fi
     fi
@@ -525,6 +547,8 @@ else
         echo ""
         echo "❌ BLOCKED - MYPY TYPE ERRORS detected"
         echo "Fix the type errors above before committing."
+        # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+        GATE_1_STATUS="FAIL"
         return 1
       fi
       echo "✅ PASSED - mypy type checking."
@@ -567,6 +591,8 @@ else
         echo ""
         echo "❌ BLOCKED - GOLANGCI-LINT ERRORS detected"
         echo "Fix the lint errors above before committing."
+        # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+        GATE_1_STATUS="FAIL"
         return 1
       fi
       echo "✅ PASSED - golangci-lint."
@@ -614,6 +640,8 @@ else
           echo ""
           echo "❌ BLOCKED - ${NEW_WARNINGS} NEW shellcheck issue(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
           echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+          # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+          GATE_1_STATUS="FAIL"
           return 1
         else
           REDUCED=$((BASELINE_WARNINGS - CURRENT_WARNINGS))
@@ -632,6 +660,8 @@ else
         echo "❌ BLOCKED - SHELLCHECK ERRORS detected"
         echo "Fix the shell script errors above."
         echo "Tip: Run 'xp-gate baseline create' to establish a lint baseline."
+        # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+        GATE_1_STATUS="FAIL"
         return 1
       fi
     else
@@ -645,6 +675,8 @@ else
         bash -n "$sh_file"
         if [ $? -ne 0 ]; then
           echo "❌ BLOCKED - SYNTAX ERROR in $sh_file"
+          # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+          GATE_1_STATUS="FAIL"
           return 1
         fi
       fi
@@ -692,10 +724,14 @@ else
         ;;
       1)
         echo "❌ BLOCKED - Java static analysis violations (fix or add suppressions)"
+        # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+        GATE_1_STATUS="FAIL"
         return 1
         ;;
       2)
         echo "❌ BLOCKED - wc-java-lint unusable (fail-closed; unset XP_GATE_WC_JAVA_LINT=soft only if you accept the risk)"
+        # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
+        GATE_1_STATUS="FAIL"
         return 1
         ;;
       3)
