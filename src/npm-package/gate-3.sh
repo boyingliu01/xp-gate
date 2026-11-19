@@ -363,7 +363,20 @@ else
     LIZARD_PATH=$(eval echo "$LIZARD_CMD")
 
     # Get changed source files for complexity check (includes test files)
-    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs)$' || true)
+    #
+    # #847: `dart` added. The writer (scripts/ccn-report.cjs SOURCE_EXT) has
+    # listed `dart` all along, and so do Gate 2's SOURCE_FILES, Gate 4's
+    # PRINCIPLES_FILES and both dart.sh/flutter.sh adapters -- so the READER of
+    # the baseline was the one place that disagreed with everything else, and
+    # Dart cyclomatic complexity was never graded. Measured: `lizard --csv -C 5`
+    # on a Dart file emits a real CCN row, so the gap was never tool capability.
+    #
+    # THIS FILE HAS A TWIN. `githooks/gate-3.sh` and `githooks/adapters/gate-3.sh`
+    # were byte-identical before this change (md5 1d4e07cc...), and tests source
+    # the one under `adapters/`. A fix applied to only one of them leaves the
+    # other silently wrong -- which is how this edit was first written and how
+    # the accompanying test failed. Any change here must land in BOTH.
+    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs|dart|php|phtml)$' || true)
 
     # Grade exactly the population the baseline was written from. The two must
     # match or the ratchet reports pre-existing code as "new", which is a false
@@ -484,8 +497,31 @@ else
             _cc_pop_skipped=""
             while IFS= read -r _cc_row; do
               [ -n "$_cc_row" ] || continue
-              _cc_row_path=$(printf '%s' "$_cc_row" | awk -F, '{print $1}')
-              if ccn_file_in_population ".ccn-baseline.json" "$_cc_row_path"; then
+              # The path is column 7 (index 6) of a lizard --csv row, NOT column 1.
+              #
+              # Column order (lizard --csv, no header, 11 fields):
+              #   0 NLOC | 1 CCN | 2 token_len | 3 param_count | 4 location_size
+              #   5 "name@start-end@path" | 6 path | 7 name | 8 signature | ...
+              # This read `$1` -- that is NLOC, not the path -- so every path
+              # handed to ccn_file_in_population was a bare number like "17".
+              # No number matches a declared root or extension, so EVERY row was
+              # classified "outside the baseline population" and dropped: the gate
+              # graded nothing, printed "not graded, not ratcheted", and fell
+              # through to "UNVERIFIED no parsable CCN row". The population filter
+              # therefore disabled the ratchet for ALL languages, not just the one
+              # it was being added for.
+              #
+              # Quote-aware via the shared awk helper rather than a second `-F,`
+              # split: the signature column (8) contains commas, so a naive field
+              # split lands on the wrong column as soon as a signature is present.
+              _cc_row_path=$(printf '%s' "$_cc_row" | csv_to_unit_separated | awk -F'\\037' '{print $7}')
+              # A row we cannot locate cannot be scoped: keep it and let the
+              # verifier decide, rather than silently dropping it as "out of
+              # population" — dropping is how "checked" became "checked nothing".
+              if [ -z "$_cc_row_path" ]; then
+                _cc_pop_kept="${_cc_pop_kept}${_cc_row}
+"
+              elif ccn_file_in_population ".ccn-baseline.json" "$_cc_row_path"; then
                 _cc_pop_kept="${_cc_pop_kept}${_cc_row}
 "
               else

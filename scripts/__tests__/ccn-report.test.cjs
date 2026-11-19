@@ -690,3 +690,154 @@ describe('the rescue path replaces an unverified CCN with the body CCN (#762)', 
     expect(body).toBe(null);
   });
 });
+
+/**
+ * @test REQ-CCNRPT-902
+ * @intent Gate 3's verified CCN must equal lizard's CCN for EVERY brace-balanced
+ *   language, not just the ones whose rows happen to be corrected before the
+ *   rescue path runs. #848: the rescue passed findFunctionBody's [start, end]
+ *   PAIR where classifyUnverifiedRow expects LINES, so ccnOfBody iterated two
+ *   numbers, matched no branch, and fell back to its initial value of 1.
+ * @covers AC-CCNRPT-902
+ *
+ * Every case is driven through the real `--csv-verified` CLI, because the bug
+ * lived in the gap between the pieces: the existing unit tests call
+ * findFunctionBody and ccnOfBody directly with correct arguments, which is
+ * exactly why they stayed green while the pipeline rewrote 8 to 1.
+ */
+describe('#848 verified CCN fidelity across languages (end-to-end)', () => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const { execFileSync } = require('child_process');
+  const reportPath = path.resolve(__dirname, '..', 'ccn-report.cjs');
+
+  // Same nesting depth in every language, so lizard reports the same CCN and any
+  // divergence is the verifier's, not the fixture's. Each body genuinely sums to
+  // 8: 1 + if + if + for + if + if + if + &&.
+  const FIXTURES = {
+    'lib/a.go': [
+      'package main',
+      'func Grade(a int, b int, c int, d int) int {',
+      '\tif a > 0 { if b > 0 { for i := 0; i < 10; i++ { if c > 0 { if d > 0 { if i > 5 && a > 0 { return 1 } } } } } }',
+      '\treturn 4',
+      '}',
+    ].join('\n'),
+    'lib/b.dart': [
+      'int Grade(int a, int b, int c, int d) {',
+      '  if (a > 0) { if (b > 0) { for (var i = 0; i < 10; i++) { if (c > 0) { if (d > 0) { if (i > 5 && a > 0) { return 1; } } } } } }',
+      '  return 4;',
+      '}',
+    ].join('\n'),
+    'lib/c.py': [
+      'def grade(a, b, c, d):',
+      '    if a > 0:',
+      '        if b > 0:',
+      '            for i in range(10):',
+      '                if c > 0:',
+      '                    if d > 0:',
+      '                        if i > 5 and a > 0:',
+      '                            return 1',
+      '    return 4',
+    ].join('\n'),
+    'lib/D.java': [
+      'public class D {',
+      '  int grade(int a, int b, int c, int d) {',
+      '    if (a > 0) { if (b > 0) { for (int i = 0; i < 10; i++) { if (c > 0) { if (d > 0) { if (i > 5 && a > 0) { return 1; } } } } } }',
+      '    return 4;',
+      '  }',
+      '}',
+    ].join('\n'),
+    'lib/E.cs': [
+      'class E {',
+      '  int Grade(int a, int b, int c, int d) {',
+      '    if (a > 0) { if (b > 0) { for (int i = 0; i < 10; i++) { if (c > 0) { if (d > 0) { if (i > 5 && a > 0) { return 1; } } } } } }',
+      '    return 4;',
+      '  }',
+      '}',
+    ].join('\n'),
+  };
+
+  /** lizard's CCN and the `--csv-verified` CCN for one fixture. */
+  function bothCcns(root, rel) {
+    const raw = execFileSync('lizard', ['--csv', rel], { cwd: root, encoding: 'utf8' });
+    const verified = execFileSync('node', [reportPath, '--csv-verified', 'batch', '--root', root], {
+      cwd: root,
+      input: raw,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const pick = (text) => text.trim().split(/\r?\n/).filter(Boolean)[0].split(',')[1];
+    return { lizard: pick(raw), verified: pick(verified) };
+  }
+
+  let root;
+  beforeAll(() => {
+    if (!lizardAvailable()) return;
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn848-'));
+    for (const [rel, body] of Object.entries(FIXTURES)) {
+      fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), `${body}\n`);
+    }
+  });
+  afterAll(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); });
+
+  for (const rel of Object.keys(FIXTURES)) {
+    it(`keeps lizard's CCN for ${path.extname(rel)} (${rel})`, () => {
+      if (!lizardAvailable()) return;
+      const { lizard, verified } = bothCcns(root, rel);
+      // The regression was silent UNDER-counting (8 -> 1), which is the dangerous
+      // direction: a real hotspot is rewritten to look trivial and the ratchet can
+      // never fire on it. Equality is the only acceptable answer.
+      expect({ file: rel, verified }).toEqual({ file: rel, verified: lizard });
+    });
+  }
+});
+
+/**
+ * @test REQ-CCNRPT-731
+ * @intent Onboarding PHP surfaced two population defects that would each have
+ *   made Gate 3 grade nothing (or grade someone else's code) in every PHP repo:
+ *     a) SOURCE_EXT had no `php`, so findSourceFiles returned ZERO files and
+ *        `--write-baseline` cheerfully wrote an empty baseline -- the same shape
+ *        as the Dart omission in #847 (a gate that reports PASSED over an empty
+ *        population).
+ *     b) `vendor` was not in skipDirs. composer recommends COMMITTING vendor/ for
+ *        applications, so the tracked-files filter does not exclude it, and a
+ *        two-file fixture graded third-party minified JS out of
+ *        vendor/phpunit/... as the project's own production code.
+ * @covers AC-CCNRPT-731
+ */
+describe('#731 PHP population: source discovery and vendor exclusion', () => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const { execFileSync } = require('child_process');
+  const mod = require('../../scripts/ccn-report.cjs');
+
+  let root;
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn731-'));
+    const write = (rel, body) => {
+      fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), body);
+    };
+    write('src/Calc.php', '<?php\nfunction calc(int $a): int { return $a + 1; }\n');
+    // Committed dependency tree: exactly what composer recommends for apps.
+    write('vendor/acme/lib/Mini.js', 'function mini(a){ if(a){ return 1; } return 2; }\n');
+    write('vendor/acme/lib/Helper.php', '<?php\nfunction helper(): int { return 1; }\n');
+    execFileSync('git', ['init', '-q', '.'], { cwd: root });
+    execFileSync('git', ['add', '-A'], { cwd: root });
+  });
+  afterAll(() => { if (root) fs.rmSync(root, { recursive: true, force: true }); });
+
+  it('discovers .php sources instead of returning an empty population', () => {
+    const files = mod.findSourceFiles(root).map((f) => f.split(path.sep).join('/'));
+    expect(files).toContain('src/Calc.php');
+  });
+
+  it('never scans composer vendor/ as project source', () => {
+    const files = mod.findSourceFiles(root).map((f) => f.split(path.sep).join('/'));
+    expect(files.filter((f) => f.startsWith('vendor/'))).toEqual([]);
+  });
+});

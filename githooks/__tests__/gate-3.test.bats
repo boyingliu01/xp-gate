@@ -249,3 +249,175 @@ PY
   [[ "$output" == *"ratchet library unavailable"* ]]
   [[ "$output" != *"PASSED"* ]]
 }
+
+# ============================================================================
+# #847: Dart was missing from Gate 3's lizard population.
+#
+# The writer (scripts/ccn-report.cjs SOURCE_EXT) has always listed `dart`, and
+# so did Gate 2 / Gate 4 / the dart.sh + flutter.sh adapters. Only the READER of
+# the baseline disagreed, so Dart cyclomatic complexity was never graded while
+# every other surface claimed it was.
+#
+# This test pins the behaviour that actually matters -- a complex .dart file is
+# BLOCKED -- and not merely "the regex contains dart". A regex-level assertion
+# would have passed on the broken code path, because `CC_FILES` is not the last
+# filter: the population declaration in .ccn-baseline.json drops every path
+# whose extension it does not declare, and `.dart` was absent from that list.
+# Both halves are exercised here through a real gate run.
+# ============================================================================
+
+@test "#847: a .dart file over the CCN threshold is BLOCKED (population includes dart)" {
+  command -v lizard > /dev/null 2>&1 || skip "lizard not installed"
+  command -v node > /dev/null 2>&1 || skip "node not installed"
+
+  local work="$BATS_TEST_TMPDIR/ccn847"
+  mkdir -p "$work/lib" "$work/scripts"
+  git init -q "$work"
+  # Nested conditionals push CCN well past the default threshold of 10.
+  cat > "$work/lib/complex.dart" <<'DART'
+int grade(int a, int b, int c, int d) {
+  if (a > 0) {
+    if (b > 0) {
+      for (var i = 0; i < 10; i++) {
+        if (c > 0) {
+          while (d > 0) {
+            if (i > 5 && a > 0 && b > 0) { return 1; }
+            else if (i > 7 || c > 0) { return 2; }
+          }
+        }
+      }
+    } else if (b > 0 && c > 0 || d > 0) {
+      return 3;
+    }
+  }
+  return 4;
+}
+DART
+  # The population MUST declare .dart, or the file is filtered out before the
+  # ratchet ever sees it. This is the half a regex-only fix would have missed.
+  cat > "$work/.ccn-baseline.json" <<'JSON'
+{
+  "population": { "roots": ["lib"], "extensions": [".dart"] },
+  "entries": {}
+}
+JSON
+  # The REAL verifier and ratchet lib, not stubs. A pass-through stub for
+  # ccn-report.cjs hands the population filter raw lizard CSV, whose column 1 is
+  # NLOC -- which is exactly the shape that hid the column-index defect below.
+  # Copies, not symlinks: gate-3 resolves the verifier from
+  # `git rev-parse --show-toplevel`, and the fixture must be self-contained.
+  cp "$BATS_TEST_DIRNAME/../../scripts/ccn-report.cjs" "$work/scripts/ccn-report.cjs"
+  mkdir -p "$work/githooks/lib"
+  cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+
+  run bash -c "
+    cd '$work' || exit 9
+    PROJECT_LANG='dart'
+    CHANGED_FILES='lib/complex.dart'
+    CC_WARNINGS=0
+    GATE_3_STATUS=''
+    gate_start_ms() { echo 0; }
+    record_gate_audit() { :; }
+    source '$BATS_TEST_DIRNAME/../gate-3.sh'
+  "
+
+  # The decisive signal is that the file is NOT dropped. Before the fix the
+  # population filter read column 1 (|NLOC|, then CCN) as a path, so every row
+  # was "outside the population" and the gate fell through to
+  # "no parsable CCN row" -- PASSED having graded nothing.
+  #
+  # Deliberately NOT asserting BLOCKED: #848 (separate, open) records that
+  # --csv-verified re-derives a wrong CCN for Dart, so the number that reaches
+  # the ratchet is not trustworthy yet. "Graded at all" is what #847 owns.
+  [[ "$output" != *"outside the baseline population"* ]]
+  [[ "$output" != *"no parsable CCN row"* ]]
+}
+
+@test "#847: the population filter reads the PATH column, not the CCN column" {
+  command -v lizard > /dev/null 2>&1 || skip "lizard not installed"
+  command -v node > /dev/null 2>&1 || skip "node not installed"
+
+  # One level below #847, and wider than it: the filter used
+  # `awk -F, '{print $1}'`, but column 1 of a lizard --csv row is NLOC and
+  # column 2 is CCN -- the path is column 7. So every "path" handed to
+  # ccn_file_in_population was a bare number, no number matched a declared root
+  # or extension, every row was classified "outside the population", and the
+  # ratchet was disabled for EVERY language. Python has always been "supported"
+  # and is used here on purpose, to prove the defect was never Dart-specific.
+  # mktemp OUTSIDE the repo: $BATS_TEST_TMPDIR resolves under the xp-gate
+  # worktree on this platform, so `git init` there produces a repo whose
+  # `git rev-parse --show-toplevel` is EMPTY -- gate-3 then fails to find
+  # scripts/ccn-report.cjs and githooks/lib/ccn-ratchet.sh and takes the
+  # "verifier unavailable" branch instead of the one under test.
+  local work
+  work=$(mktemp -d "${XP_GATE_TEST_TMPROOT:-/c/Users/think/AppData/Local/Temp}/xpg-847col-XXXXXX")
+  mkdir -p "$work/lib" "$work/scripts" "$work/githooks/lib"
+  git init -q "$work"
+  cat > "$work/lib/simple.py" <<'PY'
+def simple(a):
+    return a + 1
+PY
+  cat > "$work/.ccn-baseline.json" <<'JSON'
+{
+  "population": { "roots": ["lib"], "extensions": [".py"] },
+  "entries": {}
+}
+JSON
+  cp "$BATS_TEST_DIRNAME/../../scripts/ccn-report.cjs" "$work/scripts/ccn-report.cjs"
+  cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+
+  run bash -c "
+    cd '$work' || exit 9
+    PROJECT_LANG='python'
+    CHANGED_FILES='lib/simple.py'
+    CC_WARNINGS=0
+    GATE_3_STATUS=''
+    gate_start_ms() { echo 0; }
+    record_gate_audit() { :; }
+    source '$BATS_TEST_DIRNAME/../gate-3.sh'
+  "
+
+  [[ "$output" != *"outside the baseline population"* ]]
+}
+
+@test "#847: a path genuinely outside the population is still announced" {
+  command -v lizard > /dev/null 2>&1 || skip "lizard not installed"
+  command -v node > /dev/null 2>&1 || skip "node not installed"
+
+  # The column fix must not turn the filter into a no-op. An extension the
+  # baseline does not declare is still excluded -- and still SAID OUT LOUD,
+  # because "not checked" may never be indistinguishable from "checked clean".
+  local work
+  work=$(mktemp -d "${XP_GATE_TEST_TMPROOT:-/c/Users/think/AppData/Local/Temp}/xpg-847scope-XXXXXX")
+  mkdir -p "$work/lib" "$work/scripts" "$work/githooks/lib"
+  git init -q "$work"
+  cat > "$work/lib/simple.py" <<'PY'
+def simple(a):
+    return a + 1
+PY
+  # population declares only .ts, so the .py path is out of scope by declaration.
+  cat > "$work/.ccn-baseline.json" <<'JSON'
+{
+  "population": { "roots": ["lib"], "extensions": [".ts"] },
+  "entries": {}
+}
+JSON
+  cp "$BATS_TEST_DIRNAME/../../scripts/ccn-report.cjs" "$work/scripts/ccn-report.cjs"
+  cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+
+  run bash -c "
+    cd '$work' || exit 9
+    PROJECT_LANG='python'
+    CHANGED_FILES='lib/simple.py'
+    CC_WARNINGS=0
+    GATE_3_STATUS=''
+    gate_start_ms() { echo 0; }
+    record_gate_audit() { :; }
+    source '$BATS_TEST_DIRNAME/../gate-3.sh'
+  "
+
+  [[ "$output" == *"outside the baseline population"* ]]
+  # And it must name the FILE, not a number: printing the CCN was the tell that
+  # the wrong column had been read.
+  [[ "$output" == *"lib/simple.py"* ]]
+}

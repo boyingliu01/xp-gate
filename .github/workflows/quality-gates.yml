@@ -93,6 +93,18 @@ jobs:
             else
               echo "dart" > project_language.txt
             fi
+          elif [[ -n "$(find . -maxdepth 2 -name "*.php" -type f -not -path "./vendor/*" | head -n 1)" ]]; then
+            # #731: PHP is detected on SOURCE FILES, never on composer.json, and
+            # this arm sits BEFORE the powershell/shell ones. Both halves matter:
+            #   1. composer.json is not exclusive -- a JS repo can carry one for a
+            #      single build step, so keying on it would relabel the repo.
+            #   2. The arms below match `*.ps1` / `*.sh`, and a PHP project
+            #      routinely ships one as a build helper. Placed after them, such
+            #      a repo is classified powershell/shell and its PHP gate never
+            #      runs -- the exact #717 mistake one arm above.
+            # `-not -path "./vendor/*"` skips composer's dependency tree, so a
+            # repo is not detected as PHP merely because a dependency is.
+            echo "php" > project_language.txt
           elif [[ -n "$(find . -name "*.ps1" -type f | head -n 1)" ]]; then
             echo "powershell" > project_language.txt
           elif [[ -f "Package.swift" ]]; then

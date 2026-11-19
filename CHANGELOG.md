@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.38.33.0] - 2026-11-19
+
+**落地 0.38.30.0 记录的 PHP 接入与 #848 修复（代码本身）。**
+
+0.38.30.0 的条目写明了三件事：Dart 其实没被支持、`--csv-verified` 对 Go/Dart
+把 CCN 8 算成 1、PHP 接入九个面零 NOT WIRED。该条目随一次并发提交进了库，
+但**代码不在其中**——本版本提交的是代码本身，内容与 0.38.30.0 的描述一致，
+逐项实测证据见该条目。
+
+- `githooks/adapters/php.sh`（phpcs 退出码 3 = 工具跑不起来 = BLOCK；
+  phpstan 退出码 1 兼指错误与坏路径，改数 raw 诊断行；PHPUnit 原生
+  `--coverage-cobertura` 对齐 Gate 5 Stage 2 的解析口径）
+- `src/principles/adapters/php.ts` + `adapterMap`（被既有测试逼出来：
+  `.php` 一进 `PRINCIPLES_FILES`，capability 立刻报 #717 形状）
+- `scripts/ccn-report.cjs` 的 `rescueBodyLines()`（#848 根因）
+- `SOURCE_EXT` 补 `php`、`skipDirs` 补 `vendor`
+- `src/npm-package/lib/language-capability-surfaces.js`（拆分被 Gate 4
+  判违规的 264 行函数，并修掉从未匹配成功的 registry 正则与读错文件的 Gate 6）
+
+回归：74 vitest + 19 bats 全绿；gate-3.sh / gate-4.sh 各自五份副本 md5 唯一。
+
 ## [0.38.30.0] - 2026-11-19
 
 **PHP 接入，以及 C# 复盘查出的「Dart 表面支持、实际不评分」。**

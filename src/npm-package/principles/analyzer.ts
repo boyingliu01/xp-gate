@@ -6,6 +6,7 @@ import { GoAdapter } from './adapters/go';
 import { JavaAdapter } from './adapters/java';
 import { KotlinAdapter } from './adapters/kotlin';
 import { DartAdapter } from './adapters/dart';
+import { PhpAdapter } from './adapters/php';
 import { SwiftAdapter } from './adapters/swift';
 import { ObjectiveCAdapter } from './adapters/objectivec';
 import { CppAdapter } from './adapters/cpp';
@@ -61,6 +62,11 @@ export function getAdapterForFile(filePath: string): Adapter | null {
     '.kt': KotlinAdapter,
     '.kts': KotlinAdapter,
     '.dart': DartAdapter,
+    // #731: the same #717 shape, caught by the capability test rather than by a
+    // review -- widening gate-4.sh's filter to accept .php without this entry
+    // would have produced "Gate 4 ran and inspected nothing".
+    '.php': PhpAdapter,
+    '.phtml': PhpAdapter,
     '.swift': SwiftAdapter,
     '.m': ObjectiveCAdapter,
     '.mm': ObjectiveCAdapter,

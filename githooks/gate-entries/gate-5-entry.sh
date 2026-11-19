@@ -680,7 +680,7 @@ else
   # of a test result was reported as the absence of a need for one. The
   # Principles extensions list got `.cs` in ac214d38; this one was left behind,
   # which is why the C# arm looked like it worked while Gate 5 stood down.
-  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|cs|csx|cpp|cc|cxx|c|h|hpp|swift|m|mm|dart|sh|ps1)$"
+  CODE_EXTENSIONS="\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|cs|csx|cpp|cc|cxx|c|h|hpp|swift|m|mm|dart|php|phtml|sh|ps1)$"
   CHANGED_CODE_FILES=$(echo "$CHANGED_FILES" | grep -E "$CODE_EXTENSIONS" || true)
   if [ -z "$CHANGED_CODE_FILES" ]; then
     # #554: this branch DID stand down deliberately, but "PASS" is a claim that
