@@ -512,6 +512,119 @@ Gate 13 (PASS) completed in 1s
 （子 shell 变量、错误的夹具、被消耗的变更集），共同的教训是同一句话：
 **在看到 gate 内部变量之前，不要相信 gate 的外部症状。**
 
+
+### 3.8 门禁 11：SKIP 的原因打印了，写进记录时丢掉
+
+三个「拒绝评估」的分支各自都算出了原因并打印，但整个门禁只有**一处**汇总的
+`record_gate_audit`，调用时没传第六个参数：
+
+```bash
+record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$GATE_11_START"
+```
+
+于是每一条 SKIP 都以**空原因**落进审计记录。这是 `githooks/AGENTS.md` 列为
+全项目最常复发的缺陷，并且明说**一行带绿、却没有原因的 SKIP 是缺陷不是通过**。
+
+对只读 `xp-gate audit` 的消费者，「故意跳过」和「这条链里根本没有这个门禁」完全一样。
+
+修复后四个分支各自设 `GATE_11_DETAIL`。其中 `allow` 分支记的是**哪一种 allow**——
+`phase-not-reached` 与 `checks-passed` 是关于冲刺的相反陈述，只记「allow」等于没记。
+
+**与 3.5、3.7 是同一族的第三次**：
+
+| 门禁 | 形态 |
+|---|---|
+| 5 | 五种 SKIP 措辞，门禁只认 TypeScript 的那一种 |
+| 9 | 机制存在、文档成立，只接了一个语言入口 |
+| 11 | 原因算出来了、打印了，汇总时没传下去 |
+
+三处都不是"忘了写"，而是**链路的一环没接上**，且都在"看起来正常"的地方。
+
+### 我的测试也错了两次，第二次离报假缺陷只差一步
+
+1. 测试桩的 `record_gate_audit` 只打印 `$3|issues=$4`，把 detail 丢掉——
+   **不改桩，这条缺陷在测试里根本观测不到**。
+2. 反证测试先写成 `{"decision":"allow","reason":"checks-passed"}`，而分类器读的是
+   `allow_reason` 字段，于是期望 PASS 却得到 SKIP。我花了一步去找一个
+   **由我自己夹具字段名错误制造的**产品缺陷。
+
+### 本轮另外两处核查，结论是「实现是对的」
+
+这两项值得记，因为它们证明了这套代码并非处处有问题——避免把"找缺陷"变成"必须找到缺陷"：
+
+| 检查项 | 结论 |
+|---|---|
+| 门禁 1 是否把「无适配器语言」记成 PASS（历史上 C# 整年如此） | **否**。`.rb` 夹具输出 `No specific adapter for ruby` + `SKIPPED - Code quality (no specific checks for ruby)`，SKIP 带原因 |
+| 门禁 1 的扩展名列表是否漏语言 | 逐个核对 22 个扩展名，15 个适配器全覆盖（`.pl` 在列表内，`.tf` 是独立 pattern） |
+
+
+### 3.9 耗时基线（2026-11-19 实测）
+
+数据源：`.xp-gate/audit.jsonl`，排除负值与 `duration_anomaly` 标记后 **15691 条**可信样本。
+
+| 门禁 | 样本 | 平均 ms | **p90 ms** | p90 占比 |
+|---|---|---|---|---|
+| SAST Security | 445 | 44 204 | **180 118** | **35.6%** |
+| 5-focus | 16 | 43 829 | 76 638 | 15.1% |
+| Tests + Coverage | 1 255 | 35 741 | 64 296 | 12.7% |
+| File Hygiene | 1 207 | 14 973 | 41 706 | 8.2% |
+| Code Quality | 1 248 | 16 403 | 34 381 | 6.8% |
+| Architecture + Boy Scout | 1 102 | 12 466 | 23 137 | 4.6% |
+| IaC Security | 343 | 5 977 | 19 888 | 3.9% |
+| Build Integrity | 1 179 | 6 658 | 12 989 | 2.6% |
+| 其余 9 个 | — | — | — | <3% 各 |
+
+**SAST 是唯一超过「价值对应比例」的门禁：单条 p90 占全部门禁 p90 之和的 35.6%。**
+
+### 但 SAST 的分布不是性能问题，是两条路径
+
+| 分支 | 样本 | 中位数 |
+|---|---|---|
+| 全部 | 445 | **10 252 ms** |
+| <2s | 184（41.3%） | — |
+| 2–10s | 36（8.1%） | — |
+| >10s | 225（50.6%） | — |
+
+最快 191 ms，最慢 247 358 ms——**相差 1290 倍**。这不是波动，是「短路」与「真扫」两种行为混在同一个门禁名下。
+
+`gate-10.sh` 的注释已经写明根因：direct `semgrep scan` 在 Windows 上约 9 秒，
+账单几乎全是 Python 导入税，`--version` 单独就要 4-5 秒。所以真正的优化方向是
+**避免每次提交都付这笔启动税**（常驻 daemon 或增量扫描），而不是调超时。
+
+### 顺带发现：SAST 的历史记录 93% 缺状态字段
+
+445 条 SAST 记录里 415 条 `gate_status` 缺失（读出来是 `?`），只有 11 条 PASS、19 条 SKIP。
+门禁 10 entry 的注释提到 #806 G10x 修过「早退分支不写记录」，所以这是**修复之前的历史数据**，
+不是当前缺陷。但它说明：任何基于历史 journal 的统计都必须先过滤，否则 93% 的样本
+归入「未知」，得出「SAST 从不通过」的错误结论。
+
+
+### 3.10 门禁 × 语言可用性矩阵（截至 2026-11-19）
+
+只记录**本轮及前几轮实测过**的组合。空格不是「可用」，是「尚未验证」——
+这张表的价值在于它诚实地留下空白，而不是填满它。
+
+| 门禁 | 验证方式 | 已实测语言 | 判定形态 | 未验证 |
+|---|---|---|---|---|
+| 1 Code Quality | `probe-gate1-languages.sh` | ts python go java | 真实 lint 或 `No specific adapter for <lang>` + SKIP | rust lua perl 等无适配器语言 |
+| 2 Duplicate Code | `gate-2-no-files.test.bats` + dart 夹具 | dart（空扫描）+ ts | `clean` / `duplicates` / `no_files→SKIP` / `error` | 其余 14 语言 |
+| 4 Principles | 前轮 10/10 | 全部 10 个有规则的 | 2 个报真实违规，6 个显式「未分析」，java/kotlin 报 INFO | — |
+| 5 Tests+Coverage | `probe-gate5-languages.sh` | ts python go shell powershell java cpp dart php | 8 个 BLOCK / 1 个委托 CI（已诚实标注） | csharp kotlin swift objectivec flutter iac |
+| 9 Build Integrity | `gate-9-verdict-honesty.test.bats` | ts java go | PASS / SKIP(带语言名) / BLOCK | 其余 12 语言（现已全部记入 `GATE_9_UNVERIFIED`） |
+| 11 Sprint Flow | `gate-11-verdict-integrity.test.bats` | 与语言无关 | PASS / SKIP(带原因) / BLOCK | — |
+| 13 Compiler Strictness | 手工夹具 | go（正确 SKIP：只支持 C/C++/Java/C#） | SKIP 带原因 | cpp java csharp ts |
+
+**架构层面的结论**（比逐格填表更重要）：
+
+1. **门禁 1 的判定是正确的**：无适配器语言得到 `No specific adapter for <lang>` + SKIP 带原因，
+   不是 PASS。历史上 C# 曾整年被判 PASS，那个分支已修。
+2. **门禁 9 只支持 TS/Java 两半**，其余语言现在会进入 `GATE_9_UNVERIFIED` 并在
+   SKIP 行点名——这是本轮 §3.7 的修复。
+3. **门禁 13 只支持 C/C++/Java/C#**，其余语言 SKIP 带原因（`No staged C/C++ source files`）。
+   一个 Go 文件即使有类型错误也不会被它发现——但门禁 9 现在会说明「go 没被构建」。
+4. **真正需要补的是「谁负责构建每种语言」这个归属问题，不是补 15 个适配器**。
+   门禁 9 与门禁 13 的职责边界目前没有文档规定，这属于待决设计问题。
+
 ## 四、我自己的验证抓住的错误
 
 每一个都「看起来像成功」。记录在此，因为它们比结论更能说明问题。
