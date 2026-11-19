@@ -6464,6 +6464,63 @@ specification:
             无工具支持的语言在审计中记录 SKIP 并带原因
           test_type: integration
 
+    - id: REQ-GATE5C-SKIP-RECORDED
+      description: >-
+        门禁 5c 在每条路径上都算出一个判定，而没有任何地方读取它。
+
+        对齐检查在 githooks/lib/gate-5c-alignment.sh 中把 GATE_5C_STATUS 设为
+        PASS、SKIP 或 BLOCK 三者之一，其文件头也写明了规则：「GATE_5C_STATUS 现在
+        总是 PASS、SKIP 或 BLOCK——绝不为空」，因为此前的版本在新克隆上什么都不打印，
+        而沉默被读成了成功（#585）。
+
+        实测：gate-5c-alignment.sh 之外没有任何地方读取这个变量。搜索 pre-commit、
+        gate-driver.sh 与 lib/*.sh 全部无匹配。于是四条路径里有三条丢失了判定：
+
+        BLOCK 仍然阻断，因为 gate_5c_alignment 返回 1、门禁体执行 return 1。
+        SKIP 把原因打印到控制台，而审计行只记录 GATE_5_DETAIL——5c 从不设置它。
+        PASS 同理，与「从未运行」无法区分。
+
+        这正是本代码库反复出现的失败模式，两份 AGENTS 都写明了：「SKIP 必须被记录，
+        而不只是被打印」。控制台的一行不是记录。
+      acceptance_criteria:
+        - id: AC-GATE5C-SKIP-01
+          criteria: >-
+            门禁 5c 的判定进入审计记录，而不只是停留在变量里
+          test_type: integration
+        - id: AC-GATE5C-SKIP-02
+          criteria: >-
+            三种跳过原因各自可区分，不合并成一个笼统的 skipped
+          test_type: integration
+
+    - id: REQ-GATE5-DELETE-DETECTION
+      description: >-
+        删除测试文件的告警，对最需要它的那类提交反而不可达。
+
+        门禁 5 有两个针对「绿色构建说谎」的守卫：.only 标记（CI 只跑一个用例然后
+        报告绿色）与被删除的测试文件（安全网无声消失）。文件头称二者为「修复红色
+        构建最安静的两种方式」。
+
+        实测：只提交一个测试文件的删除时，门禁 5 报告「skipped - no code changes」
+        与 SKIP(no_code_files_changed)，完全不提被删除的文件。删除扫描位于
+        if [ -n "$STAGED_TEST_FILES" ] 内部，而该列表由 --diff-filter=ACM 构建，
+        按定义永远不含被删除的文件——于是「只删测试」恰好是守卫唯一无法运行的情形，
+        而那正是它被写出来的情形。
+
+        .only 那一半是好的，已端到端验证：暂存 test.only(...) 会带行号阻断。
+
+        这比缺少一条告警更严重：提交随后进入「没有代码文件变更」的提前跳过，记录的
+        原因 no_code_files_changed 并不假，正因如此才危险——日志显示门禁因一个无害
+        原因主动让开，而安全网已经消失了。
+      acceptance_criteria:
+        - id: AC-GATE5-DELETE-01
+          criteria: >-
+            删除扫描不再被 ADDED/MODIFIED 列表的门槛挡在后面
+          test_type: integration
+        - id: AC-GATE5-DELETE-02
+          criteria: >-
+            端到端：只删除测试文件时确实产生告警并指名该文件
+          test_type: integration
+
     - id: REQ-COVERAGE-TEST-EXCLUSION
       description: >-
         测试代码必须从覆盖率中排除，而且排除规则必须与各门禁识别测试代码的规则

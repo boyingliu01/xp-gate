@@ -258,23 +258,38 @@ else
         fi
       done <<< "$STAGED_TEST_FILES"
 
-      # --- deleted test files: WARN ---
-      DELETED_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/xp-deleted-$$")
-      ADDED_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/xp-added-$$")
-      # Routed through the same filter as every other staged-file scan (#649):
-      # a deleted/added file under node_modules/ or vendor/ is not project code,
-      # and treating it as one reports deletions that mean nothing.
-      git diff --cached --name-only --diff-filter=D 2>/dev/null | filter_project_paths > "$DELETED_LIST" || true
-      git diff --cached --name-only --diff-filter=A 2>/dev/null | filter_project_paths > "$ADDED_LIST" || true
-      GATE_5_DELETED_TESTS=$(classify_deleted_tests "$DELETED_LIST" "$ADDED_LIST" || true)
-      rm -f "$DELETED_LIST" "$ADDED_LIST"
-      if [ -n "$GATE_5_DELETED_TESTS" ]; then
-        echo "⚠️  WARN - test file(s) deleted with no same-named replacement:"
-        printf '%s\n' "$GATE_5_DELETED_TESTS" | sed 's/^/     /'
-        echo "     Deleting a test removes the safety net (指南 §9.5). If the code is"
-        echo "     genuinely gone, say so in the commit body; otherwise restore it."
-      fi
     fi
+  fi
+
+  # --- deleted test files: WARN ---
+  #
+  # OUTSIDE the STAGED_TEST_FILES guard, deliberately. That list is built with
+  # `--diff-filter=ACM`, so it can never contain a deleted file, and a commit
+  # that ONLY deletes tests -- the one case this warning exists for -- skipped
+  # the scan entirely. Measured before this fix: staging nothing but the removal
+  # of a committed test printed "Gate 5: 2124ms (skipped - no code changes)" and
+  # SKIP(no_code_files_changed), with no mention of the deletion. That reason was
+  # not false, which is what made it dangerous: the journal showed a gate
+  # standing down for a benign cause while the safety net had disappeared.
+  #
+  # Guarded on the FUNCTION rather than on the change set: an empty deletion list
+  # is the normal case, a missing classifier is not.
+  if declare -f classify_deleted_tests >/dev/null 2>&1; then
+  DELETED_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/xp-deleted-$$")
+  ADDED_LIST=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/xp-added-$$")
+  # Routed through the same filter as every other staged-file scan (#649):
+  # a deleted/added file under node_modules/ or vendor/ is not project code,
+  # and treating it as one reports deletions that mean nothing.
+  git diff --cached --name-only --diff-filter=D 2>/dev/null | filter_project_paths > "$DELETED_LIST" || true
+  git diff --cached --name-only --diff-filter=A 2>/dev/null | filter_project_paths > "$ADDED_LIST" || true
+  GATE_5_DELETED_TESTS=$(classify_deleted_tests "$DELETED_LIST" "$ADDED_LIST" || true)
+  rm -f "$DELETED_LIST" "$ADDED_LIST"
+  if [ -n "$GATE_5_DELETED_TESTS" ]; then
+    echo "⚠️  WARN - test file(s) deleted with no same-named replacement:"
+    printf '%s\n' "$GATE_5_DELETED_TESTS" | sed 's/^/     /'
+    echo "     Deleting a test removes the safety net (指南 §9.5). If the code is"
+    echo "     genuinely gone, say so in the commit body; otherwise restore it."
+  fi
   fi
 
   if [ "$GATE_5_FOCUS_BLOCKED" -gt 0 ]; then
@@ -1944,6 +1959,27 @@ if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
   fi
 else
   GATE_5_COVERAGE_APPLIES_TO="project"
+fi
+
+# Gate 5c computes a verdict on every path and, until now, NOTHING read it.
+# Measured: grep -rn GATE_5C_STATUS across pre-commit, gate-driver and lib/*.sh
+# returned no matches outside the checker itself. The BLOCK arm was still
+# effective (gate_5c_alignment returns 1 and this body does `|| return 1`), but
+# the two SKIP arms printed a reason to the console and the audit row -- which
+# records GATE_5_DETAIL, a variable 5c never set -- could not distinguish
+# "alignment ran and was clean" from "alignment never ran".
+#
+# The verdict is folded into the detail rather than into GATE_5_STATUS because
+# 5c is a SUB-check: a sub-check that could not run does not make the tests and
+# coverage it sits beside unmeasured, and promoting SKIP over a PASS earned by
+# a real test run would trade one wrong record for another. What must survive
+# is the REASON, and it is prefixed so a reader can tell which sub-check it
+# came from.
+if [ -n "${GATE_5C_STATUS:-}" ] && [ -z "${GATE_5_DETAIL:-}" ]; then
+  case "$GATE_5C_STATUS" in
+    SKIP) GATE_5_DETAIL="alignment_skipped:${GATE_5C_REASON:-unspecified}" ;;
+    PASS) GATE_5_DETAIL="alignment_clean" ;;
+  esac
 fi
 
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
