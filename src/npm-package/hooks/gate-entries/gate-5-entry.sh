@@ -1885,7 +1885,30 @@ else
   if [ "$COVERAGE_ENFORCED" = false ]; then
     echo "ℹ️  Coverage enforcement not applicable for ${CURRENT_LANG}"
   fi
-  echo "✅ PASSED - Coverage check completed."
+  # The verdict must agree with the decision, including when the decision was to
+  # hand the work to CI.
+  #
+  # This line used to print unconditionally. For the shell adapter -- which
+  # declares tests_delegated_to_ci() and prints "Not checked by this gate --
+  # verified on push/PR instead" a few lines earlier -- the log therefore ended
+  # with a PASSED for a suite that ran nowhere. Measured 2026-11-19 on a shell
+  # fixture whose only .bats test is `[ 1 -eq 2 ]`:
+  #
+  #     shell: tests run in CI bats-contracts job ...
+  #        Not checked by this gate -- verified on push/PR instead.
+  #     PASSED - Coverage check completed.
+  #
+  # The delegation is deliberate (239 bats suites serially measured 18m47s, which
+  # is why CI owns that job), so the fix is not to stop delegating -- it is to stop
+  # reporting a pass for it. Same family as "SKIP must be recorded, not merely
+  # printed", with the polarity reversed: the skip WAS printed, and then a PASS
+  # was printed on top of it.
+  if [ -n "${DELEGATED_LANGS:-}" ]; then
+    echo "ℹ️  Tests for ${DELEGATED_LANGS} are checked in CI, not by this gate."
+    echo "   No test verdict was produced here -- absence of a failure is not a pass."
+  else
+    echo "✅ PASSED - Coverage check completed."
+  fi
   done  # end for CURRENT_LANG (Stage 2 coverage)
 
   fi  # End: if [ "${TESTS_SKIPPED:-false}" != "true" ] (Issue #312 coverage skip)
