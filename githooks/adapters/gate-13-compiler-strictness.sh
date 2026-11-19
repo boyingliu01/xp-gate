@@ -497,6 +497,31 @@ gate13_count_warnings() {
   printf '%s\n' "$(( ${warnings:-0} + ${errors:-0} ))"
 }
 
+# Count ONLY compiler errors -- a translation unit that does not compile.
+#
+# Separate from gate13_count_warnings on purpose. The two questions are different:
+#   gate13_count_warnings -> "is this file worse than clean?" (baseline ratchet)
+#   gate13_count_errors   -> "does this file compile at all?"  (absolute)
+#
+# The ratchet legitimately tolerates a known warning count, and a file with no
+# baseline entry is report-only so that adopting the gate does not mean fixing
+# every pre-existing warning first. Neither exemption may extend to an ERROR:
+# pre-existing errors are not "debt to adopt", and code that does not build has no
+# business being committed.
+#
+# Measured 2026-11-19 with the language matrix, cpp fixture:
+#   a.cpp = `int main() { return not_a_symbol; }`
+#   g++: "error: 'not_a_symbol' was not declared in this scope"
+#   Gate 13: SKIP (no baseline) -> the error was not reported at all
+# The file had a baseline-eligible path only because it was MODIFIED rather than
+# added, which is the ordinary case for every existing project.
+gate13_count_errors() {
+  local cc="$1" flags="$2" file="$3" out
+  # shellcheck disable=SC2086  # flags is a deliberately word-split flag list
+  out=$("$cc" -fsyntax-only $flags "$file" 2>&1)
+  printf '%s\n' "$(printf '%s\n' "$out" | grep -E 'error:' | grep -vcE '^\s*$' || true)"
+}
+
 # ============================================================================
 # JAVA PATH (REQ-004)
 #
@@ -1388,6 +1413,28 @@ gate13_run_cpp_analysis() {
       if [ -z "$base" ]; then
         baseline_seen=1
         cnt=$(gate13_count_warnings "$cxx" "$flags" "$f")
+        # Report-only applies to the RATCHET, not to compilability. A modified file
+        # with no baseline entry is exempt from "no worse than before", because
+        # adopting the gate must not mean clearing every pre-existing warning first.
+        # It is not exempt from compiling: an error is not inherited debt, it is a
+        # file that does not build.
+        #
+        # Measured 2026-11-19 (language matrix, cpp fixture):
+        #   a.cpp = int main() { return not_a_symbol; }
+        #   g++ "error: 'not_a_symbol' was not declared in this scope"
+        #   gate: "0 warning(s) (no baseline entry, report-only)" -> commit allowed
+        _g13_errs=$(gate13_count_errors "$cxx" "$flags" "$f")
+        _g13_errs=${_g13_errs:-0}
+        if [ "$_g13_errs" -gt 0 ]; then
+          findings=$((findings + _g13_errs))
+          if [ "$tier" = "warn-only" ]; then
+            echo "     ⚠️  ${f}: does NOT compile (${_g13_errs} error(s)); warn-only tier, not blocking"
+          else
+            echo "     ❌ ${f}: does NOT compile (${_g13_errs} error(s)) — a missing baseline is no excuse"
+            blocking=$((blocking + 1))
+          fi
+          continue
+        fi
         echo "     ℹ️  ${f}: ${cnt:-0} warning(s) (no baseline entry, report-only)"
         continue
       fi
