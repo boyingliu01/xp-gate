@@ -1888,6 +1888,16 @@ else
           echo "❌ BLOCKED - Could not determine ${CURRENT_LANG} coverage percentage."
           echo "   No standard coverage report file was found, so the ${COVERAGE_THRESHOLD:-80}% floor"
           echo "   could not be checked. Produce coverage data or run a subset test run."
+          # Record the verdict the gate just made. Measured 2026-11-20 on a PHP
+          # fixture: this branch printed "BLOCKED - Could not determine php coverage
+          # percentage" and returned 1, while the persisted report recorded
+          #     gate5_tests: {"status": "SKIP", "reason": ""}
+          # and overall.gatesFailed stayed 0. The console said BLOCKED, the machine-
+          # readable record said "skipped, no reason", and neither was updated by this
+          # return. A verdict that only reaches the console is a verdict the journal
+          # contradicts.
+          GATE_5_STATUS="BLOCK"
+          GATE_5_DETAIL="coverage_not_determined: no standard report file for ${CURRENT_LANG}"
           return 1
         fi
       fi
