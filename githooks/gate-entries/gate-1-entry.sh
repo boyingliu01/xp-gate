@@ -175,7 +175,7 @@ else
               echo "$ESLINT_OUTPUT" | head -30
               echo ""
               echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
-              echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+              echo "After fixing, re-record with: node scripts/gen-lint-baseline.cjs"
               # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
               GATE_1_STATUS="FAIL"
               return 1
@@ -436,7 +436,7 @@ else
             " | head -30
             echo ""
             echo "❌ BLOCKED - ${NEW_WARNINGS} NEW lint error(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
-            echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+            echo "After fixing, re-record with: node scripts/gen-lint-baseline.cjs"
             # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
             GATE_1_STATUS="FAIL"
             return 1
@@ -639,7 +639,7 @@ else
           " | head -30
           echo ""
           echo "❌ BLOCKED - ${NEW_WARNINGS} NEW shellcheck issue(s) (baseline: ${BASELINE_WARNINGS}, current: ${CURRENT_WARNINGS})"
-          echo "Run 'xp-gate baseline reset' after fixing to update the baseline."
+          echo "After fixing, re-record with: node scripts/gen-lint-baseline.cjs"
           # Blocking without recording: GATE_1_STATUS drives the journal and the quality report.
           GATE_1_STATUS="FAIL"
           return 1
