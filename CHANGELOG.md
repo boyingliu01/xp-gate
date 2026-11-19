@@ -5399,3 +5399,13 @@ TypeScript, Python, Go, Shell, Java, Kotlin, C++, Swift, Objective-C, Dart, Flut
 - 待创建 Python 突变测试用例 (`src/mutation/__tests__/gate-m-python.test.ts`)
 - 待更新 CAPABILITIES.md 添加 Python 突变测试能力说明
 - 待创建 mutmut 配置模板 (`templates/.mutmut.conf.example`)
+**另修：层检查维度从未进入判定。**
+
+`GATE_6_LAYER_STATUS` 有 6 处赋值、**全仓库 0 处读取**。shellcheck 的 SC2034 这次报的是真缺陷。
+
+后果：`gate-6-layers.sh` 缺失时只打印「层边界未检查」，门禁仍可 PASS。
+
+**第一次修错了**：在警告旁边直接改 `GATE_6_STATUS`，被 430 行后的 `GATE_6_STATUS="PASS"` 静默覆盖。
+改为设置 flag、在最终判定处消费，并用测试钉住「消费点必须在 PASS 升级之后」。
+
+
