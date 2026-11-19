@@ -880,6 +880,31 @@ gate13_run_java_analysis() {
       fi
       if [ "$rc" -ne 0 ]; then
         if [ "$degraded" -eq 1 ]; then
+          # Degraded mode means the -Xlint flags could not be injected, so this
+          # run cannot say anything about compiler STRICTNESS. It can still say
+          # something about COMPILABILITY, and the two were being conflated: every
+          # non-zero exit was waved through as "usually missing offline
+          # dependencies".
+          #
+          # Measured 2026-11-19, language matrix, java fixture:
+          #
+          #     src/main/java/A.java : public int f() { return "no"; }
+          #     mvn -o compile       : [ERROR] COMPILATION ERROR :
+          #                            ... 不兼容的类型: java.lang.String无法转换为int
+          #                            ... Compilation failure
+          #     gate 13              : "Java build failed (mvn exit 1) in degraded
+          #                            mode — not attributed to Gate 13"  -> WARN
+          #     commit ALLOWED
+          #
+          # A missing-dependency failure does not print COMPILATION ERROR; it fails
+          # while resolving artifacts ("Could not resolve dependencies", "Non-resolvable
+          # parent POM"). javac reporting an error in a source file is not an
+          # environment problem, and the file in question is the one being committed.
+          if printf '%s\n' "$mvn_out" | grep -qE 'COMPILATION ERROR|Compilation failure'; then
+            echo "     ❌ Java compilation failed (mvn exit ${rc}) — javac reported errors in the sources"
+            printf '%s\n' "$mvn_out" | grep -E 'ERROR' | head -10 | sed 's/^/        /'
+            return "$GATE13_FAIL"
+          fi
           # We already know the lint flags were not applied, so a build failure
           # here says nothing about compiler strictness — it is usually missing
           # offline dependencies. Reporting it as FAIL would blame this gate for
