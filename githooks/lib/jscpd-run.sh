@@ -24,7 +24,21 @@
 # extensions are untouched — pinned by a control case, because an ignore set that
 # also swallowed .ts/.java/.py would report a permanent clean and look healthier
 # than before the fix.
-JSCPD_DEFAULT_IGNORE_PATTERNS='(^|/)(node_modules|dist|build|target|coverage|out|\.next|\.nuxt|vendor)/|\.log$|\.txt$|\.(ya?ml)$|golden|baseline\.json$|evidence'
+# `.xp-gate` is in the directory list for the same reason node_modules and dist
+# are: it is generated state, not project source. It is not a BUILD output but
+# xp-gate's own report/journal tree, and leaving it out made the tool compare its
+# reports to each other. Measured on this repo with `check 2`:
+#
+#   total 49-52 s (stable), jscpd alone 6-7 s, "Found 3886 clones"
+#   by path prefix: 4949 .xp-gate / 1923 src/npm-package / 1306 plugins / 1152 skills
+#
+# More findings about its own output than about the code it was asked to check,
+# in a report nobody can act on. Every other build-output directory was already
+# listed; the one this tool writes itself was the omission.
+# *.md joins the set for the same reason *.yaml did: duplicate detection is
+# about CODE, and a prose document mirrored into several plugin directories is
+# duplicate by design. Measured before: 581 of 1410 findings were skill docs
+JSCPD_DEFAULT_IGNORE_PATTERNS='(^|/)(node_modules|dist|build|target|coverage|out|\.next|\.nuxt|vendor|\.xp-gate)/|\.log$|\.txt$|\.(ya?ml)$|golden|baseline\.json$|evidence|\.md$'
 
 # The BUILD-OUTPUT half of the set above, alone (#649).
 #

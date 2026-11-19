@@ -6464,6 +6464,50 @@ specification:
             无工具支持的语言在审计中记录 SKIP 并带原因
           test_type: integration
 
+    - id: REQ-GATE2-SELF-SCAN
+      description: >-
+        门禁 2 花大部分时间把自己生成的文件互相比对，并报出上千条不是代码的克隆。
+
+        实测（本仓库 `xp-gate check 2`）：
+
+          总耗时 49-52 秒（稳定复现），jscpd 本身只占 6-7 秒
+          "Found 3886 clones"
+
+        命中的来源按路径前缀统计：
+
+            4949  .xp-gate        <- xp-gate 自己的报告/审计目录
+            1923  src/npm-package
+            1306  plugins
+            1152  skills
+
+        `.xp-gate/reports/**` 是 xp-gate 每次运行、每个门禁写一份的 JSON 报告。
+        这类文件彼此几乎相同，于是 jscpd 把它们互相比对、也跟历史每一次运行比对：
+        关于工具自身输出的发现（4949 条）比它被告知要检查的源码加起来还多。
+
+        默认忽略集早就排除了 node_modules、dist、build、target、coverage、out、
+        vendor——每一个构建输出目录，唯独缺了这个工具自己生成的目录。
+
+        另有两处同源缺陷：
+
+        1. `check 2` 无暂存集时扫全项目（jscpd 无文件参数）。这正是脱离钩子
+           运行时慢的原因。
+        2. 并发运行时报 `Gate 2 FAILED: Command failed: npx -y jscpd .`——
+           即退回到联网安装。同时 `npx -y` 意味着"没有就装上"：一个门禁会安装
+           它被要求检测的工具，改变它正在测量的环境。
+
+        修复后：2 个仓库场景 52s -> 约 24s，克隆 3886 -> 829（其中 markdown 部分
+        按用户决定排除，因为重复检测针对代码，而 581 条 markdown 命中全是按设计
+        分发的 skill 文档镜像副本）。
+      acceptance_criteria:
+        - id: AC-GATE2-SELF-SCAN-01
+          criteria: >-
+            xp-gate 自己的报告目录在默认忽略集内
+          test_type: integration
+        - id: AC-GATE2-SELF-SCAN-02
+          criteria: >-
+            忽略集覆盖工具生成的各类状态，且 XP_GATE_JSCPD_DEFAULT_IGNORE=0 仍能关闭
+          test_type: integration
+
     - id: REQ-GATE1-BLOCKING-STATUS
       description: >-
         门禁 1 会阻断提交，却把「通过」写进日志——15 条阻断路径没有一条记录判定。

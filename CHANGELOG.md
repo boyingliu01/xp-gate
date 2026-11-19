@@ -1,5 +1,79 @@
 # Changelog
 
+## [0.38.24.0] - 2026-11-19
+
+**门禁 2：花了大部分时间把自己生成的文件互相比对，并报出上千条不是代码的克隆。**
+
+### 实测
+
+本仓库 `xp-gate check 2`：
+
+```
+总耗时 49-52 秒（稳定复现）
+jscpd 本身 6-7 秒
+"Found 3886 clones"
+```
+
+命中的来源按路径前缀统计：
+
+| 路径前缀 | 命中数 |
+|---|---|
+| `.xp-gate` | **4949** |
+| `src/npm-package` | 1923 |
+| `plugins` | 1306 |
+| `skills` | 1152 |
+
+`.xp-gate/reports/**` 是 xp-gate 每次运行、每个门禁写一份的 JSON 报告。这类文件彼此
+几乎相同，于是 jscpd 把它们互相比对、也跟历史每一次运行比对。**关于工具自身输出的
+发现，比它被告知要检查的源码加起来还多**，而这样一份报告没有人能据此行动。
+
+默认忽略集早就排除了 node_modules、dist、build、target、coverage、out、vendor——
+每一个构建输出目录，唯独缺了这个工具自己生成的那个。
+
+### 同源缺陷
+
+- `check 2` 无暂存集时扫全项目（jscpd 无文件参数），这正是脱离钩子运行时慢的原因
+- 并发运行时报 `Gate 2 FAILED: Command failed: npx -y jscpd .`，即退回联网安装。
+  而 `npx -y` 意味着「没有就装上」：**一个门禁会安装它被要求检测的工具**，改变它
+  正在测量的环境
+
+### 修复结果
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| 耗时 | 52 秒 | **约 24 秒** |
+| 克隆数 | 3886 | **829** |
+
+其中 markdown 部分按用户决定排除——重复检测针对代码，而 581 条 markdown 命中全是
+按设计分发的 skill 文档镜像副本。
+
+### 修复过程中被自己的验证抓住的四个错误
+
+这一段值得完整记录，因为每一个都「看起来像成功」：
+
+1. **第一次改错了文件。** 改的是 `githooks/lib/jscpd-run.sh`（钩子那侧），而
+   `check 2` 走的是 `src/npm-package/lib/gate-runner.js`。改完实测耗时纹丝不动
+   （55 秒），才发现这是**两套独立实现**，忽略集互不相干。
+
+2. **把崩溃当成快。** 加上 `--ignore` 后耗时从 52 秒降到 389 毫秒，看着像 142 倍
+   提速。实际是 `shell: true` 让忽略模式里的 `|` 被当成管道，子进程报
+   `'dist' is not recognized`——**而 `check 2` 仍然 exit 0**。一个崩溃的门禁读起来
+   像一个飞快的干净通过。
+
+3. **去掉 shell 后撞上 Windows 的 .bin。** `execFileSync` 直调无扩展名的
+   `jscpd`（shell 脚本）报 ENOENT，直调 `jscpd.cmd` 报 EINVAL。改为用 `node`
+   执行包的真实入口 `node_modules/jscpd/bin/jscpd`，两个问题一起消失。
+
+4. **配置优先于内置集。** jscpd 的 `--ignore` 是**正则**，而 `jscpd.conf.json` 的
+   ignore 是 **glob**。同时传不是合并——CLI 值会替换配置列表，于是扫描失去了
+   `**/node_modules/**` 和 `**/.worktrees/**`，开始走进
+   `.worktrees/sprint-*/plugins/opencode/node_modules`（实测 300 秒超时，比修复前
+   还慢，且仍然失败）。改为有配置时以配置为准，内置集只作无配置项目的兜底。
+
+另外还修了一处：`process.execPath` 是 node **二进制**所在目录，不是 npm 全局前缀，
+据此探测找不到全局安装的 jscpd，于是已安装的工具被报成
+`spawnSync npx ENOENT`——正是 AGENTS.md 里「工具明明装了却报缺失」那一族。
+
 ## [0.38.23.0] - 2026-11-19
 
 **门禁 1：会阻断，却把「通过」写进日志。15 条阻断路径没有一条记录判定。**

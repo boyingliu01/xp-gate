@@ -8,6 +8,8 @@
     "**/.stryker-tmp/**",
     "**/coverage/**",
     "**/.worktrees/**",
-    "**/.perf-measure/**"
+    "**/.perf-measure/**",
+    "**/.xp-gate/**",
+    "**/*.md"
   ]
 }
