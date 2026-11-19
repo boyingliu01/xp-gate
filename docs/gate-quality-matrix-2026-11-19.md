@@ -944,6 +944,46 @@ compiler_check_command() { printf "%s" "go vet ./..."; }
 `kotlinc` 需要文件列表参数，不是项目级命令，不符合契约。它有自己已验证的
 `run_static_analysis` 路径。**宁可不接，也不接一个半对的。**
 
+
+### 3.15 门禁 9：拦住了提交，却把结果记成了"跳过"
+
+这一条不是靠读代码发现的，是靠**语言矩阵探针**发现的。
+
+#### 实测
+
+TypeScript 项目，`const x: number = "not a number"`：
+
+```
+终端:  tsc: FAIL  TypeScript compilation failed with 1 error(s):
+       ❌ BLOCKED - Gate 9: Build integrity check failed
+报告:  gate9_build_integrity.status = "SKIP"
+       overall.gatesFailed = 0, failedGates = []
+审计:  gate-9 build-integrity SKIP
+```
+
+**提交被正确拦截，记录却是相反的。**
+
+#### 根因
+
+两个分支（TypeScript 与 Java）都在设好 `BLOCK`、打完提示后立刻 `return 1`。
+那个 return 跳过了文件底部的**状态聚合**与 **`record_gate_audit`**，
+于是 `GATE_9_STATUS` 保持初始化值 `"SKIP"`。
+
+#### 修复必须两半一起动
+
+只删 `return 1` 会更糟——函数末尾是无条件 `return 0`，门禁会**打印 BLOCKED 然后放行**。
+
+1. 两个分支改为设置状态后继续；
+2. 末尾改成 `[ "$GATE_9_STATUS" = "BLOCK" ] && return 1`。
+
+测试因此**同时**钉住记录状态与返回码。证伪：把 `return 1` 注入回去，
+**只有**记录状态那条变红，返回码那条保持绿——正是缺陷的特征。
+
+#### 这条缺陷在本文档的缺陷谱系里的位置
+
+之前每一例都是「**没检查**却记成 PASS」。这一例是「**检查了并正确拒绝**却记成 SKIP」——
+方向相反，破的是同一条规则：**记录必须说出实际发生了什么，两个方向都算。**
+
 ## 四、我自己的验证抓住的错误
 
 每一个都「看起来像成功」。记录在此，因为它们比结论更能说明问题。
@@ -1041,3 +1081,127 @@ compiler_check_command() { printf "%s" "go vet ./..."; }
 12. **PHP 的 skip 返回 2 而非 0**，会走 `handle_test_failure` 的真实失败路径，
     属于**过度阻断**（与 Go/shell 的漏检相反）。优先级低：过度阻断会立刻被人发现，
     漏检不会。修法同 Bug 2——补 `XP_GATE_TESTS_SKIPPED` 标记。
+
+---
+
+## 六、第十四轮：矩阵第一次跑出真数据，抓到四个缺陷
+
+### 6.1 先修好测量工具本身
+
+在此之前矩阵连续输出全是 `NO_REPORT`。三个叠加原因，全部是**测量缺陷伪装成产品缺陷**：
+
+| # | 原因 | 表现 | 修法 |
+|---|---|---|---|
+| 1 | `/tmp` 路径分歧 | bash 解析成 `C:\Users\...\Temp`，python 解析成 `D:\tmp` | 用 `cygpath -m` 传原生路径给 python |
+| 2 | 清理失败被吞 | `rm -rf` 遇 "Device or resource busy"，`mkdir -p` 复用残留，`git init` 静默失败 | 检查两者结果并报错 |
+| 3 | 报告写错地方 | `REPORTS_DIR` 是相对路径，trap 里的 CWD 已是**另一个 fixture** | 相对 `PROJECT_ROOT` 解析 |
+
+第三个是「记录写到了没人会看的地方」——与被检查的门禁属于同一族缺陷，只是发生在测量工具里。
+
+### 6.2 门禁 8：被拦下的提交没有报告（`654471d3`）
+
+Go fixture，门禁 5 因覆盖率 0% 拦截：
+
+```
+commit rc = 1                    （提交确实被拒绝）
+ls .xp-gate/reports/pre-commit → 0 份
+```
+
+同 fixture `XP_GATE_ONLY_GATE=8`（链能跑完）→ **1 份**。
+
+**通过的提交有报告，被拦下的没有。**
+
+`pre-commit` 开头装了 `_quality_report_on_exit`，第 1183 行还专门串联了它。
+但 `gate-8.sh` 是 `trap gate8_cleanup EXIT`——**替换而非串联**，而门禁 8 在门禁 5 之前跑。
+
+把它注释掉，报告立刻出现；恢复，报告消失。两个方向都测了。
+
+#### 第一次修错了，而且更严重
+
+加上链式调用后报告出现了，但 `commit rc = 0`——**被拦的提交被放行了**。
+因为 `rm` 把 `$?` 改成 0，而报告 trap 读的第一件事就是 `$?`。
+
+「让报告出现」的代价是「让拦截失效」，比原缺陷更糟。
+
+#### 第二个坑
+
+`trap -p EXIT` 输出 `trap -- 'cmd' EXIT`。整个 eval 回去会**重新安装**旧 trap 而非执行它，
+链式静默失效。必须剥掉前后缀只留命令体。
+
+**这一点是测试抓到的，不是读代码读出来的。**
+
+修复后：`commit rc=1` **且** 报告 1 份。
+
+### 6.3 门禁 13：编译不过的文件被放行（`27198961`）
+
+```
+a.cpp : int main() { return not_a_symbol; }
+g++   : error: 'not_a_symbol' was not declared in this scope
+门禁  : "0 warning(s) (no baseline entry, report-only)"
+提交  : 通过
+```
+
+两个豁免被合并了：
+
+| 问题 | 豁免是否合理 |
+|---|---|
+| 基线棘轮「不能比之前更差」 | 合理——采用门禁不该要求先清光历史警告 |
+| 可编译性「能不能编译」 | **不合理**——error 不是继承来的债 |
+
+代码里早就写着 `gate13_count_warnings` "ERRORS COUNT TOO, AND THEY ARE THE POINT"，
+计数是对的，只是那个分支拿到计数后**打印一行就 `continue` 了**。
+
+**这不是边角情况**：任何已有的 C/C++ 项目在跑 `compiler-baseline create` 之前都是这状态。
+
+修复：拆成两个函数，各自回答一个问题。`AC-GATE13-NB-02` 钉住"仅有警告仍走 report-only"。
+
+### 6.4 门禁 1：mypy 一次都没跑，却说 PASSED（`af701f63`）
+
+```
+a.py  : def f() -> int: return "not an int"
+mypy  : error: Incompatible return value type (got "str", expected "int")
+门禁  : ✅ PASSED - mypy type checking.
+提交  : 通过
+```
+
+无 `src/`、无 `scripts/`、无 `.xp-gate-mypy-scope` 时 `SCOPE_DIRS` 为空，
+过滤循环不执行，`TYPECHECK_FILES` 空，`return 0`——**mypy 从未被调用**。
+
+输出里没有任何一行说"我没看"。
+
+作用域收窄本来的意思：让**大仓库**的 pre-commit 保持快、不受无关代码干扰。
+它从不意味着"小项目干脆不做类型检查"。
+
+修复：无声明作用域时直接检查暂存文件。`AC-PY-MYPY-02` 钉住"声明的 scope 仍然生效"。
+
+### 6.5 门禁 13：Kotlin 类型错误无人检查（`4e4f9632`）
+
+```
+门禁 1 : ✅ PASSED      ← ktlint/detekt 只 lint，不查类型
+门禁 13: ⏭️ SKIPPED     ← adapter 没声明 compiler_check_command
+```
+
+两个答案**单独看都对**，所以洞不可见。lint 和类型检查回答不同问题，Kotlin 只被问了第一个。
+
+修复：走既有的能力声明契约，给 Kotlin adapter 加 `compiler_check_command`。
+
+三个细节都是被实测逼出来的：
+
+1. `kotlinc .` 报 `error: no source files` —— **不接受目录**，必须显式展开文件列表
+2. 输出目录必须是临时目录 —— 否则 `.class` 落进工作区，下次提交的变更集取决于门禁有没有跑
+3. `nullglob` —— 空树不能让字面量 `**/*.kt` 传给编译器
+
+耗时 4.4s（两文件项目）。
+
+### 6.6 第六次同类，五个提交
+
+| 门禁 | 行为 | 记录 |
+|---|---|---|
+| 9 | 拦截构建失败 | SKIP |
+| 13 | 什么也没编译 | PASS |
+| 6 | 十种拒绝 | SKIP |
+| 8 | 拦截时 | **连记录都没有** |
+| 13 | 编译不过 | 只报告不拦 |
+| 1 | 从未调用 mypy | **"PASSED - mypy type checking."** |
+
+最后一个是这一族最纯粹的形态：**"检查成功"这句话，由一段从未运行该检查的代码打印。**

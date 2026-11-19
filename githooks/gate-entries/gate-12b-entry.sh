@@ -46,7 +46,7 @@ if ! gate_enabled 12b; then
   echo "⏭️  SKIPPED - Gate 12b: Vendor exclusion (not selected by XP_GATE_ONLY_GATE)"
   GATE_12B_STATUS="SKIP"
   GATE_12B_DETAIL="not_selected"
-  record_gate_audit "gate-12b" "mirror-parity" "$GATE_12B_STATUS" "0" "$GATE_12B_START"
+  record_gate_audit "gate-12b" "mirror-parity" "$GATE_12B_STATUS" "0" "$GATE_12B_START" "$GATE_12B_DETAIL"
   return 0
 fi
 
@@ -190,7 +190,7 @@ fi
   # that into the hook's exit status, and an audit line written after an exit
   # would never run (the same dead-assignment trap the block above documents).
   GATE_12B_STATUS="PASS"
-  record_gate_audit "gate-12b" "mirror-parity" "$GATE_12B_STATUS" "0" "$GATE_12B_START"
+  record_gate_audit "gate-12b" "mirror-parity" "$GATE_12B_STATUS" "0" "$GATE_12B_START" "$GATE_12B_DETAIL"
   return 0
 }
 
