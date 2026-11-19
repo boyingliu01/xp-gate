@@ -92,3 +92,29 @@ setup() {
     return 1
   }
 }
+
+@test "AC-GATE6-CONFIG-03: both implementations name the same config files" {
+  # AC-02 pins the JS side and AC-01 pins the behaviour. Neither notices if the
+  # two sides list DIFFERENT filenames: the hook could stop honouring
+  # .architecturerc while arch.js still did, and every existing test would stay
+  # green because each side is only checked against itself.
+  #
+  # Compare the sets directly. This is the drift detector -- the reason the
+  # defect in AC-01 existed at all is that two hand-maintained lists were never
+  # compared.
+  local hook_names js_names
+  hook_names=$(grep -oE 'architecture.yaml|.architecturerc|.archlint.yaml' "$GATE6"     | sort -u | tr '
+' ' ')
+  js_names=$(grep -oE 'architecture.yaml|.architecturerc|.archlint.yaml' "$ARCHLIB"     | sort -u | tr '
+' ' ')
+
+  [ -n "$hook_names" ] || { echo "no config names found in $HOOK_ENTRY"; return 1; }
+  [ -n "$js_names" ] || { echo "no config names found in $ARCH_JS"; return 1; }
+
+  if [ "$hook_names" != "$js_names" ]; then
+    echo "the hook and the CLI disagree about which files count as an architecture config:"
+    echo "  hook:   $hook_names"
+    echo "  arch.js: $js_names"
+    return 1
+  fi
+}
