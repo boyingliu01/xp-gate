@@ -286,6 +286,46 @@ else if (typeof e.duration_ms === 'number') { ms += e.duration_ms }   // 坏值�
 
 10-20 之后的 10130 条记录零坏值——**写入侧早已修好，读取侧的聚合没有设防**。
 
+### 3.4 门禁 3 把函数体扫到了文件末尾，任何人改这三个文件都无法提交
+
+落地上面的门禁 4 修复时撞上的。**在干净的 HEAD 上同样失败**（用 detached
+worktree 单独验证过，与本轮改动无关），所以这是一个先于我存在的 P0：
+`src/principles/adapters/java.ts`、`typescript.ts`、`analyzer.ts` 只要出现在变更集里，
+门禁 3 就报复杂度回归，而**没有修复路径**——除非伪造基线。
+
+关键对照：lizard 自己的 CSV 与 `.ccn-baseline.json` **数值完全一致**，是
+`ccn-report.cjs` 的复算把它们全改错了。
+
+| 函数 | lizard | 基线 | 复算 |
+|---|---|---|---|
+| extractInterfaces | 3 | 3 | **24** |
+| extractClasses | 3 | 3 | **8** |
+| extractBracedBlock | 6 | 6 | 7 |
+| braceDepth | 5 | 5 | 6 |
+| maskCode | 1 | 1 | 2 |
+
+四个原因**依次互相遮挡**——每修好一个，下一个才浮现。修复过程中阻断数
+5 → 4 → 1 → 0，正是这个结构的证据：
+
+1. **`stripNonCode` 不认识正则字面量。** `extractInterfaces` 里
+   `/(?:public)?\s*interface\s+(\w+)\s*\{/g` 的 `\{` 被当成真括号，函数体永远无法
+   配平，扫描一路跑到 EOF，把后面约 90 行算进这个函数。
+2. **`else` 被当成分支 token。** 实测 lizard 1.26.1：`if(x){} else {}` 与
+   `if(x){}` 同为 CCN 2，`if / else if` 有没有尾部 `else` 都是 3——它根本不数 `else`。
+3. **`findDeclarationLine` 把调用当声明。** `if (!isRuleEnabled(rule.id)) return;`
+   在声明之前就匹配上了，于是 `isRuleEnabled` 的函数体被取成**调用它的那个函数**，
+   CCN 6 而非 2。同类：方法上方的文档注释 `reads adapter.extractInterfaces()` 也抢先命中。
+4. **lizard 自己漏算箭头函数体里的 `&&`。** 这是复算**更正确**的一处：
+   `[a,b].filter(q => q && q.trim())` lizard 报 CCN 1，实际 2。基线记录了 lizard
+   的漏洞，所以只刷新了 `java.ts::extractClasses` 这一条（3 → 4），记录真实值。
+
+第 4 点是三类原因里唯一该改基线而不是改代码的：前三个是测量把代码读错了，
+这一个是被测量的工具漏读了代码。
+
+> 这与 3.2 是同一族缺陷：`ccn-report.cjs` 里 `#544` 的注释详细描述了「量测引擎
+> 不一致」并声称已用 `--csv-verified` 修好，但 `stripNonCode` 仍然不认识正则字面量。
+> **注释描述的是意图，不是状态**——判断依据只能是「回退修复后测试是否精确变红」。
+
 ---
 
 ## 四、我自己的验证抓住的错误
@@ -343,7 +383,9 @@ else if (typeof e.duration_ms === 'number') { ms += e.duration_ms }   // 坏值�
 
 仍待办：
 
-1. **门禁 4、5 的专项深挖**（前轮已验基本有效性，未做全语言覆盖）
+1. ~~门禁 4 的专项深挖~~ → **已完成**（见 3.1 后续与 CHANGELOG 0.38.35.0）：
+   10/10 语言现在给出真实判定——2 个报真实违规，6 个显式声明「未分析」，
+   java/kotlin 早已诚实报 INFO。**门禁 5 的全语言深挖仍未开始**。
 2. ~~pre-push 专项门禁~~ → **已验证**：本轮两次真实 push 中 M / M2 / ML / UI / MW / S
    全部给出明确原因（无对应语言源文件 → SKIP；推 main → MW 预审跳过），无一静默通过。
 3. ~~剩余 13 个语言~~ → **已完成**：15/15 全部产生真实判定（见上表）
@@ -357,6 +399,10 @@ else if (typeof e.duration_ms === 'number') { ms += e.duration_ms }   // 坏值�
 7. **shellcheck 基线漂移**：`.xp-gate/lint-baseline.json` 记录 `iac.sh` 有 13 个问题，
    实际 15 个（**本轮改动之前就如此**）。门禁据此报「4 NEW」，其中 2 个是漂移、2 个是
    新增脚本未入基线。已确认本人改动零新增（改前 13、改后 13），**未刷新基线掩盖**。
-   
+
 8. **`principles-csharp-coverage.test.js` 有 1 条失败**——与本轮改动无关（C# 适配器工作），
    未触碰，留给该工作的 owner。
+
+9. **`extractClasses` 基线是 lizard 的漏洞值**（见 3.4 第 4 点）。同类「lizard 漏算箭头
+   函数体 `&&`」的函数可能还有别的未暴露——只在被改动时才浮现。若要系统性排查，需要
+   一次全库 lizard-vs-复算 对比，本轮未做。
