@@ -1050,7 +1050,7 @@
     "src/principles/adapters/java.ts::(anonymous)@367": 13,
     "src/principles/adapters/java.ts::extractFunctions": 5,
     "src/principles/adapters/java.ts::(anonymous)@396": 7,
-    "src/principles/adapters/java.ts::extractClasses": 3,
+    "src/principles/adapters/java.ts::extractClasses": 4,
     "src/principles/adapters/java.ts::extractInterfaces": 3,
     "src/principles/adapters/java.ts::extract": 9,
     "src/principles/adapters/java.ts::(anonymous)@496": 4,

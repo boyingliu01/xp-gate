@@ -841,3 +841,98 @@ describe('#731 PHP population: source discovery and vendor exclusion', () => {
     expect(files.filter((f) => f.startsWith('vendor/'))).toEqual([]);
   });
 });
+
+/**
+ * @test REQ-CCNRPT-002
+ * @intent CCN must be recomputed from code only -- regex literals are not code,
+ *         and `else if` is ONE decision point
+ *
+ *         Both defects were measured together on src/principles/adapters/java.ts,
+ *         where lizard's own CSV and .ccn-baseline.json agreed with each other and
+ *         ccn-report disagreed with both:
+ *
+ *           1. stripNonCode did not know regex literals. A regex containing `\{`
+ *              left an unbalanced brace, so the body scan ran to EOF and summed
+ *              ~90 lines: extractInterfaces was reported at CCN 24 where lizard
+ *              and the baseline both said 3. Every function below such a regex
+ *              inherited the same wrong span.
+ *           2. `else if` counted as TWO branches, charging each chain double -- a
+ *              uniform baseline+1 across a whole file, which is the signature of
+ *              a counting rule rather than of code getting more complex.
+ *
+ *         Either one blocked commits that touched the file, with no repair
+ *         available short of faking the baseline.
+ * @covers AC-CCNRPT-003, AC-CCNRPT-004
+ */
+describe('CCN body counting matches lizard', () => {
+  const mod = require(reportPath);
+
+  it('AC-CCNRPT-003: a regex literal containing a brace contributes no branch and no brace', () => {
+    // extractInterfaces' real shape: a regex with `\{` inside it, then a return.
+    // The function has NO branch, so CCN must be 1. Before the fix the stray
+    // brace kept the scan open and swallowed the neighbour below, whose `while`
+    // and `??` were then charged to this function.
+    const body = [
+      '  extractInterfaces() {',
+      '    const re = /(?:public)?\s*interface\s+(\w+)\s*\{/g;',
+      '    return re;',
+      '  }',
+    ];
+    expect(mod.ccnOfBody(body)).toBe(1);
+  });
+
+  it('AC-CCNRPT-003b: a neighbour below a regex-bearing function is not charged to it', () => {
+    // Same pair as above, now with the *neighbour* present in the slice the way a
+    // leaked span would have included it. Counting this whole slice proves the
+    // leak would have produced a much larger number, so the assertion above is
+    // not passing merely because both values happen to be small.
+    const leaked = [
+      '  extractInterfaces() {',
+      '    const re = /(?:public)?\s*interface\s+(\w+)\s*\{/g;',
+      '    return re;',
+      '  }',
+      '  later() {',
+      '    while (a) { b(); }',
+      '    return a ?? b;',
+      '  }',
+    ];
+    expect(mod.ccnOfBody(leaked)).toBeGreaterThan(mod.ccnOfBody(leaked.slice(0, 4)));
+  });
+
+  it('AC-CCNRPT-004: else is not a branch token, matching lizard', () => {
+    // lizard scores `if(x){} else {}` and `if(x){}` both at 2, and scores
+    // `if / else if` at 3 whether or not a trailing `else` is present. Counting
+    // `else` therefore charged every function that has one an extra point, which
+    // read as a uniform CCN baseline+1 across each affected file.
+    const withElse = [
+      '  function f(a) {',
+      '    if (a === 1) { return 1; }',
+      '    else if (a === 2) { return 2; }',
+      '    else { return 3; }',
+      '  }',
+    ];
+    const withoutElse = [
+      '  function f(a) {',
+      '    if (a === 1) { return 1; }',
+      '    else if (a === 2) { return 2; }',
+      '  }',
+    ];
+    // if + else-if over a base of 1 => 3, both with and without the trailing else.
+    expect(mod.ccnOfBody(withElse)).toBe(3);
+    expect(mod.ccnOfBody(withoutElse)).toBe(3);
+    // The `else` itself contributes nothing: dropping it cannot change the count.
+    expect(mod.ccnOfBody(withElse)).toBe(mod.ccnOfBody(withoutElse));
+  });
+
+  it('AC-CCNRPT-004b: a division operator is not mistaken for a regex', () => {
+    // The other direction of AC-CCNRPT-003: treating `/` as a regex opener would
+    // swallow the rest of the line, hiding real branches. A bare division must
+    // leave the following `if` visible.
+    const body = [
+      '  function f(a) {',
+      '    const half = a / 2; if (half > 1) { return 1; }',
+      '  }',
+    ];
+    expect(mod.ccnOfBody(body)).toBe(2);
+  });
+});

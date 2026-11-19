@@ -249,7 +249,15 @@ function isReadableFile(target) {
 // here claimed ternaries were deliberately excluded — it was wrong, and the
 // regex was right. `\?[^.]` is what makes it right: it counts `?` unless it
 // begins `?.` (optional chaining, which is not a branch — `a?.b` stays at 1).
-const BRANCH_RE = /\b(if|else|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
+// `else` is NOT a branch token at all. lizard does not count it: measured on
+// lizard 1.26.1, `function a(x){ if(x){} else {} }` and `function a(x){ if(x){} }`
+// both score CCN 2, and `if / else if` scores 3 with or without a trailing `else`.
+// Counting `else` charged every function that has one an extra point. On
+// src/principles/adapters/java.ts that read as a uniform CCN baseline+1 across
+// the file (braceDepth 5->6, maskCode 1->2, lineOf 1->2, extractBracedBlock 6->7)
+// while lizard's own CSV matched the baseline exactly. A uniform offset is the
+// signature of a counting rule, not of code getting more complex.
+const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
 
 // Skip a quoted run starting at `i` (which points at the opening quote) and
 // return the index just past the closing quote. Unterminated runs consume the
@@ -265,9 +273,24 @@ function skipQuoted(line, i, quote) {
 }
 
 function stripNonCode(line) {
-  // Remove string/template/comment content so keywords inside them do not count.
+  // Remove string/template/comment/regex content so keywords and braces inside
+  // them do not count.
+  //
+  // REGEX LITERALS ARE LOAD-BEARING, not a nicety. A regex such as
+  // `/(?:interface)\s*\{/g` contains a `{` that is part of its text, and leaving
+  // it in made the brace scan believe a function opened a block it never closed.
+  // Measured on src/principles/adapters/java.ts: extractInterfaces opened its
+  // body, then this line added an unbalanced `{`, so balancedExtentFrom ran to the
+  // END OF THE FILE and ccnOfBody summed ~90 lines -- reporting CCN 24 for a
+  // function lizard and the baseline both say is 3. Every function below a regex
+  // containing a brace inherited the same wrong body.
   let out = '';
   let i = 0;
+  // The last character emitted as real code, used to tell a regex literal from a
+  // division operator: a `/` can only START a regex where an expression is
+  // expected (after `(`, `,`, `=`, `:`, `[`, `!`, `&`, `|`, `?`, `{`, `;`, or
+  // the start of the line), never after an identifier, literal or closing bracket.
+  let prev = '';
   while (i < line.length) {
     const ch = line[i], nx = line[i + 1];
     if (ch === '/' && nx === '/') break;
@@ -276,15 +299,53 @@ function stripNonCode(line) {
       i = end < 0 ? line.length : end + 2;
       continue;
     }
+    if (ch === '/' && REGEX_PRECEDERS.has(prev)) {
+      const end = skipRegexLiteral(line, i);
+      if (end > i) {
+        i = end;
+        out += ' ';
+        prev = ' ';
+        continue;
+      }
+    }
     if (ch === '"' || ch === "'" || ch === '`') {
       i = skipQuoted(line, i, ch);
       out += ' ';
+      prev = ' ';
       continue;
     }
     out += ch;
+    if (!/\s/.test(ch)) prev = ch;
     i++;
   }
   return out;
+}
+
+// Characters after which a `/` opens a regex literal rather than dividing.
+const REGEX_PRECEDERS = new Set([
+  '', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*',
+  '<', '>', '~', '^', '%',
+]);
+
+// Index just past a regex literal starting at `start` (which points at `/`), or
+// -1 when the run does not look like one (no unescaped closing `/` on this line).
+function skipRegexLiteral(line, start) {
+  let k = start + 1;
+  let inClass = false;
+  while (k < line.length) {
+    const ch = line[k];
+    if (ch === '\\') { k += 2; continue; }
+    if (ch === '[') inClass = true;
+    else if (ch === ']') inClass = false;
+    else if (ch === '/' && !inClass) {
+      k++;
+      // Consume flags (g, i, m, u, s, y, d).
+      while (k < line.length && /[a-z]/i.test(line[k])) k++;
+      return k;
+    }
+    k++;
+  }
+  return -1;
 }
 
 // Copy `text` through, replacing any block comment with a single space. Returns
@@ -616,7 +677,14 @@ function findFunctionBody(lines, name) {
     // the row keeps its raw count — verified by probe that both forms failed
     // before this alternative existed.
     '|\\b(?:(?:public|private|protected|readonly|static|override|declare|abstract)\\s+)*' + esc + '\\s*[:=]' +
-    '|\\b' + esc + '\\s*[:(]' +
+    // A bare `name(` / `name:` on a line is a declaration only when it STARTS the
+    // line (optionally behind modifiers). Without the `^\\s*` anchor this branch
+    // matched every USE of the name anywhere in the file, and because the scan
+    // takes the first hit, a call above the declaration won: measured on
+    // src/principles/analyzer.ts, `if (!isRuleEnabled(rule.id)) return;` on line
+    // 189 anchored isRuleEnabled to the helper it is called from, and the row was
+    // graded at that neighbour's CCN 6 instead of its own 2.
+    '|^\\s*(?:(?:public|private|protected|readonly|static|override|declare|abstract|async|get|set)\\s+)*' + esc + '\\s*[:(]' +
     ')'
   );
   for (let i = 0; i < lines.length; i++) {
@@ -716,14 +784,44 @@ function locateBodyAtRow(lines, name, startLine) {
   return null;
 }
 
-// Index of the line that DECLARES `name` (function/const/let/var form), or null.
+// Index of the line that DECLARES `name` (function/const/let/var/class-method
+// form), or null.
 // Scan stops at the first match: a file may mention a helper many times, but it
 // declares it once (hoisted duplicates would be a separate bug).
 function findDeclarationLine(lines, name) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(
     '(function\\s+' + esc + '\\s*[(<]' +
-    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=])'
+    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=]' +
+    // Class-method form: `  extractInterfaces(): Array<...> {`, `  maskCode(x) {`.
+    //
+    // Without this branch a method row could not be anchored to its declaration,
+    // so locateBodyAtRow fell through to "balanced body at the reported line".
+    // That fallback trusts lizard's line number, and lizard files some rows one
+    // line off: measured on src/principles/adapters/java.ts, whose lizard CSV and
+    // its .ccn-baseline.json entry AGREE that extractInterfaces is CCN 3, while
+    // this file rewrote it to 24 -- the CCN of `extract`, further down, that the
+    // drifted scan ran into. Five functions in that one file were reported as
+    // ratchet regressions that did not exist, blocking every commit that touched
+    // it with no repair available except faking the baseline.
+    //
+    // The name is anchored so a prefix cannot match: `extract` is a prefix of
+    // `extractInterfaces`, and an unanchored branch would anchor the short name to
+    // the long method's declaration and re-derive the same wrong body.
+    //
+    // `(?<![.!])` excludes MEMBER ACCESS and NEGATED CALLS. The declaration of a
+    // name is preceded by nothing meaningful; a USE of it is preceded by the
+    // object it is called on (`.`) or by an operator (`!`, `(`, `,`, `=`, `&`,
+    // `|`, `?`, `:`) in the expression containing it. Without this, usages won the
+    // race against the declaration:
+    //   - the doc comment above a method -- "reads `adapter.extractInterfaces()`" --
+    //     anchored the span on the comment (extractInterfaces read as CCN 24);
+    //   - `if (!isRuleEnabled(rule.id)) return;` on line 189 anchored
+    //     isRuleEnabled to the function it is CALLED from, so its body was taken as
+    //     that neighbour's and the row graded at the neighbour's CCN 6 instead of 2.
+    // Both are the same mistake: a mention is not a declaration.
+    '|^\\s*(?:(?:public|private|protected|static|readonly|override|async|get|set|abstract)\\s+)*' +
+      esc + '\\s*(?=\\()(?!\\w))'
   );
   for (let i = 0; i < lines.length; i++) {
     if (re.test(stripNonCode(lines[i]))) return i;

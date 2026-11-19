@@ -1,5 +1,148 @@
 # Changelog
 
+## [0.38.35.0] - 2026-11-19
+
+**门禁 4 对 8 个语言报「✓ No violations found」——它对其中 6 个一条规则都跑不了。**
+
+### 实测
+
+一个 6 层嵌套的 Go 文件（阈值是 4）：
+
+```
+✓ No violations found
+Files checked: 1
+Rules run: 21
+```
+
+21 条规则全部在这个文件上"运行"了，**没有一条能读它**。同样的嵌套内容写成
+TypeScript 就能正确报出——这正是它长期没被发现的原因：门禁看起来是工作的。
+
+### 根因：适配器让语言「可识别」，不等于「可分析」
+
+`src/principles/adapters/` 里有 13 个语言适配器，但体量差了一个数量级：
+
+| 适配器 | 行数 | 能力 |
+|---|---|---|
+| typescript.ts | 970 | 真实规则 |
+| java.ts | 544 | 真实规则 |
+| csharp.ts | 339 | 真实规则 |
+| cpp.ts | 167 | 仅 detect + 正则提取 |
+| python.ts | 115 | 仅 detect + 正则提取 |
+| objectivec.ts | 82 | 仅 detect + 正则提取 |
+| php.ts | 77 | 仅 detect + 正则提取 |
+| go.ts | 54 | 仅 detect + 正则提取 |
+| kotlin.ts | 53 | 仅 detect + 正则提取 |
+| dart.ts | 43 | 仅 detect + 正则提取 |
+| swift.ts | 39 | 仅 detect + 正则提取 |
+
+`src/principles/AGENTS.md` 明确说这种两层覆盖差异是**故意的**：本引擎覆盖"能有意义地
+解析"的语言，shell 适配器覆盖"能 lint 或测试"的语言，两者不必一致。
+
+**所以缺陷不是"缺了 10 个分析器"——文档明令禁止用浅层适配器补这个缺口
+（"a rule that reports noise is worse than no rule"）。缺陷是门禁没有把这个差异说出来。**
+
+### 修复：适配器声明能力，默认值取「不可分析」
+
+沿用本项目已有的 `getDuplication` 模式（REQUIRED、非 optional，因为 optional 会让
+"忘记实现"变成静默失败）：
+
+```ts
+declaresRuleCoverage(): boolean   // BaseAdapter 默认 false
+```
+
+默认 `false` 的方向值得说明，因为它与直觉相反：`false` 让门禁说"这个语言没被分析"，
+是**少报了覆盖**；`true` 让门禁说"干净"，是对没人看过的代码**下断言**。前者是局限，
+后者是撒谎。
+
+真正实现规则的三个适配器（typescript / java / csharp）显式 opt-in 返回 `true`；
+新的浅层适配器**不需要作者知道这个成员存在**，自动继承诚实答案。
+
+输出随之改变：
+
+```
+✓ No violations found in the files that were analysed
+
+⚠️  NOT ANALYSED: go — an adapter exists (the language is detected and counted
+below) but no clean-code rule can read it. These files were not checked; their
+absence from the list above is not a pass.
+
+Files checked: 1
+Rules run: 21
+```
+
+### 门禁 4 × 10 语言结果
+
+| 语言 | 判定 |
+|---|---|
+| typescript | 检出违规（6 层嵌套） |
+| csharp | 检出违规 |
+| python / go / dart / swift / cpp / php | **声明未分析**（本次修复） |
+| java / kotlin | 已诚实声明（原有 INFO，措辞为 "read this empty result as not examined rather than no violations"） |
+
+10/10 全部给出真实判定，**没有一个把"没检查"报成"通过"**。
+
+### 回归
+
+- `src/principles` 全量：**75 个文件 / 772 条测试全绿**
+- 新增 `src/principles/__tests__/language-coverage-honesty.test.bats` 3 条，其中
+  AC-02 已**证伪**：把 `declaresRuleCoverage()` 改回恒 `true` 后该测试变红，
+  AC-01/AC-03 保持绿（证明它精准针对本缺陷）
+- TypeScript 的嵌套检测未受影响（同一 fixture 仍正确报出 5 层）
+
+### 一个测量方法上的自纠
+
+最初用 `bash -n` 验证新增的 `.bats` 文件语法，连报三次 "syntax error"，据此
+在测试代码里改了好几轮。**`bash -n` 根本不能验证 `.bats` 文件**——`@test "name" {`
+不是 bash 语法，bats 有自己的预处理器。用 `bash -n` 验证现存的
+`githooks/__tests__/iac-syntax-validation.test.bats` 同样报错，才确认测法错了。
+
+改由 `bats` 直接运行后，之前"修"过的结构一次就通过。教训：**先确认验证工具适不适合
+被测对象**，否则会在一个不存在的问题上反复修改被测代码。
+
+
+
+### 附带修复：门禁 3 的 CCN 测量把函数体扫过了文件末尾
+
+查这个缺陷时撞上一个更严重的问题——**任何改动 `java.ts` 的提交都无法通过门禁 3**，
+且在干净的 HEAD 上同样失败（用独立 worktree 验证过，与本次改动无关）。
+
+`lizard` 自己的 CSV 和 `.ccn-baseline.json` 对下列函数**数值完全一致**，是
+`ccn-report.cjs` 的复算把它们全改错了：
+
+| 函数 | lizard | 基线 | 修复前的复算 |
+|---|---|---|---|
+| extractInterfaces | 3 | 3 | **24** |
+| extractClasses | 3 | 3 | **8** |
+| extractBracedBlock | 6 | 6 | 7 |
+| braceDepth | 5 | 5 | 6 |
+| maskCode | 1 | 1 | 2 |
+
+两个独立根因：
+
+**1. `stripNonCode` 不认识正则字面量。** `extractInterfaces` 里有一行
+`/(?:public)?\s*interface\s+(\w+)\s*\{/g`——**正则里的 `\{` 被当成真括号**，
+函数体永远无法配平，括号扫描一路跑到文件末尾，把后面约 90 行都算进这个函数。
+
+**2. `else` 被当成分支 token。** 实测 lizard 1.26.1：`if(x){} else {}` 与
+`if(x){}` **同为 CCN 2**，`if / else if` 有没有尾部 `else` **都是 3**——它根本不数
+`else`。而 `BRANCH_RE` 数了，于是每个含 `else` 的函数**统一 +1**；这种整齐的偏移是
+计数规则的签名，不是代码变复杂了。
+
+修复后：`stripNonCode` 剥离正则字面量（用前一个非空白字符区分「除号」与「正则开头」，
+实测 `total / 2` 不会被误剥）；`BRANCH_RE` 完全移除 `else`。
+
+这三处（正则字面量、`else`、以及下面 `extractClasses` 这类 lizard 自身漏算）是在同一
+条链上依次暴露的：每修好一个，后面那个才浮现。三个文件的超标数 5 → 4 → 1 → 0。
+
+`src/principles/__tests__/reporter.test.ts` 因本轮新增字段而改动时，门禁 6（Boy Scout）
+按「≤5 警告的改动文件必须清零」判定它既有 1 个 `code-duplication` 警告必须消除。
+抽了 `summaryOf` / `emptyResults` / `violation` 三个内联夹具工厂（仍在本文件内，
+符合 AGENTS.md「Mocks are inline」），重复率 44.2% → **0 警告**，36 条测试保持绿。
+
+新增 4 条测试锁定两个方向（含反向的「除号不是正则」和「有无 `else` 计数不变」），
+并各自**证伪**：回退任一修复，对应测试精确变红，其余保持绿。原有 39 条全数通过。
+
+
 ## [0.38.33.0] - 2026-11-19
 
 **落地 0.38.30.0 记录的 PHP 接入与 #848 修复（代码本身）。**

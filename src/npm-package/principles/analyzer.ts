@@ -35,6 +35,22 @@ export interface AnalysisSummary {
   infoCount: number;
   filesChecked: number;
   rulesRun: number;
+  /**
+   * Languages whose files were counted in `filesChecked` but which NO rule can
+   * actually examine — the adapter makes them detectable, not analysable.
+   *
+   * This exists because "no violations found" was being printed for files no
+   * rule can read. Measured: a Go file with 6-level nesting reported
+   * `✓ No violations found / Files checked: 1 / Rules run: 21`, while the same
+   * shape in TypeScript is caught. Without this field a reader cannot tell a
+   * clean file from an unexamined one, which is the defect family AGENTS.md
+   * names most often: "not checked" must never be indistinguishable from
+   * "passed".
+   *
+   * Empty means every file in the run was genuinely analysable — the output then
+   * claims exactly what it did.
+   */
+  unanalysedLanguages: string[];
 }
 
 export interface AnalysisResult {
@@ -100,10 +116,56 @@ function resolveAdapter(
   return adapterOrFactory;
 }
 
+/**
+ * Record, once per language, that this adapter cannot actually examine its own
+ * files — it makes the language detectable, not analysable.
+ *
+ * Split out of analyze() so the bookkeeping does not raise that function's
+ * cyclomatic complexity. The gate's output then says which languages were not
+ * checked instead of printing "✓ No violations found" over them.
+ */
+function recordUnanalysed(adapter: Adapter, into: string[]): void {
+  if (adapter.declaresRuleCoverage) return;
+  const lang = adapter.detectLanguage();
+  if (!into.includes(lang)) into.push(lang);
+}
+
+/**
+ * Run every enabled rule against one file, accumulating into the shared result
+ * maps.
+ *
+ * Split out of analyze() for the same reason recordUnanalysed is: keeping the
+ * per-file, per-rule loop inline pushed analyze past the clean-code.long-function
+ * limit (56 lines against a maximum of 50), and that is a real signal -- the outer
+ * function is about orchestration, this is about one file.
+ */
+function runRulesOnFile(context: {
+  file: string;
+  adapter: Adapter;
+  rules: Rule[];
+  violations: Violation[];
+  fileResult: FileResult;
+  ruleResults: Record<string, RuleResult>;
+  errors: string[];
+}): void {
+  for (const rule of context.rules) {
+    runRuleOnFile({
+      file: context.file,
+      rule,
+      adapter: context.adapter,
+      violations: context.violations,
+      fileResult: context.fileResult,
+      ruleResult: context.ruleResults[rule.id],
+      errors: context.errors,
+    });
+  }
+}
+
 function computeSummary(
   violations: Violation[],
   fileResults: Record<string, FileResult>,
   rulesToRun: Rule[],
+  unanalysedLanguages: string[],
 ): AnalysisSummary {
   let errorCount = 0;
   let warningCount = 0;
@@ -120,6 +182,7 @@ function computeSummary(
     infoCount,
     filesChecked: Object.keys(fileResults).length,
     rulesRun: rulesToRun.length,
+    unanalysedLanguages,
   };
 }
 
@@ -248,27 +311,21 @@ export async function analyze(
     ruleResults[rule.id] = { violationCount: 0, filesChecked: 0 };
   }
 
+  // Languages an adapter merely makes DETECTABLE: counted in filesChecked, read by
+  // no rule. See recordUnanalysed for why this is collected separately.
+  const unanalysedLanguages: string[] = [];
+
   for (const file of files) {
     const adapter = resolveAdapterReporting(file, adapterOrFactory, errors);
     if (!adapter) continue;
 
+    recordUnanalysed(adapter, unanalysedLanguages);
     const fileResult: FileResult = { violations: [], ruleIds: [] };
     fileResults[file] = fileResult;
-
-    for (const rule of rulesToRun) {
-      runRuleOnFile({
-        file,
-        rule,
-        adapter,
-        violations,
-        fileResult,
-        ruleResult: ruleResults[rule.id],
-        errors,
-      });
-    }
+    runRulesOnFile({ file, adapter, rules: rulesToRun, violations, fileResult, ruleResults, errors });
   }
 
-  const summary = computeSummary(violations, fileResults, rulesToRun);
+  const summary = computeSummary(violations, fileResults, rulesToRun, unanalysedLanguages);
 
   return {
     violations,

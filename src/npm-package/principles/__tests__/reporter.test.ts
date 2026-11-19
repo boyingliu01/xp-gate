@@ -8,42 +8,89 @@ import { describe, it, expect } from 'vitest';
 import { formatConsole, formatJSON, formatSARIF, formatSummary } from '../reporter';
 import { AnalysisResult, Violation } from '../analyzer';
 
-describe('reporter.ts - Output Formatting', () => {
-  const sampleViolation: Violation = {
-    file: 'src/test.ts',
-    line: 10,
-    column: 5,
-    ruleId: 'clean-code.long-function',
-    message: 'Function "processData" is too long: 65 lines (maximum: 50)',
-    severity: 'warning'
+/**
+ * Build an AnalysisResult summary.
+ *
+ * Extracted because these fixtures were written out in full 25 times, which the
+ * clean-code.code-duplication rule scored at 44.2% (threshold 15%) and the Boy
+ * Scout gate then blocked. The counts are positional rather than a params object
+ * because every call site already reads as one line of counts, and a named-field
+ * object per fixture would be longer than the literal it replaces.
+ *
+ * `unanalysedLanguages` defaults to empty: no fixture here exercises the
+ * not-analysed notice, and tests that do set it explicitly via the options and
+ * assert on it there.
+ */
+function summaryOf(
+  totalViolations: number,
+  errorCount: number,
+  warningCount: number,
+  infoCount: number,
+  filesChecked: number,
+  rulesRun: number,
+  unanalysedLanguages: string[] = []
+): AnalysisResult['summary'] {
+  return {
+    totalViolations,
+    errorCount,
+    warningCount,
+    infoCount,
+    filesChecked,
+    rulesRun,
+    unanalysedLanguages,
   };
+}
+
+/**
+ * The empty `fileResults` / `ruleResults` / `errors` set plus a duration.
+ *
+ * These lines appeared verbatim in 14 fixtures -- the remainder of the
+ * duplication the `summaryOf` extraction above did not reach (`errors: []` alone
+ * accounted for 21 of the repeated 3-line windows). Kept separate from summaryOf
+ * because the two vary independently: several tests supply real ruleResults, and
+ * one supplies a NaN errorCount.
+ */
+function emptyResults(executionTimeMs: number): Pick<
+  AnalysisResult,
+  'fileResults' | 'ruleResults' | 'executionTimeMs' | 'errors'
+> {
+  return { fileResults: {}, ruleResults: {}, executionTimeMs, errors: [] };
+}
+
+/**
+ * Build a Violation.
+ *
+ * These were written out as five-to-six line object literals 17 times, which the
+ * clean-code.code-duplication rule scored well above its 15% threshold and the
+ * Boy Scout gate blocked. Named fields would be longer than the literal they
+ * replace and would bury the one thing each fixture is really saying -- which
+ * file, which rule, which message -- so the two axes stay positional here.
+ *
+ * `column` is optional because only the first fixture asserts on it.
+ */
+function violation(
+  file: string,
+  line: number,
+  ruleId: string,
+  message: string,
+  severity: Violation['severity'],
+  column?: number
+): Violation {
+  return column === undefined
+    ? { file, line, ruleId, message, severity }
+    : { file, line, column, ruleId, message, severity };
+}
+
+describe('reporter.ts - Output Formatting', () => {
+  const sampleViolation: Violation = violation("src/test.ts", 10, "clean-code.long-function", "Function \"processData\" is too long: 65 lines (maximum: 50)", "warning", 5);
 
   const sampleResult: AnalysisResult = {
     violations: [
       sampleViolation,
-      {
-        file: 'src/utils.ts',
-        line: 1,
-        ruleId: 'clean-code.large-file',
-        message: 'File is too large: 600 lines (maximum: 500)',
-        severity: 'warning'
-      },
-      {
-        file: 'src/api.ts',
-        line: 20,
-        ruleId: 'solid.dip',
-        message: 'Direct instantiation detected: new UserRepository()',
-        severity: 'warning'
-      }
+      violation("src/utils.ts", 1, "clean-code.large-file", "File is too large: 600 lines (maximum: 500)", "warning"),
+      violation("src/api.ts", 20, "solid.dip", "Direct instantiation detected: new UserRepository()", "warning")
     ],
-    summary: {
-      totalViolations: 3,
-      errorCount: 0,
-      warningCount: 3,
-      infoCount: 0,
-      filesChecked: 3,
-      rulesRun: 3
-    },
+    summary: summaryOf(3, 0, 3, 0, 3, 3),
     fileResults: {
       'src/test.ts': { violations: [sampleViolation], ruleIds: ['clean-code.long-function'] }
     },
@@ -89,18 +136,8 @@ describe('reporter.ts - Output Formatting', () => {
     it('should handle empty violations', () => {
       const emptyResult: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 5,
-          rulesRun: 3
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 50,
-        errors: []
+        summary: summaryOf(0, 0, 0, 0, 5, 3),
+        ...emptyResults(50),
       };
       
       const output = formatConsole(emptyResult);
@@ -163,21 +200,63 @@ describe('reporter.ts - Output Formatting', () => {
       expect(output).toContain('FAIL');
     });
 
+    it('should not read a missing summary as FAIL (NaN must not decide the verdict)', () => {
+      // Round 3 of the Delphi review, three seats independently: `undefined + 0`
+      // is NaN, and `NaN === 0` is false, so an incomplete summary would make
+      // this report FAIL unconditionally -- the exact symptom the info fix
+      // removed, reintroduced through a different door. formatSummary is
+      // exported, so it cannot assume its caller honoured the type.
+      const noSummary = {
+        violations: [],
+        ...emptyResults(1),
+      } as unknown as AnalysisResult;
+
+      const output = formatSummary(noSummary);
+      expect(output).toContain('PASS');
+      expect(output).not.toContain('NaN');
+    });
+
+    it('should flag a malformed summary instead of silently treating it as clean', () => {
+      // Round 5, three seats independently: zeroing a non-numeric count stops the
+      // permanent-FAIL bug but also swallows an upstream defect -- a corrupted
+      // summary would read as "nothing to report". Keep the non-blocking verdict
+      // (crashing the reporter would be worse) but say so in the output.
+      const corrupted = {
+        violations: [],
+        summary: summaryOf(1, Number.NaN, 0, 0, 1, 1),
+        ...emptyResults(1),
+      } as unknown as AnalysisResult;
+
+      const output = formatSummary(corrupted);
+      expect(output).toMatch(/malformed|invalid|corrupt/i);
+      // The damaged field must be named, so a reader can tell WHICH count is
+      // untrustworthy. Echoing the raw value is the point of the diagnostic --
+      // only the verdict must never be decided by it.
+      expect(output).toContain('errorCount');
+      expect(output).toContain('PASS');
+    });
+
+    it('should show PASS when the only findings are info (info is log-only)', () => {
+      // AGENTS.md: info = "log only". An info finding is how a rule says "I
+      // could not judge this file" (the arch layout diagnostic), so treating it
+      // as a failure would block a commit for a blind spot rather than a defect.
+      const infoOnly: AnalysisResult = {
+        violations: [
+          violation("java/com/acme/UserController.java", 1, "arch.controller", "Skipped: no recognisable Java source root", "info")
+        ],
+        summary: summaryOf(1, 0, 0, 1, 1, 1),
+        ...emptyResults(1),
+      };
+      const output = formatSummary(infoOnly);
+      expect(output).toContain('PASS');
+      expect(output).not.toContain('FAIL');
+    });
+
     it('should show PASS when no violations', () => {
       const emptyResult: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 5,
-          rulesRun: 3
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 50,
-        errors: []
+        summary: summaryOf(0, 0, 0, 0, 5, 3),
+        ...emptyResults(50),
       };
       
       const output = formatSummary(emptyResult);
@@ -188,26 +267,10 @@ describe('reporter.ts - Output Formatting', () => {
     it('should show error count when severity has errors', () => {
       const errorResult: AnalysisResult = {
         violations: [
-          {
-            file: 'src/auth.ts',
-            line: 5,
-            ruleId: 'solid.srp',
-            message: 'Class handles both auth and logging',
-            severity: 'error'
-          }
+          violation("src/auth.ts", 5, "solid.srp", "Class handles both auth and logging", "error")
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 1,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 1
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 30,
-        errors: []
+        summary: summaryOf(1, 1, 0, 0, 1, 1),
+        ...emptyResults(30),
       };
 
       const output = formatSummary(errorResult);
@@ -221,14 +284,7 @@ describe('reporter.ts - Output Formatting', () => {
     it('should return valid SARIF JSON with version 2.1.0', () => {
       const result: AnalysisResult = {
         violations: [sampleViolation],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 1
-        },
+        summary: summaryOf(1, 0, 1, 0, 1, 1),
         fileResults: {},
         ruleResults: {
           'clean-code.long-function': { violationCount: 1, filesChecked: 1 }
@@ -247,14 +303,7 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include runs array with tool driver info', () => {
       const result: AnalysisResult = {
         violations: [sampleViolation],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 3,
-          rulesRun: 2
-        },
+        summary: summaryOf(1, 0, 1, 0, 3, 2),
         fileResults: {},
         ruleResults: {
           'clean-code.long-function': { violationCount: 1, filesChecked: 3 }
@@ -275,37 +324,11 @@ describe('reporter.ts - Output Formatting', () => {
     it('should map violations to SARIF results with correct levels', () => {
       const result: AnalysisResult = {
         violations: [
-          {
-            file: 'src/auth.ts',
-            line: 5,
-            column: 10,
-            ruleId: 'solid.srp',
-            message: 'Multiple responsibilities',
-            severity: 'error'
-          },
-          {
-            file: 'src/utils.ts',
-            line: 20,
-            ruleId: 'clean-code.long-function',
-            message: 'Function too long',
-            severity: 'warning'
-          },
-          {
-            file: 'src/config.ts',
-            line: 3,
-            ruleId: 'clean-code.magic-numbers',
-            message: 'Magic number 42',
-            severity: 'info'
-          }
+          violation("src/auth.ts", 5, "solid.srp", "Multiple responsibilities", "error", 10),
+          violation("src/utils.ts", 20, "clean-code.long-function", "Function too long", "warning"),
+          violation("src/config.ts", 3, "clean-code.magic-numbers", "Magic number 42", "info")
         ],
-        summary: {
-          totalViolations: 3,
-          errorCount: 1,
-          warningCount: 1,
-          infoCount: 1,
-          filesChecked: 3,
-          rulesRun: 3
-        },
+        summary: summaryOf(3, 1, 1, 1, 3, 3),
         fileResults: {},
         ruleResults: {
           'solid.srp': { violationCount: 1, filesChecked: 1 },
@@ -329,23 +352,9 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include file, line, and column in result locations', () => {
       const result: AnalysisResult = {
         violations: [
-          {
-            file: 'src/api.ts',
-            line: 42,
-            column: 15,
-            ruleId: 'clean-code.deep-nesting',
-            message: 'Nesting depth 6 exceeds threshold 4',
-            severity: 'warning'
-          }
+          violation("src/api.ts", 42, "clean-code.deep-nesting", "Nesting depth 6 exceeds threshold 4", "warning", 15)
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 1
-        },
+        summary: summaryOf(1, 0, 1, 0, 1, 1),
         fileResults: {},
         ruleResults: {
           'clean-code.deep-nesting': { violationCount: 1, filesChecked: 1 }
@@ -366,22 +375,9 @@ describe('reporter.ts - Output Formatting', () => {
     it('should default column to 1 when violation has no column', () => {
       const result: AnalysisResult = {
         violations: [
-          {
-            file: 'src/big.ts',
-            line: 500,
-            ruleId: 'clean-code.large-file',
-            message: 'File too large',
-            severity: 'warning'
-          }
+          violation("src/big.ts", 500, "clean-code.large-file", "File too large", "warning")
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 1
-        },
+        summary: summaryOf(1, 0, 1, 0, 1, 1),
         fileResults: {},
         ruleResults: {
           'clean-code.large-file': { violationCount: 1, filesChecked: 1 }
@@ -400,14 +396,7 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include ruleDescriptors for all rules in ruleResults', () => {
       const result: AnalysisResult = {
         violations: [sampleViolation],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 2,
-          rulesRun: 2
-        },
+        summary: summaryOf(1, 0, 1, 0, 2, 2),
         fileResults: {},
         ruleResults: {
           'clean-code.long-function': { violationCount: 1, filesChecked: 2 },
@@ -431,14 +420,7 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include execution properties (filesChecked, rulesRun, executionTimeMs)', () => {
       const result: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 10,
-          rulesRun: 5
-        },
+        summary: summaryOf(0, 0, 0, 0, 10, 5),
         fileResults: {},
         ruleResults: {
           'clean-code.long-function': { violationCount: 0, filesChecked: 10 }
@@ -459,14 +441,7 @@ describe('reporter.ts - Output Formatting', () => {
     it('should return empty results array when no violations', () => {
       const result: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 5,
-          rulesRun: 3
-        },
+        summary: summaryOf(0, 0, 0, 0, 5, 3),
         fileResults: {},
         ruleResults: {
           'clean-code.long-function': { violationCount: 0, filesChecked: 5 }
@@ -484,23 +459,9 @@ describe('reporter.ts - Output Formatting', () => {
     it('should map DIP violation to error level when violation severity is error', () => {
       const result: AnalysisResult = {
         violations: [
-          {
-            file: 'src/service.ts',
-            line: 8,
-            column: 1,
-            ruleId: 'solid.dip',
-            message: 'Direct instantiation detected',
-            severity: 'error'
-          }
+          violation("src/service.ts", 8, "solid.dip", "Direct instantiation detected", "error", 1)
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 1,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 1
-        },
+        summary: summaryOf(1, 1, 0, 0, 1, 1),
         fileResults: {},
         ruleResults: {
           'solid.dip': { violationCount: 1, filesChecked: 1 }
@@ -518,14 +479,7 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include ruleDescriptors with defaultConfiguration levels', () => {
       const result: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 3
-        },
+        summary: summaryOf(0, 0, 0, 0, 1, 3),
         fileResults: {},
         ruleResults: {
           'solid.srp': { violationCount: 0, filesChecked: 1 },
@@ -554,27 +508,10 @@ describe('reporter.ts - Output Formatting', () => {
     it('should show error severity with ✗ icon', () => {
       const errorResult: AnalysisResult = {
         violations: [
-          {
-            file: 'src/auth.ts',
-            line: 5,
-            column: 1,
-            ruleId: 'solid.srp',
-            message: 'Multiple responsibilities',
-            severity: 'error'
-          }
+          violation("src/auth.ts", 5, "solid.srp", "Multiple responsibilities", "error", 1)
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 1,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 1
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 30,
-        errors: []
+        summary: summaryOf(1, 1, 0, 0, 1, 1),
+        ...emptyResults(30),
       };
 
       const output = formatConsole(errorResult);
@@ -586,27 +523,10 @@ describe('reporter.ts - Output Formatting', () => {
     it('should show info severity with ℹ icon', () => {
       const infoResult: AnalysisResult = {
         violations: [
-          {
-            file: 'src/config.ts',
-            line: 3,
-            column: 10,
-            ruleId: 'clean-code.magic-numbers',
-            message: 'Magic number 42',
-            severity: 'info'
-          }
+          violation("src/config.ts", 3, "clean-code.magic-numbers", "Magic number 42", "info", 10)
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 1,
-          filesChecked: 1,
-          rulesRun: 1
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 20,
-        errors: []
+        summary: summaryOf(1, 0, 0, 1, 1, 1),
+        ...emptyResults(20),
       };
 
       const output = formatConsole(infoResult);
@@ -618,26 +538,10 @@ describe('reporter.ts - Output Formatting', () => {
     it('should handle violations without column number', () => {
       const noColumnResult: AnalysisResult = {
         violations: [
-          {
-            file: 'src/big.ts',
-            line: 600,
-            ruleId: 'clean-code.large-file',
-            message: 'File is too large: 600 lines (maximum: 500)',
-            severity: 'warning'
-          }
+          violation("src/big.ts", 600, "clean-code.large-file", "File is too large: 600 lines (maximum: 500)", "warning")
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 1,
-          rulesRun: 1
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 25,
-        errors: []
+        summary: summaryOf(1, 0, 1, 0, 1, 1),
+        ...emptyResults(25),
       };
 
       const output = formatConsole(noColumnResult);
@@ -649,26 +553,10 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include analysis errors only when violations exist', () => {
       const resultWithErrors: AnalysisResult = {
         violations: [
-          {
-            file: 'src/test.ts',
-            line: 5,
-            column: 1,
-            ruleId: 'clean-code.long-function',
-            message: 'Function too long',
-            severity: 'warning'
-          }
+          violation("src/test.ts", 5, "clean-code.long-function", "Function too long", "warning", 1)
         ],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 2,
-          rulesRun: 1
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 50,
+        summary: summaryOf(1, 0, 1, 0, 2, 1),
+        ...emptyResults(50),
         errors: [
           'Rule clean-code.long-function failed on src/corrupt.ts: Parse error',
           'Rule solid.srp failed on src/broken.ts: Timeout'
@@ -685,18 +573,8 @@ describe('reporter.ts - Output Formatting', () => {
     it('should not show analysis errors section when errors array is empty', () => {
       const emptyResult: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 5,
-          rulesRun: 3
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 50,
-        errors: []
+        summary: summaryOf(0, 0, 0, 0, 5, 3),
+        ...emptyResults(50),
       };
 
       const output = formatConsole(emptyResult);
@@ -707,18 +585,8 @@ describe('reporter.ts - Output Formatting', () => {
     it('should show files checked in empty violations output', () => {
       const emptyResult: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 15,
-          rulesRun: 8
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 75,
-        errors: []
+        summary: summaryOf(0, 0, 0, 0, 15, 8),
+        ...emptyResults(75),
       };
 
       const output = formatConsole(emptyResult);
@@ -731,34 +599,11 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include summary section with violation details', () => {
       const mixedResult: AnalysisResult = {
         violations: [
-          {
-            file: 'src/a.ts',
-            line: 5,
-            column: 1,
-            ruleId: 'solid.srp',
-            message: 'SRP violation',
-            severity: 'error'
-          },
-          {
-            file: 'src/b.ts',
-            line: 10,
-            ruleId: 'clean-code.long-function',
-            message: 'Too long',
-            severity: 'warning'
-          }
+          violation("src/a.ts", 5, "solid.srp", "SRP violation", "error", 1),
+          violation("src/b.ts", 10, "clean-code.long-function", "Too long", "warning")
         ],
-        summary: {
-          totalViolations: 2,
-          errorCount: 1,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 2,
-          rulesRun: 2
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 60,
-        errors: []
+        summary: summaryOf(2, 1, 1, 0, 2, 2),
+        ...emptyResults(60),
       };
 
       const output = formatConsole(mixedResult);
@@ -775,18 +620,8 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include empty arrays for no violations', () => {
       const emptyResult: AnalysisResult = {
         violations: [],
-        summary: {
-          totalViolations: 0,
-          errorCount: 0,
-          warningCount: 0,
-          infoCount: 0,
-          filesChecked: 5,
-          rulesRun: 3
-        },
-        fileResults: {},
-        ruleResults: {},
-        executionTimeMs: 30,
-        errors: []
+        summary: summaryOf(0, 0, 0, 0, 5, 3),
+        ...emptyResults(30),
       };
 
       const output = formatJSON(emptyResult);
@@ -800,14 +635,7 @@ describe('reporter.ts - Output Formatting', () => {
     it('should include all fields: violations, summary, fileResults, ruleResults, executionTimeMs, errors', () => {
       const result: AnalysisResult = {
         violations: [sampleViolation],
-        summary: {
-          totalViolations: 1,
-          errorCount: 0,
-          warningCount: 1,
-          infoCount: 0,
-          filesChecked: 3,
-          rulesRun: 2
-        },
+        summary: summaryOf(1, 0, 1, 0, 3, 2),
         fileResults: {
           'src/test.ts': { violations: [sampleViolation], ruleIds: ['clean-code.long-function'] }
         },
