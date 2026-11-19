@@ -29,13 +29,13 @@ run_static_analysis() {
   local build_failed=0
   if [ "$build_system" = "maven" ]; then
     mvn compile -q 2>&1 | grep -i "error\|fail" | sed -n '1,5p; 5q'
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
       echo "❌ Maven compilation failed"
       build_failed=1
     fi
   elif [ "$build_system" = "gradle" ]; then
     gradle compileKotlin --quiet 2>&1 | grep -i "error\|fail" | sed -n '1,5p; 5q'
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
       echo "❌ Gradle compilation failed"
       build_failed=1
     fi
@@ -119,10 +119,10 @@ run_tests() {
 
   if [ "$build_system" = "maven" ]; then
     mvn test -q 2>&1 | tail -15
-    return ${PIPESTATUS[0]}
+    return "${PIPESTATUS[0]}"
   elif [ "$build_system" = "gradle" ]; then
     gradle test --quiet 2>&1 | tail -15
-    return ${PIPESTATUS[0]}
+    return "${PIPESTATUS[0]}"
   else
     echo "No build system detected"
     return 1
@@ -141,12 +141,40 @@ run_coverage() {
 
   if [ "$build_system" = "maven" ]; then
     mvn test jacoco:report -q 2>&1 | tail -10
-    return ${PIPESTATUS[0]}
+    return "${PIPESTATUS[0]}"
   elif [ "$build_system" = "gradle" ]; then
     gradle jacocoTestReport --quiet 2>&1 | tail -10
-    return ${PIPESTATUS[0]}
+    return "${PIPESTATUS[0]}"
   else
     echo "No build system detected"
     return 1
   fi
+}
+
+# Gate 13 capability: type-check Kotlin sources with kotlinc.
+#
+# Added 2026-11-19 after the language matrix showed kotlin's dirty row as
+# G1=PASS G13=SKIP: nothing in this chain looked for a Kotlin type error.
+#
+#   a.kt : fun intOf(v: Int): Int = v
+#           fun main() { println(intOf("not an int")) }
+#   kotlinc: error: argument type mismatch: actual type is 'String', but 'Int'
+#            was expected.
+#   gate 1 : PASSED (ktlint and detekt LINT; neither type-checks)
+#   gate 13: SKIPPED (no compiler declared) -> commit ALLOWED
+#
+# Linting and type-checking are different questions, and for Kotlin only the
+# first was being asked anywhere. Measured: 4.4s for a two-file project.
+#
+# kotlinc does NOT accept a directory ("error: no source files; source file or
+# directory not found: ."), so the file list is expanded here. bash globstar is
+# enabled in the command so the expansion works in the subshell the gate uses;
+# nullglob keeps an empty tree from passing a literal `**/*.kt` to the compiler.
+#
+# Output directory is discarded (-d into a temp dir removed afterwards): this is a
+# check, not a build, and leaving .class files in the tree would make the next
+# commit's change set depend on whether the gate ran.
+# shellcheck disable=SC2016  # the single-quoted body is a command to be eval'd elsewhere, not here
+compiler_check_command() {
+  printf '%s' 'shopt -s globstar nullglob; _kt_srcs=(**/*.kt); if [ "${#_kt_srcs[@]}" -eq 0 ]; then echo "no .kt sources found" >&2; exit 2; fi; _kt_out=$(mktemp -d); kotlinc "${_kt_srcs[@]}" -d "$_kt_out"; _kt_rc=$?; rm -rf "$_kt_out"; exit "$_kt_rc"'
 }
