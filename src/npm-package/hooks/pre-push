@@ -24,8 +24,12 @@ _LE_CR=$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]'); test "${_LE_CR:-0}" -e
 #
 # Verified: an LF copy runs through (0 CR bytes); a CRLF copy prints the FATAL
 # diagnosis and exits 1 with no syntax error.
-# Pre-push Hook — 8 gates: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
-# + M2 (Mock Density, WARNING) + ML (Mock Layering) + UI (UI Sprint Gates) + MW (Code Walkthrough) + S (Sprint Flow)
+# Pre-push Hook: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
+# + MW (Code Walkthrough) + S (Sprint Flow)
+#
+# M2 (mock density), ML (mock layering) and UI (UI sprint gates) were removed
+# 2026-11-20: they had a registry row and a report row but no implementation, so
+# they printed SKIP with no reason on every push and could never do otherwise.
 #
 # DESIGN: Hook validates result/executes checks, Skill executes AI review
 # No CLI skill invocation - avoids OpenCode architecture mismatch
@@ -176,7 +180,7 @@ write_pre_push_report() {
   # #597: the Python body goes to a TEMP FILE, not a `<<PY` heredoc.
   #
   # This function runs from the EXIT trap, i.e. AFTER the main body's
-  #     while read local_ref local_sha remote_ref remote_sha; do ...
+  #     while read -r local_ref local_sha remote_ref remote_sha; do ...
   # loop has consumed the hook's stdin. A heredoc is read from stdin, so by then
   # `python - <<PY` receives NOTHING — bash discards the body and executes its
   # lines as commands instead:
@@ -207,6 +211,30 @@ write_pre_push_report() {
     printf '%s\n' "_m_details = {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'skip_kind': '${GATE_M_SKIP_KIND:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}"
     printf '%s\n' 'if survivors_detail is not None:'
     printf '%s\n' "    _m_details['survivors'] = json.dumps(survivors_detail, sort_keys=True)"
+
+    printf '%s\n' '# Every SKIP must say why it skipped.'
+    printf '%s\n' '#'
+    printf '%s\n' '# Measured 2026-11-20: 11 of this hook 12 gates wrote details:{} when they'
+    printf '%s\n' '# skipped, so the journal recorded THAT a gate skipped and never WHY. An empty'
+    printf '%s\n' '# field reads as nothing-to-do-here; the truth was usually nobody-wrote-it-down.'
+    printf '%s\n' '# The four SKIP_REASON variables that already existed were never printed by'
+    printf '%s\n' '# this template at all -- the reason was computed and then dropped.'
+    printf '%s\n' '_gates = ['
+    printf '%s\n' "    {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {'duration_ms': '${MP_DURATION_MS:-0}', 'skip_reason': '${GATE_MP_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_10_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': _m_details},"
+    printf '%s\n' "    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PY_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_PY_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_GO_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_JAVA_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_KOTLIN_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL', 'skip_reason': '${GATE_DELPHI_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_S_SKIP_REASON:-}'}}"
+    printf '%s\n' ']'
+    printf '%s\n' 'for _g in _gates:'
+    printf '%s\n' "    if _g['status'] != 'SKIP':"
+    printf '%s\n' '        continue'
+    printf '%s\n' "    if not _g['details'].get('skip_reason'):"
+    printf '%s\n' "        _g['details']['skip_reason'] = 'reason_not_recorded'"
     printf '%s\n' 'report = {'
     printf '%s\n' "  'timestamp': '$timestamp',"
     printf '%s\n' "  'trigger': 'pre-push',"
@@ -221,20 +249,7 @@ write_pre_push_report() {
     printf '%s\n' "    'gates_total': None,"
     printf '%s\n' "    'verdict': '$verdict',"
     printf '%s\n' "  },"
-    printf '%s\n' "  'gates': ["
-    printf '%s\n' "    {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {'duration_ms': '${MP_DURATION_MS:-0}'}},"
-    printf '%s\n' "    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},"
-    printf '%s\n' "    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': _m_details},"
-    printf '%s\n' "    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PY_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_PY_SKIP_REASON:-}'}},"
-    printf '%s\n' "    {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},"
-    printf '%s\n' "    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},"
-    printf '%s\n' "    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},"
-    printf '%s\n' "    {'id': 'M2', 'name': 'Mock Density (WARNING only)', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},"
-    printf '%s\n' "    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},"
-    printf '%s\n' "    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},"
-    printf '%s\n' "    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL', 'skip_reason': '${GATE_DELPHI_SKIP_REASON:-}'}},"
-    printf '%s\n' "    {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {}}"
-    printf '%s\n' "  ],"
+    printf '%s\n' "  'gates': _gates,"
     printf '%s\n' "  'warnings': [],"
     printf '%s\n' "  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],"
     printf '%s\n' '}'
@@ -620,6 +635,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
 else
   echo "⏭️  SKIPPED - Gate MS: Sprint Flow (sprint-gate.sh not found; searched: $PROJECT_ROOT/githooks, $(dirname "$0"), $HOME/.config/xp-gate/hooks, $HOME/.config/xp-gate/adapters)"
   GATE_S_STATUS="SKIP"
+  GATE_S_SKIP_REASON="sprint_gate_script_not_found"
 fi
 echo ""
 
@@ -678,9 +694,21 @@ if [[ -f "package.json" ]] && [[ -f "tsconfig.json" ]] && [[ -n "$TS_FILES" ]]; 
     rm -f "$GATE_10_OUTPUT"
   else
     echo "⚠️ Gate 10 script not found. SKIP — Gate 10."
+    GATE_10_SKIP_REASON="gate_10_script_not_found"
   fi
 else
   echo "📚 Not a TypeScript project or no TS files changed. SKIP — Gate 10."
+  # Name which of the three conditions failed rather than repeating the sentence.
+  # These are different situations with different responses: no package.json means
+  # this is not the project the gate applies to; no changed TS files means there was
+  # genuinely nothing to build.
+  if [[ ! -f "package.json" ]]; then
+    GATE_10_SKIP_REASON="not_a_node_project"
+  elif [[ ! -f "tsconfig.json" ]]; then
+    GATE_10_SKIP_REASON="no_tsconfig"
+  else
+    GATE_10_SKIP_REASON="no_ts_files_changed"
+  fi
 fi
 echo ""
 
@@ -846,13 +874,14 @@ else
 
       if [[ -z "$MUTATION_SCRIPT" ]]; then
         echo "⚠️ Gate M script not found. SKIP — Gate M."
+        GATE_M_SKIP_REASON="mutation_script_not_found"
         GATE_M_SKIP_REASON="gate-m.ts not found in .xp-gate/modules, src/mutation, or global modules"
         GATE_M_SKIP_KIND="module_missing"
       else
         # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
         MUTATION_OUTPUT=$(mktemp)
         M_START_MS=$(date +%s%3N 2>/dev/null || python -c 'import time;print(int(time.time()*1000))' 2>/dev/null || echo 0)
-        RUN_TSX_TIMEOUT=600s run_tsx $MUTATION_SCRIPT --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+        RUN_TSX_TIMEOUT=600s run_tsx "$MUTATION_SCRIPT" --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
         MUTATION_EXIT=$?
         M_END_MS=$(date +%s%3N 2>/dev/null || python -c 'import time;print(int(time.time()*1000))' 2>/dev/null || echo 0)
         if [ "$M_START_MS" != "0" ] && [ "$M_END_MS" != "0" ]; then
@@ -934,6 +963,7 @@ PY_SOURCE_FILES=$(echo "$PY_FILES" | grep -v '/venv/' | grep -v '/\.venv/' || tr
 
 if [ -z "$PY_SOURCE_FILES" ]; then
   echo "📚 No changed Python source files. SKIP — Gate M (Python)."
+  GATE_M_PY_SKIP_REASON="no_python_source_files"
   # #557: this outermost branch was the only Gate M (Python) path that assigned
   # no status, while Gate M (TypeScript) records a reason on every path. Without
   # it, "no Python in this push" and "the tool is missing" look identical in the
@@ -989,6 +1019,7 @@ else
       rm -f "$MUTATION_OUTPUT"
     else
       echo "⚠ Gate M script not found. SKIP — Gate M (Python)."
+      GATE_M_PY_SKIP_REASON="mutation_script_not_found"
       GATE_M_PY_STATUS="SKIP"
       GATE_M_PY_SKIP_REASON="gate_m_script_not_found"
       GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (gate-m.ts not found)|"
@@ -1012,6 +1043,7 @@ GO_FILES=$(echo "$PUSHED_FILES" | grep -E '\.go$' | grep -v '_test\.go$' | grep 
 
 if [ -z "$GO_FILES" ]; then
   echo "📚 No changed Go source files. SKIP — Gate M (Go)."
+  GATE_M_GO_SKIP_REASON="no_go_source_files"
 else
   GO_FILE_LIST=$(echo "$GO_FILES" | tr '\n' ',' | sed 's/,$//')
   echo "🔵 Changed Go files: $GO_FILE_LIST"
@@ -1028,6 +1060,7 @@ else
 
     if [ -z "$MUTATION_SCRIPT" ]; then
       echo "⚠ Gate M script not found. SKIP — Gate M (Go)."
+      GATE_M_GO_SKIP_REASON="mutation_script_not_found"
     else
       MUTATION_OUTPUT=$(mktemp)
       RUN_TSX_TIMEOUT=120s run_tsx "$MUTATION_SCRIPT" --changed-files "$GO_FILE_LIST" --timeout-ms 120000 > "$MUTATION_OUTPUT" 2>&1
@@ -1082,6 +1115,7 @@ JAVA_FILES=$(echo "$PUSHED_FILES" | grep -E '\.java$' | grep -v -E '(Test|Tests)
 
 if [ -z "$JAVA_FILES" ]; then
   echo "📚 No changed Java source files. SKIP — Gate M (Java)."
+  GATE_M_JAVA_SKIP_REASON="no_java_source_files"
 else
   JAVA_FILE_LIST=$(echo "$JAVA_FILES" | tr '\n' ',' | sed 's/,$//')
   echo "☕ Changed Java files: $JAVA_FILE_LIST"
@@ -1098,6 +1132,7 @@ else
 
     if [ -z "$MUTATION_SCRIPT" ]; then
       echo "⚠ Gate M script not found. SKIP — Gate M (Java)."
+      GATE_M_JAVA_SKIP_REASON="mutation_script_not_found"
     else
       MUTATION_OUTPUT=$(mktemp)
       RUN_TSX_TIMEOUT=600s run_tsx "$MUTATION_SCRIPT" --changed-files "$JAVA_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
@@ -1152,6 +1187,7 @@ KT_FILES=$(echo "$PUSHED_FILES" | grep -E '\.kt$|\.kts$' | grep -v -E '(Test|Tes
 
 if [ -z "$KT_FILES" ]; then
   echo "📚 No changed Kotlin source files. SKIP — Gate M (Kotlin)."
+  GATE_M_KOTLIN_SKIP_REASON="no_kotlin_source_files"
 else
   KT_FILE_LIST=$(echo "$KT_FILES" | tr '\n' ',' | sed 's/,$//')
   echo "🟣 Changed Kotlin files: $KT_FILE_LIST"
@@ -1168,6 +1204,7 @@ else
 
     if [ -z "$MUTATION_SCRIPT" ]; then
       echo "⚠ Gate M script not found. SKIP — Gate M (Kotlin)."
+      GATE_M_KOTLIN_SKIP_REASON="mutation_script_not_found"
     else
       MUTATION_OUTPUT=$(mktemp)
       RUN_TSX_TIMEOUT=600s run_tsx "$MUTATION_SCRIPT" --changed-files "$KT_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
@@ -1287,7 +1324,7 @@ else
       done
 
       # Count total non-empty, non-comment lines for density denominator
-      TOTAL_LINES=$(grep -v '^\s*$' "$test_file" | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*#' | wc -l | awk '{print $1}')
+      TOTAL_LINES=$(grep -v '^\s*$' "$test_file" | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*#' | wc -l | tr -d ' ')
       TOTAL_LINES=${TOTAL_LINES//[^0-9]/}
       TOTAL_LINES=${TOTAL_LINES:-0}
 
@@ -1361,7 +1398,8 @@ run_gate_m3() {
   fi
 
   # Filter to test files only
-  local test_files=$(echo "$changed_files" | grep -E '\.(test|spec)\.ts$' || true)
+  local test_files
+  test_files=$(echo "$changed_files" | grep -E '\.(test|spec)\.ts$' || true)
 
   if [[ -z "$test_files" ]]; then
     echo "   SKIP — no test files changed"
