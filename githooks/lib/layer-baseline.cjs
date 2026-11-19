@@ -53,7 +53,13 @@ function filterFindings(raw, known) {
   return raw
     .split('\n')
     .filter(Boolean)
-    .filter(line => !known.has(line));
+    // A finding may carry a 5th diagnostic field (`forbidden`, added when
+    // forbiddenImports became enforced). A ledger records WHERE the edge is, not
+    // WHY it was reported, so the key is the first four fields only. Comparing
+    // whole lines made every ledgered entry stop matching the moment the 5th
+    // column appeared, silently turning accepted debt back into blocking
+    // violations -- caught as two red tests, not by reading the code.
+    .filter((line) => !known.has(line.split('\t').slice(0, 4).join('\t')));
 }
 
 function main() {

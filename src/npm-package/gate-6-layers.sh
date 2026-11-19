@@ -202,7 +202,12 @@ FINDINGS=$(XP_LAYER_TSV="$LAYER_TSV_FILE" XP_LAYER_STATS="$LAYER_STATS_FILE" awk
       split(row, f, "\t")
       if (f[1] == "") continue
       n++
-      lname[n] = f[1]; lpat[n] = f[2]; lallow[n] = f[3]
+      # f[4] is `forbiddenImports`. It was parsed but never loaded, so the
+      # field was dead config while reading as enforcement -- the #686 defect
+      # shape, inside the fix for #686. A declared-forbidden edge always loses,
+      # even when `allowedImports` also names it: an explicit denial must not be
+      # silently cancelled by a broader grant.
+      lname[n] = f[1]; lpat[n] = f[2]; lallow[n] = f[3]; lforb[n] = f[4]
       # Patterns are compiled once here. layer_of() runs twice per source file
       # (once for the importer, once per resolved target); recompiling there
       # meant ~5800 regex builds for this repo and dominated the 2s scan.
@@ -251,6 +256,22 @@ FINDINGS=$(XP_LAYER_TSV="$LAYER_TSV_FILE" XP_LAYER_STATS="$LAYER_STATS_FILE" awk
     }
     return 0
   }
+  # `forbiddenImports` is the inverse of `allowedImports`, evaluated with the
+  # SAME two accepted forms (bare layer name or path glob) so a project cannot
+  # get enforcement by accident of spelling. It is checked BEFORE the allow
+  # list: an explicit denial wins over a broad grant. The alternative -- letting
+  # allowedImports cancel a forbiddenImports entry -- would make the stricter
+  # declaration the weaker one, which is the opposite of what a denial means.
+  function forbidden_hit(idx, tgt, dstname,   k, j, p) {
+    k = split(lforb[idx], p, ",")
+    for (j = 1; j <= k; j++) {
+      if (p[j] == "") continue
+      if (p[j] == dstname) return 1
+      if (p[j] ~ /[*]/ && tgt ~ pat2re(p[j])) return 1
+      if (p[j] !~ /[*]/ && (tgt == p[j] || tgt ~ ("^" p[j] "/"))) return 1
+    }
+    return 0
+  }
   # Resolve a relative specifier against the importing file.
   function resolve(from, spec,   np, i, dir, res, k, pp, trail, sx) {
     sub(/[.](ts|tsx|js|jsx|mjs|cjs)$/, "", spec)
@@ -286,16 +307,35 @@ FINDINGS=$(XP_LAYER_TSV="$LAYER_TSV_FILE" XP_LAYER_STATS="$LAYER_STATS_FILE" awk
     # // in http:// inside string literals.
     if (line ~ /^[ \t]*(\/\/|[#]|[*]|\/\*)/) next
     rest = line
-    while (match(rest, /from[ \t]+"[^"]+"|from[ \t]+\047[^\047]+\047/)) {
+    # Two specifier forms are scanned, alternating so both are found in one pass:
+    #   ES/TS   import ... from "x"
+    #   CJS     require("x")   (single-quoted form is scanned too)
+    # The `require(` form was missing entirely, which left every .cjs file and its
+    # dependencies unscanned. This repo holds 28 of them, several importing from
+    # the generated mirror -- so the checker reported a clean tree while the very
+    # edge its own config forbids existed on disk. A scanner that reads one of the
+    # two import syntaxes is a scanner that can pass without looking.
+    while (match(rest, /from[ \t]+"[^"]+"|from[ \t]+\047[^\047]+\047|require\([ \t]*"[^"]+"[ \t]*\)|require\([ \t]*\047[^\047]+\047[ \t]*\)/)) {
       spec = substr(rest, RSTART, RLENGTH)
-      sub(/^from[ \t]+["\047]/, "", spec)
-      sub(/["\047]$/, "", spec)
       rest = substr(rest, RSTART + RLENGTH)
+      if (spec ~ /^from/) {
+        sub(/^from[ \t]+["\047]/, "", spec)
+        sub(/["\047]$/, "", spec)
+      } else {
+        sub(/^require\([ \t]*["\047]/, "", spec)
+        sub(/["\047][ \t]*\)$/, "", spec)
+      }
       if (src == 0 || spec == "") continue
       tgt = resolve(file, spec)
       if (tgt == "") continue
       dst = layer_of(tgt)
       if (dst == 0 || dst == src) continue
+      # Denial before grant: an explicit forbiddenImports entry is never
+      # cancelled by a broader allowedImports entry.
+      if (forbidden_hit(src, tgt, lname[dst])) {
+        printf "%s\t%s\t%s\t%s\tforbidden\n", file, lname[src], lname[dst], tgt
+        continue
+      }
       if (allowed_ok(src, tgt, lname[dst])) continue
       printf "%s\t%s\t%s\t%s\n", file, lname[src], lname[dst], tgt
     }
@@ -364,11 +404,22 @@ if [ "$NEW_COUNT" -eq 0 ]; then
 fi
 
 _layers_say "❌ BLOCKED - $NEW_COUNT new layer violation(s) (of $TOTAL total):"
-printf '%s\n' "$NEW_FINDINGS" | head -10 | while IFS="$(printf '\t')" read -r f s d t; do
-  _layers_say "   - $f  [$s -> $d]  imports $t"
+# A forbidden edge and an unlisted edge are different diagnoses -- one says the
+# import is explicitly denied, the other says nobody declared it -- and the fix
+# differs (remove the import vs declare it). Name which one fired.
+FORBIDDEN_SEEN=$(printf '%s\n' "$NEW_FINDINGS" | awk -F'\t' '$5=="forbidden"' | grep -c . || true)
+printf '%s\n' "$NEW_FINDINGS" | head -10 | while IFS="$(printf '\t')" read -r f s d t why; do
+  if [ "$why" = "forbidden" ]; then
+    _layers_say "   - $f  [$s -> $d]  imports $t  (forbiddenImports)"
+  else
+    _layers_say "   - $f  [$s -> $d]  imports $t"
+  fi
 done
 if [ "$NEW_COUNT" -gt 10 ]; then
   _layers_say "   ... and $((NEW_COUNT - 10)) more"
+fi
+if [ "${FORBIDDEN_SEEN:-0}" -gt 0 ]; then
+  _layers_say "   Some edges are listed in a layer's forbiddenImports, an explicit denial."
 fi
 _layers_say "   A layer may import only what its allowedImports lists."
 _layers_say "   To accept an existing violation, record it in $LAYER_BASELINE."

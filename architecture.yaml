@@ -1,59 +1,203 @@
 # Architecture Configuration for Gate 6
-# Version: 1
+# Version: 2
+
+# NOT ENFORCED: layers are enforced by our checker, rules: is enforced by NOTHING.
 #
-# ⚠️ NOT ENFORCED by archlint 0.16 — see #686 / #687
+#   layers:  IS enforced -- by githooks/gate-6-layers.sh, our own checker.
+#   rules:   is enforced by nothing. It is planning prose only.
 #
-# 本文件目前**不被任何代码消费**。Gate 6 会检查它是否存在（缺失则 BLOCK，
-# 见 TOOL-INSTALLATION-GUIDE.md「零容忍」一节），但不会执行其中的任何一条规则：
+#   The rules block uses our own schema, not archlint-s, and archlint reads
+#   .archlint.yaml instead. Measured archlint 0.16.0: a project with
+#   allowedImports empty that imports across layers yields only Dead Code
+#   findings, never a layer violation. ARCH-001..014 are planning numbers with
+#   no implementation. Do not believe the rules block protects you.
 #
-#   1. `layers:` / `rules:` 用的是 xp-gate 自拟的结构，不是 archlint 的配置格式。
-#      archlint 原生读的是 `.archlint.yaml`（键为 `ignore:` / `entry_points:` /
-#      `rules:`，见本仓库根目录那份），两者 schema 不同。
-#   2. 实测（archlint 0.16.0）：构造一个 `allowedImports: []` 却跨层导入的工程，
-#      `archlint scan --config architecture.yaml` 只报 Dead Code，不报层级违规。
-#      archlint 确实**有**一个 `layer_violation` 检测器，但它默认 **disabled**，
-#      而且不从这个文件的 `layers:` 读取层级定义。
-#   3. `ARCH-001`~`ARCH-014` 是规划编号，无实现。全仓 `grep -rn "ARCH-0" src/`
-#      除一组无关的 `REQ-ARCH-001-02` 测试标签外零命中。
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS FILE DESCRIBES **XP-GATE'S OWN** LAYERING, NOT A BUSINESS APPLICATION'S
+# ─────────────────────────────────────────────────────────────────────────────
 #
-# 保留本文件的原因：它记录了规划中的层级语义，是 #690 / #691 落地的输入。
-# 但**不要认为它正在保护你的代码**。
+# Version 1 of this file declared the canonical Clean Architecture five
+# (domain / application / infrastructure / presentation / shared) under
+# `src/`. None of those directories has ever existed in this repository.
 #
-# 规划落地路径：docs/plans/2026-10-30-archunit-33-rules-gap-analysis.md
+# Measured 2026-11-19 with `bash githooks/gate-6-layers.sh`:
+#
+#     ⚠️  0 of 774 scanned file(s) match any of the 4 declared layer(s)
+#         reason: layer_config_matches_no_files
+#
+# That was the state for roughly 207 days (2026-04-15 → 2026-11-08). It is the
+# exact defect this gate exists to catch, applied to the gate's own repository:
+# a declaration that describes a system nobody built, which therefore protects
+# nothing while reading as configuration. The checker reported it honestly
+# (rc=3, not rc=0) — the failure was that nobody ran it against this repo.
+#
+# ─── WHAT XP-GATE ACTUALLY IS ───────────────────────────────────────────────
+#
+# xp-gate is not a request-serving application. It is a **plugin / toolchain
+# collection** invoked from inside other repos:
+#
+#   * `githooks/`  — the product core: bash gate bodies run by git at commit/push
+#   * `src/`       — the TypeScript engines the gates shell out to
+#   * `scripts/`   — build, mirror-sync and self-verification tooling
+#   * `skills/`    — canonical agent-instruction markdown (prompt 'source')
+#   * `plugins/`   — five platform wrappers (claude-code, opencode, qoder, dsh, …)
+#   * `src/npm-package/` — GENERATED mirror tree, shipped to npm
+#
+# The real layering invariant is therefore NOT "domain must not import infra".
+# It is:
+#
+#   core  ←  platform wrappers        (plugins depend on core, never the reverse)
+#   core  ←  tooling                  (scripts operate ON the product)
+#   generated mirrors depend on canonical sources, never the reverse
+#
+# Concretely, the invariant that has actually been violated in this repo
+# (measured 2026-11-19, 3 sites) is:
+#
+#   scripts/__tests__/  importing FUNCTIONALITY from `src/npm-package/`
+#   rather than from its canonical source. Tests then verify the generated
+#   copy, so a divergence between mirror and canonical is invisible to the
+#   test that should have caught it.
+#
+# See `docs/adr/0003-xp-gate-declares-its-own-layers.md` once written.
+#
+# ─── STILL TRUE: the `rules:` block below is NOT enforced ───────────────────
+#
+# `layers:` IS enforced — by githooks/gate-6-layers.sh (xp-gate's own checker),
+# not by archlint. `rules:` is NOT enforced by anything:
+#
+#   1. `rules:` uses xp-gate's own schema, not archlint's. archlint reads
+#      `.archlint.yaml` (keys `ignore:` / `entry_points:` / `rules:`), which is
+#      a different schema; that file is beside this one.
+#   2. Measured (archlint 0.16.0): a project with `allowedImports: []` that
+#      imports across layers yields only Dead Code findings, no layer
+#      violations. archlint HAS a `layer_violation` detector, but it defaults to
+#      disabled and does not read this file's `layers:`.
+#   3. `ARCH-001`~`ARCH-014` are planning numbers with no implementation.
+#      `grep -rn "ARCH-0" src/` returns only an unrelated `REQ-ARCH-001-02`
+#      test label.
+#
+# Do not believe the `rules:` block protects your code.
 #
 # Installation:
 #   npm install -g @archlinter/cli
-#   # or use npx
-#   npx @archlinter/cli scan . --config .archlint.yaml   # 注意：原生配置是 .archlint.yaml
+#   npx @archlinter/cli scan . --config .archlint.yaml   # note: native config
 
-version: 1
+version: 2
 
-# Layer definitions (project-specific)
-# ⚠️ 本块无消费方：archlint 0.16 不从 architecture.yaml 读取层级定义。
-#    改这里不会改变任何门禁行为。见文件头说明。
+# Layer definitions — XP-GATE'S OWN LAYERS (see file header).
+#
+# Semantics used by githooks/gate-6-layers.sh:
+#   * longest matching `pattern` wins (nesting resolves to the deepest layer)
+#   * a layer whose patterns match no file is config/reality drift, not a pass
+#   * `allowedImports` / `forbiddenImports` accept TWO forms, and the choice
+#     matters:
+#       - a bare layer name   ("engines")   -- matched against the destination
+#                                            LAYER, unambiguous
+#       - a path glob         ("src/**")    -- matched against the target PATH
+#
+#   TRAP: a path glob is matched against the resolved target path, NOT against
+#   the destination layer. So `allowedImports: ["src/**"]` also permits
+#   `src/npm-package/**` even when that path is a DIFFERENT layer, because the
+#   glob never consults layer membership. Nested layers are silently swallowed.
+#   Measured 2026-11-19 while writing this file: a layer granting "src/**"
+#   granted the generated mirror too, and a deliberate violation passed.
+#   Use layer names whenever layers nest. Use path globs only when the glob is
+#   narrower than every layer it could reach.
+#
+#   `forbiddenImports` is checked BEFORE `allowedImports`: an explicit denial is
+#   never cancelled by a broader grant. (Until 2026-11-19 it was parsed into a
+#   TSV column that nothing read, so the field enforced nothing at all.)
+#
+# Order here is presentational; precedence comes from pattern specificity.
 layers:
-  domain:
-    pattern: "src/domain/**"
-    description: "Core business logic, entities, and domain rules"
-    allowedImports: ["src/shared/**"]
-    forbiddenImports: ["src/infrastructure/**", "src/application/**", "src/presentation/**"]
-    
-  application:
-    pattern: "src/application/**"
-    description: "Application services, use cases, and business workflows"
-    allowedImports: ["src/domain/**", "src/shared/**"]
-    forbiddenImports: ["src/infrastructure/**", "src/presentation/**"]
-    
-  infrastructure:
-    pattern: "src/infrastructure/**"
-    description: "External services, databases, APIs, and technical implementations"
-    allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
-    forbiddenImports: ["src/presentation/**"]
-    
-  presentation:
-    pattern: "src/presentation/**"
-    description: "UI components, controllers, and user-facing interfaces"
-    allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
+  # ── Layer 0: generated output ────────────────────────────────────────────
+  # Generated output. Only the parts of src/npm-package that are BYTE COPIES
+  # of another tree -- adapters/ hooks/ skills/ plugins/ gates/ -- which are
+  # regenerated at prepack from githooks/, skills/ and plugins/.
+  #
+  # src/npm-package/lib/** and src/npm-package/scripts/** are NOT mirrors.
+  # Measured 2026-11-19: detect-deps.js, sprint-state-manager.js and
+  # gate-identity.js each exist in exactly ONE place on disk, and that place is
+  # src/npm-package/. They are the canonical source the product ships.
+  #
+  # An earlier revision declared ALL of src/npm-package/** as generated, which
+  # produced 7 false violations on this very repo. A layer model wrong in the
+  # overly-strict direction is still wrong, and it is why this config needs the
+  # same mutation test as the checker: a config that accuses innocent code gets
+  # baselined, and a baselined config stops being read.
+  generated:
+    patterns:
+      - "src/npm-package/adapters/**"
+      - "src/npm-package/hooks/**"
+      - "src/npm-package/skills/**"
+      - "src/npm-package/plugins/**"
+      - "src/npm-package/gates/**"
+      - "dist/**"
+      - "coverage/**"
+    description: "Byte-copies regenerated at prepack, plus build output. Never a functional dependency."
+    allowedImports: []
+    forbiddenImports: []
+
+  # ── Layer 1: product core (bash hook layer) ──────────────────────────────
+  # The gate bodies and driver that git actually executes. This is the product.
+  # It must never depend on platform wrappers or on generated trees.
+  hooks:
+    patterns: ["githooks/**"]
+    description: "Gate bodies, driver, registry, adapters. The executable core."
+    allowedImports: ["hooks", "engines"]
+    forbiddenImports: ["platforms", "generated"]
+
+  # ── Layer 2: product core (TypeScript engines) ───────────────────────────
+  # Engines the gate bodies shell out to. May not depend on the wrappers or on
+  # the generated mirror.
+  engines:
+    patterns: ["src/**"]
+    description: "TypeScript analysis engines invoked by gates."
+    allowedImports: ["engines"]
+    forbiddenImports: ["platforms", "generated"]
+
+  # ── Layer 2b: tests inside the shipped engines ───────────────────
+  # Nested inside `engines`: `src/**/__tests__/**` is a strict prefix superset,
+  # so the longest-pattern rule resolves these files HERE rather than to
+  # `engines`. They exist because a test that verifies a generated artifact has
+  # to run the generator, which is a legitimate engine -> tooling edge.
+  #
+  # Declaring it as its own layer, rather than adding the generator path to
+  # `engines.allowedImports`, is the point: allowedImports matches the TARGET
+  # path, so granting "scripts/generate-deploy-manifest" there would also grant
+  # it to every PRODUCTION file under lib/ — measured 2026-11-19, a production
+  # import passed. A source-scoped exception has to be a layer, because that is
+  # the only construct that scopes by the importing file.
+  engine-tests:
+    patterns: ["src/**/__tests__/**"]
+    description: "Tests shipped inside the engines; may invoke build tooling."
+    allowedImports: ["engines", "engine-tests", "tooling"]
+    forbiddenImports: ["platforms", "generated"]
+  # ── Layer 3: platform wrappers ───────────────────────────────────────────
+  # Thin adapters that ship the core to claude-code / opencode / qoder / dsh.
+  # Direction is one-way: wrappers depend on core, core never learns about them.
+  platforms:
+    patterns: ["plugins/**"]
+    description: "Per-platform plugin wrappers around the core."
+    allowedImports: ["platforms"]
+    forbiddenImports: []
+
+  # ── Layer 4: self-verification tooling ───────────────────────────────────
+  # Build, mirror-sync, and the test suites that verify xp-gate itself. Operates
+  # ON the product, so it may read any core layer — but it may not reach into
+  # the generated mirror for functionality (see `generated` above).
+  tooling:
+    patterns: ["scripts/**"]
+    description: "Build, sync and self-verification tooling."
+    allowedImports: ["hooks", "engines", "platforms", "instructions", "tooling"]
+    forbiddenImports: ["generated"]
+
+  # ── Layer 5: canonical agent instructions ────────────────────────────────
+  # Prompt source of truth. Markdown; imports nothing.
+  instructions:
+    patterns: ["skills/**"]
+    description: "Canonical agent-instruction markdown."
+    allowedImports: []
     forbiddenImports: []
 
 # Rule activation and severity

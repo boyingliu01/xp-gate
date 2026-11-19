@@ -331,3 +331,112 @@ YAML
   [ "$status" -eq 1 ]
   [[ "$output" == *"domain -> infrastructure"* ]]
 }
+
+# ── Round 6: two dead capabilities found by mutation-testing this checker ─────
+# Both cases below are the same defect family the checker itself exists to
+# remove, found one level deeper: a declared capability that does nothing while
+# reading as protection. Each was discovered by injecting a violation that the
+# checker failed to report. Before these fix, both were green.
+#
+# Rationale for putting them here rather than in a plan doc: a capability that
+# is never asserted against a FAILING input is indistinguishable from one that
+# does not exist, and this repository has already paid for that lesson twice.
+
+@test "forbiddenImports blocks an import even when allowedImports permits the layer" {
+  # `forbiddenImports` was parsed into a TSV column that nothing read. A project
+  # that wrote `forbiddenImports: [...]` got no enforcement whatsoever -- the
+  # declaration was dead config from the day it shipped, which is #686's defect
+  # verbatim, inside the fix for #686.
+  #
+  # The case is built so allowedImports ALONE would pass: `application` allows
+  # `domain` by name, and the forbidden rule is what must still block it. If the
+  # forbidden arm is dead this exits 0; the fix makes it exit 1.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:
+    pattern: "src/domain/**"
+    allowedImports: []
+    forbiddenImports: []
+  application:
+    pattern: "src/application/**"
+    allowedImports: ["domain"]
+    forbiddenImports: ["domain"]
+YAML
+  mkdir -p src/domain src/application
+  printf 'export const d = 1;\n' > src/domain/d.ts
+  printf 'import { d } from "../domain/d";\nexport const a = d;\n' > src/application/a.ts
+  run bash "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"application -> domain"* ]]
+  [[ "$output" == *"forbidden"* ]]
+}
+
+@test "forbiddenImports does not fire when the layer is not imported at all" {
+  # Anti-vacuity counterpart: the forbidden arm must be a filter, not a blanket
+  # failure. A config that forbids something nobody imports is a clean pass.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:
+    pattern: "src/domain/**"
+    allowedImports: []
+  application:
+    pattern: "src/application/**"
+    allowedImports: ["domain"]
+    forbiddenImports: ["domain"]
+YAML
+  mkdir -p src/domain src/application
+  printf 'export const d = 1;\n' > src/domain/d.ts
+  printf 'export const a = 1;\n' > src/application/a.ts
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+}
+
+@test "a CommonJS require() crossing a layer boundary is a violation" {
+  # The scanner matched only `from "..."` / `from '...'`. Every `.cjs` file in
+  # this repository therefore had its dependencies entirely unscanned, and this
+  # repo has 28 `.cjs` files, several of which import from the generated
+  # `src/npm-package/` mirror. The blind spot is not hypothetical: it made the
+  # checker report a clean tree while the exact edge its config forbids existed.
+  cat > "$XP_GATE_LAYER_CONFIG" <<'YAML'
+version: 1
+layers:
+  domain:
+    pattern: "src/domain/**"
+    allowedImports: []
+  infrastructure:
+    pattern: "src/infrastructure/**"
+    allowedImports: []
+YAML
+  mkdir -p src/domain src/infrastructure
+  printf 'export const i = 1;\n' > src/infrastructure/c.js
+  printf 'const { i } = require("../infrastructure/c");\nmodule.exports = { i };\n' \
+    > src/domain/a.cjs
+  run bash "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"src/domain/a.cjs"* ]]
+  [[ "$output" == *"domain -> infrastructure"* ]]
+}
+
+@test "a require() that stays inside its own layer is not a violation" {
+  # Anti-over-reach: adding require() support must not turn every same-layer
+  # dependency into a finding.
+  write_config
+  seed_clean_tree
+  printf 'const { Entity } = require("../domain/entity");\nmodule.exports = { Entity };\n' \
+    > src/infrastructure/db.js
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+}
+
+@test "a require() inside a comment is not a violation" {
+  # The comment skip runs before the import scan; a require() in prose must not
+  # be reported, or every explanatory comment becomes a false block.
+  write_config
+  seed_clean_tree
+  printf '// const { x } = require("../infrastructure/db");\nexport const y = 1;\n' \
+    > src/domain/commented.cjs
+  run bash "$GATE"
+  [ "$status" -eq 0 ]
+}
