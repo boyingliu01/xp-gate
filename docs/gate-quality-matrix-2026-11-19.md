@@ -1263,3 +1263,154 @@ Java 修复的两个测试，各自抓到我自己的一次同类错误：
 导致 csharp 的后续用例变慢并卡住。给 probe 加 `.gitignore` 解决。
 
 这是**测量工具的缺陷被误读成产品缺陷**的第 N 次——矩阵本身也是一个需要被检查的对象。
+
+---
+
+## 八、第十六轮：报告三处说谎，一处比一处彻底
+
+这一轮不再找"门禁算错了"，而是查**门禁算对之后，这个结论有没有活到该到的地方**。
+
+三处全部失守，而且是递进的：报告的**判定**丢了、**测量**丢了、**门禁的存在**丢了。
+
+### 8.1 Gate 12b / 12c：记了 PASS，什么都没检查
+
+两个前置门禁都把工作藏在文件存在性判断后：
+
+```bash
+if [ -n "$ROOT" ] && [ -f "$ROOT/scripts/check-xxx.sh" ]; then
+   ... 真正检查 ...
+fi
+# 落到这里，记 PASS
+```
+
+**没有 `else`。** 条件不成立时，代码直接穿到底部的 PASS 记录。
+
+实测（装了钩子但没有 `scripts/` 的 fixture，暂存一个含裸 `npx --yes eslint` 的文件）：
+
+```
+提交      : 通过
+报告 JSON : 没有 gate12b / gate12c 条目
+审计日志  : 没有 gate-12b / gate-12c 记录
+控制台    : 该门禁一行都没打印
+```
+
+本仓库自己的审计里有 112 条 12c 记录、每条 143ms——**它在这里确实运行**。
+在那个仓库里，它连"存在过"的证据都没留。
+
+这是本系列缺陷里**最完整的一例**：不只是报了没挣到的通过，
+而是**报了通过，同时抹掉了自己存在过的全部痕迹**。
+
+### 8.2 持久化：报告算好的字段，写盘前全扔掉
+
+`generate_quality_report()` 写完整报告，随后"持久化"那一步用**写死的键列表**重建：
+
+```js
+const r = {timestamp, trigger, branch, commit, changed_files,
+           overall, gates, warnings, errors};
+```
+
+本仓库连续 8 份真实报告的顶层键里，`gateTimings`、`coverageMatrix`、
+`coverageWarnings`、`languagesSource` **全部不存在**。
+
+而模版里关于 `gateTimings` 的注释写着：
+
+> published so "which gate is slow" is a measurement instead of an estimate
+
+**它一直在发布，发布进了一个随后被丢弃、替换成更短文档的文件里。**
+
+### 8.3 报告：链没到的门禁记成 SKIP
+
+驱动是 fail-fast 的，但报告为每个门禁打印一行，状态写成 `${GATE_N_STATUS:-SKIP}`。
+没运行的门禁体永远不会设置这个变量——于是「链在这里就断了」和「这个门禁决定跳过」
+产生**完全相同的一行**。
+
+iac fixture 实测：
+
+```
+控制台: Chain stopped at Gate 1 — these gates were NOT reached: 2 3 8 10 7 5 6 4
+报告:   gate7_iac_security {"status":"SKIP","scanned_files":0}
+```
+
+矩阵分析器读到那个 `SKIP`，理解为「门禁 7 运行了、没问题」，
+报出 **「iac 的植入缺陷没有被 G7 抓到」**——一个**由报告制造的假结论**。
+
+### 8.4 三处是同一个错误的不同深度
+
+| 层次 | 丢的是什么 | 表现 |
+|---|---|---|
+| 8.3 | 判定 | 记成 SKIP，读起来像"检查了但放过" |
+| 8.2 | 测量 | 字段消失，下游看到的报告更短 |
+| 8.1 | 门禁的存在 | 什么都没留，连"有这道门禁"都看不出来 |
+
+前面十五轮修的都是"门禁算错了"。这一轮的三处，**门禁都算对了**——
+错在结论离开门禁之后。
+
+### 8.5 分析器也要跟着改，而且不只是改符号
+
+矩阵分析器把 `NOT_REACHED` 当成漏检上报。修法不只是加个标志，还要**调整判断顺序**：
+
+从未运行的门禁既无 FAIL 也无 BLOCK，所以同时满足 `!seen.length`。
+旧顺序先判 `!seen.length`，「门禁不可达」的分支永远轮不到。
+
+**一个分支写了但永远走不到，和没写是一样的。** 这和 8.1 的 `else` 缺失是同一个病。
+
+### 8.6 我自己在这一轮犯的错
+
+**1. 把注释插进了 heredoc。** 辅助函数的说明被插进
+`cat > "$REPORT_FILE" << ENDJSON` 内部，原样输出到 JSON：
+
+```
+SyntaxError: Expected double-quoted property name in JSON at position 894
+```
+
+**提交钩子没有报错，因为它不解析这个文件。** 端到端运行时才发现。
+
+**2. 一个在 bug 存在时依然通过的护栏。** AC-PF-01 第一版 grep 整个文件找
+`Object.assign`，而这个文件别处本来就有 `Object.assign`——
+把缺陷还原回去，测试仍然绿。改成只检查持久化那一行才有效。
+
+**3. 同一个锚点错误犯了两次。** AC-PH-03 要检查 `if` 有没有 `else`：
+
+- 第一次从"提到 checker 文件名的行"开始扫——注释里也有这个文件名；
+- 第二次从 guard 往后找第一个列 2 的 `fi`——12b 的块内部第 136 行就有一个。
+
+两次都是**断言是对的，锚点找错了**。锚定"文件里最后一个列 2 的 `fi`"才对。
+
+**4. CHANGELOG 有 10 条从未提交。** 每次插入后 `git add` 都撞上另一个
+agent 持有的 `.git/index.lock`，而我把 `git add` 的输出经
+`grep -v ignored | head -2` 过滤，**错误被吞掉了**，脚本仍报"已插入"。
+
+**流程成功信号比结论错误信号更容易骗人**——这是本轮 8.1 的产品缺陷，
+在我自己的工作流里一模一样地重演了一遍。
+
+### 8.7 本轮落地的修复
+
+| 提交 | 缺陷 |
+|---|---|
+| `ccedab10` | Java 编译失败被降级模式 WARN 放行 |
+| `cd3a4664` | 探针 fixture 加 `.gitignore` / `.architecture-skip` |
+| `e3202fed` | 工具缺失被当成"发现违规"（swift/dart/flutter）；`PIPESTATUS` |
+| `99babd26` | 链未到达的门禁被记为 SKIP |
+| `444b02cd` | 持久化丢掉报告字段 |
+| `722f465c` | 耗时基线 |
+| `fe19af25` | 门禁 × 语言矩阵 |
+| `4630fce4` | 12b/12c 记 PASS 却什么都没检查 |
+
+### 8.8 测试计数
+
+| 套件 | 结果 |
+|---|---|
+| `gate-report-not-reached.test.bats` | 4/4 |
+| `report-persisted-fields.test.bats` | 3/3 |
+| `prelude-gate-honest-skip.test.bats` | 4/4 |
+| `gate-13-java-compile-fail.test.bats` | 3/3 |
+| `adapter-tool-missing.test.bats` | 5/5 |
+
+全部做过证伪：删掉修复后对应用例变红。
+
+### 8.9 下一轮该查什么
+
+按"门禁算对之后结论去哪了"这条线，还有两处没查：
+
+1. **Gate 5（覆盖率）的 commit-only 记录**：它写不写审计？理由带不带？
+2. **pre-push 的门禁**：那一侧的报告与审计是否也有同样的三处丢失？
