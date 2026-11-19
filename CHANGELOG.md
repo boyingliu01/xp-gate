@@ -21,6 +21,69 @@
 
 回归：74 vitest + 19 bats 全绿；gate-3.sh / gate-4.sh 各自五份副本 md5 唯一。
 
+## [0.38.34.0] - 2026-11-19
+
+**IaC 适配器在钩子里从来拿不到文件列表——因为门禁 1 调用它时不传参数。**
+
+### 实测的矛盾
+
+同一个修复，两条路径给出两个答案：
+
+| 调用方式 | 结果 |
+|---|---|
+| `run_static_analysis "bad.tf"`（直接调用） | `rc=1`，报 `Error: Unclosed configuration block` |
+| 钩子里的门禁 1 | `✅ PASSED` |
+
+### 根因
+
+`gate-1-entry.sh:843` 是这样调的：
+
+```bash
+G1A_OUTPUT=$(run_static_analysis 2>&1) || G1A_EXIT=$?
+```
+
+**没有参数。** 适配器是按 `$CURRENT_LANG` 被 source 进来的，语言路由已经由门禁做完，
+所以适配器拿到的 `$1` 是空的。于是：
+
+```bash
+local iac_files=$(detect_iac_files "")   # → TERRAFORM: （空）
+if [ "$has_iac" = false ]; then
+  return 0                               # ← 在任何检查之前就返回了
+fi
+```
+
+空的 `$1` 被读成了「没有东西要查」，而它真正的意思是「范围已经由门禁定好了」。
+
+### 修复
+
+`$1` 为空时回退到门禁维护的 `$CHANGED_FILES`。另外 5 个适配器早就有这个回退，
+`iac.sh` 是唯一没有的那个。
+
+### 这个缺陷为什么值得单独记一笔
+
+上一版修复（加 `terraform validate`）**本身是对的，测试也是绿的**——因为测试用
+文件名直接调适配器。但**生产路径根本不带参数**，所以那个修复在真实提交里从未执行过。
+
+> **测试通过只证明「被测试的那种调用方式」是对的。
+> 它不证明生产代码用的就是那种调用方式。**
+
+这与本项目已经记录过的一整个错误家族同源：断言的对象与被断言的对象不是同一个。
+区别只在于这次的分界线是*调用契约*，而不是*断言内容*。
+
+### 门禁 1 × 15 语言
+
+```
+PASS: 15   SKIP: 0   FAIL: 0
+```
+
+11 个语言由门禁 1 亲自检出（python / go / shell / powershell / java / kotlin /
+iac / dart / php / swift / flutter），4 个被更早顺序的门禁拦下（typescript → 门禁 9，
+csharp → 门禁 4，cpp → 覆盖率，objectivec → 门禁 5），均属有效判定。
+
+新增 `scripts/probe-gate1-languages.sh`：门禁 1 是 commit-only（`check 1` 恒定 SKIP），
+探针必须驱动真实 `pre-commit`，这是唯一能观察到语言路由的方式。
+
+
 ## [0.38.30.0] - 2026-11-19
 
 **PHP 接入，以及 C# 复盘查出的「Dart 表面支持、实际不评分」。**

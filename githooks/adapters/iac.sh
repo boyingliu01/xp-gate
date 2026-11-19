@@ -59,6 +59,19 @@ detect_iac_files() {
 
 run_static_analysis() {
   local changed_files="$1"
+  # Gate 1 calls this with NO argument (githooks/gate-entries/gate-1-entry.sh
+  # does `G1A_OUTPUT=$(run_static_analysis 2>&1)`) and routes by $CURRENT_LANG
+  # instead. An empty $1 therefore means "everything the gate already decided is
+  # in scope", not "nothing to do" -- fall back to the staged set the gate keeps
+  # in $CHANGED_FILES. Without this, `detect_iac_files ""` finds no files,
+  # `has_iac` is false, and the function returns 0 before reaching any check.
+  #
+  # Measured: through the hook, Gate 1 printed "✅ PASSED - Language-specific
+  # code quality checks." for an unparseable .tf file; called directly with the
+  # filename it returned 1. The adapter was fine; the argument was empty.
+  if [ -z "$changed_files" ] && [ -n "${CHANGED_FILES:-}" ]; then
+    changed_files="$CHANGED_FILES"
+  fi
   local iac_files=$(detect_iac_files "$changed_files")
   
   # Check if any IaC files are present
