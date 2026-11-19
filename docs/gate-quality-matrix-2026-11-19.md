@@ -465,6 +465,53 @@ time: 0.156ms
 叫它 no_files 会把它藏起来）；解析出的「Found N clones」压过空报告检查
 （那是扫描发生过的证据）。
 
+
+### 3.7 门禁 9：承诺了「有人没构建」，只兑现了一种情况
+
+`GATE_9_UNVERIFIED` 的注释写着「a value means *this commit contains code nobody
+built*」，聚合段也要求 unverified 部分「必须说出来」。但**只有 Gradle 分支在赋值**。
+
+一个 Go 文件带类型错误，同时跑门禁 9 和 13：
+
+```
+→ Gate 9: Build integrity...
+     ℹ️  Not a TypeScript project - skipping build integrity check
+     ⏭️  SKIPPED - Build integrity (not a TypeScript project)
+⏭️  Gate 9 skipped in 0s (nothing was verified)
+
+ℹ️  No staged C/C++ source files -- nothing to compile
+Gate 13 (PASS) completed in 1s
+```
+
+`go build` 对同一份文件报错。**没有门禁构建它，也没有门禁说明这一点。**
+
+这与门禁 5 的「五种 SKIP 措辞只有一种被识别」是同族：**机制存在、文档成立、只接了一个入口**。
+
+修复改为遍历 `PROJECT_LANGS`（权威语言来源），记录变更集里实际涉及、又不是 TS/Java
+两半覆盖的语言。三处输出都补上：
+
+| 位置 | 之前 | 之后 |
+|---|---|---|
+| PASS 提示 | 只有 Gradle | 任何未构建语言 |
+| SKIP 行 | `(nothing was verified)` | `no build-integrity half for: go:no_build_integrity_half` |
+| journal | 只有 Gradle | 任何未构建语言 |
+
+改动前，一个纯 Go 提交和一个纯文档提交的 SKIP 行**完全一样**——这是最需要修的一点。
+
+### 我差点第三次交付「绿得毫无意义」
+
+第一版测试通过时，修复**一行都没执行**：测试桩没设 `PROJECT_LANGS`，而它只在门禁 0 的
+`.xp-gate-config.json` 分支里赋值，循环因此空转。补上变量后才真正变红。
+
+端到端更糟：探针的 `CHANGED_FILES` 是空的（上一次提交已消耗掉变更），
+所以「没报警告」看起来像修复失效。加 `bash -x` 才看到
+`GATE_9_UNVERIFIED=go:no_build_integrity_half` **早已算对**——
+只是那条警告的条件是 `STATUS = PASS`，而 Go 提交走 SKIP。
+
+**这是连续第三轮「症状是探针缺陷、穿着产品缺陷的衣服」。** 三次的形态各不相同
+（子 shell 变量、错误的夹具、被消耗的变更集），共同的教训是同一句话：
+**在看到 gate 内部变量之前，不要相信 gate 的外部症状。**
+
 ## 四、我自己的验证抓住的错误
 
 每一个都「看起来像成功」。记录在此，因为它们比结论更能说明问题。
