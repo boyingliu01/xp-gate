@@ -256,6 +256,182 @@ generate_quality_report() {
   local GATE_TIMINGS_JSON
   GATE_TIMINGS_JSON=$(gate_timings_json)
 
+  # --- gate_key_status: NOT_REACHED vs SKIP ------------------------------------
+  # A gate the chain never reached is NOT a gate that decided to skip.
+  #
+  # Every status below is written as ${GATE_N_STATUS:-SKIP}, and a body that never
+  # ran never sets the variable -- so "the chain stopped before this gate" and
+  # "this gate chose to skip" produced the identical report row. Gate-driver.sh
+  # had already fixed the CONSOLE half of this ("Chain stopped at Gate 1 -- these
+  # gates were NOT reached"); the JSON half was never done.
+  #
+  # Measured 2026-11-20, iac fixture, Gate 1 blocked:
+  #     console: chain stopped, NOT reached: 2 3 8 10 7 5 6 4
+  #     report : gate7_iac_security {"status":"SKIP","scanned_files":0}
+  # and the matrix analyser then flagged "the planted defect was not caught by
+  # G7" against a gate whose body had never been invoked. The wrong verdict was
+  # produced by the REPORT, not by the gate.
+  #
+  # gate_key_status KEY DEFAULT:
+  #   - the variable is set      -> report it verbatim (the gate ran and decided)
+  #   - the key is in the NOT-REACHED list -> NOT_REACHED
+  #   - otherwise                -> the caller-supplied default
+  # A gate the chain never reached is NOT a gate that decided to skip.
+  #
+  # The console has drawn that distinction since the driver was fixed ("Chain
+  # stopped at Gate N -- these gates were NOT reached"), but the JSON did not:
+  # every status below was written as ${GATE_N_STATUS:-SKIP}, and a body that never
+  # ran never sets the variable. So the report said "SKIP" for gates whose bodies
+  # had never been invoked -- the exact confusion the console message exists to
+  # prevent, surviving in the machine-readable output.
+  #
+  # Measured 2026-11-20, iac fixture, Gate 1 blocked the chain:
+  #     console: chain stopped, NOT reached: 2 3 8 10 7 5 6 4
+  #     report : gate7_iac_security {"status":"SKIP","scanned_files":0}
+  # and the matrix analyser then reported "the planted defect was not caught by
+  # G7" -- a wrong verdict produced by the report, against a gate whose body had
+  # never run.
+  gate_key_status() {
+    case "$1" in
+      1)
+        if [ -n "${GATE_1_STATUS:-}" ]; then
+          printf %s "${GATE_1_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 1 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      2)
+        if [ -n "${GATE_2_STATUS:-}" ]; then
+          printf %s "${GATE_2_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 2 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      3)
+        if [ -n "${GATE_3_STATUS:-}" ]; then
+          printf %s "${GATE_3_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 3 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      4)
+        if [ -n "${GATE_4_STATUS:-}" ]; then
+          printf %s "${GATE_4_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 4 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      5)
+        if [ -n "${GATE_5_STATUS:-}" ]; then
+          printf %s "${GATE_5_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 5 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      6)
+        if [ -n "${GATE_6_STATUS:-}" ]; then
+          printf %s "${GATE_6_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 6 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      7)
+        if [ -n "${GATE_7_STATUS:-}" ]; then
+          printf %s "${GATE_7_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 7 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      8)
+        if [ -n "${GATE_8_STATUS:-}" ]; then
+          printf %s "${GATE_8_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 8 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      9)
+        if [ -n "${GATE_9_STATUS:-}" ]; then
+          printf %s "${GATE_9_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 9 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      10)
+        if [ -n "${GATE_10_STATUS:-}" ]; then
+          printf %s "${GATE_10_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 10 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      11)
+        if [ -n "${GATE_11_STATUS:-}" ]; then
+          printf %s "${GATE_11_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 11 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      12)
+        if [ -n "${GATE_12_STATUS:-}" ]; then
+          printf %s "${GATE_12_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 12 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      12b)
+        if [ -n "${GATE_12b_STATUS:-}" ]; then
+          printf %s "${GATE_12b_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 12b '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      12c)
+        if [ -n "${GATE_12c_STATUS:-}" ]; then
+          printf %s "${GATE_12c_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 12c '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      13)
+        if [ -n "${GATE_13_STATUS:-}" ]; then
+          printf %s "${GATE_13_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 13 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
+      *) printf %s "SKIP" ;;
+    esac
+  }
+
   cat > "$REPORT_FILE" << ENDJSON
 {
   "reportVersion": "2.0",
@@ -286,17 +462,17 @@ generate_quality_report() {
   "gates": {
     "gate1_static_analysis": {
       "name": "Code Quality (Static + Lint + Shell)",
-      "status": "${GATE_1_STATUS:-SKIP}",
+      "status": "$(gate_key_status 1)",
       "tool": "${GATE_1_TOOL:-auto}"
     },
     "gate2_dup_code": {
       "name": "Duplicate Code",
-      "status": "${GATE_2_STATUS:-SKIP}",
+      "status": "$(gate_key_status 2)",
       "metric": "similarity <= 5%"
     },
     "gate3_complexity": {
       "name": "Cyclomatic Complexity",
-      "status": "${GATE_3_STATUS:-SKIP}",
+      "status": "$(gate_key_status 3)",
       "reason": "${GATE_3_REASON:-}",
       "threshold": "${CCN_THRESHOLD:-5}",
       "blockThreshold": "${CCN_THRESHOLD:-5}",
@@ -304,13 +480,13 @@ generate_quality_report() {
     },
     "gate4_principles": {
       "name": "Clean Code + SOLID",
-      "status": "${GATE_4_STATUS:-SKIP}",
+      "status": "$(gate_key_status 4)",
       "reason": "${GATE_4_REASON:-}",
       "warnings": ${WARNING_COUNT:-0}
     },
     "gate5_tests": {
       "name": "Tests + Coverage",
-      "status": "${GATE_5_STATUS:-SKIP}",
+      "status": "$(gate_key_status 5)",
       "reason": "${GATE_5_DETAIL:-}",
       "thresholds": { "lines": ${COVERAGE_THRESHOLD}, "functions": null, "branches": null, "statements": null },
       "threshold_source": "${COVERAGE_THRESHOLD_SOURCE}",
@@ -319,30 +495,30 @@ generate_quality_report() {
     },
     "gate6_arch_boyscout": {
       "name": "Architecture + Boy Scout Rule",
-      "status": "${GATE_6_STATUS:-SKIP}",
+      "status": "$(gate_key_status 6)",
       "reason": "${GATE_6_REASON:-}",
       "boyScoutPassed": $BS_PASSED,
       "boyScoutBlocked": $BS_BLOCKED
     },
     "gate7_iac_security": {
       "name": "IaC Security Scanning",
-      "status": "${GATE_7_STATUS:-SKIP}",
+      "status": "$(gate_key_status 7)",
       "scanned_files": ${GATE_7_SCANNED_FILES:-0},
       "tools": "checkov, hadolint, kube-score, tflint"
     },
     "gate8_secret_scanning": {
       "name": "Secret Scanning",
-      "status": "${GATE_8_STATUS:-SKIP}",
+      "status": "$(gate_key_status 8)",
       "tool": "gitleaks"
     },
     "gate9_build_integrity": {
       "name": "Build Integrity",
-      "status": "${GATE_9_STATUS:-SKIP}",
+      "status": "$(gate_key_status 9)",
       "tool": "tsc + npm pack + import check"
     },
     "gate10_sast": {
       "name": "SAST Security Scan",
-      "status": "${GATE_10_STATUS:-SKIP}",
+      "status": "$(gate_key_status 10)",
       "reason": "${GATE_10_REASON:-}",
       "scanned_files": ${GATE_10_SCANNED_FILES:-0},
       "path": "${GATE_10_SEMGREP_PATH:-direct}",
@@ -351,7 +527,7 @@ generate_quality_report() {
     },
     "gate11_sprint_flow": {
       "name": "Sprint Flow Enforcement",
-      "status": "${GATE_11_STATUS:-SKIP}",
+      "status": "$(gate_key_status 11)",
       "tool": "sprint-gate.sh"
     },
     "gate12_file_hygiene": {
