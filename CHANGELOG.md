@@ -1,5 +1,409 @@
 # Changelog
 
+## [0.38.55.0] - 2026-11-20
+
+**报告把每个字段都算好了，然后写盘前全扔掉了。**
+
+### 缺陷
+
+`generate_quality_report()` 先写一份完整报告，随后有一步把它"持久化"——
+而这一步用**写死的键列表**重建文档：
+
+```js
+const r = {timestamp, trigger, branch, commit, changed_files,
+           overall, gates, warnings, errors};
+```
+
+模版后来长出来的每一个字段——`gateTimings`、`coverageMatrix`、
+`coverageWarnings`、`languagesSource`、`reportVersion`、`language`——都被静默丢弃。
+
+### 实测
+
+本仓库连续 8 份真实报告：
+
+```
+顶层键: timestamp, trigger, branch, commit, changed_files,
+        overall, gates, warnings, errors, duration_ms
+gateTimings: 全部 8 份都不存在
+```
+
+而模版里关于 `gateTimings` 的注释写着：
+
+> published so "which gate is slow" is a measurement instead of an estimate
+
+**它一直在发布，发布进了一个随后被丢弃、替换成更短文档的文件里。**
+
+### 这是我系列缺陷家族的又一层
+
+前面那些是**判定**在撒谎（没检查却报通过）。这个是**测量**活不到磁盘。
+
+### 修复
+
+```js
+const r = Object.assign({}, br, { ...需要重算的字段 });
+```
+
+保留 `delete r.duration_ms` 和 `Number.isFinite(d)&&d>0`——
+否则展开会复活一个被守卫拒绝的陈旧值。
+
+### 修复后
+
+```
+顶层键: reportVersion, generatedAt, branch, commit, language, overall,
+        languagesSource, gateTimings, coverageMatrix, coverageWarnings,
+        gates, timestamp, trigger, changed_files, warnings, errors, duration_ms
+gateTimings: {"version-consistency":1108}
+```
+
+### 测试
+
+3 个。**AC-PF-01 的第一版是坏的**：它 grep 整个文件找 `Object.assign`，
+而这个文件别处本来就有 `Object.assign`——还原缺陷后测试仍然绿。
+
+**一个在 bug 存在时依然通过的护栏，比没有护栏更糟。**
+
+### 顺带：分析器也要认识新状态
+
+矩阵分析器把 `NOT_REACHED` 当成漏检。修法不只是加标志，还要**调整判断顺序**：
+从未运行的门禁既无 FAIL 也无 BLOCK，同时满足「没有 FAIL/BLOCK」的判断，
+旧顺序下「门禁不可达」的分支永远轮不到——于是对**从未被调用**的门禁
+报出「缺陷没被抓到」。反过来先判不可达才对。
+
+## [0.38.54.0] - 2026-11-20
+
+**报告里的 `SKIP` 有两种完全不同的含义，而它们长得一模一样。**
+
+### 缺陷
+
+驱动是 fail-fast 的，但报告为**每个**门禁打印一行，状态都写成
+`GATE_N_STATUS:-SKIP`——**没运行的门禁体永远不会设置这个变量**。
+
+于是「链在这个门禁之前就断了」和「这个门禁决定跳过」产生**完全相同的一行**。
+
+### 实测
+
+iac fixture，门禁 1 阻断：
+
+```
+控制台: Chain stopped at Gate 1 — these gates were NOT reached: 2 3 8 10 7 5 6 4
+报告:   gate7_iac_security {"status":"SKIP","scanned_files":0}
+```
+
+矩阵分析器读到那个 `SKIP`，理解为「门禁 7 运行了、没发现问题」，
+报出 **「iac 的植入缺陷没有被 G7 抓到」**——一个由**报告**制造的假结论。
+
+### 最讽刺的地方
+
+控制台那一半**早就修好了**：`Chain stopped at Gate N — these gates were NOT reached`
+就是那次修复的产物。**但报告 JSON 那一半从来没做。**
+
+人能看到的事实，机器看不到。
+
+### 修复
+
+驱动在 `exit` 前导出未到达列表（必须 `export`，报告在更晚的 EXIT trap 里读取）：
+
+```bash
+XP_GATE_NOT_REACHED="$(printf '%s' "$_rest" | sed 's/^ *//')"
+export XP_GATE_NOT_REACHED
+```
+
+报告的 11 处 status 改为经过 `gate_key_status`：
+门禁设了状态就原样，在未到达列表里就 `NOT_REACHED`，否则 `SKIP`。
+
+### 修复后
+
+```
+gate2_dup_code               NOT_REACHED
+gate7_iac_security           NOT_REACHED
+gate9_build_integrity        SKIP          <- 它真的运行了
+gate12_file_hygiene          PASS
+```
+
+### 我自己犯的两个错
+
+**1. 把注释插进了 heredoc。** 辅助函数的说明注释被插进
+`cat > "$REPORT_FILE" << ENDJSON` 内部，原样输出到 JSON：
+`SyntaxError: Expected double-quoted property name at position 894`。
+**提交钩子没报错，因为它不解析这个文件。**
+
+**2. shellcheck 连续三轮不通过。** 间接展开 `${!var}` 触发 3 条 SC2154，
+拆行、case 分支赋值、函数级 disable 都没用。最终**完全不用间接展开**
+（每个 key 一个 case 分支）才清零——而这个更啰嗦的写法**本来就更安全**：
+key 集合被显式枚举，拼错是可见的遗漏，而不是静默为空的状态。
+
+## [0.38.53.0] - 2026-11-20
+
+**没装 SwiftLint，每个 Swift 提交都被拦下，理由是"代码质量违规"。**
+
+### 实测
+
+```
+Running static analysis for swift...
+SwiftLint not available
+BLOCKED - swift code quality violations (fix or add suppressions)
+Chain stopped at Gate 1 — these gates were NOT reached: 2 3 8 10 7 5 6 4
+```
+
+一次输出里两个伤害：干净项目被判为脏，**且后八个门禁根本没跑**。
+
+### 契约
+
+| 退出码 | 含义 |
+|---|---|
+| 0 | PASS |
+| 1 / 2 | BLOCK（发现违规 / fail-closed） |
+| 3 | WARN，**未验证** |
+
+`swift.sh` 在工具缺失时 `return 1`，被判为"分析器发现了问题"。
+
+**这是本系列缺陷的反向版本**：前面几个是"没检查却报通过"，
+这个是"没检查却报失败"。同一个根因——
+**退出码是按它的值选的，不是按调用方怎么用选的**。
+
+### 修复范围
+
+| Adapter | 工具缺失返回值 | 处理 |
+|---|---|---|
+| swift | 1 -> 3 | 修 |
+| dart | 1 -> 3 | 修 |
+| flutter | 1 -> 3 | 修 |
+| php | 2 | **不改**：Gate 1 有专门的 fail-closed 分支，措辞和测试都锁着 |
+
+三个都补上 `XP_G1_REASON`，否则只是把"无理由的 BLOCK"换成"无理由的 WARN"。
+
+### 顺手抓到的第二个缺陷
+
+`dart analyze | sed ...` 之后 `return $?` 拿到的是 **sed** 的退出码。
+sed 几乎总是成功，所以真发现被报成 0——**又一个没挣到的通过**。
+改成 `PIPESTATUS[0]`。
+
+第一次修复漏掉了 `run_coverage` 里的 `dart test --coverage` 那一处，
+是 AC-ANT-05 抓出来的：**我自己写的修复不完整，测试抓到了。**
+
+### 测试
+
+5 个。工具缺失的用例用**限制 PATH** 模拟，不 skip——"本机装了所以跳过"
+意味着该断言在最重要的那台机器上永远不执行。
+
+## [0.38.52.0] - 2026-11-20
+
+**Java 代码编译不过，门禁 13 说「降级模式，不归我管」就放行了。**
+
+### 实测
+
+```
+src/main/java/A.java : public int f() { return "no"; }
+mvn -o compile       : [ERROR] COMPILATION ERROR :
+                       ... 不兼容的类型: java.lang.String无法转换为int
+门禁 13              : Java build failed (mvn exit 1) in degraded mode
+                       — not attributed to Gate 13
+提交                 : 通过（WARN）
+```
+
+### 降级模式错在哪
+
+门禁 13 的 Java 分支有降级模式：`-Xlint` 没能注入时，
+这一轮**说不了编译严格性**。
+
+缺陷在于它**把「可编译性」也一起放弃了**：任何非零 `mvn` 退出都被当成
+"通常是缺离线依赖"，直接 WARN。
+
+> **缺依赖不会打印 `COMPILATION ERROR`。** 它失败在解析构件阶段。
+
+### 修复
+
+降级模式下先看 Maven 输出，有 `COMPILATION ERROR` 就 FAIL。
+顺序是修复的全部：放在 `return GATE13_WARN` 之后就是死代码。
+
+### 修复后
+
+```
+Java compilation failed (mvn exit 1) — javac reported errors in the sources
+Gate 13 (FAIL) completed in 5s
+BLOCKED - Gate 13: Compiler Strictness (FAIL)
+```
+
+### 测试
+
+3 个。AC-JAVA-CF-02 钉住"缺依赖仍然是 WARN"——
+把每个降级失败都翻成 FAIL 会让所有离线构建误拦。
+
+**这两个测试各自抓到了我自己的一次同类错误**：AC-01 匹配到注释里的
+"not attributed to Gate 13"，把正确的修复报成死代码；AC-02 又匹配到注释里的
+"Could not resolve"。**都是「grep 到了注释而非代码」。**
+
+## [0.38.51.0] - 2026-11-20
+
+**同一份 Dart 代码，能否被类型检查，取决于 pubspec 里有没有 `flutter:` 这个词。**
+
+### 根因链：三层，前两层都不是我以为的那个
+
+**第一层（我的错误假设）**：`dart.sh` 没声明检查器。
+读代码发现它**声明了**。
+
+**第二层**：项目被检测成 `flutter` 而不是 `dart`。确认——
+`pubspec.yaml` 提到 `flutter:` 时门禁 0 判定为 `flutter`，
+而 `flutter.sh` 当时没有声明。**这是真缺口**，补上了。
+**但补完仍未生效。**
+
+**第三层（真正的原因）**：`~/.config/xp-gate/adapters/dart.sh` 是**旧版**。
+
+```
+仓库版   grep -c compiler_check_command -> 1
+全局副本 grep -c compiler_check_command -> 0
+```
+
+adapter 解析链全局优先，所以钩子读的是那个没有声明的旧文件。
+
+**这正是 `githooks/AGENTS.md` 里写着的陷阱**：
+
+> An adapter is stale until proven otherwise — md5sum both copies before
+> believing a hook-vs-direct-call difference.
+
+**我读到了这条警告，却没有在排查时执行它。**
+
+### 修复
+
+两侧都补，全局副本全量同步。
+AC-FLUTTER-TC-02 钉住"两者必须声明同一条命令"。
+
+### 元教训
+
+我在**同一个陷阱上花了三次排查**：先猜代码缺陷，再猜检测缺陷，
+最后才去 `md5sum` 全局副本。AGENTS.md 已经写了答案，
+**而我先读了它、再违反了它**。
+
+## [0.38.50.0] - 2026-11-20
+
+**SKIP 记录了，但没写原因。**
+
+门禁 12 / 12b / 12c 的 `record_gate_audit` 调用不传第 6 个参数，
+所以审计日志里只有 `"status":"SKIP"` 而没有 `detail`。
+
+这与项目自己的规则冲突：**"not checked" 必须能说明为什么没检查**。
+一个没有理由的 SKIP，和"链里根本没这个门禁"在审计上是无法区分的。
+
+### 修复
+
+三处全部传入 `GATE_N_DETAIL`，并把 Gate 12 的两个 SKIP 站点
+补上 `not_selected` / `script_not_found`。
+
+### 测试
+
+3 个。AC-SKIP-REASON-01 数引号参数个数 >= 6，
+因为传参这个动作本身才是被钉住的东西。
+
+## [0.38.49.0] - 2026-11-20
+
+**Kotlin 的类型错误，没有任何门禁在检查。**
+
+门禁 1 只跑 ktlint/detekt（格式与静态规则），门禁 13 没有 Kotlin 的检查器声明。
+结果是：一个类型错误的 Kotlin 文件可以提交。
+
+### 为什么之前没被发现
+
+`kotlinc .` 不接受目录：
+
+```
+error: no source files; source file or directory not found: .
+```
+
+所以"给 Kotlin 加类型检查"看起来不可行。
+实际做法是用 globstar 枚举源文件后再交给 kotlinc。
+
+### 修复
+
+`kotlin.sh` 增加 `compiler_check_command()`。顺带把 6 处
+`PIPESTATUS` 加上引号（shellcheck 从 6 条基线降到 0）。
+
+### 测试
+
+4 个。
+
+## [0.38.48.0] - 2026-11-20
+
+**mypy 从未运行，门禁 1 打印了 `PASSED - mypy type checking.`**
+
+### 缺陷
+
+`python-incremental-typecheck.sh` 的 `SCOPE_DIRS` 为空时：
+
+1. `TYPECHECK_FILES` 是空数组
+2. `return 0`
+3. 调用方看到 0，打印 PASSED
+
+一个**根目录级**的 Python 项目（没有 `src/` 也没有 `scripts/`）
+从来没被 mypy 看过一眼，而门禁说它通过了。
+
+### 这是本会话缺陷家族的**最纯粹形态**
+
+> 「检查成功」这句话，由一个**从未运行过检查的代码路径**打印出来。
+
+### 修复
+
+scope 为空时直接检查暂存文件，并明确告知。
+注意：这段声明**必须在赋值之前**，否则数组会被清空。
+
+### 测试
+
+3 个（AC-PY-MYPY-01/02/03）。
+
+## [0.38.47.0] - 2026-11-20
+
+**没有 baseline 时，编译不过的修改文件被 report-only 放行了。**
+
+门禁 13 的 baseline 有两种用途，而它们被合并了：
+
+1. **ratchet**（不新增警告）——没有 baseline 确实无法比较
+2. **可编译性**——这与 baseline 无关
+
+没有 baseline 时，代码走进了第 2 个豁免，把编译错误当成"无法比较"跳过。
+
+### 修复
+
+`gate13_count_errors()` 只数 `error:` 行，
+在 fallback 到 report-only 之前先检查是否有编译错误。
+
+### 测试
+
+3 个。AC-NB-01 用带 `echo` 前缀的完整模式定位目标行，
+因为裸短语匹配到了 900 行之前的一处注释。
+
+## [0.38.46.0] - 2026-11-20
+
+**被拦下的提交，没有报告。**
+
+门禁 8（密钥扫描）在加载时执行 `trap gate8_cleanup EXIT`，
+**替换掉了** `_quality_report_on_exit` —— 于是提交被拦时报告不生成。
+
+实测：
+
+| 场景 | 提交退出码 | 报告数 |
+|---|---|---|
+| 正常阻断 | 1 | **0** |
+| `XP_GATE_ONLY_GATE=8` | 1 | 1 |
+
+### 第一次修复更糟
+
+加链式 trap 后报告出现了，但 `commit rc=0`——**被拦的提交被放行了**。
+因为 `rm` 把上一个命令的退出码改成了 0，而报告函数用那个值退出。
+
+这比原缺陷更严重：原本只是少了报告，修完后是少了拦截。
+
+修法：先保存当前退出码，再用子 shell 恢复它，最后执行链式 trap。
+
+### 第二个陷阱
+
+`eval "$(trap -p EXIT)"` **会重新安装 trap，而不是执行它**。
+必须剥掉 `trap -- ` 前缀和 ` EXIT` 后缀以及包围的引号。
+
+**这个是测试抓到的，不是我读代码看出来的。**
+
+### 测试
+
+4 个，含 AC-GATE8-TRAP-04（退出码保持不变）。
+
 ## [0.38.38.0] - 2026-11-19
 
 **门禁 11 把 SKIP 的原因打印出来，然后在写进记录时把它丢掉。**

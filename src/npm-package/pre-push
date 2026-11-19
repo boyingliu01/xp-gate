@@ -1,0 +1,1720 @@
+#!/bin/bash
+_LE_CR=$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]'); test "${_LE_CR:-0}" -eq 0 || { printf '%s\n' "======================================================================" "FATAL: hook has CRLF line endings -- bash cannot parse it (#546)." "  file: $0" "  fix : tr -d '\\r' < \"$0\" > \"$0.tmp\" && mv \"$0.tmp\" \"$0\" && chmod +x \"$0\"" "Or re-sync the installed copy: xp-gate doctor --sync-hooks" "======================================================================" >&2; exit 1; }
+#
+# The line above is the #546 line-ending self-check. It MUST stay on the first
+# executable line, as a SINGLE physical line, using no construct whose keyword
+# needs a line boundary. All three are load-bearing:
+#
+#  * A CRLF rewrite puts \r at the end of EVERY line. Any construct whose
+#    keywords must match across lines -- if/then/fi, case/esac, for/do/done --
+#    then fails to PARSE and none of it runs. The original #546 implementation
+#    was a nested if/fi spanning 11 lines: it could not survive the very
+#    condition it detects. On a CRLF copy bash reported
+#        line 76: syntax error near unexpected token `$'{\r''
+#    blaming an innocent function far below -- which is exactly the failure #546
+#    set out to prevent. It looked correct locally only because that bash build
+#    deferred the error past the first command.
+#  * Even on one line, `if ... then ... fi` ends in `fi\r`, and `then\r` / `fi\r`
+#    are ordinary words to the tokenizer. So the check uses only
+#    `test ... || { ...; exit 1; }`: the `{` already follows `; `, so a trailing
+#    \r on the line cannot change how it tokenizes.
+#  * The CR count is byte-wise (`tr -cd`). `grep -c $'\r'` reports 0 matches
+#    through the Git-Bash/MSYS layer even on files that carry CR bytes, which is
+#    what made earlier attempts at this fixture look green while CI stayed red.
+#
+# Verified: an LF copy runs through (0 CR bytes); a CRLF copy prints the FATAL
+# diagnosis and exits 1 with no syntax error.
+# Pre-push Hook — 8 gates: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
+# + M2 (Mock Density, WARNING) + ML (Mock Layering) + UI (UI Sprint Gates) + MW (Code Walkthrough) + S (Sprint Flow)
+#
+# DESIGN: Hook validates result/executes checks, Skill executes AI review
+# No CLI skill invocation - avoids OpenCode architecture mismatch
+#
+# Size limits intentionally REMOVED — AI workflows generate large cumulative pushes;
+# file count is not a quality signal. All pre-push runs journaled to .xp-gate/reports/pre-push/.
+#
+# See: docs/plans/delphi-review --mode code-walkthrough-pre-push-design-v2.md
+#
+# Install: cp this-file .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   CODE WALKTHROUGH - PRE-PUSH CHECK"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+REMOTE="$1"
+URL="$2"
+_PRE_PUSH_REPORT_DONE=0
+
+# The gate registry answers "what is gate MW called and which file decides it"
+# without reading 1200 lines of this hook. Optional by design: a consumer repo
+# installed from an older package has no registry, and this hook must keep
+# working there -- same contract as pre-commit:318-323.
+#
+# Registering is BOOKKEEPING, not execution policy: the gates below keep their
+# own order and skip semantics. Before this, the registry knew nothing about any
+# pre-push gate, so half the gates this project runs could not be looked up by
+# name at all (#769).
+_PRE_PUSH_GATE_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+_PRE_PUSH_REGISTRY="$_PRE_PUSH_GATE_DIR/gate-registry.sh"
+[ -f "$_PRE_PUSH_REGISTRY" ] || _PRE_PUSH_REGISTRY="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-registry.sh"
+if [ -f "$_PRE_PUSH_REGISTRY" ]; then
+  # shellcheck source=/dev/null
+  . "$_PRE_PUSH_REGISTRY"
+  PRE_PUSH_REGISTRY_STATUS="loaded"
+else
+  # Absent is not a failure: record it so a missing registry is visible in the
+  # journal instead of silently indistinguishable from "nothing to report".
+  PRE_PUSH_REGISTRY_STATUS="missing"
+fi
+
+write_pre_push_report() {
+  local exit_code="$1"
+  local timestamp report_ts reports_dir report_file commit_hash verdict
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  report_ts=$(date -u +"%Y-%m-%d-%H%M%S")
+  reports_dir=".xp-gate/reports/pre-push"
+  report_file="${reports_dir}/${report_ts}.json"
+  # #710: `git rev-parse` prints a partial line before it fails, so
+  # `$(cmd || echo x)` captures "<partial>\nx". Strip newlines before the value
+  # reaches this JSON journal — a raw newline cannot appear inside a JSON string.
+  commit_hash=$(git rev-parse HEAD 2>/dev/null) || commit_hash=""
+  commit_hash=$(printf '%s' "$commit_hash" | tr -d '\r\n'); [ -n "$commit_hash" ] || commit_hash="unknown"
+  verdict=$([ "$exit_code" -eq 0 ] && echo "PASS" || echo "BLOCKED")
+  # #798: run-level wall-clock duration, from the shared now_ms clock. Emitted as
+  # Python `None` when unmeasurable so the field is explicitly JSON null rather
+  # than a believable 0 — the same rule pre-commit's duration_ms follows.
+  #
+  # Lower bound: the push cannot have run for less than the slowest gate it
+  # recorded. A value below that means the arithmetic is wrong, and a wrong
+  # number here is acted upon; null is the honest answer.
+  local xp_push_duration_ms="None"
+  if [ -n "${PRE_PUSH_START_MS:-}" ]; then
+    local _xp_push_now _xp_push_floor
+    _xp_push_now="$(now_ms 2>/dev/null || true)"
+    case "$_xp_push_now" in
+      ''|*[!0-9]*) _xp_push_now="" ;;
+    esac
+    _xp_push_floor="${MP_DURATION_MS:-0}"; case "$_xp_push_floor" in ''|*[!0-9]*) _xp_push_floor=0 ;; esac
+    if [ -n "${M_DURATION_MS:-}" ]; then
+      case "$M_DURATION_MS" in
+        ''|*[!0-9]*) : ;;
+        *) [ "$M_DURATION_MS" -gt "$_xp_push_floor" ] && _xp_push_floor="$M_DURATION_MS" ;;
+      esac
+    fi
+    if [ -n "$_xp_push_now" ] && [ "$_xp_push_now" -gt "$PRE_PUSH_START_MS" ]; then
+      local _xp_push_total=$(( _xp_push_now - PRE_PUSH_START_MS ))
+      if [ "$_xp_push_total" -ge "$_xp_push_floor" ]; then
+        xp_push_duration_ms="$_xp_push_total"
+      else
+        echo "   ⚠️  pre-push duration_ms rejected: measured ${_xp_push_total}ms is below the slowest gate (${_xp_push_floor}ms) — recording null." >&2
+      fi
+    fi
+  fi
+  mkdir -p "$reports_dir"
+  # #544: the survivor detail is a JSON document, so it cannot be interpolated
+  # into this heredoc — a single quote in a path would break the Python source.
+  # Hand it to the child through the environment and let Python parse it, then
+  # store it serialised back into the `details` string domain (every value there
+  # is a string; the journal has broken before over mixed types).
+  export XP_GATE_M_SURVIVORS_JSON="${M_SURVIVORS_JSON:-}"
+  # #597: resolve a WORKING interpreter instead of assuming `python3`.
+  #
+  # Measured on Windows Git Bash: `python3` resolves to the Microsoft Store
+  # execution-alias stub at
+  #     /c/Users/think/AppData/Local/Microsoft/WindowsApps/python3
+  # which exits non-zero and prints nothing (`python3 --version` is empty). The
+  # old `python3 - <<PY 2>/dev/null || true` then swallowed the failure, so:
+  #   - the JSON journal was never written;
+  #   - bash went on to execute the heredoc BODY as shell commands, producing
+  #       python3: line 56: None: command not found
+  #       python3: line 56: verdict: command not found
+  # A `|| true` around a whole script body cannot distinguish "python missing"
+  # from "script failed", and the journal is the only audit trail a push leaves.
+  #
+  # `python` is the real interpreter on Windows (3.12.x) while `python3` is the
+  # stub; on Linux `python3` is real and `python` may be absent. Probe both and
+  # require the candidate to actually report a version.
+  local py_bin=""
+  for _candidate in python3 python py; do
+    if command -v "$_candidate" >/dev/null 2>&1 && \
+       "$_candidate" --version >/dev/null 2>&1; then
+      py_bin="$_candidate"
+      break
+    fi
+  done
+  if [ -z "$py_bin" ]; then
+    echo "⚠️  Gate M journal: no working Python interpreter found (tried python3, python, py) — report NOT written for $report_file." >&2
+    return 0
+  fi
+  # #577: the scoring rule lives in its own module so it can be tested directly.
+  # Install layout: <hooks dir>/lib/prepush-score.py, with the deprecated copy
+  # under <hooks dir>/hooks/lib/ for older installs.
+  local score_lib=""
+  for _cand in \
+    "$(dirname "${BASH_SOURCE[0]}")/lib/prepush-score.py" \
+    "$(dirname "${BASH_SOURCE[0]}")/hooks/lib/prepush-score.py" \
+    ../githooks/lib/prepush-score.py; do
+    if [ -f "$_cand" ]; then
+      score_lib="$_cand"
+      break
+    fi
+  done
+  if [ -z "$score_lib" ]; then
+    # #569 follow-up: a missing scorer used to only warn, and the journal then
+    # carried `score: null, gates_run: null` — a document that LOOKS written but
+    # answers none of the questions it exists for. The score rule lives in
+    # prepush-score.py and nowhere else, so "no scorer" means the summary was
+    # never computed, not that the run had nothing to summarise. Fail closed.
+    echo "❌ Gate M journal: prepush-score.py not found — cannot compute the score for $report_file." >&2
+    echo "   Expected it beside the hook (lib/prepush-score.py) or under hooks/lib/. Reinstall with: xp-gate doctor --sync-hooks" >&2
+    return 1
+  fi
+  # No blanket `|| true`: a failing interpreter must be visible. The journal is
+  # advisory, so still return 0, but say so instead of dying silently.
+  #
+  # #597: the Python body goes to a TEMP FILE, not a `<<PY` heredoc.
+  #
+  # This function runs from the EXIT trap, i.e. AFTER the main body's
+  #     while read local_ref local_sha remote_ref remote_sha; do ...
+  # loop has consumed the hook's stdin. A heredoc is read from stdin, so by then
+  # `python - <<PY` receives NOTHING — bash discards the body and executes its
+  # lines as commands instead:
+  #     .git/hooks/pre-push: line 92: None: command not found
+  #     .git/hooks/pre-push: line 92: verdict: command not found
+  # The old form (`python3 - <<PY 2>/dev/null || true`) hid all of it, so the
+  # JSON journal was silently never written on any platform. Writing the script
+  # to a file removes the stdin dependency entirely.
+  local py_script py_rc
+  py_script="$(mktemp)" || {
+    echo "⚠️  Gate M journal: could not create a temp file — report NOT written for $report_file." >&2
+    return 0
+  }
+  # Values are injected here (they are expanded by bash before Python parses the
+  # file), exactly as the heredoc did.
+  {
+    printf '%s\n' \
+      'import json' \
+      'import os' \
+      'from pathlib import Path'
+    printf '%s\n' "pushed_files = '''${PUSHED_FILES:-}'''.splitlines()"
+    printf '%s\n' "passed = 1 if '$verdict' == 'PASS' else 0"
+    printf '%s\n' 'try:'
+    printf '%s\n' "    _survivors_raw = os.environ.get('XP_GATE_M_SURVIVORS_JSON', '').strip()"
+    printf '%s\n' '    survivors_detail = json.loads(_survivors_raw) if _survivors_raw else None'
+    printf '%s\n' 'except (ValueError, TypeError):'
+    printf '%s\n' '    survivors_detail = None'
+    printf '%s\n' "_m_details = {'skip_reason': '${GATE_M_SKIP_REASON:-}', 'skip_kind': '${GATE_M_SKIP_KIND:-}', 'duration_ms': '${M_DURATION_MS:-0}', 'mutation_score': '${M_SCORE:-}'}"
+    printf '%s\n' 'if survivors_detail is not None:'
+    printf '%s\n' "    _m_details['survivors'] = json.dumps(survivors_detail, sort_keys=True)"
+    printf '%s\n' 'report = {'
+    printf '%s\n' "  'timestamp': '$timestamp',"
+    printf '%s\n' "  'trigger': 'pre-push',"
+    printf '%s\n' "  'branch': '$CURRENT_BRANCH',"
+    printf '%s\n' "  'commit': '$commit_hash',"
+    printf '%s\n' "  'duration_ms': $xp_push_duration_ms,"
+    printf '%s\n' "  'changed_files': [f for f in pushed_files if f],"
+    printf '%s\n' "  'overall': {"
+    printf '%s\n' "    'score': None,"
+    printf '%s\n' "    'score_scope': None,"
+    printf '%s\n' "    'gates_passed': None,"
+    printf '%s\n' "    'gates_total': None,"
+    printf '%s\n' "    'verdict': '$verdict',"
+    printf '%s\n' "  },"
+    printf '%s\n' "  'gates': ["
+    printf '%s\n' "    {'id': 'MP', 'name': 'Gate-Script Mirror Parity', 'status': '${GATE_MP_STATUS:-SKIP}', 'details': {'duration_ms': '${MP_DURATION_MS:-0}'}},"
+    printf '%s\n' "    {'id': '10', 'name': 'Build Integrity', 'status': '${GATE_10_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M', 'name': 'Mutation Testing', 'status': '${GATE_M_STATUS:-SKIP}', 'details': _m_details},"
+    printf '%s\n' "    {'id': 'M-Python', 'name': 'Mutation Testing (Python)', 'status': '${GATE_M_PY_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_PY_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'M-Go', 'name': 'Mutation Testing (Go)', 'status': '${GATE_M_GO_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'M2', 'name': 'Mock Density (WARNING only)', 'status': '${GATE_M2_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_M3_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'UI', 'name': 'UI Sprint Gates', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL', 'skip_reason': '${GATE_DELPHI_SKIP_REASON:-}'}},"
+    printf '%s\n' "    {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {}}"
+    printf '%s\n' "  ],"
+    printf '%s\n' "  'warnings': [],"
+    printf '%s\n' "  'errors': [] if '$verdict' == 'PASS' else ['pre-push hook exited with code $exit_code'],"
+    printf '%s\n' '}'
+    printf '%s\n' "Path('$report_file').write_text(json.dumps(report, indent=2) + '\n')"
+  } > "$py_script"
+
+  # Native Python cannot open mktemp's POSIX path (/tmp/...) on Windows: it
+  # resolves the leading slash against the current drive and reports a file
+  # that "does not exist", which the caller then billed as "Gate M journal
+  # missing" on every push. Convert when a converter is available.
+  local py_script_native="$py_script"
+  if command -v cygpath >/dev/null 2>&1; then
+    # MSYS/Git-Bash: mktemp hands back /tmp/..., which is a MOUNT, not /<drive>/.
+    # Native python.exe resolves the leading slash against the current drive and
+    # reports "can't open file", which the caller then billed as "Gate M journal
+    # missing" on every push. cygpath knows the mount table; the helper library
+    # is not sourced yet at this point, so it cannot be used here.
+    py_script_native="$(cygpath -w "$py_script" 2>/dev/null || printf '%s' "$py_script")"
+  fi
+  "$py_bin" "$py_script_native"
+  py_rc=$?
+  rm -f "$py_script"
+  if [ "$py_rc" -ne 0 ]; then
+    echo "⚠️  Gate M journal: $py_bin exited $py_rc — the push's audit record at $report_file is missing." >&2
+    return 0
+  fi
+
+  # #577: the score rule is NOT re-derived here. It lives in
+  # githooks/lib/prepush-score.py as a real module with a real interface, so the
+  # rule can be exercised directly by tests instead of being asserted through a
+  # copied-and-pasted implementation. It refuses to emit a number when the gates
+  # that ran cannot summarise the report (none ran, or fewer than half did).
+  # Same MSYS/native-path boundary as the journal body above: $score_lib is a
+  # POSIX path ($HOME/.config/...) and native python.exe cannot open it.
+  local score_lib_native="$score_lib"
+  if command -v cygpath >/dev/null 2>&1; then
+    score_lib_native="$(cygpath -w "$score_lib" 2>/dev/null || printf '%s' "$score_lib")"
+  fi
+  if ! "$py_bin" "$score_lib_native" --report "$report_file"; then
+    echo "⚠️  Gate M journal: could not score $report_file — score left unset." >&2
+  fi
+}
+
+_pre_push_report_on_exit() {
+  local saved_exit=$?
+  if [ "$_PRE_PUSH_REPORT_DONE" = "1" ]; then
+    exit "$saved_exit"
+  fi
+  _PRE_PUSH_REPORT_DONE=1
+  write_pre_push_report "$saved_exit"
+  exit "$saved_exit"
+}
+trap '_pre_push_report_on_exit' EXIT
+
+# Get files being pushed in this push operation
+# pre-push receives stdin with ref information
+PUSHED_FILES=""
+TS_FILES=""
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    # Branch deletion - skip validation entirely
+    echo "   ℹ️  Branch deletion detected ($local_ref). Skipping validation."
+    continue
+  elif [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    # New ref — a branch or a tag.
+    # Base-branch resolution shared by the tag check below (#491) and the
+    # cumulative new-branch diff.
+    BASE_BRANCH="origin/main"
+    if ! git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
+      BASE_BRANCH="origin/master"
+    fi
+    # Tag push (#491): a tag carries no code beyond the commit it points at.
+    # If that commit is already published on the base branch, its content
+    # passed these gates when the base ref was pushed. Re-validating it here
+    # false-blocked every release: GATE MW binds evidence to the local HEAD,
+    # and a squash merge rewrote the reviewed commit's hash, so no genuine
+    # evidence could ever match. The scope is deliberately the PROTECTED base
+    # ref, not "any remote-tracking branch": a commit that only ever lived on
+    # a side branch still gets the full gates. A tag on a NOT-yet-published
+    # commit falls through to the cumulative validation below — creating a
+    # tag must not become a path around review. Threat model: like any
+    # client-side hook this bounds honest workflows and accidents, not an
+    # adversary with write access to this repository — such an actor could
+    # forge refs AND the walkthrough evidence file itself; server-side branch
+    # protection remains the real boundary.
+    if [[ "$local_ref" == refs/tags/* ]]; then
+      _tag_commit=$(git rev-parse --verify "${local_sha}^{commit}" 2>/dev/null || true)
+      if [ -z "$_tag_commit" ]; then
+        echo "   ⚠️  Could not dereference $local_ref to a commit — treating it as un-published."
+      elif git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1 \
+           && git merge-base --is-ancestor "$_tag_commit" "$BASE_BRANCH" 2>/dev/null; then
+        echo "   ℹ️  Tag $local_ref points at a commit already published on $BASE_BRANCH — no new code content."
+        continue
+      fi
+    fi
+    # New branch (or tag on un-published work) - compare cumulative diff vs base branch
+    # Use git merge-base HEAD main/master to find the branch point,
+    # then diff the full branch range. Falls back to HEAD-only diff if no base found.
+    if git rev-parse --verify "$BASE_BRANCH" >/dev/null 2>&1; then
+      MERGE_BASE=$(git merge-base HEAD "$BASE_BRANCH" 2>/dev/null)
+      if [ -n "$MERGE_BASE" ] && [ "$MERGE_BASE" != "$(git rev-parse HEAD)" ]; then
+        PUSHED_FILES=$(git diff --name-only "$MERGE_BASE"...HEAD 2>/dev/null)
+        TS_FILES=$(git diff --name-only "$MERGE_BASE"...HEAD 2>/dev/null | grep '\.ts$' || true)
+      else
+        PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+        TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+      fi
+    else
+      PUSHED_FILES=$(git diff-tree -r --name-only HEAD)
+      TS_FILES=$(git diff-tree -r --name-only HEAD | grep '\.ts$' || true)
+    fi
+  else
+    # Existing branch - compare against what we're pushing from
+    PUSHED_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha")
+    TS_FILES=$(git diff-tree -r --name-only "$remote_sha" "$local_sha" | grep '\.ts$' || true)
+  fi
+done
+
+if [ -z "$PUSHED_FILES" ]; then
+  echo "📚 No files changed in push. Skipping walkthrough."
+  exit 0
+fi
+
+# Determine if pushed files contain ONLY documentation/non-source files
+DOC_ONLY=true
+SOURCE_EXTENSIONS="\.py$|\.js$|\.cjs$|\.mjs$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.cpp$|\.cc$|\.cxx$|\.c$|\.h$|\.hpp$|\.swift$|\.kt$|\.kts$|\.sh$|\.dart$|\.ps1$|\.psm1$|\.m$|\.mm$|\.cs$|\.csx$|\.fs$|\.fsx$|\.vb$|\.php$|\.rb$|\.lua$|\.pl$"
+
+# Extensionless hook scripts and test files are CODE, not documentation.
+# Measured consequence of the old list: a commit touching githooks/pre-push and
+# its .bats suite was classified "Documentation-only push (no source code
+# files)" and the walkthrough was skipped — the single most safety-critical
+# script in the repo, exempt from review by a filename-shape accident.
+NON_EXT_SOURCE_RE='^(githooks/(pre-commit|pre-push|post-merge|install\.sh|verify\.sh)|[^/]+\.bats)$|/__tests__/'
+
+for file in $PUSHED_FILES; do
+  if echo "$file" | grep -qE "$SOURCE_EXTENSIONS" || echo "$file" | grep -qE "$NON_EXT_SOURCE_RE"; then
+    DOC_ONLY=false
+    break
+  fi
+done
+
+# Documentation-only changes (no source code) -> skip walkthrough
+#
+# #798: this branch used to print an affirmative "No code review required.
+# Proceeding with push..." - an AFFIRMATIVE conclusion produced by the very
+# check that just failed to recognise the files as source. A C# project (.cs
+# missing from SOURCE_EXTENSIONS) got that green line on every push, having run
+# zero gates. "Not applicable" and "passed" must not read the same, so the
+# message now states what actually happened and what was NOT checked.
+if [ "$DOC_ONLY" = "true" ]; then
+  echo "No source code files in this push - pre-push gates NOT applicable."
+  echo "   Files: $(echo "$PUSHED_FILES" | tr '
+' ', ' | sed 's/,$//')"
+  echo "   SKIPPED - code walkthrough and mutation gates did not run."
+  echo "   If this project has a source language missing from SOURCE_EXTENSIONS,"
+  echo "   these gates are silently inert. Check the list near the top of this hook."
+  exit 0
+fi
+
+# ============================================================================
+# GATE MP: GATE-SCRIPT MIRROR PARITY (#532 / REQ-A-02 / AC-A-02-04)
+# ============================================================================
+# The npm package ships byte mirrors of every gate script (package root,
+# hooks/, adapters/). A canonical edit without `sync-package-content.js --fix`
+# ships stale copies silently — the #532 SAST verdict fix almost shipped that
+# way (the fix landed on gate-10.sh while three fallback copies kept the
+# #518 defects). Push is the moment code leaves the machine, so the parity
+# guard runs here (fail-closed) and in CI's mirror-parity job. Read-only:
+# compares bytes and git index modes; heals nothing.
+GATE_MP_STATUS="SKIP"
+# #798: duration is audited in MILLISECONDS end-to-end (#521 AC-2; the #524
+# lesson: never mix a seconds timestamp into a ms budget).
+#
+# The clock is now the SHARED lib/now-ms.sh helper, not a private `date +%s%3N`.
+# That difference mattered: on Windows Git Bash `date +%s%3N` prints the literal
+# "...%3N" and exits 0, so the `|| true` fallback never fired and the value had
+# to be discarded to 0 — every pre-push gate duration read as 0ms. now_ms()
+# prefers node Date.now() and regex-validates its output on every platform.
+#
+# Resolution order mirrors pre-commit: beside the hook, then hooks/lib/ (older
+# installs), then the repo source.
+for _xp_now_ms_candidate in \
+  "$(dirname "${BASH_SOURCE[0]}")/lib/now-ms.sh" \
+  "$(dirname "${BASH_SOURCE[0]}")/hooks/lib/now-ms.sh" \
+  "$(dirname "${BASH_SOURCE[0]}")/../githooks/lib/now-ms.sh"; do
+  if [ -f "$_xp_now_ms_candidate" ]; then
+    # shellcheck disable=SC1090  # sourcing the resolved lib is the contract here
+    source "$_xp_now_ms_candidate"
+    break
+  fi
+done
+unset _xp_now_ms_candidate
+# Without the helper timing is unmeasurable: emit nothing rather than
+# substituting a different clock, so the report omits the field (#640's rule).
+if ! command -v now_ms >/dev/null 2>&1; then
+  now_ms() { printf ''; }
+fi
+_mp_now_ms() {
+  local _t
+  _t="$(now_ms 2>/dev/null || true)"
+  case "$_t" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$_t" ;;
+  esac
+}
+# #798: run-level start, latched before ANY gate. Pre-push reports carried only
+# per-gate timings (M, MP) and no total, so the chain as a whole was never
+# measurable — the issue recorded "pre-push 报告里根本没有耗时字段".
+PRE_PUSH_START_MS="$(now_ms 2>/dev/null || true)"
+case "$PRE_PUSH_START_MS" in
+  ''|*[!0-9]*) PRE_PUSH_START_MS="" ;;
+esac
+MP_START_MS="$(_mp_now_ms)"
+MP_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || MP_ROOT=""
+MP_ROOT=$(printf '%s' "$MP_ROOT" | tr -d '
+'); [ -n "$MP_ROOT" ] || MP_ROOT="."
+# Two different questions, and only the first one was being asked.
+#
+#   check-hook-mirror.sh compares the WORKING TREE. It catches "a mirror was never
+#   regenerated". It cannot catch "a mirror was regenerated but never staged",
+#   because the directory it reads is already correct by then.
+#
+# Measured on this repository: two commits edited githooks/gate-driver.sh and
+# githooks/gate-7.sh, ran sync-mirrors, passed this gate, and pushed. The mirrors
+# in those commits were still the pre-fix files:
+#
+#   git show HEAD:src/npm-package/hooks/gate-driver.sh | grep -c "NOT reached"  ->  0
+#
+# npm publishes src/npm-package/**, so every consumer received the unfixed gate
+# while the repository looked repaired, and CI (which checks the committed tree)
+# would have disagreed with local -- the direction AGENTS.md tells the reader to
+# blame on a stale local install.
+#
+# So ask the change-set question too: for every staged canonical file that has a
+# mirror, does the STAGED mirror equal the STAGED canonical?
+_mp_staged_drift() {
+  local _canon _mirror _pairs=0 _drift=""
+  # Only paths staged in THIS commit, so an unrelated dirty file cannot block.
+  while IFS= read -r _canon; do
+    [ -n "$_canon" ] || continue
+    case "$_canon" in
+      githooks/*) _mirror="src/npm-package/${_canon#githooks/}" ;;
+      src/principles/*) _mirror="src/npm-package/${_canon#src/}" ;;
+      *) continue ;;
+    esac
+    # A pair exists only when the mirror is tracked; otherwise this file has no
+    # mirror to fall out of step with.
+    git -C "$MP_ROOT" ls-files --error-unmatch "$_mirror" >/dev/null 2>&1 || continue
+    _pairs=$((_pairs + 1))
+    local _c _m
+    _c=$(git -C "$MP_ROOT" show ":$_canon" 2>/dev/null) || continue
+    _m=$(git -C "$MP_ROOT" show ":$_mirror" 2>/dev/null) || continue
+    [ "$_c" = "$_m" ] || _drift="$_drift $_canon<->$_mirror"
+  done <<EOF
+$(git -C "$MP_ROOT" diff --cached --name-only --diff-filter=d 2>/dev/null)
+EOF
+  if [ -n "$_drift" ]; then
+    printf '%s\n' "$_drift"
+    return 1
+  fi
+  MP_STAGED_PAIRS=$_pairs
+  return 0
+}
+
+if [ -f "$MP_ROOT/scripts/check-hook-mirror.sh" ]; then
+  if (cd "$MP_ROOT" && bash scripts/check-hook-mirror.sh); then
+    if ! MP_STAGED_DRIFT="$(_mp_staged_drift)"; then
+      GATE_MP_STATUS="FAIL"
+      MP_DURATION_MS=$(( $(_mp_now_ms) - MP_START_MS ))
+      [ "$MP_DURATION_MS" -lt 0 ] 2>/dev/null && MP_DURATION_MS=0
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ GATE MP FAILED — PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "The working tree is consistent, but the STAGED tree is not:"
+      for _d in $MP_STAGED_DRIFT; do
+        echo "   staged canonical and staged mirror differ: $_d"
+      done
+      echo ""
+      echo "This is the case a working-tree comparison cannot see: the mirror was"
+      echo "regenerated on disk (so check-hook-mirror.sh passes) but the"
+      echo "regenerated file was never staged, so the commit carries the old one."
+      echo "npm publishes src/npm-package/** -- shipping it would give every"
+      echo "consumer the unfixed gate while the repository looks repaired."
+      echo "Fix: git add src/npm-package/... for the files listed above, then push."
+      exit 1
+    fi
+    GATE_MP_STATUS="PASS"
+    MP_DURATION_MS=$(( $(_mp_now_ms) - MP_START_MS ))
+    [ "$MP_DURATION_MS" -lt 0 ] 2>/dev/null && MP_DURATION_MS=0
+    echo "✅ Gate MP: gate-script mirror parity OK (${MP_DURATION_MS}ms, working tree + ${MP_STAGED_PAIRS:-0} staged pairs)"
+  else
+    MP_DURATION_MS=0
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "   ❌ GATE MP FAILED — PUSH BLOCKED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "A gate script changed without its npm-package mirrors being synced."
+    echo "Fix locally: node src/npm-package/scripts/sync-package-content.js --fix"
+    echo "Then commit the mirrors and push again."
+    exit 1
+  fi
+else
+  echo "⚠️ Gate MP: check-hook-mirror.sh not found. SKIP — Gate MP."
+  echo "   Gate MP did not run; this push was not checked for mirror drift."
+  GATE_MP_STATUS="SKIP"
+  GATE_MP_SKIP_REASON="mirror_script_not_found"
+  GATES_SKIPPED="${GATES_SKIPPED:-}Gate MP (mirror parity: script not found)|"
+  MP_DURATION_MS=0
+fi
+echo ""
+
+# Size limits check — REMOVED: AI workflows generate large cumulative pushes; size is not a quality signal
+  DIFF_STATS=$(git diff origin/main...HEAD --stat 2>/dev/null || git diff origin/master...HEAD --stat 2>/dev/null)
+  FILES_CHANGED=$(echo "$DIFF_STATS" | tail -1 | grep -oE '[0-9]+ file' | grep -oE '[0-9]+' || echo "0")
+  LINES_ADDED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+  LINES_DELETED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+
+echo ""
+echo "Branch: $CURRENT_BRANCH"
+echo "Files changed: $FILES_CHANGED"
+echo "Lines: +$LINES_ADDED -$LINES_DELETED"
+echo ""
+
+# Run a TypeScript entrypoint under tsx without routing arguments through the
+# npx shim: Windows cmd.exe caps command lines at 8191 chars and long changed-file
+# lists overflow it, turning a healthy run into a false BLOCK. Prefer the
+# repo-local tsx CLI driven by node directly; keep npx as fallback for consumer
+# repos relying on a global install. RUN_TSX_TIMEOUT (e.g. "120s") wraps the
+# invocation in `timeout`.
+if ! declare -F run_tsx >/dev/null 2>&1; then
+  run_tsx() {
+    local _root="${PROJECT_ROOT:-$(pwd)}" _timeout=()
+    if [ -n "${RUN_TSX_TIMEOUT:-}" ]; then
+      _timeout=(timeout "$RUN_TSX_TIMEOUT")
+    fi
+    if [ -f "$_root/node_modules/tsx/dist/cli.mjs" ] && command -v node >/dev/null 2>&1; then
+      "${_timeout[@]}" node "$_root/node_modules/tsx/dist/cli.mjs" "$@"
+    else
+      "${_timeout[@]}" npx tsx "$@"
+    fi
+  }
+fi
+
+# ============================================================================
+# GATE S: SPRINT FLOW ENFORCEMENT
+# Validates sprint state consistency before push
+# Uses sprint-gate.sh for standalone validation logic
+# ============================================================================
+GATE_S_STATUS="PASS"
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || PROJECT_ROOT=""
+PROJECT_ROOT=$(printf '%s' "$PROJECT_ROOT" | tr -d '
+'); [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="."
+SPRINT_GATE_SCRIPT=""
+
+# Same chain as pre-commit's Gate 11 (#476). The two tiers here both point at
+# gate-script directories, while update-hooks installs sprint-gate.sh under
+# ~/.config/xp-gate/hooks -- a correctly installed machine was told the file was
+# missing here too. Nothing is sourced for this: pre-push resolves its libraries
+# further down (ADAPTER_COMMON), and this gate must decide before that.
+#
+# `$HOME/.config/xp-gate/adapters` is the tier #678 found missing: `xp-gate
+# setup-global` runs copyAdapters(), which ships every `gate-*.sh` AND
+# `sprint-gate.sh` into the ADAPTERS directory -- never into hooks/. So a globally
+# installed machine had sprint-gate.sh present under adapters/ while this loop
+# searched only hooks/, and Gate MS skipped on every push without complaint. Both
+# tiers are searched now: which directory `init` chose is an install detail this
+# gate should not depend on.
+for _sprint_gate_dir in "$PROJECT_ROOT/githooks" "$(dirname "$0")" \
+                        "$HOME/.config/xp-gate/hooks" "$HOME/.config/xp-gate/adapters"; do
+  if [ -n "$_sprint_gate_dir" ] && [ -f "$_sprint_gate_dir/sprint-gate.sh" ]; then
+    SPRINT_GATE_SCRIPT="$_sprint_gate_dir/sprint-gate.sh"
+    break
+  fi
+done
+
+if [ -n "$SPRINT_GATE_SCRIPT" ]; then
+  if ! bash "$SPRINT_GATE_SCRIPT" --pre-push; then
+    GATE_S_STATUS="BLOCK"
+    echo "❌ BLOCKED - Gate MS: Sprint Flow Enforcement"
+    exit 1
+  fi
+else
+  echo "⏭️  SKIPPED - Gate MS: Sprint Flow (sprint-gate.sh not found; searched: $PROJECT_ROOT/githooks, $(dirname "$0"), $HOME/.config/xp-gate/hooks, $HOME/.config/xp-gate/adapters)"
+  GATE_S_STATUS="SKIP"
+fi
+echo ""
+
+# ============================================================================
+# GATE 10: BUILD INTEGRITY CHECK (TypeScript)
+# ============================================================================
+GATE_10_STATUS="SKIP"
+
+if [[ -f "package.json" ]] && [[ -f "tsconfig.json" ]] && [[ -n "$TS_FILES" ]]; then
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   GATE 10: BUILD INTEGRITY CHECK"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  GATE_10_SCRIPT=""
+  if [[ -f "$PROJECT_ROOT/src/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT="$PROJECT_ROOT/src/build-integrity/gate-10.ts"
+  elif [[ -f ".xp-gate/modules/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT=".xp-gate/modules/build-integrity/gate-10.ts"
+  elif [[ -f "$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts" ]]; then
+    GATE_10_SCRIPT="$HOME/.config/xp-gate/modules/build-integrity/gate-10.ts"
+  fi
+
+  if [[ -n "$GATE_10_SCRIPT" ]]; then
+    # Build comma-separated list of absolute file paths for changed TS files
+    GATE_10_FILE_LIST=""
+    while IFS= read -r f; do
+      if [ -z "$GATE_10_FILE_LIST" ]; then
+        GATE_10_FILE_LIST="$f"
+      else
+        GATE_10_FILE_LIST="$GATE_10_FILE_LIST,$f"
+      fi
+    done <<< "$TS_FILES"
+
+    GATE_10_OUTPUT=$(mktemp)
+    if RUN_TSX_TIMEOUT=120s run_tsx "$GATE_10_SCRIPT" --changed-files "$GATE_10_FILE_LIST" --project-root "$PROJECT_ROOT" > "$GATE_10_OUTPUT" 2>&1; then
+      cat "$GATE_10_OUTPUT"
+      GATE_10_STATUS="PASS"
+      echo "✅ Gate 10: PASS"
+    else
+      GATE_10_EXIT=$?
+      cat "$GATE_10_OUTPUT"
+      if [[ $GATE_10_EXIT -eq 124 ]]; then
+        echo "⏱️ Gate 10: TIMEOUT (120s). Allowing push with warning."
+        GATE_10_STATUS="TIMEOUT"
+      else
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   ❌ GATE 10 FAILED — PUSH BLOCKED"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Build integrity check failed. Fix type errors, broken imports,"
+        echo "or package manifest issues before pushing."
+        rm -f "$GATE_10_OUTPUT"
+        exit 1
+      fi
+    fi
+    rm -f "$GATE_10_OUTPUT"
+  else
+    echo "⚠️ Gate 10 script not found. SKIP — Gate 10."
+  fi
+else
+  echo "📚 Not a TypeScript project or no TS files changed. SKIP — Gate 10."
+fi
+echo ""
+
+# ============================================================================
+# GATE M: MUTATION TESTING
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M: MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Source adapter-common.sh through the GENERATED resolution table (REQ-RESOLVE-001).
+#
+# WHAT THIS REPLACED
+# ------------------
+# This block used to be hand-written:
+#
+#     if   [[ -f "$GLOBAL_ADAPTER_DIR/adapter-common.sh" ]]; then ...
+#     elif [[ -f "$PROJECT_GITHOOKS/adapter-common.sh"    ]]; then ...
+#     elif [[ -f "$(dirname "$0")/adapter-common.sh"      ]]; then ...
+#
+# Three lines that looked obviously correct and were inverted. The generated
+# data (`ADAPTER_DIR_ORDER`, in hook-module-resolution.js) declares PROJECT
+# first, on purpose: the global install is a machine-wide DEFAULT that a repo's
+# own githooks/ must be able to override. The hand-written cascade tried GLOBAL
+# first, so on any machine with a global install, every per-project githooks/
+# was unreachable — including this repository's, whose own gate scripts
+# therefore never ran while the log said they had (#495 AC-495-23).
+#
+# The order is not restated here. `_hook_tier_dir` comes from the generated file,
+# so there is no second implementation left to drift. If somebody adds a fourth
+# tier to ADAPTER_DIR_ORDER, this hook picks it up with no edit.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
+
+ADAPTER_COMMON=""
+GATE_M_SKIP_KIND=""
+
+# Locate the generated table next to this hook. It ships in HOOK_FILES, so it is
+# present wherever the hooks are installed; a missing copy is a real install
+# defect and must be reported, never papered over by falling back to a private
+# copy of the order.
+HOOK_RESOLUTION_FILE="$SCRIPT_DIR/hook-module-resolution.sh"
+
+# The `shellcheck source=` directive belongs in front of the whole `if`, not in
+# front of one `elif` branch. ShellCheck can only attach a directive to a
+# complete compound command; placed inside the branch it made the analyser
+# abandon this `if` and every line after it -- 3 parse errors (SC1073/SC1123/
+# SC1072) and ~990 lines of this hook that were never checked at all.
+# shellcheck source=githooks/hook-module-resolution.sh
+if [ ! -f "$HOOK_RESOLUTION_FILE" ]; then
+  echo "⚠️  hook-module-resolution.sh not found at $HOOK_RESOLUTION_FILE"
+  echo "    Run: xp-gate init   (or reinstall the hooks)"
+  echo "⚠️ Could not resolve adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh not found: $HOOK_RESOLUTION_FILE"
+  GATE_M_SKIP_KIND="missing"
+elif ! source "$HOOK_RESOLUTION_FILE" 2>/dev/null; then
+  echo "⚠️  hook-module-resolution.sh is corrupt: $HOOK_RESOLUTION_FILE"
+  echo "    Run: node scripts/generate-hook-resolution.cjs   (or reinstall)"
+  echo "⚠️ Could not source hook-module-resolution.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh failed to source: $HOOK_RESOLUTION_FILE"
+  GATE_M_SKIP_KIND="corrupt"
+elif ! declare -F _hook_tier_dir >/dev/null 2>&1; then
+  # Schema < 2: the file parses and sources cleanly but predates the resolver.
+  # A file that installs without error and provides nothing is the worst case —
+  # it looks like a successful install.
+  echo "⚠️  hook-module-resolution.sh is STALE (schema ${HOOK_RESOLUTION_SCHEMA:-1}, need 2)."
+  echo "    Run: xp-gate update-hooks   (regenerates the resolution table)"
+  echo "⚠️ Could not resolve adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh is stale: schema ${HOOK_RESOLUTION_SCHEMA:-1}, need 2"
+  GATE_M_SKIP_KIND="stale"
+elif [ -n "$_HOOK_RESOLVE_BROKEN" ]; then
+  # case D: valid syntax, function present, contract wrong. Caught at load time
+  # by the generated selfcheck instead of blowing up mid-push at a random call.
+  echo "⚠️  hook-module-resolution.sh contract selfcheck failed: $_HOOK_RESOLVE_BROKEN"
+  echo "    Run: xp-gate update-hooks"
+  echo "⚠️ Could not resolve adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="hook-module-resolution.sh contract mismatch: $_HOOK_RESOLVE_BROKEN"
+  GATE_M_SKIP_KIND="contract_mismatch"
+else
+  # Walk the declared tiers IN ORDER and take the first one whose probe exists.
+  # The order comes from HOOK_ADAPTER_DIR_TIERS; this loop does not know which
+  # tier "should" win, which is the point.
+  for _tier in "${HOOK_ADAPTER_DIR_TIERS[@]}"; do
+    _tier_id="${_tier%%|*}"
+    _tier_rest="${_tier#*|}"
+    _tier_base="${_tier_rest%%|*}"
+    _tier_probe="${_tier_rest#*|}"
+    _tier_dir="$(_hook_tier_dir "$_tier_id" "$_tier_base")"
+    [ -n "$_tier_dir" ] || continue
+    if [ -f "$_tier_dir/$_tier_probe" ]; then
+      ADAPTER_COMMON="$_tier_dir/$_tier_probe"
+      break
+    fi
+  done
+fi
+
+if [ -n "$ADAPTER_COMMON" ]; then
+  # shellcheck source=githooks/adapter-common.sh
+  if ! source "$ADAPTER_COMMON" 2>/dev/null; then
+    echo "⚠️ Could not source adapter-common.sh from $ADAPTER_COMMON. SKIP — Gate M."
+    GATE_M_SKIP_REASON="adapter-common.sh could not be sourced: $ADAPTER_COMMON"
+    GATE_M_SKIP_KIND="source_failed"
+    ADAPTER_COMMON=""
+  fi
+elif [ -z "$GATE_M_SKIP_KIND" ]; then
+  # No tier held adapter-common.sh. Report every tier that was tried, so the
+  # message says WHERE it looked rather than only that it failed.
+  _tried=""
+  for _tier in "${HOOK_ADAPTER_DIR_TIERS[@]}"; do
+    _tier_id="${_tier%%|*}"
+    _tier_rest="${_tier#*|}"
+    _tier_base="${_tier_rest%%|*}"
+    _tier_dir="$(_hook_tier_dir "$_tier_id" "$_tier_base")"
+    _tried="$_tried $_tier_id=${_tier_dir:-<unset>}"
+  done
+  echo "⚠️ adapter-common.sh not found in any tier:${_tried}"
+  echo "⚠️ Could not source adapter-common.sh. SKIP — Gate M."
+  GATE_M_SKIP_REASON="adapter-common.sh not found in any resolution tier:$_tried"
+  GATE_M_SKIP_KIND="missing"
+fi
+
+# #404 P0: every Gate M skip records WHY. Without this the journals carried
+# `details: {}` on 62 of 68 runs, so the RFC's "SKIP rate" question was
+# unanswerable — a missing tool and "no mutable file in this push" are opposite
+# findings that looked identical after the fact.
+if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
+  echo "📚 Not a TypeScript project. SKIP — Gate M."
+  GATE_M_SKIP_REASON="not a TypeScript project (package.json+tsconfig.json required)"
+  GATE_M_SKIP_KIND="not_applicable"
+else
+  # Check if mutation testing is configured
+  if ! detect_mutation_testable 2>/dev/null; then
+    echo "⚠️ Stryker config not found or @stryker-mutator not installed."
+    echo "   SKIP — Gate M mutation testing."
+    GATE_M_SKIP_REASON="stryker config missing or @stryker-mutator not installed"
+    GATE_M_SKIP_KIND="tool_missing"
+  else
+    # Filter to source files (exclude tests). The tree-segment grep excludes
+    # test infrastructure (helpers/fixtures under tests/, test/, __tests__/)
+    # that is not named *.test.* -- it must be judged by the suites that run
+    # it, not by a mutation score budgeted for production code (#480).
+    CHANGED_SOURCE_FILES=$(echo "$TS_FILES" | grep -v '__tests__' | grep -v '\.test\.' | grep -v '\.spec\.' | grep -v '\.d\.ts$' | grep -v -E '(^|/)(tests?|__tests__)/' || true)
+
+    if [ -z "$CHANGED_SOURCE_FILES" ]; then
+      echo "📚 No changed TypeScript source files. SKIP — Gate M."
+      GATE_M_SKIP_REASON="no changed TypeScript source files in this push"
+      GATE_M_SKIP_KIND="no_input"
+    else
+      echo "🧬 Running mutation tests on changed files..."
+      echo "$CHANGED_SOURCE_FILES"
+
+      # Check for mutation gate script in installed modules first, then project src/
+      MUTATION_SCRIPT=""
+      if [ -f ".xp-gate/modules/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT=".xp-gate/modules/mutation/gate-m.ts"
+      elif [ -f "src/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT="src/mutation/gate-m.ts"
+      elif [ -f "$HOME/.config/xp-gate/modules/mutation/gate-m.ts" ]; then
+        MUTATION_SCRIPT="$HOME/.config/xp-gate/modules/mutation/gate-m.ts"
+      fi
+
+      if [[ -z "$MUTATION_SCRIPT" ]]; then
+        echo "⚠️ Gate M script not found. SKIP — Gate M."
+        GATE_M_SKIP_REASON="gate-m.ts not found in .xp-gate/modules, src/mutation, or global modules"
+        GATE_M_SKIP_KIND="module_missing"
+      else
+        # Run mutation gate with timeout matching stryker.conf.json (timeoutMS: 600000 = 10min)
+        MUTATION_OUTPUT=$(mktemp)
+        M_START_MS=$(date +%s%3N 2>/dev/null || python -c 'import time;print(int(time.time()*1000))' 2>/dev/null || echo 0)
+        RUN_TSX_TIMEOUT=600s run_tsx $MUTATION_SCRIPT --changed-files "$CHANGED_SOURCE_FILES" > "$MUTATION_OUTPUT" 2>&1
+        MUTATION_EXIT=$?
+        M_END_MS=$(date +%s%3N 2>/dev/null || python -c 'import time;print(int(time.time()*1000))' 2>/dev/null || echo 0)
+        if [ "$M_START_MS" != "0" ] && [ "$M_END_MS" != "0" ]; then
+          M_DURATION_MS=$((M_END_MS - M_START_MS))
+          [ "$M_DURATION_MS" -ge 0 ] || M_DURATION_MS=0
+        else
+          M_DURATION_MS=0
+        fi
+        # #404: the mutation score is the number the RFC wants a distribution for.
+        # It is printed by gate-m.ts; take the last percentage it reported.
+        M_SCORE=$(sed -n 's/.*[Mm]utation score[: ]*\([0-9][0-9]*\(\.[0-9][0-9]*\)\?\)%.*/\1/p' "$MUTATION_OUTPUT" 2>/dev/null | tail -1)
+
+        # #544: per-file survivor detail, so retro can answer "which module has
+        # the most surviving mutants". gate-m.ts emits one
+        # GATE_M_SURVIVORS_JSON= line; it is ABSENT when no report was produced,
+        # and absent must stay absent. An empty value means "not measured"; a
+        # written zero would mean "measured, no survivors". Only the former is
+        # ever true when the line is missing -- conflating the two is the whole
+        # of #544.
+        M_SURVIVORS_JSON=$(printf '%s\n' "$MUTATION_OUTPUT" | sed -n 's/^GATE_M_SURVIVORS_JSON=//p' | tail -1)
+
+        case $MUTATION_EXIT in
+          0)
+            echo "✅ Gate M: PASS"
+            GATE_M_STATUS="PASS"
+            # Update baseline after successful mutation test
+            if [ -f ".stryker-baseline.json" ]; then
+              echo "📝 Updating mutation baseline..."
+              cp ".stryker-baseline.json" ".stryker-baseline.json.prev" 2>/dev/null || true
+            fi
+            ;;
+          1)
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "   ❌ GATE M FAILED - PUSH BLOCKED"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            cat "$MUTATION_OUTPUT"
+            echo ""
+            rm -f "$MUTATION_OUTPUT"
+            exit 1
+            ;;
+          124)
+            echo "⏱️ Gate M: TIMEOUT (120s). Mutation testing incomplete."
+            echo "   Allowing push with warning — review mutation coverage manually."
+            GATE_M_STATUS="TIMEOUT"
+            GATE_M_SKIP_REASON="mutation run exceeded the 600s timeout; score is unknown"
+            GATE_M_SKIP_KIND="timeout"
+            ;;
+          *)
+            echo "⚠️ Gate M: Unexpected exit code $MUTATION_EXIT"
+            cat "$MUTATION_OUTPUT"
+            echo "   Allowing push with warning."
+            GATE_M_STATUS="WARN"
+            GATE_M_SKIP_REASON="gate-m.ts exited $MUTATION_EXIT (unexpected); score is unknown"
+            GATE_M_SKIP_KIND="error"
+            ;;
+        esac
+
+        rm -f "$MUTATION_OUTPUT"
+      fi
+    fi
+  fi
+fi
+
+# ============================================================================
+# GATE M (Python): Incremental Mutation Testing via mutmut
+# Runs after TypeScript Gate M; uses the same gate-m.ts orchestrator with
+# MutmutRunner for Python files.
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M (Python): MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect changed Python source files (exclude tests, venv, cached)
+PY_FILES=$(echo "$PUSHED_FILES" | grep -E '\.py$' | grep -v '__pycache__' | grep -v '\.test\.py' | grep -v '/test_' | grep -v '/tests/' || true)
+PY_SOURCE_FILES=$(echo "$PY_FILES" | grep -v '/venv/' | grep -v '/\.venv/' || true)
+
+if [ -z "$PY_SOURCE_FILES" ]; then
+  echo "📚 No changed Python source files. SKIP — Gate M (Python)."
+  # #557: this outermost branch was the only Gate M (Python) path that assigned
+  # no status, while Gate M (TypeScript) records a reason on every path. Without
+  # it, "no Python in this push" and "the tool is missing" look identical in the
+  # journals, which is the gap #404 P0 spent effort closing for the TS gate.
+  GATE_M_PY_STATUS="SKIP"
+  GATE_M_PY_SKIP_REASON="no_python_source_files"
+  GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (no changed Python source files)|"
+else
+  PYTHON_FILE_LIST=$(echo "$PY_SOURCE_FILES" | tr '\n' ',' | sed 's/,$//')
+  echo "🐍 Changed Python files: $PYTHON_FILE_LIST"
+
+  if detect_python_mutation_testable 2>/dev/null; then
+    if [ -f "src/mutation/gate-m.ts" ]; then
+      MUTATION_OUTPUT=$(mktemp)
+      RUN_TSX_TIMEOUT=120s run_tsx src/mutation/gate-m.ts --changed-files "$PYTHON_FILE_LIST" > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M (Python): PASS"
+          GATE_M_PY_STATUS="PASS"
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M (Python) FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          cat "$MUTATION_OUTPUT"
+          echo "⏱ Gate M (Python): TIMEOUT (120s). Allowing push with warning."
+          # A timeout means the mutation score was never measured. Saying
+          # nothing here let the closing banner claim success for a gate that
+          # started work and could not finish (#557).
+          GATE_M_PY_STATUS="TIMEOUT"
+          GATE_M_PY_SKIP_REASON="timeout_120s"
+          GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (TIMEOUT — score never measured)|"
+          ;;
+        *)
+          cat "$MUTATION_OUTPUT"
+          echo "⚠ Gate M (Python): Unexpected exit code $MUTATION_EXIT. Allowing push with warning."
+          GATE_M_PY_STATUS="ERROR"
+          GATE_M_PY_SKIP_REASON="unexpected_exit_${MUTATION_EXIT}"
+          GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (error, exit ${MUTATION_EXIT} — score never measured)|"
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    else
+      echo "⚠ Gate M script not found. SKIP — Gate M (Python)."
+      GATE_M_PY_STATUS="SKIP"
+      GATE_M_PY_SKIP_REASON="gate_m_script_not_found"
+      GATES_SKIPPED="${GATES_SKIPPED:-}Gate M Python (gate-m.ts not found)|"
+    fi
+  else
+    echo "⚠ mutmut not installed. SKIP — Gate M (Python)."
+  fi
+fi
+
+# ============================================================================
+# GATE M (Go): Incremental Mutation Testing via gomutants
+# Uses the same gate-m.ts orchestrator with GoMutantsRunner.
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M (Go): MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect changed Go source files (exclude tests, vendor)
+GO_FILES=$(echo "$PUSHED_FILES" | grep -E '\.go$' | grep -v '_test\.go$' | grep -v '/vendor/' || true)
+
+if [ -z "$GO_FILES" ]; then
+  echo "📚 No changed Go source files. SKIP — Gate M (Go)."
+else
+  GO_FILE_LIST=$(echo "$GO_FILES" | tr '\n' ',' | sed 's/,$//')
+  echo "🔵 Changed Go files: $GO_FILE_LIST"
+
+  if detect_go_mutation_testable 2>/dev/null; then
+    MUTATION_SCRIPT=""
+    if [ -f ".xp-gate/modules/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT=".xp-gate/modules/mutation/gate-m.ts"
+    elif [ -f "src/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT="src/mutation/gate-m.ts"
+    elif [ -f "$HOME/.config/xp-gate/modules/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT="$HOME/.config/xp-gate/modules/mutation/gate-m.ts"
+    fi
+
+    if [ -z "$MUTATION_SCRIPT" ]; then
+      echo "⚠ Gate M script not found. SKIP — Gate M (Go)."
+    else
+      MUTATION_OUTPUT=$(mktemp)
+      RUN_TSX_TIMEOUT=120s run_tsx "$MUTATION_SCRIPT" --changed-files "$GO_FILE_LIST" --timeout-ms 120000 > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M (Go): PASS"
+          GATE_M_GO_STATUS="PASS"
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M (Go) FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          cat "$MUTATION_OUTPUT"
+          echo "⏱ Gate M (Go): TIMEOUT (120s). Allowing push with warning."
+          GATE_M_GO_STATUS="TIMEOUT"
+          ;;
+        *)
+          cat "$MUTATION_OUTPUT"
+          echo "⚠ Gate M (Go): Unexpected exit code $MUTATION_EXIT. Allowing push with warning."
+          GATE_M_GO_STATUS="WARN"
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    fi
+  else
+    echo "⚠ gomutants not installed. SKIP — Gate M (Go)."
+  fi
+fi
+
+# ============================================================================
+# GATE M (Java): Incremental Mutation Testing via PITest
+# Uses the same gate-m.ts orchestrator with PitestRunner.
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M (Java): MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect changed Java source files (exclude tests)
+JAVA_FILES=$(echo "$PUSHED_FILES" | grep -E '\.java$' | grep -v -E '(Test|Tests)\.java$' || true)
+
+if [ -z "$JAVA_FILES" ]; then
+  echo "📚 No changed Java source files. SKIP — Gate M (Java)."
+else
+  JAVA_FILE_LIST=$(echo "$JAVA_FILES" | tr '\n' ',' | sed 's/,$//')
+  echo "☕ Changed Java files: $JAVA_FILE_LIST"
+
+  if detect_pitest_testable 2>/dev/null; then
+    MUTATION_SCRIPT=""
+    if [ -f ".xp-gate/modules/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT=".xp-gate/modules/mutation/gate-m.ts"
+    elif [ -f "src/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT="src/mutation/gate-m.ts"
+    elif [ -f "$HOME/.config/xp-gate/modules/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT="$HOME/.config/xp-gate/modules/mutation/gate-m.ts"
+    fi
+
+    if [ -z "$MUTATION_SCRIPT" ]; then
+      echo "⚠ Gate M script not found. SKIP — Gate M (Java)."
+    else
+      MUTATION_OUTPUT=$(mktemp)
+      RUN_TSX_TIMEOUT=600s run_tsx "$MUTATION_SCRIPT" --changed-files "$JAVA_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M (Java): PASS"
+          GATE_M_JAVA_STATUS="PASS"
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M (Java) FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          cat "$MUTATION_OUTPUT"
+          echo "⏱ Gate M (Java): TIMEOUT (600s). Allowing push with warning."
+          GATE_M_JAVA_STATUS="TIMEOUT"
+          ;;
+        *)
+          cat "$MUTATION_OUTPUT"
+          echo "⚠ Gate M (Java): Unexpected exit code $MUTATION_EXIT. Allowing push with warning."
+          GATE_M_JAVA_STATUS="WARN"
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    fi
+  else
+    echo "⚠ PITest not configured. SKIP — Gate M (Java)."
+  fi
+fi
+
+# ============================================================================
+# GATE M (Kotlin): Incremental Mutation Testing via PITest
+# Uses the same gate-m.ts orchestrator with PitestRunner for Kotlin files.
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE M (Kotlin): MUTATION TESTING"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect changed Kotlin source files (exclude tests)
+KT_FILES=$(echo "$PUSHED_FILES" | grep -E '\.kt$|\.kts$' | grep -v -E '(Test|Tests|Spec)\.kt$' || true)
+
+if [ -z "$KT_FILES" ]; then
+  echo "📚 No changed Kotlin source files. SKIP — Gate M (Kotlin)."
+else
+  KT_FILE_LIST=$(echo "$KT_FILES" | tr '\n' ',' | sed 's/,$//')
+  echo "🟣 Changed Kotlin files: $KT_FILE_LIST"
+
+  if detect_pitest_testable 2>/dev/null; then
+    MUTATION_SCRIPT=""
+    if [ -f ".xp-gate/modules/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT=".xp-gate/modules/mutation/gate-m.ts"
+    elif [ -f "src/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT="src/mutation/gate-m.ts"
+    elif [ -f "$HOME/.config/xp-gate/modules/mutation/gate-m.ts" ]; then
+      MUTATION_SCRIPT="$HOME/.config/xp-gate/modules/mutation/gate-m.ts"
+    fi
+
+    if [ -z "$MUTATION_SCRIPT" ]; then
+      echo "⚠ Gate M script not found. SKIP — Gate M (Kotlin)."
+    else
+      MUTATION_OUTPUT=$(mktemp)
+      RUN_TSX_TIMEOUT=600s run_tsx "$MUTATION_SCRIPT" --changed-files "$KT_FILE_LIST" --timeout-ms 600000 > "$MUTATION_OUTPUT" 2>&1
+      MUTATION_EXIT=$?
+
+      case $MUTATION_EXIT in
+        0)
+          echo "✅ Gate M (Kotlin): PASS"
+          GATE_M_KOTLIN_STATUS="PASS"
+          ;;
+        1)
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "   ❌ GATE M (Kotlin) FAILED - PUSH BLOCKED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          cat "$MUTATION_OUTPUT"
+          echo ""
+          rm -f "$MUTATION_OUTPUT"
+          exit 1
+          ;;
+        124)
+          cat "$MUTATION_OUTPUT"
+          echo "⏱ Gate M (Kotlin): TIMEOUT (600s). Allowing push with warning."
+          GATE_M_KOTLIN_STATUS="TIMEOUT"
+          ;;
+        *)
+          cat "$MUTATION_OUTPUT"
+          echo "⚠ Gate M (Kotlin): Unexpected exit code $MUTATION_EXIT. Allowing push with warning."
+          GATE_M_KOTLIN_STATUS="WARN"
+          ;;
+      esac
+
+      rm -f "$MUTATION_OUTPUT"
+    fi
+  else
+    echo "⚠ PITest not configured. SKIP — Gate M (Kotlin)."
+  fi
+fi
+
+# ============================================================================
+# GATE MD: MOCK DENSITY CHECK (BLOCK at 30%, configurable via .mockpolicyrc)
+# Phase 1: WARNING mode (collect false positive data before enabling BLOCK)
+# Per-layer thresholds: .mockpolicyrc layers.*.maxMockDensity
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE MD: MOCK DENSITY CHECK"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Collect TS and Python test files from pushed files
+ALL_PUSHED_TEST_FILES=""
+TS_TEST_FILES=$(echo "$TS_FILES" | grep -E '\.(test|spec)\.(ts|tsx)$' || true)
+PY_TEST_FILES=$(echo "$PUSHED_FILES" | grep -E '(_test\.py|test_.*\.py)$' || true)
+
+if [ -n "$TS_TEST_FILES" ]; then
+  ALL_PUSHED_TEST_FILES="$TS_TEST_FILES"
+fi
+if [ -n "$PY_TEST_FILES" ]; then
+  ALL_PUSHED_TEST_FILES="$ALL_PUSHED_TEST_FILES $PY_TEST_FILES"
+fi
+
+if [ -z "$ALL_PUSHED_TEST_FILES" ]; then
+  echo "⏭️  SKIPPED - Mock density check (no test files in push)"
+else
+  MOCK_BLOCKED=false
+
+  # Read .mockpolicyrc configuration
+  MOCK_THRESHOLD=30  # Default threshold
+  if [ -f ".mockpolicyrc" ]; then
+    # Read global mock-threshold if present
+    CUSTOM_THRESHOLD=$(grep -oE '"mock-threshold"\s*:\s*[0-9]+' .mockpolicyrc | grep -oE '[0-9]+$' || true)
+    if [ -n "$CUSTOM_THRESHOLD" ]; then
+      MOCK_THRESHOLD=$CUSTOM_THRESHOLD
+    fi
+  fi
+
+  for test_file in $ALL_PUSHED_TEST_FILES; do
+    if [ -f "$test_file" ]; then
+      # Count mock keyword references (precise patterns only).
+      #
+      # This used to be `for kw in ...; do grep -o "$kw" | wc -l; done`: 20
+      # keywords x (grep + wc) = 40 process creations, for a scan of ONE file.
+      # Process creation is the dominant cost in this hook (a single pre-push
+      # run executes ~359 commands), so that loop alone measured ~5.5 s of the
+      # ~25 s pre-push on the reference 100-line fixture.
+      #
+      # The file is read ONCE and the same per-keyword arithmetic runs with bash
+      # builtins, which forks nothing. This is deliberately NOT a single
+      # `grep -oE 'a|b|c'`: that form counts each keyword's matches once, while
+      # the loop double-counts overlaps ("vi.mockResolvedValue" matches both
+      # `vi.mock` and `mockResolvedValue`). Switching to one alternation would
+      # silently LOWER the density and weaken Gate M2. Equivalence with the old
+      # loop was verified on 40 real test files plus overlap/edge fixtures (0
+      # mismatches).
+      # NOT `local`: this block runs at top level (inside a `for`, not a
+      # function), where `local` is invalid (SC2168) -- bash prints
+      # "local: can only be used in a function" and returns non-zero on every
+      # iteration. The four names are file-scoped and each is assigned before
+      # use below, so dropping the declaration changes no behaviour.
+      _mock_content="$(cat "$test_file" 2>/dev/null)" || _mock_content=""
+      MOCK_COUNT=0
+      for _mock_kw in "jest.mock" "vi.mock" "jest.spyOn" "vi.spyOn" "jest.fn" "vi.fn" \
+                      "mockResolvedValue" "mockRejectedValue" "mockReturnValue" \
+                      "mockImplementation" "createMock" "mockReset" "mockClear" \
+                      "mockRestore" "MagicMock" "unittest.mock" ".patch(" "gomock" \
+                      "mockgen" ".EXPECT()"; do
+        _mock_rest="$_mock_content"
+        _mock_c=0
+        while :; do
+          case "$_mock_rest" in
+            *"$_mock_kw"*) _mock_c=$((_mock_c + 1)); _mock_rest="${_mock_rest#*"$_mock_kw"}" ;;
+            *) break ;;
+          esac
+        done
+        MOCK_COUNT=$((MOCK_COUNT + _mock_c))
+      done
+
+      # Count total non-empty, non-comment lines for density denominator
+      TOTAL_LINES=$(grep -v '^\s*$' "$test_file" | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*#' | wc -l | awk '{print $1}')
+      TOTAL_LINES=${TOTAL_LINES//[^0-9]/}
+      TOTAL_LINES=${TOTAL_LINES:-0}
+
+      if [ "$TOTAL_LINES" -gt 0 ] 2>/dev/null; then
+        MOCK_DENSITY=$(awk "BEGIN {printf \"%.1f\", ($MOCK_COUNT / $TOTAL_LINES) * 100}")
+        MOCK_DENSITY=${MOCK_DENSITY:-"0"}
+      else
+        MOCK_DENSITY="0"
+      fi
+
+      THRESHOLD_BLOCK=$(awk "BEGIN {print ($MOCK_DENSITY > $MOCK_THRESHOLD) ? 1 : 0}")
+
+      # Check for @mock-justified annotation with reason text (min 10 chars)
+      HAS_JUSTIFIED=$(grep -qE '@mock-justified\s*:\s*.{10,}' "$test_file" 2>/dev/null && echo "true" || echo "false")
+
+      if [ "$THRESHOLD_BLOCK" = "1" ]; then
+        if [ "$HAS_JUSTIFIED" = "false" ]; then
+          # Phase 1: WARNING mode (will become BLOCK in Phase 2)
+          echo "⚠️  WARNING: $test_file — Mock density ${MOCK_DENSITY}% exceeds ${MOCK_THRESHOLD}% threshold"
+          echo "   Must: Reduce mocks OR add '// @mock-justified: <reason>' (min 10 char explanation)"
+          echo "   (Phase 1: WARNING mode — will become BLOCK after baseline analysis)"
+          # Note: Do NOT set MOCK_BLOCKED=true in Phase 1
+        else
+          echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (justified by annotation)"
+        fi
+      else
+        echo "✅ $test_file — Mock density ${MOCK_DENSITY}% (within ${MOCK_THRESHOLD}% threshold)"
+      fi
+    fi
+  done
+
+  # Phase 1: WARNING mode only — no blocking
+  # Phase 2 (after baseline analysis): enable BLOCK based on false positive rate
+  # if [ "$MOCK_BLOCKED" = true ]; then
+  #   echo ""
+  #   echo "❌ PUSH BLOCKED — Mock density too high without justification"
+  #   exit 1
+  # fi
+fi
+
+# ============================================================================
+# Gate ML: Mock Layering Strategy
+# Validates mock policies based on test layer and dependency scope
+# Runs only in non-main branches, TypeScript projects with the module available
+# ============================================================================
+run_gate_m3() {
+  local changed_files="$1"
+  local project_root="$2"
+
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   GATE ML: MOCK LAYERING STRATEGY"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # Check for mock-policy module in installed modules first, then project src/
+  local GATE_M3_SCRIPT=""
+  if [ -f ".xp-gate/modules/mock-policy/gate-m3.ts" ]; then
+    GATE_M3_SCRIPT=".xp-gate/modules/mock-policy/gate-m3.ts"
+  elif [ -f "./src/mock-policy/gate-m3.ts" ]; then
+    GATE_M3_SCRIPT="./src/mock-policy/gate-m3.ts"
+  fi
+
+  if [[ -z "$GATE_M3_SCRIPT" ]]; then
+    echo "   SKIP — module not found"
+    return 0
+  fi
+
+  if [[ ! -f "package.json" ]] || [[ ! -f "tsconfig.json" ]]; then
+    echo "   SKIP — TypeScript only"
+    return 0
+  fi
+
+  # Filter to test files only
+  local test_files=$(echo "$changed_files" | grep -E '\.(test|spec)\.ts$' || true)
+
+  if [[ -z "$test_files" ]]; then
+    echo "   SKIP — no test files changed"
+    return 0
+  fi
+
+  echo "   Changed test files: $(echo "$test_files" | wc -l)"
+
+  # Convert to array safely (handles spaces in filenames)
+  local args=()
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && args+=("$f")
+  done <<< "$test_files"
+
+  if run_tsx "$GATE_M3_SCRIPT" "${args[@]}"; then
+    echo "✅ Gate ML: PASS"
+    return 0
+  else
+    local exit_code=$?
+    if [[ "$exit_code" -eq 1 ]]; then
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "   ❌ GATE ML FAILED - PUSH BLOCKED"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      echo "Mock layering violations found. Review and fix or adjust"
+      echo ".mockpolicyrc severity to 'warning' for advisory mode."
+      echo ""
+      return 1
+    fi
+    echo "⚠️ Gate ML: Unexpected error — allowing push with warning"
+    return 0
+  fi
+}
+
+run_gate_m3 "$TS_FILES" "$PROJECT_ROOT"
+
+# ============================================================================
+# GATE UI: UI SPRINT DETECTION & RESULT VALIDATION
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   GATE UI: UI SPRINT QUALITY GATES"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
+  # #578: this guard used `${#XP_GATE_BYPASS_REASON// /}`, which stacks "length"
+  # and "substitution" — bash rejects it with `bad substitution` for the whole
+  # condition line, so NEITHER branch ran. The bypass therefore skipped Gate UI
+  # with an empty or one-character reason, and the audit entry below was lost
+  # too. Strip the whitespace into a variable first, then take its length: two
+  # ordinary expansions, each of them valid on its own.
+  XP_GATE_BYPASS_REASON_COMPACT="${XP_GATE_BYPASS_REASON//[[:space:]]/}"
+  if [[ -z "$XP_GATE_BYPASS_REASON" || ${#XP_GATE_BYPASS_REASON_COMPACT} -lt 10 ]]; then
+    echo "❌ XP_GATE_BYPASS_REASON required (min 10 non-whitespace chars)"
+    echo "   got: ${#XP_GATE_BYPASS_REASON_COMPACT} non-whitespace character(s)"
+    exit 1
+  fi
+  echo "⚠️  UI Gate BYPASSED — reason: $XP_GATE_BYPASS_REASON"
+  # #710: build the whole record in node rather than interpolating shell
+  # variables into a JSON string. Values come from the environment so no shell
+  # quoting layer can mangle them (an earlier sed-based escaper silently
+  # dropped the reason entirely when its backslash expression broke).
+  #
+  # The reason is free-form USER INPUT: one double quote in it used to end the
+  # JSON string early and turn the audit line into garbage. An audit trail that
+  # can be corrupted by the thing it is auditing is not an audit trail.
+  AUDIT_ENTRY=$(
+    _AJ_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+    _AJ_BRANCH="$CURRENT_BRANCH" \
+    _AJ_COMMIT="$(git rev-parse HEAD 2>/dev/null)" \
+    _AJ_USER="$(git config user.name 2>/dev/null)" \
+    _AJ_REASON="$XP_GATE_BYPASS_REASON" \
+    node -e '
+      const env = process.env;
+      const clean = (v, fallback) => {
+        const s = String(v === undefined ? "" : v).replace(/[\r\n]+/g, " ").trim();
+        return s === "" ? fallback : s;
+      };
+      process.stdout.write(JSON.stringify({
+        timestamp: env._AJ_TS,
+        branch: clean(env._AJ_BRANCH, "unknown"),
+        commit: clean(env._AJ_COMMIT, "unknown"),
+        user: clean(env._AJ_USER, "unknown"),
+        reason: clean(env._AJ_REASON, ""),
+        bypass_type: "ui-gates",
+      }));
+    ' 2>/dev/null
+  )
+  echo "$AUDIT_ENTRY" >> .audit-log.jsonl
+else
+    # Detect UI changes in pushed files.
+    #
+    # stderr is kept out of the captured value but its ABSENCE is no longer
+    # treated as a clean "no UI here" answer (#553). jq -r prints the empty
+    # string and exits 0 on empty input, so the old `|| echo "false"` fallback
+    # was unreachable; an empty verdict became "", which is not "true", which
+    # silently took the "No UI changes detected — skipping" branch. A push whose
+    # only change was src/ui/streamlit_app.py was therefore told there was
+    # nothing to review — the failure Gate UI exists to prevent, inverted.
+    UI_DETECTION=$(echo "$PUSHED_FILES" | npx -y tsx src/npm-package/lib/ui-detector.ts --push-mode --from-stdin 2>/dev/null)
+    UI_DETECT_EXIT=$?
+
+    if [ "$UI_DETECT_EXIT" -eq 0 ] && [ -n "$UI_DETECTION" ]; then
+      IS_UI_SPRINT=$(echo "$UI_DETECTION" | jq -r 'if type == "object" then (.isUiSprint | tostring) else "unknown" end' 2>/dev/null)
+    else
+      IS_UI_SPRINT=""
+    fi
+    # Three answers, not two. "" (detector missing, crashed, or emitted nothing)
+    # is "unknown", and unknown must never read as "no UI".
+    if [ -z "$IS_UI_SPRINT" ] || [ "$IS_UI_SPRINT" = "null" ]; then
+      IS_UI_SPRINT="unknown"
+    fi
+
+    if [ "$IS_UI_SPRINT" = "unknown" ]; then
+      # A missing detector must not disable UI review. Fall back to a path
+      # check over the same file list: a cheap, conservative substitute for a
+      # verdict we do not have.
+      UI_PATH_HITS=$(echo "$PUSHED_FILES" | grep -Ei '(^|/)(src/ui|ui|components|pages|views|screens)/|[.](tsx|jsx|vue|svelte|css|scss|sass|less)$' || true)
+      if [ -n "$UI_PATH_HITS" ]; then
+        echo ""
+        echo "❌ Gate UI: could not evaluate the UI verdict (detector unavailable or produced no verdict, exit ${UI_DETECT_EXIT})."
+        echo "   This push touches UI-looking paths:"
+        echo "$UI_PATH_HITS" | sed 's/^/     /'
+        echo ""
+        echo "   The gate cannot claim there is nothing to review when it never got an answer."
+        echo "   Fix: install the detector (npx -y tsx must be able to load src/npm-package/lib/ui-detector.ts),"
+        echo "   or run the review explicitly: xp-gate ui-review"
+        echo "   To accept the risk for this push: XP_GATE_SKIP_UI_GATES=1 XP_GATE_BYPASS_REASON=\"<why>\""
+        echo ""
+        exit 1
+      fi
+      echo "ℹ️  Gate UI: detector unavailable (exit ${UI_DETECT_EXIT}) and no UI-looking paths in this push — nothing to review."
+      IS_UI_SPRINT="false"
+    fi
+
+    if [[ "$IS_UI_SPRINT" == "true" ]]; then
+      UI_RESULT_FILE=".ui-gate-result.json"
+      MISSING_RESULTS=()
+      
+      if [[ ! -f "$UI_RESULT_FILE" ]]; then
+        MISSING_RESULTS+=("$UI_RESULT_FILE")
+      fi
+      
+      if [[ ${#MISSING_RESULTS[@]} -gt 0 ]]; then
+        echo ""
+        echo "❌ UI sprint detected — missing result file(s):"
+        for f in "${MISSING_RESULTS[@]}"; do echo "  - $f"; done
+        echo ""
+        echo "Before pushing, run: /design-review + /qa-only in your Agent session"
+        echo "Or for non-sprint flows: xp-gate ui-review"
+        echo ""
+        echo "Sprint Flow: Phase 3 automatically triggers these when UI changes detected."
+        exit 1
+      fi
+      
+      # Validate result file
+      RESULT_COMMIT=$(jq -r '.commit' "$UI_RESULT_FILE" 2>/dev/null)
+      RESULT_VERDICT=$(jq -r '.verdict' "$UI_RESULT_FILE" 2>/dev/null)
+      RESULT_EXPIRES=$(jq -r '.expires' "$UI_RESULT_FILE" 2>/dev/null)
+      
+      if [[ "$RESULT_COMMIT" != "$(git rev-parse HEAD)" ]]; then
+        echo "❌ .ui-gate-result.json outdated — expected commit $(git rev-parse HEAD), got $RESULT_COMMIT"
+        exit 1
+      fi
+      
+      if [[ "$RESULT_VERDICT" != "APPROVED" ]]; then
+        echo "❌ .ui-gate-result.json verdict: $RESULT_VERDICT (must be APPROVED)"
+        exit 1
+      fi
+      
+      CURRENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      if [[ "$CURRENT_TIME" > "$RESULT_EXPIRES" ]]; then
+        echo "❌ .ui-gate-result.json expired ($RESULT_EXPIRES)"
+        exit 1
+      fi
+      
+      echo "✅ Gate UI: PASS — UI changes reviewed and approved"
+    else
+      echo "ℹ️  No UI changes detected — skipping UI Gate"
+    fi
+  fi
+
+# ============================================================================
+# GATE MW: VALIDATE CODE WALKTHROUGH RESULT FILE
+# ============================================================================
+RESULT_FILE=".code-walkthrough-result.json"
+MW_SKIPPED=0
+# Journal status (#557 follow-up). The journal already read GATE_DELPHI_STATUS
+# but nothing ever assigned it, so Gate MW reported its SKIP default in every
+# report -- including pushes where the walkthrough was in fact verified. The
+# closing banner told the truth while the machine-readable journal did not, which
+# is the half-fix #557 was about.
+GATE_DELPHI_STATUS="SKIP"
+# Consumed by the journal heredoc (sourced/inherited boundary).
+# shellcheck disable=SC2034
+GATE_DELPHI_SKIP_REASON="not_run"
+
+# Skipped on main/master by design, exactly like Gate ML and Gate UI above.
+# Work is already walkthrough-reviewed on the feature branch before it lands, so
+# demanding a fresh three-model sweep against the merge commit would only
+# re-review identical code — and it made every release commit unpushable, since
+# the release commit itself changes nothing anyone reviewed. githooks/AGENTS.md
+# documented this skip; the code did not implement it (drift fixed here).
+if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+  MW_SKIPPED=1
+  # Consumed by the journal heredoc (sourced/inherited boundary).
+  # shellcheck disable=SC2034
+  GATE_DELPHI_SKIP_REASON="main_branch_push"
+  echo ""
+  echo "   ℹ️  Gate MW skipped (pushing to ${CURRENT_BRANCH} — pre-reviewed via branch walkthrough)"
+  echo ""
+else
+
+
+if [ ! -f "$RESULT_FILE" ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ GATE MW: CODE WALKTHROUGH REQUIRED - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "No code walkthrough result found."
+  echo ""
+  echo "Before pushing, run code walkthrough in your Agent session:"
+  echo ""
+  echo "  /delphi-review --mode code-walkthrough"
+  echo ""
+  echo "After APPROVED verdict, retry this push."
+  echo ""
+  exit 1
+fi
+
+# Check Node.js availability (MANDATORY - zero degradation)
+if ! command -v node >/dev/null 2>&1; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ ENVIRONMENT ERROR - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Node.js is NOT installed. Required for JSON validation."
+  echo ""
+  echo "Install Node.js 18 or newer, then retry the push."
+  echo ""
+  exit 1
+fi
+
+# Walkthrough evidence must bind to the exact feature-branch HEAD being pushed.
+EXPECTED_COMMIT=$(git rev-parse HEAD)
+
+# Validate the complete evidence contract without interpolating JSON into shell.
+HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# #739: under Git Bash $HOOK_DIR is a POSIX path (/d/projects/...). `test -f`
+# accepts it because MSYS resolves that form itself, but node.exe does not: it
+# reads a leading "/d" as drive-relative and reports
+# "Cannot find module 'D:\d\projects\...'". So the guard below PASSED and the
+# consumer crashed, which is why this surfaced as a Node stack trace instead of
+# the intended "Gate MW validator is missing" message. cygpath is the documented
+# conversion; where it is absent (plain POSIX, no MSYS) the path is already
+# native and is left untouched.
+if command -v cygpath >/dev/null 2>&1; then
+  HOOK_DIR_FOR_NODE=$(cygpath -w "$HOOK_DIR")
+else
+  HOOK_DIR_FOR_NODE="$HOOK_DIR"
+fi
+MW_VALIDATOR="$HOOK_DIR_FOR_NODE/lib/validate-code-walkthrough.cjs"
+if [ ! -f "$MW_VALIDATOR" ]; then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ RESULT FILE INVALID - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "Gate MW validator is missing: $MW_VALIDATOR"
+  echo ""
+  echo "Re-run: /delphi-review --mode code-walkthrough"
+  echo ""
+  exit 1
+fi
+
+CURRENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# The 5th argument names the repository whose `.delphi-config.json` BINDS the
+# evidence (#574). It is passed explicitly instead of letting the validator
+# infer it from cwd: the gate's subject is the repo being pushed, and a cwd-
+# derived lookup would bind xp-gate's own config whenever the suite runs here.
+MW_PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || MW_PROJECT_ROOT=""
+MW_PROJECT_ROOT=$(printf '%s' "$MW_PROJECT_ROOT" | tr -d '
+')
+if ! VALIDATION_ERROR=$(node "$MW_VALIDATOR" "$RESULT_FILE" "$EXPECTED_COMMIT" "$CURRENT_BRANCH" "$CURRENT_TIME" "$MW_PROJECT_ROOT" 2>&1); then
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "   ❌ RESULT FILE OUTDATED - PUSH BLOCKED"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+  echo "$VALIDATION_ERROR"
+  echo ""
+  echo "Re-run: /delphi-review --mode code-walkthrough"
+  echo ""
+  exit 1
+fi
+
+# The validator passed: record that the walkthrough was actually verified.
+# Consumed by the journal heredoc (sourced/inherited boundary).
+# shellcheck disable=SC2034
+GATE_DELPHI_STATUS="PASS"
+# shellcheck disable=SC2034
+GATE_DELPHI_SKIP_REASON=""
+fi
+
+# ============================================================================
+# Closing banner. States what actually happened (#557): a gate that skipped is
+# named. The heading used to read "ALL CHECKS PASSED" unconditionally while Gate
+# MP and Gate M (Python) skipped on a typical push without recording why, so a
+# reviewer skimming the log had no signal that mutation testing never ran.
+# ============================================================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Turn the recorded skips into a displayable list.
+#
+# Split on the SEPARATOR (`|`), never on anything that can occur inside a reason.
+# The previous form replaced `|` with " , " and then split on `,`, so a reason
+# that merely contained a comma was torn in two and its second half printed as
+# its own gate:
+#     Gate MP: script not found, parity NOT verified
+#       - Gate MP: script not found
+#       - parity NOT verified      <-- invented gate, and the real entry lost
+#                                      the half that said what was verified (#572)
+# A trailing separator is dropped, and blank segments are skipped.
+SKIPPED_LIST=$(printf '%s' "${GATES_SKIPPED:-}" | tr '|' '\n' | sed '/^[[:space:]]*$/d')
+if [ -n "$SKIPPED_LIST" ]; then
+  echo "   ⚠️  NO BLOCKING FAILURES — but not every gate ran:"
+  printf '%s\n' "$SKIPPED_LIST" | sed 's/^[[:space:]]*/     - /'
+else
+  echo "   ✅ ALL CHECKS PASSED"
+fi
+# Say what actually happened. Printing "VERIFIED" on a skipped gate would be a
+# claim the hook cannot support — the same dishonesty (evidence asserting an
+# unperformed check) that Gate MW exists to prevent.
+if [ "$MW_SKIPPED" = "1" ]; then
+  echo "   ℹ️  GATE MW: CODE WALKTHROUGH SKIPPED (main-branch push)"
+else
+  echo "   ✅ GATE MW: CODE WALKTHROUGH VERIFIED"
+fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Branch: $CURRENT_BRANCH"
+echo "Files changed: $FILES_CHANGED"
+echo "Lines: +$LINES_ADDED -$LINES_DELETED"
+if [ "$MW_SKIPPED" != "1" ] && [ -f "$RESULT_FILE" ]; then
+  echo ""
+  echo "Code walkthrough result:"
+  echo "  Commit: $EXPECTED_COMMIT"
+  echo "  Verdict: APPROVED"
+fi
+
+echo ""
+echo "Proceeding with push..."
+exit 0

@@ -636,7 +636,7 @@ ENDJSON
     echo "   ⚠️  duration_ms rejected: measured ${_XP_DURATION_MS}ms is below the longest gate (${_XP_DURATION_FLOOR}ms) — recording null." >&2
     _XP_DURATION_MS=""
   fi
-  _XP_RF="$REPORT_FILE" _XP_PRF="$PERSISTED_REPORT_FILE" _XP_TS="$TIMESTAMP" _XP_BR="$BRANCH" _XP_CH="$COMMIT_HASH" _XP_CF="${CHANGED_FILES:-}" _XP_DUR="$_XP_DURATION_MS" node -e "const fs=require('fs');const e=process.env;const br=JSON.parse(fs.readFileSync(e._XP_RF,'utf8'));const cf=(e._XP_CF||'').split('\n').filter(f=>f);const r={timestamp:e._XP_TS,trigger:'pre-commit',branch:e._XP_BR,commit:e._XP_CH,changed_files:cf,overall:br.overall||{},gates:br.gates||{},warnings:[],errors:[]};const d=Number(e._XP_DUR);if(Number.isFinite(d)&&d>0){r.duration_ms=d;}fs.writeFileSync(e._XP_PRF,JSON.stringify(r,null,2)+'\n');" 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
+  _XP_RF="$REPORT_FILE" _XP_PRF="$PERSISTED_REPORT_FILE" _XP_TS="$TIMESTAMP" _XP_BR="$BRANCH" _XP_CH="$COMMIT_HASH" _XP_CF="${CHANGED_FILES:-}" _XP_DUR="$_XP_DURATION_MS" node -e "const fs=require('fs');const e=process.env;const br=JSON.parse(fs.readFileSync(e._XP_RF,'utf8'));const cf=(e._XP_CF||'').split('\n').filter(f=>f);const r=Object.assign({},br,{timestamp:e._XP_TS,trigger:'pre-commit',branch:e._XP_BR,commit:e._XP_CH,changed_files:cf,overall:br.overall||{},gates:br.gates||{},warnings:br.warnings||[],errors:br.errors||[]});delete r.duration_ms;const d=Number(e._XP_DUR);if(Number.isFinite(d)&&d>0){r.duration_ms=d;}fs.writeFileSync(e._XP_PRF,JSON.stringify(r,null,2)+'\n');" 2>/dev/null || cp "$REPORT_FILE" "$PERSISTED_REPORT_FILE"
 
   # ── History append (unchanged — append-only for trend) ────────────────────────────
   local GATES_JSON="{"

@@ -68,14 +68,14 @@ for (const lang of langs) {
     const cells = GATES.map((g) => {
       const v = verdictOf(run, g);
       // Short cells keep the table readable; the legend below defines them.
-      return { PASS: 'P', FAIL: 'F', BLOCK: 'B', SKIP: 'S', WARN: 'W', ABSENT: '-', NO_REPORT: '?', NO_RUN: '?' }[v] || v;
+      return { PASS: 'P', FAIL: 'F', BLOCK: 'B', SKIP: 'S', WARN: 'W', NOT_REACHED: 'N', ABSENT: '-', NO_REPORT: '?', NO_RUN: '?' }[v] || v;
     });
     lines.push(`| ${lang} | ${mode} | ${cells.join(' | ')} |`);
   }
 }
 
 lines.push('');
-lines.push('图例: P=PASS F=FAIL B=BLOCK S=SKIP W=WARN -=absent(链未到达) ?=无报告');
+lines.push('图例: P=PASS F=FAIL B=BLOCK S=SKIP W=WARN N=NOT_REACHED -=absent ?=无报告');
 
 // --- finding 1: a clean project blocked by a gate ----------------------------
 //
@@ -136,18 +136,18 @@ for (const lang of langs) {
   });
   const attempted = owners.filter((g) => {
     const v = verdictOf(dirty, g);
-    return v !== 'ABSENT' && v !== 'NO_REPORT';
+    return v !== 'ABSENT' && v !== 'NO_REPORT' && v !== 'NOT_REACHED';
   });
-  if (!seen.length) {
-    findings.push({
-      kind: '可能漏检',
-      detail: `${lang} 的植入缺陷没有被 G${owners.join('/G')} 抓到`,
-      evidence: owners.map((g) => `G${g}=${verdictOf(dirty, g)}`).join(' '),
-    });
-  } else if (attempted.length === 0) {
+  if (attempted.length === 0) {
     findings.push({
       kind: '门禁不可达',
       detail: `${lang} 的负责门禁根本没有运行`,
+      evidence: owners.map((g) => `G${g}=${verdictOf(dirty, g)}`).join(' '),
+    });
+  } else if (!seen.length) {
+    findings.push({
+      kind: '可能漏检',
+      detail: `${lang} 的植入缺陷没有被 G${owners.join('/G')} 抓到`,
       evidence: owners.map((g) => `G${g}=${verdictOf(dirty, g)}`).join(' '),
     });
   }
