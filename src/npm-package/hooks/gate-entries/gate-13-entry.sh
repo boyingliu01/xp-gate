@@ -571,8 +571,16 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
     # evaluate", so it must not beat a WARN or a BLOCK, but it must survive an
     # arm that answered PASS.
     _g13_any_skip=0
+    # True when at least one arm actually evaluated something and found nothing.
+    # Kept because "SKIP" is contagious by design only when NOTHING evaluated: a
+    # project whose Go adapter ran `go vet` and passed has been checked, even
+    # though its C/C++ arm had no sources. Measured consequence of not tracking
+    # this: a clean Go project reported Gate 13 SKIP, which reads exactly like the
+    # language being unsupported.
+    _g13_any_pass=0
     _g13_note() {
       case "$1" in
+        0) _g13_any_pass=1 ;;
         1|2) _g13_worst=$1 ;;
         3) [ "$_g13_worst" -eq 0 ] && _g13_worst=3 ;;
         4) _g13_any_skip=1 ;;
@@ -587,6 +595,10 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
     # #717 is about, one level up.
     gate13_run_csharp_analysis; _g13_rc=$?; _g13_note "$_g13_rc"
     gate13_run_analyzer;       _g13_rc=$?; _g13_note "$_g13_rc"
+    # The adapter-declared compile-time check (Go, Rust, Dart, Kotlin, ...). Runs
+    # for every language whose adapter defines compiler_check_command; returns
+    # GATE13_SKIP for the rest, which _g13_note already understands.
+    gate13_run_declared_checks; _g13_rc=$?; _g13_note "$_g13_rc"
 
     # A clean worst of PASS means no arm found a problem -- but that is only a real
     # PASS if every arm actually evaluated something. If any arm reported SKIP and
@@ -595,9 +607,13 @@ elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse 
     #
     # Without this, the C/C++ arm's new GATE13_SKIP would be erased by the analyzer
     # arm answering 0 on the same empty change set -- which is exactly what the
+    # _g13_any_pass is what makes SKIP conditional on NOTHING having been checked:
+    # a Go project whose vet ran and passed HAS been checked, even though its
+    # C/C++ arm had no sources. Without it, a clean Go project reported SKIP --
+    # which reads exactly like "your language is not supported".
     # first end-to-end run showed: the reason line printed, and the verdict was
     # still PASS.
-    if [ "$_g13_worst" -eq 0 ] && [ "$_g13_any_skip" -eq 1 ]; then
+    if [ "$_g13_worst" -eq 0 ] && [ "$_g13_any_skip" -eq 1 ] && [ "$_g13_any_pass" -eq 0 ]; then
       exit 4
     fi
     exit "$_g13_worst"

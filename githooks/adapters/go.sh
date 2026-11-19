@@ -63,6 +63,16 @@ run_tests() {
 # Undeclared adapters keep the safe double-run default.
 coverage_runs_tests() { return 0; }
 
+# Gate 13 capability: the Go vet tool type-checks and reports the class of error
+# the compiler gate exists to catch. Measured 2026-11-19 on this machine: 1.4s,
+# and it exits 1 on `var x int = "not an int"` -- which the whole chain let through
+# before this declaration existed.
+#
+# The pattern is "./..." rather than the staged files: Go compiles per package, so
+# vetting one file of a package reports that package anyway, and a partial
+# argument cannot detect an error that only appears when two files meet.
+compiler_check_command() { printf "%s" "go vet ./..."; }
+
 run_coverage() {
   require_tool go "Go SDK" || return 1
 
