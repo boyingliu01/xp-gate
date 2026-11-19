@@ -73,7 +73,19 @@ afterEach(() => {
   fs.rmSync(sandbox, { recursive: true, force: true });
 });
 
-function writeCleanSandbox() {
+function writeCleanSandbox({ withConfig = false } = {}) {
+  // Architecture config is REQUIRED before lib/arch.js will scan
+  // (REQ-GATE6-CONFIG-PARITY, mirroring the hook), so every case that expects a
+  // scan must declare one. Opt-in rather than unconditional: the --use-config
+  // group runs `archlint init` and asserts the file appears, and pre-creating it
+  // made init refuse to overwrite and exit non-zero (measured: that group went
+  // from green to 1 failed | 34 passed when the config was written here always).
+  if (withConfig) {
+    fs.writeFileSync(
+      path.join(sandbox, '.archlint.yaml'),
+      ['rules:', '  code-clone:', '    severity: high', '  cyclic-dependency:', '    severity: high', ''].join(String.fromCharCode(10)),
+    );
+  }
   fs.mkdirSync(path.join(sandbox, 'src'), { recursive: true });
   fs.writeFileSync(path.join(sandbox, 'src', 'a.js'), 'module.exports = { a: 1 };\n');
   fs.writeFileSync(
@@ -323,7 +335,7 @@ describe('stripExtendedPrefix', () => {
 
 describe('arch — real archlint integration (anti-noop)', () => {
   it('exits 0 on a clean sandbox (zero-tolerance mode, no baseline)', () => {
-    writeCleanSandbox();
+    writeCleanSandbox({ withConfig: true });
     const run = runArchInChild(sandbox, []);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain('Zero-tolerance mode');
@@ -331,7 +343,7 @@ describe('arch — real archlint integration (anti-noop)', () => {
   }, 60000);
 
   it('BLOCKS a planted high-severity violation — exit 0 is a real scan, not a no-op', () => {
-    writeCleanSandbox();
+    writeCleanSandbox({ withConfig: true });
     plantHighClone();
     const run = runArchInChild(sandbox, []);
     expect(run.status).toBe(1);
@@ -340,7 +352,7 @@ describe('arch — real archlint integration (anti-noop)', () => {
   }, 60000);
 
   it('baseline ratchet: snapshot of a clean tree then re-scan exits 0', () => {
-    writeCleanSandbox();
+    writeCleanSandbox({ withConfig: true });
     const snapshot = runRealArchlint(['snapshot', '-o', path.join(sandbox, '.architecture-baseline.json'), '-p', sandbox], sandbox);
     expect(snapshot.status).toBe(0);
     const run = runArchInChild(sandbox, []);
@@ -349,7 +361,7 @@ describe('arch — real archlint integration (anti-noop)', () => {
   }, 120000);
 
   it('baseline ratchet: a NEW high finding against the baseline blocks', () => {
-    writeCleanSandbox();
+    writeCleanSandbox({ withConfig: true });
     const snapshot = runRealArchlint(['snapshot', '-o', path.join(sandbox, '.architecture-baseline.json'), '-p', sandbox], sandbox);
     expect(snapshot.status).toBe(0);
     plantHighClone();
