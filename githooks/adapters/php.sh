@@ -134,12 +134,14 @@ run_static_analysis() {
   root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
   php=$(_php_bin) || {
     echo "php is not installed -- static analysis not measurable"
+    echo "XP_G1_REASON: php_missing"
     echo "   Install: scoop install php   (or winget install PHP.PHP.8.4)"
     return 2
   }
 
   if ! phpstan=$(_php_vendor_bin "$root" phpstan); then
     echo "phpstan is not installed -- static analysis not measurable"
+    echo "XP_G1_REASON: phpstan_missing"
     echo "   Install: composer require --dev phpstan/phpstan"
     return 2
   fi
@@ -181,6 +183,7 @@ run_static_analysis() {
   # Non-zero, no diagnostics: the tool could not do its job.
   printf '%s\n' "$out" | sed -n '1,15p'
   echo "phpstan could not run (no diagnostic rows produced) -- refusing to report this as clean"
+  echo "XP_G1_REASON: phpstan_no_diagnostics"
   return 2
 }
 
@@ -195,11 +198,13 @@ run_lint() {
   root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
   php=$(_php_bin) || {
     echo "php is not installed -- lint not measurable"
+    echo "XP_G1_REASON: php_missing"
     return 2
   }
 
   if ! phpcs=$(_php_vendor_bin "$root" phpcs); then
     echo "phpcs is not installed -- lint not measurable"
+    echo "XP_G1_REASON: phpcs_missing"
     echo "   Install: composer require --dev squizlabs/php_codesniffer"
     return 2
   fi
@@ -247,6 +252,7 @@ run_lint() {
       # Measured: unknown --standard or a path phpcs cannot open.
       printf '%s\n' "$out" | sed -n '1,15p'
       echo "phpcs could not run (exit 3: bad standard or unusable path), not a violation"
+      echo "XP_G1_REASON: phpcs_unusable_standard"
       return 2
       ;;
     *)
@@ -265,6 +271,7 @@ run_tests() {
   root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
   php=$(_php_bin) || {
     echo "php is not installed -- tests not measurable"
+    echo "XP_G1_REASON: php_missing"
     return 2
   }
 
@@ -276,6 +283,7 @@ run_tests() {
 
   if ! phpunit=$(_php_vendor_bin "$root" phpunit); then
     echo "phpunit is not installed -- tests not measurable"
+    echo "XP_G1_REASON: phpunit_missing"
     echo "   Install: composer require --dev phpunit/phpunit"
     return 2
   fi
@@ -309,6 +317,7 @@ run_coverage() {
   root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
   php=$(_php_bin) || {
     echo "php is not installed -- coverage not measurable"
+    echo "XP_G1_REASON: php_missing"
     return 2
   }
 

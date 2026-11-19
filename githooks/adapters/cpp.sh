@@ -30,6 +30,7 @@ run_static_analysis() {
       -not -path './.git/*' -not -path './build/*' 2>/dev/null | head -20)
     if [ -z "$files" ]; then
       echo "No C/C++ sources to analyse"
+      echo "XP_G1_REASON: no_cpp_sources"
       return 2
     fi
     # clang-tidy needs a compilation database to know the include paths, and it
@@ -61,6 +62,7 @@ run_static_analysis() {
         _cppcheck_run
         return $?
       fi
+      echo "XP_G1_REASON: clang_tidy_unusable_config"
       return 2
     fi
     return "$rc"
@@ -72,6 +74,7 @@ run_static_analysis() {
   fi
 
   echo "No C/C++ analysis tools (clang-tidy/cppcheck)"
+  echo "XP_G1_REASON: cpp_tools_missing"
   return 2
 }
 

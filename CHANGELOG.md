@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.38.61.0] - 2026-11-20
+
+**适配器拒绝评估时，必须说明为什么。**
+
+Gate 1 的适配器契约是 `0=通过 / 1|2=阻断 / 3=警告`，
+而原因**只能**通过 `XP_G1_REASON: ` 这个 stdout 行跨子 shell 边界传出来
+（适配器跑在 `$( ... )` 里，`export` 到不了调用方）。
+
+实测（PHP fixture，无 composer.json）：
+
+```
+❌ BLOCKED - php toolchain could not execute — NOT a pass (fail-closed): unknown
+```
+
+门禁拒绝了——这是对的（fail-closed）——但它告诉操作者「unknown」。
+适配器向控制台打印了完全可用的一句话（"phpstan is not installed -- static
+analysis not measurable"），**却没有记录任何机器可读的东西**。
+
+### 范围
+
+| 适配器 | return 2 次数 | 修复前原因 |
+|---|---|---|
+| php | 18 | 0 |
+| csharp | 9 | 0 |
+| cpp | 4 | 0 |
+| iac | 1 | 0 |
+| java | 3 | 5 ✅ 已合规 |
+| powershell | 2 | 9 ✅ 已合规 |
+
+**32 处拒绝评估，一处原因都没有。**
+
+现在全部补齐，例如：
+
+```
+XP_G1_REASON: phpstan_missing
+XP_G1_REASON: dotnet_sdk_missing
+XP_G1_REASON: checkov_could_not_run
+XP_G1_REASON: clang_tidy_unusable_config
+```
+
+### 新增契约测试
+
+`adapter-reason-contract.test.bats` 检查三件事：
+
+1. 任何有 `return 2` 的适配器都必须能发出原因
+2. 原因行格式必须与 Gate 1 的 `sed -n 's/^XP_G1_REASON: //p'` 精确匹配
+   （前缀在第 0 列、冒号后恰好一个空格、内容非空）
+3. php 的三条主路径（phpstan / phpcs / phpunit 缺失）都有原因
+
+### 还发现但未修（需要独立的深层改动）
+
+同一个 PHP fixture 暴露了 Gate 5 的一处「判定与记录不一致」：
+
+```
+覆盖率检查 return 1（BLOCK）
+→ 报告里 gate5 状态却是 SKIP，reason 为空
+→ overall.gatesFailed = 0，verdict = PARTIAL 而非 BLOCK
+```
+
+这是本系列第 10 处同类缺陷，根因在 Gate 5 的状态提升逻辑（`#554` 那一族的又一次），
+已记录，需要独立的修复批次。
+
+### 证伪
+
+测试 1 在修复前准确报出 `cpp.sh(4) csharp.sh(9) iac.sh(1)` 全部零原因；
+补齐后转绿。
+
 ## [0.38.60.0] - 2026-11-20
 
 **Gate 1 报告了违规，但没说是什么规则。**
