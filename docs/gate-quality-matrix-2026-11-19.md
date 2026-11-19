@@ -423,6 +423,48 @@ SKIP 打印了，然后 PASS 盖在上面。
 
 ---
 
+
+### 3.6 门禁 2：一个文件都没分析，判定干净
+
+`classify_jscpd_run` 从一行决定判定：没解析出「Found N clones」且 N>0，就归 `clean`。
+
+「Found 0 clones」= 「没找到重复」，**只有当确实分析了东西时才等于「没有重复」**。
+jscpd 把区别写在 stderr 上，却仍 exit 0：
+
+```
+Warning: jscpd analyzed no files: check the paths and the --format,
+--ignore and --pattern filters
+Found 0 clones.
+```
+
+2026-11-19 在 Dart 夹具上实测：表格是 `Total: 0 files / 0 lines / 0 tokens`，
+门禁打印 `PASSED`，汇总记 PASS。
+
+第二种形态更隐蔽——只有一行时间：
+
+```
+$ jscpd --ignore "**/*" lib.dart ; echo $?
+time: 0.156ms
+0
+```
+
+旧兜底把它也归成 `clean`，注释写「leave the gate's verdict as it was」，
+但它留下的 verdict 就是 PASS。
+
+两种形态现在都归 `no_files` → SKIP 带原因。**SKIP 而非 BLOCK**：项目可能合理地
+不含 jscpd `--format` 覆盖的类型，阻断等于因格式清单惩罚一门语言。
+
+两条反向守卫防止矫枉过正，这是本系列反复强调的：
+
+| 测试 | 钉住的行为 | 没有它会怎样 |
+|---|---|---|
+| -06 | 有内容但无法解析的报告仍算「扫描发生过」 | 每种不认识的格式都变 SKIP，门禁对任何 jscpd 改版失效 |
+| -02 | 真扫了真文件、0 克隆，仍是 `clean` | 把静默通过换成永久跳过 |
+
+**分类器内部的顺序也是契约**：非零退出压过 no-files（崩溃是更具体的事实，
+叫它 no_files 会把它藏起来）；解析出的「Found N clones」压过空报告检查
+（那是扫描发生过的证据）。
+
 ## 四、我自己的验证抓住的错误
 
 每一个都「看起来像成功」。记录在此，因为它们比结论更能说明问题。
@@ -504,16 +546,18 @@ SKIP 打印了，然后 PASS 盖在上面。
    函数体 `&&`」的函数可能还有别的未暴露——只在被改动时才浮现。若要系统性排查，需要
    一次全库 lizard-vs-复算 对比，本轮未做。
 
-10. **门禁 5 汇总表仍显示 `PASS`**：委托给 CI 的 shell 现在正文诚实了
-    （`No test verdict was produced here`），但 `GATE_5_STATUS` 仍是 `PASS`，
-    所以汇总行写着 `Gate 5: PASS (coverage: N/A%)`。同一矛盾在变量层还留着——
-    要让状态变 `SKIP` 得改 `record_gate_audit` 的取值路径，影响面比正文大，
-    本轮只修了人读的那一半。
+10. ~~门禁 5 汇总表仍显示 `PASS`~~ → **已修复**：状态默认现在先看
+    `DELEGATED_LANGS`，记 SKIP 并在 `GATE_5_DETAIL` 点名语言。端到端验证过，
+    同一夹具的汇总行已是 `SKIP (coverage: N/A%)`。
 
-11. **门禁 5 的三个死变量**：`TESTS_DEFERRED` / `PY_TEST_SKIPPED` /
-    `GATE_5_COVERAGE_APPLIES_TO` 只写不读（grep 过 pre-commit、gate-driver、lib/）。
-    尤其最后一个算出了有一个 `subset`/`project` 的区分却从不到达审计记录，
-    看着像**没写完的意图**而不是噪声。删之前要先决定那个区分该不该进 journal。
+11. **门禁 5 的「死变量」——我最初判断错了两个**：只有 `TESTS_DEFERRED` 真无人读取。
+    `PY_TEST_SKIPPED` 被 `lib/coverage-total.sh:54` 读（`enforce_python_coverage`
+    拒绝消费子集运行留下的陈旧 `.coverage`，**该防护有效**）；
+    `GATE_5_COVERAGE_APPLIES_TO` 被 `gate-13-entry.sh` 两处读
+    （持久化 `applies_to` 字段与子集豁免）。
+    我基于只 grep 了三个目录的结论去「修复」后者、还写了个绿测试，
+    扩大范围后才发现读取方——改动已回退。教训：
+    **「我 grep 了没找到读取方」是关于所 grep 目录的证据，不是关于代码库的**。
 
 12. **PHP 的 skip 返回 2 而非 0**，会走 `handle_test_failure` 的真实失败路径，
     属于**过度阻断**（与 Go/shell 的漏检相反）。优先级低：过度阻断会立刻被人发现，
