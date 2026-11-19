@@ -1,5 +1,90 @@
 # Changelog
 
+## [0.38.37.0] - 2026-11-19
+
+**门禁 9 承诺了「这个提交里有代码没人构建」，却只在 Java+Gradle 这一种情况下兑现。**
+
+### 实测
+
+一个 Go 文件带类型错误（`var x int = "not an int"`），同时跑门禁 9 和门禁 13：
+
+```
+→ Gate 9: Build integrity...
+     ℹ️  Not a TypeScript project - skipping build integrity check
+     ⏭️  SKIPPED - Build integrity (not a TypeScript project)
+⏭️  Gate 9 skipped in 0s (nothing was verified)
+
+ℹ️  No staged C/C++ source files -- nothing to compile
+Gate 13 (PASS) completed in 1s
+```
+
+`go build` 对同一份文件报 `cannot use "not an int" (untyped string constant) as int value`。
+**没有任何门禁构建了它，也没有任何门禁说明这一点。**
+
+### 根因：机制存在，但只接了一个入口
+
+`GATE_9_UNVERIFIED` 的注释写着：
+
+> Languages present in this change set that the gate cannot check. Empty means
+> "everything in the change set was either verified or not applicable"; a value
+> means **"this commit contains code nobody built"**.
+
+聚合段也写着「unverified 部分必须说出来」。但整套机制**只有 Gradle 分支在赋值**。
+其余 13 种语言既不构建、也不记录——于是那句承诺在文档里成立、在代码里不成立。
+
+### 修复
+
+改为遍历 `PROJECT_LANGS`（权威语言来源），把变更集里**实际涉及**、又不是 TS/Java 两半
+覆盖的语言记入 `GATE_9_UNVERIFIED`。判定按变更集而非项目：一个仓库恰好含 `.py` 文件，
+不该让一次纯 TS 提交报出未验证。
+
+输出三处都补上：
+
+| 位置 | 之前 | 之后 |
+|---|---|---|
+| PASS 提示 | 只有 Gradle 会触发 | 任何未构建语言都触发 |
+| SKIP 行 | `(nothing was verified)` —— 纯 Go 提交与纯文档提交无法区分 | `no build-integrity half for: go:no_build_integrity_half` |
+| 审计 journal | 同上，只有 Gradle | 任何未构建语言 |
+
+### 关于那张扩展名表——一个被写下来的例外
+
+`githooks/AGENTS.md` 禁止手工维护语言列表。这次为了把语言映射到扩展名，确实需要一张表，
+所以理由与代价都写进了代码注释，而不是留给下一个人去发现：
+
+- `PROJECT_LANGS` 是**哪些语言存在**的权威，循环由它驱动。表里没有的语言不可能被凭空造出来。
+- 表只做「语言 → 扩展名」映射，**无法把工作路由给适配器**——而路由漂移才是那条规则要防的。
+  新增适配器若没加进表，退化为「该语言不报警告」，即**改动前的行为**，不是新故障。
+- 真正的扩展名权威是 `src/npm-package/lib/language-tools.js`，但它是 JavaScript、只有 CLI 能调。
+  在提交热路径上为了一句提示而 spawn 一个 node 进程（本机冷启动实测 >150ms），
+  对提交门禁来说是错的交换。
+
+已知代价写在注释里：将来新增适配器需要往表里加扩展名。
+
+### 顺带修掉两个真实的「记录与打印不一致」
+
+| 缺陷 | 证据 |
+|---|---|
+| `GATE_9_DETAIL="not_selected"` 赋值后从不使用——紧邻的 `record_gate_audit` 调用漏掉了 detail 参数 | `grep -rn GATE_9_DETAIL` 只有一行（赋值本身）；shellcheck 报 SC2034 |
+| 该行的注释写着「Recorded, not merely printed」，但记录里没有原因 | 「故意未被选中」与「链路根本没走到」在 journal 里仍然无法区分 |
+
+`gitohooks/AGENTS.md` 明说：一行带绿、却没有原因的 SKIP 是缺陷不是通过。
+
+### 我自己差点又一次「绿得毫无意义」
+
+第一版测试通过时，修复其实**一行都没执行**：测试桩没有设置 `PROJECT_LANGS`，
+而 `PROJECT_LANGS` 只在门禁 0 的 `.xp-gate-config.json` 分支里赋值。
+补上变量后测试才真正变红。
+
+端到端验证也一样：探针的 `CHANGED_FILES` 是空的（上一次提交已把变更消耗掉），
+所以「没报警告」看起来像修复无效。加了 `bash -x` 才看到
+`GATE_9_UNVERIFIED=go:no_build_integrity_half` **早已算对**——
+只是那条警告的条件是 `STATUS = PASS`，而 Go 提交走的是 SKIP。
+
+**三次「看起来是产品缺陷，其实是探针缺陷」**，与前两轮门禁 5 的探针错误同型。
+
+8 个测试（4 个新增 + 2 个反向守卫 + 1 个 journal + 1 个 not-selected），全部经过证伪：
+回退修复后精确变红，其余保持绿。
+
 ## [0.38.36.0] - 2026-11-19
 
 **门禁 2 把「一个文件都没分析」记为干净，门禁 5 把委托给 CI 的测试记为 PASS。**

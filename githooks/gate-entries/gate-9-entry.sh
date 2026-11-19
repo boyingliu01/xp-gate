@@ -37,7 +37,13 @@ if ! gate_enabled 9; then
   echo "⏭️  SKIPPED - Gate 9: Build integrity (not selected by XP_GATE_ONLY_GATE)"
   GATE_9_STATUS="SKIP"
   GATE_9_DETAIL="not_selected"
-  record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$(gate_start_ms)"
+  # The detail was assigned and then dropped: this call omitted the sixth
+  # argument, so `grep -rn GATE_9_DETAIL` found exactly one line -- the
+  # assignment -- and shellcheck flagged it SC2034. The row was written, but
+  # without the reason, which is the half that separates "deselected on purpose"
+  # from "the chain never reached here". githooks/AGENTS.md: a SKIP row with no
+  # reason is a bug, not a pass.
+  record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$(gate_start_ms)" "$GATE_9_DETAIL"
   return 0
 fi
 
@@ -325,6 +331,80 @@ fi
 # single-variable guard: with explicit sub-statuses a Java PASS no longer
 # "resurrects" a TS SKIP -- each half keeps its own record and the gate
 # reflects the union of what was actually verified.
+#
+# DEFECT C: GATE_9_UNVERIFIED promised more than it delivered. Its comment says
+# "a value means 'this commit contains code nobody built'", and the aggregation
+# below says an unverified part "must SAY so" -- but only the Gradle arm ever set
+# it. Measured 2026-11-19 on a Go fixture with a deliberate type error
+# (`var x int = "not an int"`): Gate 9 skipped with "Not a TypeScript project",
+# Gate 13 passed with "No staged C/C++ source files", and no gate built the file.
+#
+# Collected HERE, driven by PROJECT_LANGS rather than by listing the languages
+# this gate cannot build: such a list can only cover what someone remembered,
+# which is how the defect arose. Every language in the change set that is not one
+# of the two halves that can run is, by definition, unverified.
+#
+# --- What this block does NOT do, and why ---
+#
+# githooks/AGENTS.md forbids hand-maintained language lists, and the extension
+# table below looks like one. It is a deliberate exception with a named cost, so
+# it is written down rather than discovered later:
+#
+#   * PROJECT_LANGS is the authority for WHICH languages exist in this repo, and
+#     the loop is driven by it. A language missing from the table cannot be
+#     invented here; at worst one that IS present gets no note.
+#   * The table only maps language -> extension for languages already in
+#     PROJECT_LANGS. It cannot route work to an adapter -- the drift that rule
+#     exists to prevent. A new adapter that is added to PROJECT_LANGS but not
+#     here degrades to "no unverified note for that language", which is the
+#     PRE-EXISTING behaviour, not a new failure.
+#   * The real extension authority is src/npm-package/lib/language-tools.js,
+#     which is JavaScript and reachable only from the CLI. Calling node from this
+#     bash hot path to read it would cost a process spawn (measured >150ms cold
+#     on this machine) on every commit, to improve a message. That trade is
+#     wrong for a gate on the commit path.
+#
+# Known cost: a future adapter's extension must be added here or its commits get
+# no unverified note. AC-GATE9-VERDICT-04/05 pin the behaviour for go; the
+# fallback `*)` arm below is what keeps an unknown language from producing a
+# meaningless blanket warning.
+#
+# Scoped to the CHANGE SET, not the project: a repo that happens to contain a
+# .py file must not warn on a TypeScript-only commit. AC-GATE9-VERDICT-03 pins
+# that a fully verified change carries no note.
+if [ "${DOCS_ONLY_COMMIT:-false}" != "true" ]; then
+  for _g9_lang in $PROJECT_LANGS; do
+    case "$_g9_lang" in
+      typescript|java) continue ;;   # these have real halves above
+    esac
+    # Only when the change set actually touches that language.
+    case "$_g9_lang" in
+      python)      _g9_rx='\.py$' ;;
+      go)          _g9_rx='\.go$' ;;
+      rust)        _g9_rx='\.rs$' ;;
+      csharp)      _g9_rx='\.cs$' ;;
+      cpp|c)       _g9_rx='\.(c|cc|cpp|cxx|h|hpp)$' ;;
+      kotlin)      _g9_rx='\.kts?$' ;;
+      swift)       _g9_rx='\.swift$' ;;
+      dart)        _g9_rx='\.dart$' ;;
+      php)         _g9_rx='\.php$' ;;
+      ruby)        _g9_rx='\.rb$' ;;
+      shell)       _g9_rx='\.(sh|bash)$' ;;
+      powershell)  _g9_rx='\.ps1$' ;;
+      objectivec)  _g9_rx='\.m$' ;;
+      iac)         _g9_rx='\.(tf|tfvars)$' ;;
+      *)           _g9_rx="" ;;
+    esac
+    # An unrecognised language with no pattern cannot be confirmed absent, and
+    # claiming "unverified" for every language would make the note meaningless.
+    [ -n "$_g9_rx" ] || continue
+    if printf '%s\n' "${CHANGED_FILES:-}" | grep -qE "$_g9_rx"; then
+      GATE_9_UNVERIFIED="${GATE_9_UNVERIFIED:+${GATE_9_UNVERIFIED}, }${_g9_lang}:no_build_integrity_half"
+    fi
+  done
+  unset _g9_lang _g9_rx
+fi
+
 GATE_9_STATUS="SKIP"
 if [ "$GATE_9_TS_STATUS" = "PASS" ] || [ "$GATE_9_JAVA_STATUS" = "PASS" ]; then
   GATE_9_STATUS="PASS"
@@ -355,7 +435,19 @@ GATE_9_DURATION=$((GATE_9_DURATION_MS / 1000))
 # human reads said success. The tick now follows the verdict it summarises.
 case "$GATE_9_STATUS" in
   PASS) echo "✅ Gate 9 completed in ${GATE_9_DURATION}s" ;;
-  SKIP) echo "⏭️  Gate 9 skipped in ${GATE_9_DURATION}s (nothing was verified)" ;;
+  # The SKIP line must name the languages it could not build, when there are any.
+  # "nothing was verified" is true but not actionable: on a Go commit it does not
+  # say WHICH language went unchecked, and the reader has no way to tell this
+  # apart from a docs-only commit where there was genuinely nothing to build.
+  # GATE_9_UNVERIFIED is already computed for the PASS note above and the journal;
+  # the SKIP line was the one place it still went unsaid.
+  SKIP)
+    if [ -n "${GATE_9_UNVERIFIED:-}" ]; then
+      echo "⏭️  Gate 9 skipped in ${GATE_9_DURATION}s — no build-integrity half for: ${GATE_9_UNVERIFIED}"
+    else
+      echo "⏭️  Gate 9 skipped in ${GATE_9_DURATION}s (nothing was verified)"
+    fi
+    ;;
   *)    echo "❌ Gate 9 blocked in ${GATE_9_DURATION}s" ;;
 esac
 record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$GATE_9_START" "${GATE_9_UNVERIFIED:-}"
