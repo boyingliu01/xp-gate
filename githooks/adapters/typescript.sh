@@ -220,14 +220,64 @@ run_tests() {
     _run_local_tool vitest run
   elif _local_bin jest >/dev/null; then
     _run_local_tool jest --passWithNoTests
+  elif _declared_test_command >/dev/null 2>&1; then
+    # The project states how its own tests run. Node ships a test runner built in
+    # (`node --test`, Node 18+), so "no runner installed locally" is frequently
+    # false, and the SKIP below then states a reason that is not true -- which
+    # reads as "this project has no tests", the exact defect family AGENTS.md
+    # names. Measured on a fixture whose package.json says `"test": "node
+    # --test"` with a deliberately failing assertion: Gate 5 printed SKIP, the
+    # commit walked past it, and the failing test never ran.
+    #
+    # This is NOT the npx problem the header of this file warns about: it runs
+    # what the project declared, from the project's own tree, and installs
+    # nothing. The named runners above still win, so existing projects keep the
+    # exact output shape Gate 5's failure handler parses.
+    _run_declared_test_command
   else
-    # SKIP, not BLOCK: no runner is installed, so no test was expected to run.
+    # SKIP, not BLOCK: nothing declares a runner, so no test was expected to run.
     # Returning non-zero here is what turned "this project does not use
     # vitest/jest" into "TESTS FAILED" for every downstream repo with .js files.
     echo "⏭️  SKIP - No test runner installed locally (node_modules/.bin has no vitest or jest)"
     echo "   Install the runner this project uses, or declare its test command."
     return 0
   fi
+}
+
+# Print the project's declared test command, or nothing when it declares none.
+#
+# Read from package.json with node rather than grep: the script can contain any
+# JSON-escaped character, and a grep that trips over one would silently report
+# "no declaration" and fall back to the SKIP this function exists to prevent.
+_declared_test_command() {
+  [ -f package.json ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  local cmd
+  cmd=$(node -e '
+    let p;
+    try { p = JSON.parse(require("fs").readFileSync("package.json", "utf8")); }
+    catch { process.exit(1); }
+    const t = p && p.scripts && p.scripts.test;
+    if (typeof t !== "string" || !t.trim()) process.exit(1);
+    // npm initialises this placeholder in every package; running it would report
+    // a failure for a project that simply has no tests.
+    if (/^no test specified$/i.test(t.trim())) process.exit(1);
+    process.stdout.write(t);
+  ' 2>/dev/null) || return 1
+  [ -n "$cmd" ] || return 1
+  printf '%s\n' "$cmd"
+}
+
+# Run the command `_declared_test_command` printed, propagating its exit status.
+#
+# Executed through the shell because a package.json test script is shell by
+# contract (it is what `npm test` would run). The command comes from the project
+# under test, which the gate is already trusting to build and test itself.
+_run_declared_test_command() {
+  local cmd
+  cmd=$(_declared_test_command) || return 127
+  echo "Running declared test command: $cmd"
+  run_without_git_context sh -c "$cmd"
 }
 
 run_coverage() {

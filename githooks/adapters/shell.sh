@@ -212,6 +212,13 @@ run_tests() {
   local bats_bin
   if ! bats_bin="$(_shell_resolve_bats)"; then
     echo "bats not available, skipping shell test suite (install: npm i -D bats)"
+    # Machine-readable skip, read by Gate 5's `_gate5_test_run_skipped`. Returning
+    # 0 here is right -- nothing was expected to run and blocking would punish a
+    # project for its environment -- but the gate cannot tell "returned 0 because
+    # the suite passed" from "returned 0 because nothing ran" without being told.
+    # Measured 2026-11-19: a failing .bats suite on a machine with bats installed
+    # but not on the hook's PATH produced "PASSED - Unit tests passed."
+    echo "XP_GATE_TESTS_SKIPPED"
     return 0
   fi
 

@@ -472,6 +472,7 @@ run_tests() {
   PWSH=$(_detect_pwsh)
   if [ -z "$PWSH" ]; then
     echo "PowerShell not available, skipping PowerShell tests"
+    echo "XP_GATE_TESTS_SKIPPED"
     return 0
   fi
 
@@ -510,6 +511,7 @@ _pester_timeout "XP_GATE_POWERSHELL_TEST_TIMEOUT_S" "${XP_GATE_POWERSHELL_TEST_T
     return $run_exit
   else
     echo "No Pester tests found"
+    echo "XP_GATE_TESTS_SKIPPED"
     return 0
   fi
 }
