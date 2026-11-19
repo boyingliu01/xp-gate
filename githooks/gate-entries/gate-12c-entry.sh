@@ -62,6 +62,26 @@ if printf '%s\n' "$STAGED_FILES" 2>/dev/null | grep -qE '^githooks/(adapters/|li
       echo "   about does not measure the environment, it changes it."
       return 1
     fi
+  else
+    # A hook change was staged but the checker is not reachable, so NOTHING was
+    # examined. Falling through to the PASS record below would have published a
+    # check that never ran -- measured 2026-11-20 in a fixture repo: the commit
+    # was allowed and the audit carried no gate-12c row at all, while this
+    # repo's own journal shows 112 rows it never had to earn.
+    #
+    # The most likely cause of a missing checker is a partial install (the
+    # project has hooks but scripts/ was never shipped), so say that rather
+    # than skipping in silence.
+    if [ -z "$_probe_root" ]; then
+      _probe_why="PROJECT_ROOT is unset, so the checker cannot be located"
+    else
+      _probe_why="$_probe_root/scripts/check-no-npx-probe.sh is missing"
+    fi
+    echo "⏭️  SKIPPED - Gate 12c: probe discipline not verified — $_probe_why"
+    GATE_12C_STATUS="SKIP"
+    GATE_12C_DETAIL="checker_missing"
+    record_gate_audit "gate-12c" "probe-discipline" "$GATE_12C_STATUS" "0" "$GATE_12C_START" "$GATE_12C_DETAIL"
+    return 0
   fi
 fi
 

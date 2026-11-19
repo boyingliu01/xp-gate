@@ -183,6 +183,22 @@ if [ -n "$MIRROR_STAGED" ] && printf '%s
         return 1
       fi
     fi
+  else
+    # A mirrored hook change was staged but the checker is unreachable, so no pair
+    # was compared. Without this arm the body falls through to the PASS record
+    # below and publishes a check that never ran.
+    #
+    # Same defect as gate-12c had, found in the same fixture run on 2026-11-20.
+    if [ -z "$MIRROR_REPO_ROOT" ]; then
+      _mirror_why="PROJECT_ROOT is unset, so the checker cannot be located"
+    else
+      _mirror_why="$MIRROR_REPO_ROOT/scripts/check-hook-mirror.sh is missing"
+    fi
+    echo "⏭️  SKIPPED - Gate 12b: mirror parity not verified — $_mirror_why"
+    GATE_12B_STATUS="SKIP"
+    GATE_12B_DETAIL="checker_missing"
+    record_gate_audit "gate-12b" "mirror-parity" "$GATE_12B_STATUS" "0" "$GATE_12B_START" "$GATE_12B_DETAIL"
+    return 0
   fi
 fi
   # Reached only when nothing blocked, so this is the PASS record. The blocking
