@@ -269,7 +269,29 @@ elif [ -f "package.json" ] && [ -f "tsconfig.json" ]; then
         echo "❌ BLOCKED - Gate 9: Build integrity check failed"
         echo "Fix type errors, broken imports, or package manifest issues before committing."
         rm -f "$GATE_9_OUTPUT"
-        return 1
+        # DO NOT `return 1` here.
+        #
+        # This used to return immediately, which skipped the aggregation at the
+        # bottom of this file AND the record_gate_audit call below it. The commit
+        # was still blocked (the driver saw the non-zero return), but the run
+        # report kept GATE_9_STATUS at its initialised "SKIP" and the audit line
+        # recorded SKIP too.
+        #
+        # Measured 2026-11-19 on a TypeScript fixture with `const x: number =
+        # "not a number"`:
+        #
+        #     stdout : tsc: FAIL  TypeScript compilation failed with 1 error(s)
+        #              BLOCKED - Gate 9: Build integrity check failed
+        #     report : gate9_build_integrity.status = "SKIP"
+        #              overall.gatesFailed = 0, failedGates = []
+        #
+        # So the gate blocked correctly and recorded the opposite. Every
+        # downstream reader -- the report, the audit journal, gate-coverage --
+        # saw a skip.
+        #
+        # The aggregation below turns GATE_9_TS_STATUS=BLOCK into
+        # GATE_9_STATUS=BLOCK, and gate_9_run returns non-zero from there, so the
+        # commit is still blocked; only now the record agrees with the behaviour.
       fi
     fi
     rm -f "$GATE_9_OUTPUT"
@@ -298,7 +320,10 @@ if echo "$CHANGED_FILES" | grep -q '\.java$'; then
         echo ""
         echo "❌ BLOCKED - Gate 9: Java build integrity check failed"
         echo "Fix the compile errors before committing."
-        return 1
+        # Same defect as the TypeScript branch above: returning here skipped the
+        # aggregation and the audit record, so a blocked Java build was written to
+        # the report as SKIP. Falling through lets GATE_9_JAVA_STATUS=BLOCK reach
+        # the aggregation, which produces the non-zero return.
         ;;
       *)
         GATE_9_JAVA_STATUS="SKIP"
@@ -453,6 +478,18 @@ esac
 record_gate_audit "gate-9" "build-integrity" "$GATE_9_STATUS" "0" "$GATE_9_START" "${GATE_9_UNVERIFIED:-}"
 echo ""
 # ============================================================================
+  # Return what the aggregated status says.
+  #
+  # This was an unconditional `return 0` -- safe only because the two BLOCK
+  # branches bailed out with their own `return 1` before reaching here. Those
+  # early returns skipped the aggregation and the audit record, so the report and
+  # the journal recorded SKIP for a commit that was correctly blocked.
+  #
+  # Removing the early returns without changing this line would have been worse:
+  # the gate would have printed "BLOCKED" and returned success. Both halves move
+  # together, which is why the tests pin the RECORDED status and the RETURN CODE,
+  # not either one alone.
+  [ "$GATE_9_STATUS" = "BLOCK" ] && return 1
   return 0
 }
 

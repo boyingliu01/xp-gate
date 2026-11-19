@@ -1,309 +1,355 @@
 #!/usr/bin/env bash
-# Gate x language effectiveness probe.
 #
-# Creates one project per language, stages a file with a KNOWN defect for a
-# given gate, and asks: did the gate produce a real verdict, and was it the
-# RIGHT verdict?
+# Gate x language matrix probe.
 #
-# The failure this exists to catch is not "the gate crashed". It is a gate that
-# reports PASS (or worse, records a pass) over code it never examined -- the
-# defect family named in both AGENTS files.
+# WHAT THIS ANSWERS
+#   For every (gate, language) pair: did the gate produce a REAL verdict?
 #
-# Usage: bash scripts/probe-gate-matrix.sh [gate_key ...]
-# Exit: 0 only when every probed combination produced the expected verdict.
-set -u
+#   A real verdict is PASS with something actually checked, BLOCK because it found
+#   the defect, or SKIP with a reason. What the objective forbids is "not checked"
+#   recorded as "checked and fine" -- i.e. PASS on a language the gate cannot read.
+#
+# WHY IT IS A SCRIPT AND NOT A BATS SUITE
+#   It shells out to 15 toolchains and runs the real hook twice per language. As a
+#   bats suite it would take the whole CI budget by itself and fail on any machine
+#   missing one language's toolchain; as a probe it produces the matrix as DATA,
+#   which is what the deliverable asks for.
+#
+# USAGE
+#   bash scripts/probe-gate-matrix.sh                 # all languages
+#   bash scripts/probe-gate-matrix.sh go typescript   # selected
+#
+# Each language gets TWO runs:
+#   clean -- a well-formed project. Any BLOCK here is a false positive.
+#   dirty -- the same project plus one planted defect that a compiler or analyser
+#            must catch. A PASS from the gate whose subject is that defect means
+#            the gate reported something it did not compute.
+#
+# Output is one JSON object per line (JSONL): a reader can diff two runs.
+#
+# ASCII only: the JSON is parsed by node on the other end.
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-WORK="${TMPDIR:-/tmp}/xp-probe-matrix"
-rm -rf "$WORK"; mkdir -p "$WORK"
+set -uo pipefail
 
-PASS_N=0; FAIL_N=0; SKIP_N=0
-declare -a FAILURES=()
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORK_ROOT="${TMPDIR:-/tmp}/xpgate-matrix"
+LANGS=()
 
-# --- helpers ---------------------------------------------------------------
-
-# make_project <dir> <lang> <filename> <content>
-make_project() {
-  local dir="$1" lang="$2" file="$3" content="$4"
-  mkdir -p "$dir"
-  ( cd "$dir" && git init -q -b probe ) || return 1
-  printf '%s\n' "$content" > "$dir/$file"
-  # Minimal manifests so language detection has something to key on.
-  case "$lang" in
-    typescript) printf '{"name":"p","version":"1.0.0"}\n' > "$dir/package.json" ;;
-    python)     printf '[project]\nname="p"\n' > "$dir/pyproject.toml" ;;
-    go)         printf 'module p\n\ngo 1.21\n' > "$dir/go.mod" ;;
-    java)       printf '<project/>\n' > "$dir/pom.xml" ;;
-    kotlin)     printf '<project/>\n' > "$dir/pom.xml" ;;
-    csharp)     printf '<Project Sdk="Microsoft.NET.Sdk"/>\n' > "$dir/p.csproj" ;;
-    cpp|c)      printf 'cmake_minimum_required(VERSION 3.10)\nproject(p)\n' > "$dir/CMakeLists.txt" ;;
-    swift)      printf '// swift-tools-version:5.5\n' > "$dir/Package.swift" ;;
-    dart)       printf 'name: p\n' > "$dir/pubspec.yaml" ;;
-    shell)      printf '#!/bin/sh\n' > "$dir/run.sh" ;;
-    powershell) printf '# p\n' > "$dir/run.ps1" ;;
-    iac)        printf 'terraform {}\n' > "$dir/main.tf" ;;
+for arg in "$@"; do
+  case "$arg" in
+    -*) echo "unknown flag: $arg" >&2; exit 2 ;;
+    *) LANGS+=("$arg") ;;
   esac
-  ( cd "$dir" && git add -A && git -c user.email=p@p -c user.name=p \
-      -c core.hooksPath= commit -q --no-verify -m init ) || return 1
-  return 0
-}
-
-# stage_change <dir> <file> <content>
-stage_change() {
-  printf '%s\n' "$3" > "$1/$2"
-  ( cd "$1" && git add "$2" )
-}
-
-# run_gate <dir> <lang> -> echoes the gate's console output
-run_gate() {
-  # Run the REPO's CLI, not the globally installed one. Measured the hard way: a
-  # probe against the global `xp-gate` reported gate-6 PASS after the repo copy
-  # already blocked, because a global install shadows the edit -- the exact trap
-  # githooks/AGENTS.md warns about. A probe that measures a different binary than
-  # the one under review is measuring the difference, not the product.
-  # Two traps met here at once.
-  #
-  # 1. The global `xp-gate` on PATH was v0.38.9 while the repo is v0.38.21, so a
-  #    probe against it measured a twelve-release-old binary and reported
-  #    gate-6 PASS after the repo copy already blocked.
-  # 2. The repo CLI only loads from its own package directory: run from the repo
-  #    root it dies with ERR_MODULE_NOT_FOUND (src/scripts/generate-deploy-
-  #    manifest.cjs), and that crash reads as "the gate found nothing".
-  #
-  # So: enter src/npm-package, then cd into the fixture. A probe that measures a
-  # different binary than the one under review measures the difference.
-  ( cd "$REPO/src/npm-package" && cd "$1" && timeout 300 node "$REPO/src/npm-package/bin/xp-gate.js" check "$2" 2>&1 ) || true
-}
-
-# record <name> <expected> <output>
-record() {
-  local name="$1" expect="$2" out="$3"
-  local verdict="NONE"
-  if printf '%s' "$out" | grep -qiE '❌|BLOCKED|FAIL'; then verdict="BLOCK"
-  elif printf '%s' "$out" | grep -qiE '⏭️|SKIPPED|SKIP'; then verdict="SKIP"
-  elif printf '%s' "$out" | grep -qiE '✅|PASSED|PASS'; then verdict="PASS"
-  fi
-
-  if [ "$verdict" = "$expect" ]; then
-    PASS_N=$((PASS_N + 1))
-    printf '  ✅ %-42s %-6s (expected %s)\n' "$name" "$verdict" "$expect"
-  elif [ "$verdict" = "SKIP" ] && [ "$expect" = "SKIP" ]; then
-    SKIP_N=$((SKIP_N + 1))
-    printf '  ⏭️  %-42s %-6s (expected %s)\n' "$name" "$verdict" "$expect"
-  else
-    FAIL_N=$((FAIL_N + 1))
-    FAILURES+=("$name: got $verdict, expected $expect")
-    printf '  ❌ %-42s %-6s (expected %s)\n' "$name" "$verdict" "$expect"
-    printf '%s\n' "$out" | tail -6 | sed 's/^/       | /'
-  fi
-}
-
-# --- probes ----------------------------------------------------------------
-# Each probe stages a file that MUST be caught, or a clean one that MUST pass.
-# The negative probe (a real defect) is what proves the gate examined anything.
-
-probe_gate0() {   # version consistency
-  local d="$WORK/g0"
-  make_project "$d" typescript pkg.json '{}' || return
-  printf '{"name":"p","version":"9.9.9"}\n' > "$d/package.json"
-  printf '1.0.0\n' > "$d/VERSION"
-  printf '{"name":"p","version":"1.0.0"}\n' > "$d/package.json"
-  ( cd "$d" && git add -A && git -c user.email=p@p -c user.name=p -c core.hooksPath= commit -q --no-verify -m base )
-  # Now break it: VERSION and package.json disagree.
-  printf '2.0.0\n' > "$d/VERSION"
-  stage_change "$d" VERSION '2.0.0'
-  # Gate 0 needs git-staged context; `check 0` outside a hook SKIPs by design.
-  record "gate-0 skips without staged context" SKIP "$(run_gate "$d" 0)"
-}
-
-probe_gate2() {   # duplicate code
-  # Gate 2's output has no PASS/FAIL keyword at all: it prints jscpd's table and
-  # "Found N clones." A probe that classifies purely on those keywords records
-  # NONE for a gate that worked perfectly (measured: this probe failed on the
-  # probe author's own fixture while `check 2` printed "Found 1 clones").
-  # The verdict here is therefore read from the report itself.
-  local d="$WORK/g2"
-  make_project "$d" typescript s.ts 'export function a(x:number){return x*2;}' || return
-  local big
-  big=$(node -e 'let s="";for(let i=0;i<40;i++)s+="function f"+i+"(a,b){if(a>b){return a+b;}else{return a-b;}}\n";process.stdout.write(s)')
-  stage_change "$d" dup1.ts "$big"
-  stage_change "$d" dup2.ts "$big"
-  # Gate 2 is REPORT-ONLY by design: every language arm prints findings as info
-  # and never sets FAIL. Verified: no path in gate-2-entry.sh assigns GATE_2_STATUS=FAIL.
-  local out
-  out="$(run_gate "$d" 2)"
-  # A clone report IS the gate doing its job. "Found 0" on this fixture would be
-  # the failure -- the same shape as the absolute-path defect: a clean-looking
-  # zero produced by not looking.
-  # Counted directly rather than through record(): record() classifies on
-  # PASS/FAIL keywords, and this gate's output contains neither.
-  if printf '%s' "$out" | grep -qE 'Found [1-9][0-9]* clones'; then
-    PASS_N=$((PASS_N + 1))
-    printf '  ✅ %-42s %-6s (expected %s)
-' "gate-2 reports duplicates (advisory)" "PASS" "PASS"
-  else
-    FAIL_N=$((FAIL_N + 1))
-    FAILURES+=("gate-2 reports duplicates (advisory): found no clone on a fixture with an exact duplicate")
-    printf '  ❌ %-42s %-6s (expected %s)
-' "gate-2 reports duplicates (advisory)" "NONE" "PASS"
-    printf '%s
-' "$out" | tail -4 | sed 's/^/       | /'
-  fi
-}
-
-probe_gate3() {   # complexity
-  local d="$WORK/g3"
-  make_project "$d" typescript s.ts 'export const a=1;' || return
-  local complex
-  complex=$(node -e '
-    let f="export function deep(a,b,c,d,e,f2,g,h){\n";
-    let n=0;
-    for(let i=0;i<25;i++){f+="  ".repeat(1)+"if(a==="+i+"){b+="+i+";}\n";}
-    f+="  return a+b+c+d+e+f2+g+h;\n}\n";
-    process.stdout.write(f)')
-  stage_change "$d" cx.ts "$complex"
-  record "gate-3 complexity blocks" BLOCK "$(run_gate "$d" 3)"
-}
-
-probe_gate8() {   # secret scanning (fail-closed)
-  local d="$WORK/g8"
-  make_project "$d" typescript u.ts 'export const a=1;' || return
-  # Assembled at run time, not written literally: a valid GitHub token in the
-  # script body makes GATE 8 block this very file -- which is the gate working
-  # correctly, and it did (the commit adding this probe was stopped by it).
-  # Splitting the literal keeps the probe effective without turning the probe
-  # into the leak it hunts for.
-  local _fake_gh="ghp_16C7e42F292c6912E7710c838347A"
-  local _fake_tail="e178B4a"
-  stage_change "$d" leak.ts "export const TOKEN = \"$_fake_gh$_fake_tail\";"
-  record "gate-8 secret blocks" BLOCK "$(run_gate "$d" 8)"
-  # And the clean direction: a clean file must not be blamed.
-  local d2="$WORK/g8b"
-  make_project "$d2" typescript u.ts 'export const a=1;' || return
-  stage_change "$d2" clean.ts 'export const b = 2;'
-  record "gate-8 clean passes" PASS "$(run_gate "$d2" 8)"
-}
-
-probe_gate10() {  # SAST
-  local d="$WORK/g10"
-  make_project "$d" typescript u.ts 'export const a=1;' || return
-  stage_change "$d" sqli.ts 'import {exec} from "child_process";
-export function run(c:string){exec(c);}'
-  record "gate-10 injection blocks" BLOCK "$(run_gate "$d" 10)"
-}
-
-# --- main ------------------------------------------------------------------
-
-probe_gate4() {   # principles (clean code / SOLID)
-  local d="$WORK/g4"
-  make_project "$d" typescript base.ts 'export const base = 1;' || return
-  # Deep nesting is a real WARNING-level finding, and the only prescription
-  # below ERROR. Built with genuine nesting (5 levels) -- an earlier fixture of
-  # 30 FLAT if-statements was not deep at all and proved nothing.
-  stage_change "$d" messy.ts 'export function messy(a: number, b: number, c: number) {
-  let r = 0;
-  if (a > 1) { if (b > 2) { if (c > 3) { if (a > 5) { r = 1; } else { r = 2; } } else { r = 3; } } else { r = 4; } } else { r = 5; }
-  return r;
-}'
-  local out; out=$(run_gate "$d" 4)
-  # Gate 4 blocks on ERROR only; WARNING is handed to the Boy Scout Rule, by
-  # design ("will be handled by Boy Scout Rule"). So the finding must APPEAR,
-  # and the gate must not block on it. Asserting BLOCK here would encode a
-  # requirement the gate never had.
-  if printf '%s' "$out" | grep -qiE 'deep-nesting|WARNING'; then
-    PASS_N=$((PASS_N+1)); printf '  ✅ %-42s %-6s
-' "gate-4 reports deep nesting" "REPORT"
-  else
-    FAIL_N=$((FAIL_N+1)); FAILURES+=("gate-4 deep nesting: not reported")
-    printf '  ❌ %-42s %-6s
-' "gate-4 reports deep nesting" "NONE"
-    printf '%s
-' "$out" | tail -6 | sed 's/^/       | /'
-  fi
-}
-
-probe_gate6() {   # architecture
-  local d="$WORK/g6"
-  make_project "$d" typescript base.ts 'export const base = 1;' || return
-  # No architecture config at all: the gate must not pass silently.
-  stage_change "$d" more.ts 'export const more = 2;'
-  local out; out=$(run_gate "$d" 6)
-  local verdict="NONE"
-  if printf '%s' "$out" | grep -qiE '❌|BLOCKED'; then verdict="BLOCK"
-  elif printf '%s' "$out" | grep -qiE '⏭️|SKIPPED'; then verdict="SKIP"
-  elif printf '%s' "$out" | grep -qiE '✅|PASSED'; then verdict="PASS"
-  fi
-  # Either BLOCK (config required) or SKIP-with-reason is defensible; a bare PASS
-  # over a repo with no architecture constraints is not.
-  if [ "$verdict" = "BLOCK" ] || [ "$verdict" = "SKIP" ]; then
-    PASS_N=$((PASS_N+1)); printf '  ✅ %-42s %-6s (expected BLOCK or SKIP)\n' "gate-6 no config is not a pass" "$verdict"
-  else
-    FAIL_N=$((FAIL_N+1)); FAILURES+=("gate-6 no config: got $verdict")
-    printf '  ❌ %-42s %-6s (expected BLOCK or SKIP)\n' "gate-6 no config is not a pass" "$verdict"
-    printf '%s\n' "$out" | tail -6 | sed 's/^/       | /'
-  fi
-}
-
-probe_gate7() {   # IaC security
-  local d="$WORK/g7"
-  make_project "$d" iac main.tf 'resource "null_resource" "a" {}' || return
-  # An open security group is a textbook IaC finding.
-  stage_change "$d" bad.tf 'resource "aws_security_group" "open" {
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}'
-  local out; out=$(run_gate "$d" 7)
-  local verdict="NONE"
-  if printf '%s' "$out" | grep -qiE '❌|BLOCKED'; then verdict="BLOCK"
-  elif printf '%s' "$out" | grep -qiE '⏭️|SKIPPED'; then verdict="SKIP"
-  elif printf '%s' "$out" | grep -qiE '✅|PASSED'; then verdict="PASS"
-  fi
-  if [ "$verdict" = "BLOCK" ]; then
-    PASS_N=$((PASS_N+1)); printf '  ✅ %-42s %-6s\n' "gate-7 open SG blocks" "$verdict"
-  else
-    FAIL_N=$((FAIL_N+1)); FAILURES+=("gate-7 open SG: got $verdict")
-    printf '  ❌ %-42s %-6s (expected BLOCK)\n' "gate-7 open SG blocks" "$verdict"
-    printf '%s\n' "$out" | tail -8 | sed 's/^/       | /'
-  fi
-}
-
-# --- main (must come last: bash defines functions as it reads) ---
-
-echo "=============================================="
-echo " GATE EFFECTIVENESS PROBE"
-echo "=============================================="
-
-# Arguments are gate keys. `"${@:-...}"` would quote the whole default list into
-# ONE word, so `probe-gate-matrix.sh 4 6 7` found nothing and reported 0/0/0 --
-# a probe that silently probed nothing, which is the very defect it hunts.
-if [ "$#" -eq 0 ]; then
-  set -- 0 2 3 8 10
-fi
-
-for key in "$@"; do
-  fn="probe_gate${key}"
-  if declare -f "$fn" >/dev/null 2>&1; then
-    echo ""
-    echo "-- gate-$key --"
-    "$fn"
-  else
-    echo ""
-    echo "-- gate-$key -- (no probe defined)"
-  fi
 done
 
-echo ""
-echo "=============================================="
-printf ' PASS: %d   FAIL: %d   SKIP: %d\n' "$PASS_N" "$FAIL_N" "$SKIP_N"
-if [ "$FAIL_N" -gt 0 ]; then
-  echo " FAILURES:"
-  printf '   - %s\n' "${FAILURES[@]}"
+if [ ${#LANGS[@]} -eq 0 ]; then
+  LANGS=(go typescript python java kotlin dart cpp csharp php shell powershell swift objectivec iac flutter)
 fi
-echo "=============================================="
-[ "$FAIL_N" -eq 0 ]
 
-# --- gates 4, 6, 7 ---------------------------------------------------------
+# --- fixtures ---------------------------------------------------------------
+#
+# write_fixture lang clean|dirty
+#
+# Every fixture is self-contained and one directory deep. A language whose
+# toolchain is absent still gets a fixture: the probe then records what the gates
+# say about a language nobody can check, which is the interesting case.
+write_fixture() {
+  local lang="$1" mode="$2" bad=0
+  [ "$mode" = "dirty" ] && bad=1
+
+  case "$lang" in
+    go)
+      printf 'module probe\n\ngo 1.21\n' > go.mod
+      # Fixture design, learned the hard way: the planted defect must be the ONLY
+      # thing any tool could object to.
+      #
+      #   `var x int` unused        -> golangci-lint `unused` on the CLEAN fixture.
+      #   `var x int = 2`           -> staticcheck ST1023 "should omit type int".
+      #   `x := "not an int"`       -> not a type error at all; Go infers string.
+      #
+      # Passing a wrong-typed literal into a function that takes int is a real
+      # compile error, and the clean counterpart is idiomatic Go that golangci-lint
+      # reports 0 issues on (measured).
+      if [ "$bad" = 1 ]; then
+        printf 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println(intOf("not an int"))\n}\n\nfunc intOf(v int) int { return v }\n' > main.go
+      else
+        printf 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println(intOf(1))\n}\n\nfunc intOf(v int) int { return v }\n' > main.go
+      fi
+      ;;
+    typescript)
+      printf '{"compilerOptions":{"strict":true,"noEmit":true},"include":["*.ts"]}\n' > tsconfig.json
+      printf '{"name":"probe","version":"1.0.0"}\n' > package.json
+      if [ "$bad" = 1 ]; then
+        printf 'const x: number = "not a number";\nexport default x;\n' > a.ts
+      else
+        printf 'const x: number = 1;\nexport default x;\n' > a.ts
+      fi
+      ;;
+    python)
+      if [ "$bad" = 1 ]; then
+        printf 'def f() -> int:\n    return "not an int"\n' > a.py
+      else
+        printf 'def f() -> int:\n    return 1\n' > a.py
+      fi
+      ;;
+    java)
+      mkdir -p src/main/java
+      printf '<project><modelVersion>4.0.0</modelVersion><groupId>p</groupId><artifactId>p</artifactId><version>1</version></project>\n' > pom.xml
+      if [ "$bad" = 1 ]; then
+        printf 'package p;\npublic class A { public int f() { return "no"; } }\n' > src/main/java/A.java
+      else
+        printf 'package p;\npublic class A { public int f() { return 1; } }\n' > src/main/java/A.java
+      fi
+      ;;
+    kotlin)
+      if [ "$bad" = 1 ]; then
+        printf 'fun f(): Int { return "not an int" }\nfun main() {}\n' > a.kt
+      else
+        printf 'fun f(): Int { return 1 }\nfun main() {}\n' > a.kt
+      fi
+      ;;
+    dart)
+      printf 'name: probe\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\n' > pubspec.yaml
+      mkdir -p lib
+      if [ "$bad" = 1 ]; then
+        printf 'int f() { return "not an int"; }\n' > lib/a.dart
+      else
+        printf 'int f() { return 1; }\n' > lib/a.dart
+      fi
+      ;;
+    cpp)
+      if [ "$bad" = 1 ]; then
+        printf 'int main() { return not_a_symbol; }\n' > a.cpp
+      else
+        printf 'int main() { return 1; }\n' > a.cpp
+      fi
+      ;;
+    csharp)
+      printf '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>\n' > p.csproj
+      if [ "$bad" = 1 ]; then
+        printf 'class A { public int F() { return "no"; } }\n' > A.cs
+      else
+        printf 'class A { public int F() { return 1; } }\n' > A.cs
+      fi
+      ;;
+    php)
+      if [ "$bad" = 1 ]; then
+        printf '<?php\nfunction f(): int { return "no"; }\n' > a.php
+      else
+        printf '<?php\nfunction f(): int { return 1; }\n' > a.php
+      fi
+      ;;
+    shell)
+      if [ "$bad" = 1 ]; then
+        printf '#!/usr/bin/env bash\nf() { echo "$#" ; }\nf "unclosed\n' > a.sh
+      else
+        printf '#!/usr/bin/env bash\nf() { echo "$#" ; }\nf "ok" 1\n' > a.sh
+      fi
+      ;;
+    powershell)
+      if [ "$bad" = 1 ]; then
+        printf 'function f { return "no" \n' > a.ps1
+      else
+        printf 'function f { return 1 }\n' > a.ps1
+      fi
+      ;;
+    swift)
+      if [ "$bad" = 1 ]; then
+        printf 'let x: Int = "not an int"\n' > a.swift
+      else
+        printf 'let x: Int = 1\n' > a.swift
+      fi
+      ;;
+    objectivec)
+      if [ "$bad" = 1 ]; then
+        printf '#import <Foundation/Foundation.h>\nint main() { int x = "no"; return x; }\n' > a.m
+      else
+        printf '#import <Foundation/Foundation.h>\nint main() { int x = 1; return x; }\n' > a.m
+      fi
+      ;;
+    iac)
+      if [ "$bad" = 1 ]; then
+        printf 'resource "aws_s3_bucket" "b" {\n  bucket = "probe"\n  acl    = "not-a-real-acl-value"\n}\n' > main.tf
+      else
+        printf 'resource "aws_s3_bucket" "b" {\n  bucket = "probe-ok-1"\n}\n' > main.tf
+      fi
+      ;;
+    flutter)
+      printf 'name: probe\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\ndependencies:\n  flutter:\n    sdk: flutter\n' > pubspec.yaml
+      mkdir -p lib
+      if [ "$bad" = 1 ]; then
+        printf 'import "package:flutter/material.dart";\nint f() { return "not an int"; }\n' > lib/a.dart
+      else
+        printf 'import "package:flutter/material.dart";\nint f() { return 1; }\n' > lib/a.dart
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+first_source() {
+  case "$1" in
+    go) echo main.go ;;
+    typescript) echo a.ts ;;
+    python) echo a.py ;;
+    java) echo src/main/java/A.java ;;
+    kotlin) echo a.kt ;;
+    dart|flutter) echo lib/a.dart ;;
+    cpp) echo a.cpp ;;
+    csharp) echo A.cs ;;
+    php) echo a.php ;;
+    shell) echo a.sh ;;
+    powershell) echo a.ps1 ;;
+    swift) echo a.swift ;;
+    objectivec) echo a.m ;;
+    iac) echo main.tf ;;
+    *) echo "" ;;
+  esac
+}
+
+# --- one run -----------------------------------------------------------------
+
+# The report JSON is the authority, not the printed table.
+#
+# Measured while building this probe: parsing the human table produced ABSENT for
+# eight of fourteen gates on a Python project where the run report showed Gate 1
+# PASS, Gate 2 PASS, Gate 3 PASS and so on. The table is only printed when
+# something fails or warns -- a clean run prints no table at all. A probe that
+# read it would have reported "gates 1,2,3,4,5 ABSENT" as a product defect.
+#
+# githooks/AGENTS.md states the rule this follows: "Verdicts must come from
+# structured output, not exit codes." The same applies to a probe reading a gate.
+run_case() {
+  local lang="$1" mode="$2"
+  local dir="$WORK_ROOT/$lang"
+  local out rc
+
+  out=$(cd "$dir" && timeout 900 git commit -m "$mode" 2>&1)
+  rc=$?
+
+  # Keep the raw run for diagnosis. Without this, every wrong conclusion about
+  # "the gate reported X" had to be re-derived by hand from a fixture that no
+  # longer exists.
+  printf '%s\n' "$out" > "$WORK_ROOT/${lang}-${mode}.log"
+
+  PROBE_LANG="$lang" PROBE_MODE="$mode" PROBE_RC="$rc" PROBE_REPORT="$out" \
+    PROBE_DIR="$dir" \
+    python - <<'PY'
+import os, re, json, glob
+
+order = ["0", "1", "2", "3", "8", "10", "7", "5", "6", "4", "9", "11", "12", "13"]
+
+# Map a gate NUMBER to the report key naming it. The report is keyed by a
+# generated name (gate1_static_analysis), and NT is bound by the registry -- so
+# read the digit prefix rather than hardcoding a second table that could drift.
+def gate_num(key):
+    m = re.match(r"^gate([0-9]+[a-c]?)_", key)
+    return m.group(1) if m else None
+
+report_dir = os.path.join(os.environ["PROBE_DIR"], ".xp-gate", "reports", "pre-commit")
+files = sorted(glob.glob(os.path.join(report_dir, "*.json")))
+data = None
+if files:
+    try:
+        with open(files[-1], encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        data = None
+
+gates = []
+if data and isinstance(data.get("gates"), dict):
+    found = {}
+    for key, val in data["gates"].items():
+        num = gate_num(key)
+        if num is None or not isinstance(val, dict):
+            continue
+        found[num] = {
+            "gate": num,
+            "name": val.get("name") or "",
+            "verdict": (val.get("status") or "UNKNOWN").upper(),
+            "detail": val.get("detail") or val.get("reason") or "",
+        }
+    for gid in order:
+        gates.append(found.get(gid, {"gate": gid, "name": "", "verdict": "ABSENT", "detail": ""}))
+    source = "report"
+else:
+    # No report: the hook refused before writing one (protected branch, gate 0
+    # block, crash). Record that rather than 14 identical ABSENTs.
+    for gid in order:
+        gates.append({"gate": gid, "name": "", "verdict": "NO_REPORT", "detail": ""})
+    source = "none"
+
+stopped = re.search(r"Chain stopped at Gate ([0-9]+[a-c]?)", os.environ["PROBE_REPORT"])
+print(json.dumps({
+    "language": os.environ["PROBE_LANG"],
+    "mode": os.environ["PROBE_MODE"],
+    "commit_rc": int(os.environ["PROBE_RC"]),
+    "source": source,
+    "report": os.path.basename(files[-1]) if files else None,
+    "chain_stopped_at": stopped.group(1) if stopped else None,
+    "gates": gates,
+}, sort_keys=True))
+PY
+}
+
+probe_language() {
+  local lang="$1"
+  local dir="$WORK_ROOT/$lang"
+  rm -rf "$dir"
+  mkdir -p "$dir" || return 1
+  cd "$dir" || return 1
+
+  write_fixture "$lang" clean >/dev/null 2>&1 || { echo "no fixture for $lang" >&2; return 1; }
+
+  git init -q -b "probe-$lang" . >/dev/null 2>&1
+  git config user.email "probe@example.com"
+  git config user.name "probe"
+  git config commit.gpgsign false
+  git config core.hooksPath "$REPO_ROOT/githooks"
+
+  git add -A >/dev/null 2>&1
+  git -c core.hooksPath= commit -q --no-verify -m "baseline" >/dev/null 2>&1
+
+  # CLEAN run: change the project WITHOUT changing its meaning, its formatting, or
+  # any identifier that a toolchain assigns a role to.
+  #
+  # This took four attempts, and every wrong version produced a confident, FALSE
+  # product defect:
+  #
+  #   1. Append a bare newline         -> content-identical, gates saw an empty
+  #                                       change set and measured nothing.
+  #   2. Append "// clean-run marker"  -> illegal in Python; Gate 1 correctly FAILED.
+  #      Reported as "Gate 1 blocks a clean Python project".
+  #   3. Append "# clean-run marker"   -> legal, but ruff format disliked the
+  #      trailing newline; Gate 1 correctly FAILED again.
+  #   4. sed s/\bmain\b/main2/         -> renamed Go's entry point; golangci-lint
+  #      correctly called func main2 unused; Gate 1 correctly FAILED again.
+  #
+  # All four were the probe's bug wearing a product bug's clothes. The lesson is
+  # not "write a better marker": a toolchain that knows what an identifier MEANS
+  # can veto any edit that looks harmless.
+  #
+  # What works is rewriting a literal VALUE in the fixture. Every fixture has
+  # exactly one by construction (`= 1`), the result is a real diff, and no
+  # compiler, linter or formatter has an opinion about it.
+  local src
+  src=$(first_source "$lang")
+  if [ -n "$src" ] && [ -f "$src" ]; then
+    sed -i 's/\b1\b/2/' "$src" 2>/dev/null || true
+  fi
+  git add -A >/dev/null 2>&1
+  run_case "$lang" clean
+
+  # DIRTY run: plant the defect.
+  write_fixture "$lang" dirty >/dev/null 2>&1
+  git add -A >/dev/null 2>&1
+  run_case "$lang" dirty
+}
+
+mkdir -p "$WORK_ROOT"
+
+for lang in "${LANGS[@]}"; do
+  probe_language "$lang"
+done
