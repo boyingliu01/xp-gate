@@ -18,7 +18,7 @@ const { execFile, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|swift|cpp|cc|c|h|hpp|m|mm|dart)$/i;
+const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|swift|cpp|cc|c|h|hpp|m|mm|dart|php|phtml)$/i;
 // Test-file classification. Keep equivalent to the exclusion regex in
 // githooks/gate-3.sh: the gate grades exactly the population this writer
 // records, so a divergence makes the ratchet report pre-existing code as new
@@ -87,7 +87,15 @@ function taggedError(code, message) {
 
 function findSourceFiles(root) {
   const out = [];
-  const skipDirs = new Set(['.git', 'node_modules', 'dist', '.worktrees', '.codegraph', '.sprint-state', '.xp-gate']);
+  // #731: `vendor` is composer's dependency tree, and it is NOT gitignored by
+  // default in PHP projects -- a committed vendor/ (which composer recommends
+  // for applications) is tracked, so the `tracked` filter below does not exclude
+  // it. Measured while onboarding PHP: a two-file fixture with a normal
+  // composer install produced baseline rows for
+  // `vendor/phpunit/php-code-coverage/.../bootstrap.bundle.min.js`, i.e. a third
+  // party's minified JS was being graded as the project's own production code.
+  // Same reasoning as node_modules; the name is just spelled differently.
+  const skipDirs = new Set(['.git', 'node_modules', 'dist', 'vendor', '.worktrees', '.codegraph', '.sprint-state', '.xp-gate']);
   // Git-untracked files are not repo content: scratch dirs, .stryker-tmp
   // sandboxes and .qoder reports would otherwise flood the report with
   // phantom "production" functions that no gate can even see.
@@ -494,6 +502,24 @@ function intOrZero(value) {
   return parseInt(value, 10) || 0;
 }
 
+// The rescue body's LINES, or null.
+//
+// #848: findFunctionBody returns a [startIdx, endIdx] PAIR, but
+// classifyUnverifiedRow counts CCN over the body's LINES. Handing the pair
+// straight through made ccnOfBody iterate two numbers instead of source text; a
+// number matches no branch, so the count fell back to its initial value of 1.
+// Measured before this fix: a Go function lizard reports at CCN 8, whose body
+// genuinely sums to 8, was rewritten to 1 -- while the stderr tally still said
+// "rescued by name", so the row looked MORE verified than the rows it was
+// silently corrupting. Every brace-balanced language was affected; Python, Java
+// and C# happened to pass only because their rows were corrected before reaching
+// this path.
+function rescueBodyLines(srcLines, name, lineNo) {
+  const window = (srcLines || []).slice(lineNo - 1, lineNo - 1 + RESCUE_WINDOW_LINES);
+  const span = findFunctionBody(window, name);
+  return span ? window.slice(span[0], span[1] + 1) : null;
+}
+
 // Verify one row's CCN, falling back to findFunctionBody when verifyRowCcn
 // cannot pin the body. The architecture seat caught that this second search
 // previously only decided whether to count the row as unverified — if it FOUND
@@ -507,7 +533,7 @@ function verifyCcnForRow({ sourceLines, rowPath, name, ccn, lineNo, endNo, tally
   const srcLines = sourceLines(rowPath);
   const res = verifyRowCcn({ srcLines, name, ccn, lineNo, endNo });
   if (res.corrected) return res;
-  const body = findFunctionBody((srcLines || []).slice(lineNo - 1, lineNo - 1 + RESCUE_WINDOW_LINES), name);
+  const body = rescueBodyLines(srcLines, name, lineNo);
   const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
   const verdict = classifyUnverifiedRow({ body, ccn, reportedSpan });
   tally[verdict.category] += 1;

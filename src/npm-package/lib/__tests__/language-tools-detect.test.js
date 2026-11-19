@@ -217,3 +217,85 @@ describe('detectProjectLanguages C# registry membership (#730)', () => {
     expect(detected).not.toContain('csharp');
   });
 });
+
+/**
+ * @test REQ-846
+ * @intent Objective-C 有完整的运行时（githooks/adapters/objectivec.sh），且在 Gate 1/3/4/5/10
+ *         与 docs-only.sh 的每个门禁层清单里都出现过，却从未进入 LANGUAGE_REGISTRY。这是 #730
+ *         的同构缺陷：detect-languages 生成的配置不含 objectivec，而读配置的 hook 不回退
+ *         扩展名嗅探，于是 Objective-C 项目永不路由。注册表成员资格，而非门禁支持，决定可达性。
+ * @covers AC-846-01, AC-846-02, AC-846-03, AC-846-04
+ */
+describe('detectProjectLanguages Objective-C registry membership (#846)', () => {
+  let loadModule;
+
+  beforeEach(() => {
+    vi.resetModules();
+    delete require.cache[require.resolve('../language-tools')];
+    loadModule = () => require('../language-tools');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function detectIn(spec) {
+    const root = makeFixture(spec);
+    try {
+      return loadModule().detectProjectLanguages(root);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  it('detects objectivec from a Podfile', () => {
+    const { detected, configFiles } = detectIn({
+      Podfile: "platform :ios, '13.0'",
+      'ViewController.m': '#import <UIKit/UIKit.h>',
+    });
+    expect(detected).toContain('objectivec');
+    expect(configFiles.objectivec).toContain('Podfile');
+  });
+
+  // The .xcodeproj is a DIRECTORY, and .pbxproj lives inside it — not at the repo
+  // root. A registry entry listing only the literal '.pbxproj' would stat a file
+  // of that name and never match, leaving the config looking corrected while
+  // detection stayed broken. Glob it and prove the glob actually fires.
+  it('detects objectivec from a <name>.pbxproj inside an Xcode project dir', () => {
+    expect(
+      detectIn({
+        'MyApp.xcodeproj/project.pbxproj': '// !$*UTF8*$!',
+        'AppDelegate.m': '@implementation AppDelegate @end',
+      }).detected,
+    ).toContain('objectivec');
+  });
+
+  // The bug's actual shape: an iOS app with a JS bridge or Fastlane tooling.
+  // Before the fix this reported typescript alone, so the hook took the
+  // TypeScript path for an Objective-C codebase.
+  it('reports objectivec alongside typescript in a mixed ObjC + JS repo', () => {
+    const { detected } = detectIn({
+      Podfile: 'platform :ios, 13.0',
+      'Main.m': 'int main() { return 0; }',
+      'package.json': '{"name":"bridge"}',
+    });
+    expect(detected).toEqual(expect.arrayContaining(['objectivec', 'typescript']));
+  });
+
+  // `.m` is also MATLAB's extension. Objective-C detection must key off the Xcode
+  // manifest, NOT the extension, or every MATLAB checkout is graded as ObjC —
+  // and since `configFiles` is non-empty for objectivec, the extension fallback
+  // is structurally disabled for it.
+  it('does not report objectivec for a MATLAB repo that has only .m files', () => {
+    const { detected } = detectIn({
+      'script.m': 'x = [1 2 3]; plot(x);',
+    });
+    expect(detected).not.toContain('objectivec');
+  });
+
+  it('does not report objectivec for a repo with no Xcode artifact', () => {
+    const { detected } = detectIn({ 'package.json': '{}', 'index.js': '' });
+    expect(detected).not.toContain('objectivec');
+  });
+});
