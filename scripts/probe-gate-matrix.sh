@@ -349,6 +349,22 @@ probe_language() {
   fi
   git config user.email "probe@example.com"
   git config user.name "probe"
+  # Build residue must not enter the baseline. `dotnet build` (Gate 5/9) writes
+  # obj/ and bin/ into the fixture, and without this the baseline commit carried 17
+  # compiled files -- which then slowed every subsequent case and made the change
+  # set unreadable. This is fixture hygiene, not a product behaviour under test.
+  printf "obj/
+bin/
+node_modules/
+.dart_tool/
+*.o
+*.class
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+target/
+build/
+" > .gitignore
   git config commit.gpgsign false
   git config core.hooksPath "$REPO_ROOT/githooks"
 

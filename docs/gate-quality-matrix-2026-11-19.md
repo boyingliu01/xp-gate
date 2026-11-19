@@ -1205,3 +1205,61 @@ mypy  : error: Incompatible return value type (got "str", expected "int")
 | 1 | 从未调用 mypy | **"PASSED - mypy type checking."** |
 
 最后一个是这一族最纯粹的形态：**"检查成功"这句话，由一段从未运行该检查的代码打印。**
+
+---
+
+## 七、第十五轮：矩阵全部跑通后的六个修复
+
+### 7.1 总览
+
+| # | 门禁 | 缺陷 | 提交 |
+|---|---|---|---|
+| 1 | 8 | 被拦下的提交没有报告（EXIT trap 被替换） | `654471d3` |
+| 2 | 13 | 编译不过的文件被 report-only 放行 | `27198961` |
+| 3 | 1 | mypy 从未运行，却打印 PASSED | `af701f63` |
+| 4 | 13 | Kotlin 类型错误无人检查 | `4e4f9632` |
+| 5 | 12/12b/12c | SKIP 记录了但没写原因 | `47934024` |
+| 6 | 13 | Flutter 检测下失去 Dart 类型检查 | `d778bcee` |
+| 7 | 13 | Java 编译失败被降级成 WARN | `ccedab10` |
+
+### 7.2 修复前后的矩阵对比
+
+```
+go       dirty  G13: - → B     编译错误被拦
+python   dirty  G1:  P → F     mypy 真正运行
+kotlin   dirty  G13: S → B     类型检查覆盖
+cpp      dirty  G13: P → F     无 baseline 也拦编译错误
+java     dirty  G13: W → F     降级模式不再放过编译失败
+dart     dirty  G13: S → B     全局 adapter 同步后生效
+```
+
+### 7.3 三个"诊断层"的教训
+
+dart 那个缺陷我排查了三轮：
+
+1. 猜「adapter 没声明」→ **错**，它声明了
+2. 发现「项目被检测成 flutter」→ **真缺口**，但修完没生效
+3. **全局 adapter 副本过期** → 真正原因
+
+第 3 层写着 `githooks/AGENTS.md` 里，**我本轮读过了它，然后在排查时没有执行它**。
+
+> An adapter is stale until proven otherwise — `md5sum` both copies before
+> believing a hook-vs-direct-call difference.
+
+### 7.4 第二次栽在「grep 到注释」
+
+Java 修复的两个测试，各自抓到我自己的一次同类错误：
+
+- AC-01 匹配到注释里的 `not attributed to Gate 13`，把**正确的修复**报成死代码
+- AC-02 匹配到注释里的 `Could not resolve`，报出**假警报**
+
+两个方向相反，同一个原因。修法都是 `grep -vE '^[[:space:]]*#'`。
+
+**写测试消除一种误报，可能就是为下一种误报铺路。**
+
+### 7.5 测量工具自身的卫生
+
+`dotnet build` 在 fixture 里生成 `obj/`、`bin/`，被 `git add -A` 收进基线，
+导致 csharp 的后续用例变慢并卡住。给 probe 加 `.gitignore` 解决。
+
+这是**测量工具的缺陷被误读成产品缺陷**的第 N 次——矩阵本身也是一个需要被检查的对象。
