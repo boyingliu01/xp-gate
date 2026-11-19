@@ -44,7 +44,7 @@ if ! gate_enabled 12c; then
   echo "⏭️  SKIPPED - Gate 12c: Worktree hygiene (not selected by XP_GATE_ONLY_GATE)"
   GATE_12C_STATUS="SKIP"
   GATE_12C_DETAIL="not_selected"
-  record_gate_audit "gate-12c" "probe-discipline" "$GATE_12C_STATUS" "0" "$GATE_12C_START"
+  record_gate_audit "gate-12c" "probe-discipline" "$GATE_12C_STATUS" "0" "$GATE_12C_START" "$GATE_12C_DETAIL"
   return 0
 fi
 
@@ -68,7 +68,7 @@ fi
   # Nothing blocked, so this is the PASS record (see the note in 12b's body for
   # why blocking paths return before reaching here).
   GATE_12C_STATUS="PASS"
-  record_gate_audit "gate-12c" "probe-discipline" "$GATE_12C_STATUS" "0" "$GATE_12C_START"
+  record_gate_audit "gate-12c" "probe-discipline" "$GATE_12C_STATUS" "0" "$GATE_12C_START" "$GATE_12C_DETAIL"
   return 0
 }
 

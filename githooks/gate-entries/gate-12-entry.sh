@@ -39,7 +39,8 @@ if ! gate_enabled 12; then
   # does record, so the two skip paths disagreed with each other.
   echo "⏭️  SKIPPED - Gate 12: File hygiene (not selected by XP_GATE_ONLY_GATE)"
   GATE_12_STATUS="SKIP"
-  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$(gate_start_ms)"
+  GATE_12_DETAIL="not_selected"
+  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$(gate_start_ms)" "$GATE_12_DETAIL"
   return 0
 fi
 
@@ -63,8 +64,9 @@ else
   # --skip-version-check arm): the words said SKIP, the state said PASS.
   echo "⏭️  SKIPPED - Gate 12: File Hygiene (gate-12-file-hygiene.sh not found)"
   GATE_12_STATUS="SKIP"
+  GATE_12_DETAIL="script_not_found"
   GATE_12_START=$(gate_start_ms)
-  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START"
+  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START" "$GATE_12_DETAIL"
 fi
 # ============================================================================
   return 0
