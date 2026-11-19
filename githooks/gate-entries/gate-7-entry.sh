@@ -40,7 +40,7 @@ if ! gate_enabled 7; then
   echo "⏭️  SKIPPED - Gate 7: IaC security (not selected by XP_GATE_ONLY_GATE)"
   GATE_7_STATUS="SKIP"
   GATE_7_DETAIL="not_selected"
-  record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
+  record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START" "$GATE_7_DETAIL"
   return 0
 fi
 
@@ -50,7 +50,7 @@ else
   echo "⏭️  SKIPPED - No IaC files changed, skipping Gate 7."
   GATE_7_STATUS="SKIP"
   GATE_7_REASON="no_iac_files_changed"
-  record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START"
+  record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "0" "$GATE_7_START" "$GATE_7_REASON"
 fi
   return 0
 }

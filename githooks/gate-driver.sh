@@ -131,6 +131,25 @@ _xp_gate_run_chain() {
       if [ -n "$_rest" ]; then
         echo "⚠️  Chain stopped at Gate $key — these gates were NOT reached:$_rest"
       fi
+      # Export the same fact for the REPORT, not just for the reader.
+      #
+      # The message above fixed the console; the JSON kept saying "SKIP" for every
+      # gate below the stop, because the report writer defaults each status with
+      # ${GATE_N_STATUS:-SKIP} and an unreached body never sets the variable. So
+      # `xp-gate audit`, the matrix analyser and anything else reading the report
+      # still saw "each later gate chose to skip" -- the exact distinction this
+      # message was added to draw.
+      #
+      # Measured 2026-11-20 on the iac fixture, Gate 1 blocked:
+      #     console: "Chain stopped at Gate 1 -- NOT reached: 2 3 8 10 7 5 6 4"
+      #     report : gate7_iac_security {"status":"SKIP","scanned_files":0}
+      # and the matrix analyser then reported "iac: planted defect not caught by
+      # G7" against a gate whose body had never been invoked.
+      #
+      # Must be exported, not merely set: the report writer runs from a later EXIT
+      # trap and reads it in that context.
+      XP_GATE_NOT_REACHED="$(printf '%s' "$_rest" | sed 's/^ *//')"
+      export XP_GATE_NOT_REACHED
       exit "$rc"
     fi
 

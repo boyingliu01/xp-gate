@@ -90,11 +90,9 @@ write_fixture() {
     typescript)
       printf '{"compilerOptions":{"strict":true,"noEmit":true},"include":["*.ts"]}\n' > tsconfig.json
       printf '{"name":"probe","version":"1.0.0"}\n' > package.json
-      # One source file has no architecture to violate, and archlint god_module
-      # flags any single-file project (measured: 1 smell on a four-line file).
-      # Gate 6 fails closed on a missing config by design, so the fixture
-      # declares the exemption the design provides.
-      : > .architecture-skip
+      # .architecture-skip is created for every fixture after git init (see there):
+      # archlint god_module flags any single-file project, measured at 1 smell on a
+      # four-line file.
       if [ "$bad" = 1 ]; then
         printf 'const x: number = "not a number";\nexport default x;\n' > a.ts
       else
@@ -191,7 +189,14 @@ write_fixture() {
       fi
       ;;
     flutter)
-      printf 'name: probe\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\ndependencies:\n  flutter:\n    sdk: flutter\n' > pubspec.yaml
+      # dev_dependencies must be declared, or `dart analyze` rejects any file that
+      # imports package:test. Measured on a CORRECT test file:
+      #     error - test\a_test.dart:1:8 - Target of URI doesn't exist:
+      #             'package:test/test.dart' ... - uri_does_not_exist
+      #     error - test\a_test.dart:4:3 - The function 'test' isn't defined
+      # and Gate 13 blocked correctly. A fixture defect that reads exactly like a
+      # product defect -- which is the whole reason the fixture rule exists.
+      printf 'name: probe\nenvironment:\n  sdk: ">=3.0.0 <4.0.0"\ndependencies:\n  flutter:\n    sdk: flutter\ndev_dependencies:\n  test: any\n' > pubspec.yaml
       mkdir -p lib
       if [ "$bad" = 1 ]; then
         printf 'import "package:flutter/material.dart";\n\nint f() {\n  return "not an int";\n}\n' > lib/a.dart
@@ -365,6 +370,14 @@ __pycache__/
 target/
 build/
 " > .gitignore
+  # Gate 6 fails closed when a project declares no architecture config, BY DESIGN --
+  # the config is what tells it which boundaries to enforce. Every fixture is a
+  # handful of files, so there is no architecture to declare; the exemption file is
+  # the mechanism the design provides for that. Without this, each new fixture that
+  # happened to reach Gate 6 reported a BLOCK that was entirely an artifact of the
+  # fixture (measured: shell clean G6=FAIL, typescript clean before it was handled
+  # one-off).
+  : > .architecture-skip
   git config commit.gpgsign false
   git config core.hooksPath "$REPO_ROOT/githooks"
 
