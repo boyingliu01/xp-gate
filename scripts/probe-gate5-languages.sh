@@ -239,7 +239,19 @@ judge() {
     if [ -n "$src" ]; then printf '\n' >> "$src"; fi
     git add -A 2>/dev/null
     git config core.hooksPath "$REPO/githooks"
-    timeout 900 git -c user.email=p@p -c user.name=p commit -m probe 2>&1
+    # XP_GATE_ONLY_GATE isolates the gate under test.
+    #
+    # Without it the probe measured the ORDER of the chain, not Gate 5: on the
+    # python fixture, Ruff rejected a missing blank line and on the java fixture
+    # the lint arm found one violation, so Gate 1 blocked and Gate 5 was never
+    # reached -- recorded as "gate-5 FAIL" for a gate that had not run. Both
+    # fixtures were fine; the probe was attesting to a verdict it never observed.
+    #
+    # Note the trade-off this accepts: the probe now certifies Gate 5's behaviour
+    # in isolation. End-to-end ordering is covered separately (the two full-chain
+    # runs recorded in docs/gate-quality-matrix), because re-proving the order in
+    # every language cell would make each cell two tests.
+    timeout 900 env XP_GATE_ONLY_GATE=5 git -c user.email=p@p -c user.name=p commit -m probe 2>&1
   ) || true
 
   # Scope the verdict to Gate 5's OWN section of the hook log.
