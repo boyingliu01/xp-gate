@@ -87,3 +87,52 @@ setup() {
     false
   }
 }
+
+
+@test "AC-GATE5-DELEG-NOT-PASS-03: a delegated run's STATUS is SKIP, not PASS" {
+  # The prose was fixed first; the variable was not. The gate still wrote
+  # GATE_5_STATUS="PASS" by default, so the summary line read
+  #
+  #     Gate 5: Tests + Coverage    PASS (coverage: N/A%)
+  #
+  # directly below the honest "No test verdict was produced here" message. The
+  # summary is what a reader keeps and what the audit journal records, so leaving
+  # it as PASS re-created the same false claim one layer down.
+  #
+  # Same rule as #554: a branch that records its own verdict must not be
+  # re-decided by the block epilogue.
+  #
+  # This test was wrong twice before it worked, which is why it is written the
+  # long way round:
+  #   v1 matched the phrase anywhere in the file -- satisfied by the fix's own
+  #      comment, stayed green with the guard removed.
+  #   v2 grepped for the guard line -- satisfied by a DIFFERENT
+  #      `if [ -n "${DELEGATED_LANGS:-}" ]` forty lines up (the prose one).
+  # Now it locates the block that contains the PASS default and requires
+  # DELEGATED_LANGS to appear inside it.
+  local block
+  block=$(awk '
+    /GATE_5_STATUS="PASS"/ { found = NR }
+    { lines[NR] = $0 }
+    END {
+      if (!found) exit
+      from = found - 12; if (from < 1) from = 1
+      for (i = from; i <= found; i++) print lines[i]
+    }' "$GATE")
+
+  printf '%s' "$block" | grep -qF 'DELEGATED_LANGS' || {
+    echo "the status default does not consult DELEGATED_LANGS"
+    echo "a delegated run still records PASS in the summary and the journal"
+    printf '%s\n' "$block" | sed 's/^/  | /'
+    false
+  }
+}
+
+@test "AC-GATE5-DELEG-NOT-PASS-04: a non-delegated run still records PASS" {
+  # Anti-vacuity: the fix must not turn every passing run into a SKIP. A gate that
+  # never records PASS is as useless as one that always does.
+  sed 's/#.*//' "$GATE" | grep -q 'GATE_5_STATUS="PASS"' || {
+    echo "no PASS path remains: a real run would no longer record success"
+    false
+  }
+}

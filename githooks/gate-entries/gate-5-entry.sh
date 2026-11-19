@@ -21,13 +21,30 @@
 # on - there is no copy left in the hook.
 # ============================================================================
 
-# The last three are real dead stores, left in place rather than deleted in the
-# same change that fixes a defect in this arm: removing them silently would hide
-# the possibility that they were MEANT to be consumed (the audit record currently
-# carries only GATE_5_DETAIL, so the subset/project distinction is computed and
-# thrown away). Deleting them belongs with whoever decides whether that
-# distinction should reach the journal -- see the gate-5 follow-ups.
+# SC2034 -- four variables shellcheck reports as written-but-never-read INSIDE
+# THIS FILE. All four are consumed from elsewhere, and the check that establishes
+# it has to search wider than this file:
 #
+#   COVERAGE_THRESHOLD_SOURCE  read by githooks/pre-commit (2 references).
+#   PY_TEST_SKIPPED            read by githooks/lib/coverage-total.sh:54, where
+#                              enforce_python_coverage refuses to consume a stale
+#                              .coverage left by a subset run. NOT dead -- an
+#                              earlier version of this comment claimed it was,
+#                              based on grepping only pre-commit and gate-driver.
+#   GATE_5_COVERAGE_APPLIES_TO read by githooks/gate-entries/gate-13-entry.sh at
+#                              two sites (the persisted "applies_to" field and the
+#                              subset exemption). Also NOT dead, same wrong grep.
+#   TESTS_DEFERRED             written here, and no reader found anywhere: not in
+#                              pre-commit, gate-driver, lib/ or the other gate
+#                              bodies. This one IS unused, and is left in place
+#                              rather than deleted in a change about something
+#                              else; deleting it is safe and belongs in its own
+#                              commit.
+#
+# The lesson is the one this repository keeps relearning: "I grepped and found no
+# reader" is evidence about the directories you grepped, not about the codebase.
+#
+
 # Three note-level codes, suppressed for the same reason: each is a deliberate
 # shell idiom the linter cannot tell from an accident.
 #
@@ -1975,7 +1992,18 @@ else
   # Not written as a `:-PASS` expansion: AC-599-03 forbids a PASS default in
   # any `GATE_N_STATUS:-DEFAULT` expansion, because that is how an unassigned
   # gate came to render as "passed". An explicit comparison keeps both rules.
-  if [ -z "$GATE_5_STATUS" ]; then
+  #
+  # The delegation check comes FIRST, and it is the same defect one layer down
+  # from the prose fix above: a language whose tests are delegated to CI never
+  # ran a test here, so recording PASS for it is a claim about work nobody did.
+  # Measured on the shell fixture: the gate printed "No test verdict was produced
+  # here -- absence of a failure is not a pass" and the summary line one inch
+  # below still read "Gate 5: Tests + Coverage  PASS (coverage: N/A%)". The
+  # summary is what a reader keeps and what the journal records.
+  if [ -n "${DELEGATED_LANGS:-}" ]; then
+    GATE_5_STATUS="SKIP"
+    GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }tests delegated to CI for: ${DELEGATED_LANGS}"
+  elif [ -z "$GATE_5_STATUS" ]; then
     GATE_5_STATUS="PASS"
   fi
 fi
