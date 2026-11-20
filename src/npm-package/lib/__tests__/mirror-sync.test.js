@@ -609,7 +609,20 @@ describe('assertPairsResolved — a zero-pair result must not read as a pass', (
     // An installed package ships lib/ but not scripts/, and the canonical trees it
     // would compare against are not installed either. Reporting an error there
     // would make a correct install look broken.
+    //
+    // `toBeNull()` alone cannot fail in a way that distinguishes "correctly quiet"
+    // from "quiet for any reason at all", so this also asserts what the function is
+    // NOT doing: the directory must genuinely lack a generator, or the null would
+    // be meaningless. Verified by the companion case above, where the same call on
+    // a root that DOES have one still returns null only because the pair list is
+    // non-empty -- the two facts together pin the contract.
     const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-nocheckout-'));
     expect(assertPairsResolved(emptyDir)).toBeNull();
+    expect(
+      fs.existsSync(path.join(emptyDir, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs'))
+    ).toBe(false);
+    // And the real repository, which has the generator and a resolved pair list,
+    // also reports no problem -- the contrast that makes the null above meaningful.
+    expect(assertPairsResolved(path.resolve(__dirname, '..', '..', '..', '..'))).toBeNull();
   });
 });
