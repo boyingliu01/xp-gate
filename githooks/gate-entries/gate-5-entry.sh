@@ -34,12 +34,20 @@
 #   GATE_5_COVERAGE_APPLIES_TO read by githooks/gate-entries/gate-13-entry.sh at
 #                              two sites (the persisted "applies_to" field and the
 #                              subset exemption). Also NOT dead, same wrong grep.
-#   TESTS_DEFERRED             written here, and no reader found anywhere: not in
-#                              pre-commit, gate-driver, lib/ or the other gate
-#                              bodies. This one IS unused, and is left in place
-#                              rather than deleted in a change about something
-#                              else; deleting it is safe and belongs in its own
-#                              commit.
+#   TESTS_DEFERRED             REMOVED. It was written here and no reader existed
+#                              anywhere -- not in pre-commit, gate-driver, lib/ or
+#                              the other gate bodies. The note that stood here said
+#                              deleting it was safe and belonged in its own commit;
+#                              this is that commit.
+#
+#                              Deleting it outright would have dropped the FACT it
+#                              recorded (this language's tests run inside the
+#                              coverage pass, not separately). So the fact moved to
+#                              GATE_5_DETAIL, which is the field that already
+#                              carries the other "why the tests did not run" answer
+#                              and which reaches the journal through
+#                              record_gate_audit. A flag nobody reads is
+#                              indistinguishable from a decision never made.
 #
 # The lesson is the one this repository keeps relearning: "I grepped and found no
 # reader" is evidence about the directories you grepped, not about the codebase.
@@ -977,7 +985,23 @@ else
           DELEGATED_LANGS="${DELEGATED_LANGS:+${DELEGATED_LANGS} }${CURRENT_LANG}"
         elif adapter_declares_coverage_runs_tests; then
           echo "ℹ️  ${CURRENT_LANG}: coverage run includes the tests — deferring test execution to a single pass."
-          TESTS_DEFERRED=true
+          # The deferral is stated in the RECORD, not only on the console.
+          #
+          # This used to set `TESTS_DEFERRED=true` and nothing read it -- not this
+          # file, not the report writer, not the audit journal. A flag written by a
+          # gate and read by nobody is indistinguishable from a decision that was
+          # never made: the console said "deferring", the report said nothing about
+          # why the language's tests were not run, and a reader comparing two
+          # languages could not tell a skip from a run.
+          #
+          # GATE_5_DETAIL already carries the delegate reason one branch above, so
+          # the deferral goes there too: one field, both shapes, and both reach the
+          # journal through record_gate_audit.
+          #
+          # Deliberately NOT appended to DELEGATED_LANGS: that variable is reported
+          # further down as "tests delegated to CI", and a coverage-run deferral is
+          # not a CI delegation. Reusing it would relabel this case as the other.
+          GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests deferred to the coverage run"
         else
           TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
           TESTS_EXIT_CODE=$?
