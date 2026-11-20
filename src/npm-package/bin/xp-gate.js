@@ -794,7 +794,23 @@ function handleAuditRecord(args, auditPath) {
 function evalGateAuditModule(expr) {
   const { execFileSync } = require('node:child_process');
   const modulePath = path.join(__dirname, '..', 'lib', 'gate-audit.ts');
-  const tsxCli = path.join(__dirname, '..', '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  // Resolve tsx by searching upward instead of counting `..` segments (#817).
+  //
+  // Three `..` from `bin/` already reaches `<global>/node_modules`, so the old
+  // `path.join(__dirname, '..', '..', '..', 'node_modules', 'tsx', ...)` produced
+  // `<global>/node_modules/node_modules/tsx/dist/cli.mjs` -- a path that can never
+  // exist. `audit --check` then died with MODULE_NOT_FOUND on every global install,
+  // and it happens to be the command doctor recommends when audit evidence is
+  // missing, so the documented recovery path was the broken one.
+  const tsxCli = require('../lib/tsx-resolve').findTsxCliFrom(__dirname);
+  if (!tsxCli) {
+    // An install hint beats a MODULE_NOT_FOUND stack: the file is fine, the
+    // dependency is absent, and those need different actions from the user.
+    throw new Error(
+      'xp-gate: cannot locate tsx, which this command needs to load its TypeScript module. '
+      + 'Install it with `npm i -g tsx`, or reinstall xp-gate (`npm i -g @boyingliu01/xp-gate`).',
+    );
+  }
   const script = [
     `import * as m from ${JSON.stringify(modulePath)};`,
     `process.stdout.write(JSON.stringify(${expr}));`,

@@ -600,30 +600,7 @@ const GATE_REGISTRY = {
     description: 'jscpd duplicate code detection',
     aliases: ['duplicates', 'dup', '2'],
     run: (targetPath) => {
-      const jscpdConfig = findConfig(targetPath, 'jscpd.conf.json');
-      // The scan root is '.' whenever we are running inside the target.
-      //
-      // jscpd 4.x does not apply its glob ignore rules to an ABSOLUTE scan path:
-      // measured on a fixture with three byte-identical files, one of them under
-      // .xp-gate/, `jscpd <abs-path> --ignore "**/.xp-gate/**,..."` reported 0
-      // clones while `jscpd . --ignore <same>` reported 2 (the copy excluded, the
-      // real duplicate kept). Passing '.' and running with cwd = target keeps both
-      // the ignore rules and the discovery working.
-      const scanRoot = !targetPath || path.resolve(targetPath) === path.resolve(process.cwd()) ? '.' : targetPath;
-      const args = [scanRoot];
-      if (jscpdConfig) args.push('--config', jscpdConfig);
-      // The ignore set is passed ONLY when the project has no config of its own.
-      //
-      // jscpd's --ignore is a REGEX while jscpd.conf.json's ignore is GLOB. Passing
-      // both does not merge them -- the CLI value replaces the config's list, so the
-      // scan lost "**/node_modules/**" and "**/.worktrees/**" and started walking
-      // .worktrees/sprint-*/plugins/opencode/node_modules (measured: 300 s timeout,
-      // down from 49 s, with the run still failing). The config is authoritative
-      // when it exists; the built-in set is a fallback for projects without one.
-      if (!jscpdConfig) {
-        const ignore = jscpdDefaultIgnorePatterns();
-        if (ignore) args.push('--ignore', ignore);
-      }
+      const args = buildJscpdArgs({ targetPath });
       runJscpd(args, targetPath);
     },
   },
@@ -838,6 +815,150 @@ function jscpdDefaultIgnorePatterns() {
   ].join(',');
 }
 
+/**
+ * Resolve jscpd's JS entry point without assuming a filename.
+ *
+ * Two defects are fixed here at once (#853):
+ *
+ * 1. **Doubled `node_modules`.** Roots were probed as
+ *    `path.join(root, 'node_modules', 'jscpd', ...)`, but a global npm prefix
+ *    already ends in `node_modules`, so the probe became
+ *    `<prefix>/node_modules/node_modules/jscpd`. `hasNodeModules()` decides per
+ *    root whether to append the segment.
+ *
+ * 2. **Hardcoded `bin/jscpd`.** jscpd 5.x declares its entry as
+ *    `{"jscpd": "./run-jscpd.js"}` and ships no `bin/jscpd` at all. The bin field
+ *    is now read from the installed package.json, so an upstream rename cannot
+ *    silently disable the gate again -- which is precisely how 5.x broke it.
+ *
+ * @param {{searchRoots?: Array<string|undefined>}} [opts]
+ * @returns {string|null} absolute path to jscpd's JS entry, or null when absent
+ */
+function findJscpdEntry(opts = {}) {
+  const roots = (opts.searchRoots || []).filter((r) => typeof r === 'string' && r.length > 0);
+  for (const root of roots) {
+    const candidate = jscpdEntryUnder(root);
+    if (candidate) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Look for an installed jscpd beneath one root, treating the root as either a
+ * project directory (whose `node_modules` we must enter) or a node_modules
+ * directory already.
+ *
+ * @param {string} root
+ * @returns {string|null}
+ */
+function jscpdEntryUnder(root) {
+  const bases = [path.join(root, 'node_modules')];
+  // A global npm prefix (`<...>/npm/node_modules`) is itself a node_modules dir.
+  if (path.basename(path.resolve(root)) === 'node_modules') bases.unshift(root);
+  for (const base of bases) {
+    const entry = jscpdEntryIn(path.join(base, 'jscpd'));
+    if (entry) return entry;
+  }
+  return null;
+}
+
+/**
+ * Read `package.json`'s bin field from `packageDir` and return the entry that
+ * actually exists on disk, or null when the package is absent or half-written.
+ *
+ * @param {string} packageDir
+ * @returns {string|null}
+ */
+function jscpdEntryIn(packageDir) {
+  const pkgJson = path.join(packageDir, 'package.json');
+  let bin;
+  try {
+    bin = JSON.parse(fs.readFileSync(pkgJson, 'utf8')).bin;
+  } catch {
+    // No package.json, unreadable, or invalid JSON: not an installed package.
+    return null;
+  }
+  const rel = typeof bin === 'string' ? bin : bin && (bin.jscpd || Object.values(bin)[0]);
+  if (!rel) return null;
+  const entry = path.join(packageDir, rel);
+  return fs.existsSync(entry) ? entry : null;
+}
+
+/**
+ * Default duplicate-ratio ceiling for Gate 2.
+ *
+ * Must match the `code-duplication` principle rule's threshold. Two gates judging
+ * "how much duplication is too much" with different numbers teach the user that
+ * the gates disagree, and a user who sees Gate 4 fail while Gate 2 passes
+ * concludes the gates are unreliable.
+ */
+const JSCPD_THRESHOLD = 15;
+
+/**
+ * Build the jscpd argv for Gate 2.
+ *
+ * Extracted from the gate's `run` so the threshold decision is testable without
+ * spawning jscpd. The threshold is the part that was missing: jscpd returns 0
+ * regardless of findings when no `--threshold` is given, so forwarding its exit
+ * code made Gate 2 unconditionally pass. Measured on a fixture with 66.7%
+ * duplication: `jscpd .` exit 0, `jscpd . --threshold 5` exit 1.
+ *
+ * @param {{targetPath?: string}} opts
+ * @returns {string[]}
+ */
+function buildJscpdArgs(opts = {}) {
+  const targetPath = opts.targetPath;
+  const jscpdConfig = findConfig(targetPath, 'jscpd.conf.json');
+  // The scan root is '.' whenever we are running inside the target.
+  //
+  // jscpd 4.x does not apply its glob ignore rules to an ABSOLUTE scan path:
+  // measured on a fixture with three byte-identical files, one of them under
+  // .xp-gate/, `jscpd <abs-path> --ignore "**/.xp-gate/**,..."` reported 0
+  // clones while `jscpd . --ignore <same>` reported 2 (the copy excluded, the
+  // real duplicate kept). Passing '.' and running with cwd = target keeps both
+  // the ignore rules and the discovery working.
+  const scanRoot = !targetPath || path.resolve(targetPath) === path.resolve(process.cwd()) ? '.' : targetPath;
+  const args = [scanRoot];
+  if (jscpdConfig) {
+    args.push('--config', jscpdConfig);
+    // A config that declares its own `threshold` owns the decision. Passing ours
+    // as well would override the project's number -- the same config-vs-CLI
+    // conflict that already cost the ignore list its entries.
+    const declared = readConfiguredThreshold(jscpdConfig);
+    if (declared === null) args.push('--threshold', String(JSCPD_THRESHOLD));
+    return args;
+  }
+  // The ignore set is passed ONLY when the project has no config of its own.
+  //
+  // jscpd's --ignore is a REGEX while jscpd.conf.json's ignore is GLOB. Passing
+  // both does not merge them -- the CLI value replaces the config's list, so the
+  // scan lost "**/node_modules/**" and "**/.worktrees/**" and started walking
+  // .worktrees/sprint-*/plugins/opencode/node_modules (measured: 300 s timeout,
+  // down from 49 s, with the run still failing). The config is authoritative
+  // when it exists; the built-in set is a fallback for projects without one.
+  const ignore = jscpdDefaultIgnorePatterns();
+  if (ignore) args.push('--ignore', ignore);
+  args.push('--threshold', String(JSCPD_THRESHOLD));
+  return args;
+}
+
+/**
+ * Read `threshold` from a jscpd config file.
+ *
+ * @param {string} configPath
+ * @returns {number|null} the declared threshold, or null when absent or invalid
+ */
+function readConfiguredThreshold(configPath) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return typeof parsed.threshold === 'number' && Number.isFinite(parsed.threshold)
+      ? parsed.threshold
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function runJscpd(args, targetPath) {
   // Invoke jscpd's JS entry through `node` rather than going through .bin/.
   //
@@ -853,24 +974,25 @@ function runJscpd(args, targetPath) {
   //   1. the project under check
   //   2. this package own dependency tree
   //   3. the global install tree
+  //
+  // The global trees are passed as PREFIXES, not as `.../node_modules` paths,
+  // because a global npm prefix already contains `node_modules`. Treating the two
+  // the same is #853: the old code appended `node_modules/jscpd/bin/jscpd` to an
+  // already-`node_modules`-terminated root, probing
+  // `<prefix>/node_modules/node_modules/jscpd/bin/jscpd`, which can never exist.
+  // `entry` was therefore always undefined and every lookup fell through to `npx`,
+  // which on Windows reported `spawnSync npx ENOENT` -- a working tool reported as
+  // missing, with an exit code indistinguishable from "duplicate code found".
+  //
   // process.execPath is the node BINARY location, not the npm global prefix; both
   // are probed along with the APPDATA npm tree, because a global package lives in
-  // a directory that varies by platform and by install method. Getting this wrong
-  // is how an installed jscpd was reported missing as "spawnSync npx ENOENT".
-  const npmGlobalRoots = [
-    path.join(path.dirname(process.execPath), 'node_modules'),
-    path.join(process.env.APPDATA || '', 'npm', 'node_modules'),
-  ].filter((r) => r && !r.startsWith('node_modules'));
-  const roots = [
-    targetPath || process.cwd(),
-    process.cwd(),
-    path.join(__dirname, '..', '..'),
-    path.join(__dirname, '..', '..', '..'),
-    ...npmGlobalRoots,
-  ];
-  const entry = roots
-    .map((r) => path.join(r, 'node_modules', 'jscpd', 'bin', 'jscpd'))
-    .find((c) => fs.existsSync(c));
+  // a directory that varies by platform and by install method.
+  const globalPrefixes = [
+    path.dirname(process.execPath),
+    path.join(process.env.APPDATA || '', 'npm'),
+    path.join(process.env.USERPROFILE || process.env.HOME || '', '.npm-global'),
+  ].filter((r) => r && r !== path.sep);
+  const entry = findJscpdEntry({ searchRoots: [targetPath, process.cwd(), ...globalPrefixes] });
   let lastErr = null;
   // Third fallback is deliberately `--no-install`: a global jscpd is on PATH on the
   // dev machine (/c/Users/think/AppData/Roaming/npm/jscpd) but `npx` here was
@@ -1063,7 +1185,7 @@ async function invokeGateHandler(gateId, gate, targetPath, opts) {
   }
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
+module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
   // AC-670-03 asserts the --all preamble END-TO-END: that an all-mode run hands
   // the security gates a non-empty file population sourced from the list file and
   // sets GATE_SCOPE="all". With these unexported, the case could only take its

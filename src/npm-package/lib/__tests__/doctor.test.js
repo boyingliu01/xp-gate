@@ -210,9 +210,14 @@ describe('doctor', () => {
 
   function createXpGatePrePush(dir) {
     fs.mkdirSync(dir, { recursive: true });
+    // Mirror the banner the shipped hook actually carries. The previous fixture used
+    // '# Pre-push Hook — 8 gates:', which no shipped hook has ever contained -- so
+    // these "healthy install" cases passed against a fixture while every real
+    // installation failed (#854). A fixture that disagrees with the product turns
+    // the test into a check on itself.
     fs.writeFileSync(
       path.join(dir, 'pre-push'),
-      '#!/bin/bash\n# Pre-push Hook — 8 gates:\n'
+      '#!/bin/bash\n# Pre-push Hook: Gate 10 (Build Integrity) + M (Mutation)\n'
     );
   }
 

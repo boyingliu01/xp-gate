@@ -62,12 +62,44 @@ function getPackageVersion() {
 
 /**
  * Signature strings used to verify file ownership.
+ *
+ * Each must be a STABLE identity anchor -- text that says "this file is xp-gate's
+ * <hook>" and does not describe how many gates it runs or what they are called.
+ * Descriptive banners rot: `pre-push` was keyed on `'Pre-push Hook — 8 gates:'`,
+ * while the hook's actual banner reads `'Pre-push Hook: Gate 10 (Build
+ * Integrity) + M/...'`. The two never matched, so `doctor` reported
+ * "Missing or not xp-gate" for every healthy installation -- a false alarm that
+ * `--fix` could not clear because there was nothing to fix (#854).
+ *
+ * The same trap sits in the sibling signatures: `pre-commit`'s banner continues
+ * " - 12 numbered gates (Gate 0–11)", so a signature that included that span
+ * would break the day a gate is added. Anchor before the count, not through it.
  */
 const SIGNATURES = {
   'pre-commit': 'OpenCode Quality Gates - Pre-Commit Hook',
-  'pre-push': 'Pre-push Hook — 8 gates:',
+  'pre-push': 'Pre-push Hook:',
   'post-merge': 'XP-Gate VERSION sync hook',
   'adapter-common.sh': 'detect_project_lang()'
+};
+
+/**
+ * Contents that identify an xp-gate hook even when its banner wording changed.
+ *
+ * The banner is documentation and is expected to be edited; ownership should
+ * survive that. These are markers of the hook's actual machinery, which any
+ * xp-gate hook carries and no unrelated script would.
+ */
+const OWNERSHIP_MARKERS = [
+  'XP-Gate',
+  'xp-gate',
+  '_LE_CR', // the #546 line-ending self-check every shipped hook begins with
+];
+
+/** Banner prefixes per hook: how a hook announces its own identity. */
+const BANNER_SELF_ID = {
+  'pre-commit': 'Pre-Commit Hook',
+  'pre-push': 'Pre-push Hook',
+  'post-merge': 'post-merge',
 };
 
 /**
@@ -248,6 +280,23 @@ function checkSpawnCapability(checks) {
   return 0;
 }
 
+/**
+ * Read a hook file's text, or null when it is absent or unreadable.
+ *
+ * Returning null rather than throwing keeps the caller's decision in one place:
+ * absence is a FAIL, not an exception.
+ *
+ * @param {string} hookPath
+ * @returns {string|null}
+ */
+function readHookContent(hookPath) {
+  try {
+    return fs.readFileSync(hookPath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 function isXpGateFile(filePath, signature) {
   if (!fs.existsSync(filePath)) return false;
   try {
@@ -256,6 +305,46 @@ function isXpGateFile(filePath, signature) {
   } catch {
     return false;
   }
+}
+
+/**
+ * The table of hook-ownership signatures, exposed so tests can assert the
+ * invariant that keeps #854 from recurring: no signature may embed a count.
+ *
+ * @returns {Record<string, string>}
+ */
+function getHookSignatures() {
+  return { ...SIGNATURES };
+}
+
+/**
+ * Decide whether `content` is xp-gate's hook for `hookName`.
+ *
+ * Two things are checked, in order:
+ *
+ * 1. The hook's own signature, so a pre-commit file cannot satisfy pre-push.
+ * 2. A banner-independent ownership marker, but only when the file ALSO announces
+ *    itself as this hook (`BANNER_SELF_ID`) and carries xp-gate machinery.
+ *
+ * The second exists because keying on a descriptive banner is what rotted: the
+ * banner is documentation and gets edited, while the check quietly turned every
+ * healthy install into "Missing or not xp-gate". Requiring a self-announcement is
+ * what keeps the looser test honest -- merely MENTIONING a hook name is not
+ * enough, and it has to be: `githooks/pre-commit` refers to `pre-push` twice in
+ * its comments, so a bare `content.includes(hookName)` accepted the wrong file.
+ *
+ * @param {string} hookName
+ * @param {string} content
+ * @returns {boolean}
+ */
+function isXpGateHookContent(hookName, content) {
+  if (typeof content !== 'string' || content.length === 0) return false;
+  const signature = SIGNATURES[hookName];
+  if (!signature) return false;
+  if (content.includes(signature)) return true;
+  const announcesItself = BANNER_SELF_ID[hookName];
+  if (!announcesItself || !content.includes(announcesItself)) return false;
+  return OWNERSHIP_MARKERS.some((marker) => content.includes(marker));
 }
 
 function getConfig() {
@@ -1752,7 +1841,14 @@ function syncGlobalHooksFromRepo(ctx = {}) {
  */
 function checkSingleHook(hooksDir, name, signature, label, checks) {
   const hookPath = path.join(hooksDir, name);
-  if (!fs.existsSync(hookPath) || !isXpGateFile(hookPath, signature)) {
+  // Read once and let the ownership check see the content: isXpGateHookContent
+  // also accepts a banner-independent ownership marker, so a reworded banner no
+  // longer turns every healthy install into "Missing or not xp-gate" (#854).
+  const content = readHookContent(hookPath);
+  const owned = content !== null
+    ? isXpGateHookContent(name, content)
+    : isXpGateFile(hookPath, signature);
+  if (!fs.existsSync(hookPath) || !owned) {
     checks.push({ name: `${label}: ${name}`, status: 'FAIL', detail: 'Missing or not xp-gate' });
     return 1;
   }
@@ -3767,7 +3863,7 @@ function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
 }
 
 module.exports = {
-  doctor, doctorDelphi, isXpGateFile, SIGNATURES,
+  doctor, doctorDelphi, isXpGateFile, SIGNATURES, getHookSignatures, isXpGateHookContent,
   fixVersionMismatch,
   fixTemplateDirMismatch,
   fixMissingHooks,

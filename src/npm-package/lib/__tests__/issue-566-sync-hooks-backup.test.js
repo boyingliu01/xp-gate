@@ -53,22 +53,29 @@ describe('doctor --sync-hooks keeps the previous version (#566)', () => {
    * @param {{installedPrePush?: string}} [opts] content for the installed pre-push
    */
   function makeLayout(opts = {}) {
-    const root = fs.mkdtempSync(path.join(tmpHome, `layout-${DESCRIBE_ID}-`));
-    const repoRoot = path.join(root, 'repo');
-    const repoHooks = path.join(repoRoot, 'githooks');
-    const installedHooks = path.join(root, 'installed-hooks');
-    fs.mkdirSync(repoHooks, { recursive: true });
-    fs.mkdirSync(installedHooks, { recursive: true });
+    // Wrap the fixture setup so a failure names the fixture that broke instead of
+    // surfacing later as "doctor reported the wrong thing". Without this, an
+    // unreadable tmpHome looks like a product defect in the assertion.
+    try {
+      const root = fs.mkdtempSync(path.join(tmpHome, `layout-${DESCRIBE_ID}-`));
+      const repoRoot = path.join(root, 'repo');
+      const repoHooks = path.join(repoRoot, 'githooks');
+      const installedHooks = path.join(root, 'installed-hooks');
+      fs.mkdirSync(repoHooks, { recursive: true });
+      fs.mkdirSync(installedHooks, { recursive: true });
 
-    // The canonical hook carries the xp-gate signature doctor looks for.
-    fs.writeFileSync(
-      path.join(repoHooks, 'pre-push'),
-      '#!/usr/bin/env bash\n# XP-Gate Pre-Push Hook\n# Pre-push Hook — 8 gates: Gate 10\necho canonical\n',
-    );
-    if (opts.installedPrePush !== undefined) {
-      fs.writeFileSync(path.join(installedHooks, 'pre-push'), opts.installedPrePush);
+      // The canonical hook carries the xp-gate signature doctor looks for.
+      fs.writeFileSync(
+        path.join(repoHooks, 'pre-push'),
+        '#!/usr/bin/env bash\n# XP-Gate Pre-Push Hook\n# Pre-push Hook: Gate 10 (Build Integrity)\necho canonical\n',
+      );
+      if (opts.installedPrePush !== undefined) {
+        fs.writeFileSync(path.join(installedHooks, 'pre-push'), opts.installedPrePush);
+      }
+      return { root, repoRoot, repoHooks, installedHooks };
+    } catch (err) {
+      throw new Error(`fixture: could not build hook layout under ${tmpHome}: ${err.message}`);
     }
-    return { root, repoRoot, repoHooks, installedHooks };
   }
 
   it('AC-599-13: overwriting an existing hook keeps a copy of the previous version', () => {
@@ -138,7 +145,7 @@ describe('doctor --sync-hooks keeps the previous version (#566)', () => {
   });
 
   it('AC-599-13: an identical file is not re-copied and leaves no backup', () => {
-    const canonical = '#!/usr/bin/env bash\n# XP-Gate Pre-Push Hook\n# Pre-push Hook — 8 gates: Gate 10\necho canonical\n';
+    const canonical = '#!/usr/bin/env bash\n# XP-Gate Pre-Push Hook\n# Pre-push Hook: Gate 10 (Build Integrity)\necho canonical\n';
     const { repoHooks, installedHooks } = makeLayout({ installedPrePush: canonical });
 
     const { syncGlobalHooksFromRepo } = loadDoctor();
