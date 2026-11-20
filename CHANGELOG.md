@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.38.68.0] - 2026-11-20
+
+**镜像同步（无行为变更）。**
+
+`node src/npm-package/scripts/sync-package-content.js --fix` + 重新生成 deploy-manifest 投影。
+
+五个曾经分叉的门禁脚本，现在在四处完全一致：
+
+- `githooks/`
+- `githooks/adapters/`
+- `src/npm-package/hooks/`
+- `src/npm-package/adapters/`
+
+`gate-driver.sh` 与 `gate-registry.sh` 的镜像也落后于 canonical——那些改动是本次会话中
+直接改在镜像上的，从未从 canonical 同步过来。这次提交记录的是**追平**，不是内容变更。
+
 ## [0.38.67.0] - 2026-11-20
 
 **Gate 12 的三道内容检查在项目内安装下全部静默失效，门禁报 PASS。**
