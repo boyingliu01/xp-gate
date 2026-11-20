@@ -55,12 +55,49 @@
 - `ccn-report --check`：本次新增函数无违规（`stripPhpLiterals` 初版 CCN 23、
   `countParameters` 11，按 CCN 棘轮重构到阈值内）
 
+### 评审拦下的两个真 bug（已在发版前修掉）
+
+第一版通过全部测试后，Delphi 三席评审否决，理由是参数计数与错误处理判定
+有具体缺陷。逐一实测，**两条属实，一条不成立**：
+
+**① 数组默认值里的逗号被当成分隔符。** 实测：
+
+```
+shortArray($a = [1,2], $b = [3,4])  -> paramCount 4   （应为 2）
+nested($a = ['k' => ['x' => 1, 'y' => 2]], $b) -> 3   （应为 2）
+```
+
+`scanParamList` 只跟踪圆括号，`[` `]` 里的逗号落在"深度 1"，被计入。
+`too-many-params` 阈值是 7，几个数组默认值就能把正确代码判成 BLOCK——这是
+**误报**方向，代价最高，用户会用关闭规则来"解决"。修法：三种括号 ( `[` `{`
+一起跟踪，只在最外层计逗号。
+
+**② `hasTryCatch` 读的是未剥离的原文。** 实测：
+
+```php
+$s = 'try { x } catch (E $e) { }';   // 只有字符串里有 try/catch
+```
+→ 报告 `hasTryCatch=true`。消费该字段的是 `missing-error-handling`，
+于是**真正没有错误处理的方法反而被放过**。修法：字面量只剥离一次，
+四个指标全部基于剥离后的视图。
+
+**③ 未采纳：未闭合字符串/注释在 EOF 的索引边界。** 评审认为可能丢字符或越界。
+实测四种边界（文件尾未闭合单引号串、未闭合块注释、行注释在 EOF、串后仍有代码），
+均正常解析、无越界、无丢字符。为此保留了测试覆盖，但不改实现。
+
+每个 bug 都先写失败测试再修：新增 7 个用例，修复前 4 个红
+（`expected 4 to be 2`、`expected 3 to be 2`、`expected true to be false` ×2），
+修复后 17/17 全绿。
+
+`scanParamList` 的分支级联使 CCN 升到 14–15（阈值 10），改成括号增量查表后清零。
+
 ### 同时修复的既有漂移
 
 `githooks/gate-entries/gate-0-entry.sh` 的 PHP 语言路由（#731：暂存的 `.php`
 必须把 `php` 加进 `PROJECT_LANGS`，且按扩展名判定、不看 `composer.json`）
 在 canonical 里存在、在 npm 镜像里缺失。也就是说**已发布的包根本不识别 PHP 项目**，
 无论 `adapters/php.sh` 多正确。已同步。
+
 
 ## [0.38.73.0] - 2026-11-20
 

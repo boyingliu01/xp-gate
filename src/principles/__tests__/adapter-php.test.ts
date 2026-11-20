@@ -223,3 +223,116 @@ class Wide
     expect(violations[0].message).toContain('8');
   });
 });
+
+describe('PhpAdapter — commas inside a default value are not separators (AC-PHP-ADAPTER-04)', () => {
+  // Found by code review after the first fix, and confirmed by measurement: a
+  // scanner that tracks only parentheses counts the commas inside a short-array
+  // literal as parameters. `shortArray($a = [1,2], $b = [3,4])` reported 4.
+  // The rule's threshold is 7, so two such defaults in a three-parameter method
+  // would fire `too-many-params` on correct code -- a false block, which is the
+  // expensive direction.
+  it('counts a short-array default as one parameter', () => {
+    const [fn] = extract(`<?php
+class A
+{
+    public function shortArray($a = [1,2], $b = [3,4])
+    {
+        return $a;
+    }
+}
+`);
+    expect(fn.paramCount).toBe(2);
+  });
+
+  it('counts a nested array default as one parameter', () => {
+    const [fn] = extract(`<?php
+class A
+{
+    public function nested($a = ['k' => ['x' => 1, 'y' => 2]], $b)
+    {
+        return $a;
+    }
+}
+`);
+    expect(fn.paramCount).toBe(2);
+  });
+
+  it('still counts commas inside a nested call correctly', () => {
+    // Parentheses were already tracked; this pins that the fix did not break them.
+    const [fn] = extract(`<?php
+class A
+{
+    public function calls($a = bar(1,2), $b)
+    {
+        return $a;
+    }
+}
+`);
+    expect(fn.paramCount).toBe(2);
+  });
+
+  it('counts a plain two-parameter list', () => {
+    const [fn] = extract(`<?php
+class A
+{
+    public function plain($a, $b)
+    {
+        return $a;
+    }
+}
+`);
+    expect(fn.paramCount).toBe(2);
+  });
+});
+
+describe('PhpAdapter — error handling must exist in code, not in a string (AC-PHP-ADAPTER-05)', () => {
+  // Also found by review: hasTryCatch read the RAW body, so a method whose only
+  // `try {` was inside a string literal reported error handling it did not have.
+  // missing-error-handling consumes this field, so the rule stayed silent on a
+  // method that genuinely lacks a catch.
+  it('does not credit a try/catch that only appears inside a string', () => {
+    const [fn] = extract(`<?php
+class B
+{
+    public function fake()
+    {
+        $s = 'try { x } catch (E $e) { }';
+        return $s;
+    }
+}
+`);
+    expect(fn.hasTryCatch).toBe(false);
+  });
+
+  it('does not credit a try/catch that only appears in a comment', () => {
+    const [fn] = extract(`<?php
+class B
+{
+    public function commented()
+    {
+        // try { x } catch (E $e) { }
+        return 1;
+    }
+}
+`);
+    expect(fn.hasTryCatch).toBe(false);
+  });
+
+  it('still credits a real try/catch', () => {
+    const [fn] = extract(`<?php
+class B
+{
+    public function real()
+    {
+        try {
+            $this->run();
+        } catch (\\RuntimeException $e) {
+            return null;
+        }
+        return 1;
+    }
+}
+`);
+    expect(fn.hasTryCatch).toBe(true);
+  });
+});
