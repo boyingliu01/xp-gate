@@ -68,13 +68,28 @@
 # Returns 0 and prints the root; returns 1 when no PHP project marker exists.
 _php_detect_root() {
   local dir="${1:-$PWD}"
-  local probe="$dir" found=""
-  while [ -n "$probe" ] && [ "$probe" != "/" ]; do
+  local probe="$dir" found="" next
+  # Terminate on a FIXED POINT, not on the string "/".
+  #
+  # Measured 2026-11-20: `git commit` hands the hook PWD in Windows form
+  # ("C:/Users/.../phpst") while a directly-invoked hook sees POSIX form
+  # ("/tmp/phpst"). dirname never reaches "/" on the Windows form -- it descends
+  # C:/Users/x -> C:/Users -> C: -- and dirname("C:") == "C:", so this loop had no
+  # exit. The commit hung with no output past "Running static analysis for php..."
+  # for as long as the process lived; a directly-invoked hook completed normally,
+  # which is exactly the shape that reads as "the product is fine, the caller is
+  # odd". Host CPU load was 0.00 during the hang, so it was not measurement noise.
+  #
+  # Comparing against the previous probe catches every such degenerate root at
+  # once (C:, and any future shape) instead of enumerating the forms of "/".
+  while [ -n "$probe" ]; do
     if [ -f "$probe/composer.json" ]; then found="$probe"; break; fi
     if [ -f "$probe/phpunit.xml" ] || [ -f "$probe/phpunit.xml.dist" ]; then
       found="$probe"; break
     fi
-    probe=$(dirname "$probe")
+    next=$(dirname "$probe")
+    [ "$next" = "$probe" ] && break
+    probe="$next"
   done
   if [ -z "$found" ]; then
     if [ -f "composer.json" ] || [ -f "phpunit.xml" ] || [ -f "phpunit.xml.dist" ]; then
