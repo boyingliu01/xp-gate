@@ -83,17 +83,27 @@ describe('#853 Gate 2 must be able to fail', () => {
   it('ignores a DIRECTORY that happens to be named like a config file', () => {
     // `--config <dir>` cannot work, so a stray directory must not be discovered as
     // a config: it would turn the gate red for a reason that has nothing to do with
-    // duplication. The cwd may legitimately hold a real config (this repo does), so
-    // the assertion targets the directory case specifically: whenever a --config IS
-    // passed, it must be a regular file.
+    // duplication.
     fs.mkdirSync(path.join(tmpDir, '.jscpd.json'));
+    const args = buildJscpdArgs({ targetPath: tmpDir });
+    expect(args).not.toContain('--config');
+    expect(args[args.indexOf('--threshold') + 1]).toBe('15');
+  });
+
+  it('never applies the working directory config to an explicit target', () => {
+    // The stated rule is "an explicit --target decides". Measured before this was
+    // enforced: with only the xp-gate repo holding a jscpd.conf.json, a target with
+    // no config of its own still received `--config <xp-gate repo>/jscpd.conf.json`
+    // -- so `check 2 /other/repo` judged that repo by this repo's ignore list.
+    // The fixture keeps its own cwd config out of the picture by asserting on the
+    // config PATH rather than on presence.
     const args = buildJscpdArgs({ targetPath: tmpDir });
     const at = args.indexOf('--config');
     if (at >= 0) {
-      expect(fs.statSync(args[at + 1]).isFile()).toBe(true);
-      expect(path.dirname(args[at + 1])).not.toBe(tmpDir);
+      expect(args[at + 1].startsWith(tmpDir)).toBe(true);
     }
-    expect(args[args.indexOf('--threshold') + 1]).toBe('15');
+    // A target with no config must never produce one of its own.
+    expect(args).not.toContain('--config');
   });
 
   it('falls back to the default threshold when the config is malformed', () => {
