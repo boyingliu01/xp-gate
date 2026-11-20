@@ -232,6 +232,69 @@ done
 
 [ -d githooks/adapters ] || fail "missing canonical adapters directory: githooks/adapters"
 
+# ── Gate scripts that exist in BOTH githooks/ and githooks/adapters/ ────────────
+#
+# This is a different duplication from the mirror one above, and nothing was
+# checking it. Some gate scripts live at `githooks/<name>.sh` (canonical, per
+# sync-package-content.js) AND at `githooks/adapters/<name>.sh`, because
+# `resolveGateScript()` falls back to `<adapterDir>/gate-<n>.sh` and a global
+# install puts adapterDir at ~/.config/xp-gate/adapters.
+#
+# The two are loaded by DIFFERENT install shapes: a project install resolves
+# $GATE_DIR to githooks/ and reads the canonical copy; a global install reads the
+# adapters copy. So a divergence is not caught by running the gates locally -- it
+# is caught by the user.
+#
+# Measured 2026-11-20: FIVE had silently drifted. The worst was gate-13, whose
+# adapters copy gained gate13_run_declared_checks() while the canonical copy did
+# not (1770 lines against 1458). A project install loaded the copy WITHOUT the arm
+# and printed `gate13_run_declared_checks: command not found` followed by
+# `Gate 13 (PASS)` -- every adapter-declared compile-time check (go vet, cargo
+# check, dart analyze) missing, and the local run was the looser one. gate-7,
+# gate-8, gate-10 and gate-12-file-hygiene had drifted the same way; gate-10 was a
+# gate repaired earlier in the same session, and that repair only reached one copy.
+#
+# The rule is #532's: for every name present in both places, the bytes must match,
+# and so must the mode -- they are the same program, delivered two ways.
+_gate_dual_drift=""
+for _gd_adapters in githooks/adapters/gate-*.sh githooks/adapters/sprint-gate.sh; do
+  [ -f "$_gd_adapters" ] || continue
+  _gd_name=$(basename "$_gd_adapters")
+  _gd_canonical="githooks/$_gd_name"
+  [ -f "$_gd_canonical" ] || continue
+  if ! cmp -s "$_gd_canonical" "$_gd_adapters"; then
+    _gate_dual_drift="$_gate_dual_drift $_gd_name"
+    printf '%s\n' "FAIL: gate script has diverged between the two places it ships:" >&2
+    printf '%s\n' "        githooks/$_gd_name           ($(wc -l < "$_gd_canonical") lines)" >&2
+    printf '%s\n' "        githooks/adapters/$_gd_name  ($(wc -l < "$_gd_adapters") lines)" >&2
+    printf '%s\n' "   A project install loads the first; a global install loads the second." >&2
+    printf '%s\n' "   Bring both to the same content in ONE commit -- do not reorder the" >&2
+    printf '%s\n' "   resolution, which only decides which copy is wrong." >&2
+  fi
+  if in_git_repo; then
+    _gd_cmode=$(index_mode "$_gd_canonical")
+    _gd_amode=$(index_mode "$_gd_adapters")
+    if [ -n "$_gd_cmode" ] && [ -n "$_gd_amode" ] && [ "$_gd_cmode" != "$_gd_amode" ]; then
+      _gate_dual_drift="$_gate_dual_drift $_gd_name(mode)"
+      printf '%s\n' "FAIL: gate script mode differs between the two places it ships:" >&2
+      printf '%s\n' "        githooks/$_gd_name ($_gd_cmode) vs githooks/adapters/$_gd_name ($_gd_amode)" >&2
+    fi
+  fi
+done
+unset _gd_adapters _gd_name _gd_canonical _gd_cmode _gd_amode
+
+# ── Gate scripts that exist in only ONE of the two places ─────────────────────
+#
+# A name present in adapters/ but not in githooks/ (or the reverse) is not
+# automatically wrong, but it means one install shape has a gate the other does
+# not. Report it so the asymmetry is a decision rather than an accident.
+for _gd_adapters in githooks/adapters/gate-*.sh githooks/adapters/sprint-gate.sh; do
+  [ -f "$_gd_adapters" ] || continue
+  _gd_name=$(basename "$_gd_adapters")
+  [ -f "githooks/$_gd_name" ] || printf '%s\n' "NOTE: githooks/adapters/$_gd_name has no canonical counterpart at githooks/$_gd_name"
+done
+unset _gd_adapters _gd_name
+
 # P1-E step 1: `src/npm-package/adapters/` is GENERATED and gitignored, so this
 # check no longer asks "are the two committed trees equal" -- there is only one
 # committed tree now. It asks whether the generator REPRODUCES the canonical tree

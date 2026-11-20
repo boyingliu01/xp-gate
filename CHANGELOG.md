@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.38.71.0] - 2026-11-20
+
+**给"一个门禁两份拷贝"加通用检查——这是上一轮五个缺陷的共同形状。**
+
+### 为什么之前没被发现
+
+有些门禁脚本同时存在于两处，**不同的安装形态读不同的那一份**：
+
+- `githooks/<name>.sh` —— canonical（`sync-package-content.js` 明文规定）
+- `githooks/adapters/<name>.sh` —— 全局安装时 `adapterDir` 指向 `~/.config/xp-gate/adapters`
+
+项目内安装读**第一份**，全局安装读**第二份**。所以分叉在本地看不出来：
+**验证通过的代码不是用户拿到的那份程序。**
+
+`scripts/check-hook-mirror.sh` 一直在检查 `githooks/<f>` → `src/npm-package/<f>`，
+对 `githooks/adapters/` **一个字都没说**——这就是它活了这么久的原因。
+
+### 实测的分叉（上一轮修复）
+
+| 文件 | canonical | adapters |
+|---|---|---|
+| `gate-13-compiler-strictness.sh` | 1458 行 | **1770 行** |
+| `gate-7.sh` / `gate-8.sh` / `gate-10.sh` / `gate-12-file-hygiene.sh` | — | 同样分叉 |
+
+`gate-10` 是**同一会话早些时候修过的门禁**——那次修复只进了一份拷贝。
+
+### 新增检查
+
+`check-hook-mirror.sh` 现在对**每一个两处都存在的门禁名**检查：
+
+1. **字节一致**（`cmp -s`）
+2. **模式一致**（git 索引里的 `100644` / `100755`）
+
+失败信息不复述"文件不同"，而是说明**为什么这很危险**：
+
+```
+FAIL: gate script has diverged between the two places it ships:
+        githooks/gate-7.sh           (95 lines)
+        githooks/adapters/gate-7.sh  (97 lines)
+   A project install loads the first; a global install loads the second.
+   Bring both to the same content in ONE commit -- do not reorder the
+   resolution, which only decides which copy is wrong.
+```
+
+最后一句是**我上一轮犯过的错**：我先去改 entry 的解析顺序，方向错了——
+canonical 是 `githooks/<f>`，该做的是把内容补到一致。
+
+### 另外报告"只有一份"的情况
+
+只存在于一处不算错，但意味着**一种安装形态有某个门禁、另一种没有**。
+用 `NOTE:` 输出，让这个不对称是**决定**而不是**意外**。
+
+### 测试
+
+`gate-dual-copy-parity.test.bats`（4 条），其中第 3 条**真的执行变异**：
+
+1. 备份一份 adapters 拷贝
+2. 追加一行使其分叉
+3. 跑真实的 `check-hook-mirror.sh`
+4. 要求非零退出、且输出里含分叉提示和文件名
+5. 恢复备份
+
+一个存在但无法失败的规则，正是这次整轮工作要消除的形状。
+
 ## [0.38.70.0] - 2026-11-20
 
 **修正文件模式不一致。**
