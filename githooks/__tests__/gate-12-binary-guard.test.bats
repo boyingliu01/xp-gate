@@ -27,11 +27,45 @@ teardown() {
 }
 
 # Load only the helper under test: sourcing the gate would run every check.
+#
+# is_binary_staged_file has been a SET LOOKUP since ed5da9f8 ("one awk process
+# instead of four git spawns per file"): it answers from $GATE_12_BINARY_SET, which
+# _g12_scan_blobs fills for the whole change set in one git call. Extracting just the
+# predicate and calling it answers "text" for everything, because the set it reads was
+# never built -- so this loads the scan that populates it too, and asks the real
+# question rather than a question about an empty set.
 load_helper() {
-  awk '/^is_binary_staged_file\(\) \{/,/^\}/' "$GATE" > "$WORK/helper.sh"
-  [ -s "$WORK/helper.sh" ] || { echo "is_binary_staged_file not found in gate-12" >&2; return 1; }
+  awk '/^_g12_in_set\(\) \{/,/^\}/' "$GATE" > "$WORK/helper.sh"
+  awk '/^_g12_scan_blobs\(\) \{/,/^\}/' "$GATE" >> "$WORK/helper.sh"
+  awk '/^is_binary_staged_file\(\) \{/,/^\}/' "$GATE" >> "$WORK/helper.sh"
+  [ -s "$WORK/helper.sh" ] || { echo "gate-12 helpers not found" >&2; return 1; }
+
+  # State the helpers read. The gate sets these before calling them; here they start
+  # empty and the two steps below fill them in.
+  GATE_12_BINARY_SET=" "
+  GATE_12_HAS_TRAILING_WS=" "
+  GATE_12_MISSING_EOF=" "
+  GATE_12_HAS_CONFLICT=" "
+  STAGED_FILES="$(git diff --cached --name-only)"
+  GATE_12_SCANNER="$REPO_ROOT/githooks/lib/gate-12-blob-scan.awk"
+
   # shellcheck disable=SC1091
   . "$WORK/helper.sh"
+
+  # Binary membership comes from ONE `--numstat` call for the whole index, which
+  # marks a binary entry as `-\t-\t<path>`. Reproduce that step so the set the
+  # predicate reads is the set the gate would have built.
+  local _adds _dels _path
+  while IFS=$'\t' read -r _adds _dels _path; do
+    [ -z "$_path" ] && continue
+    case "$_adds" in
+      -) GATE_12_BINARY_SET="${GATE_12_BINARY_SET}${_path} " ;;
+    esac
+  done <<EOF
+$(git diff --cached --numstat --diff-filter=d 2>/dev/null)
+EOF
+
+  _g12_scan_blobs
 }
 
 @test "AC-682-01: a text file is NOT judged binary (checks must run)" {

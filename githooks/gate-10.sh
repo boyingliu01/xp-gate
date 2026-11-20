@@ -210,6 +210,29 @@ gate10_resolve_ruleset() {
 }
 # @@RULES-RESOLVER-END@@
 
+
+# --- Telemetry: never let an upload be the gate's runtime -------------------
+#
+# This file's own header already named telemetry as part of the import chain
+# behind semgrep's ~9s startup -- and then never disabled it. Measured
+# 2026-11-19, one trivial file, ABBA-alternated so a time trend cannot explain it:
+#
+#     semgrep scan --config=auto ...            8095ms / 98595ms
+#     SEMGREP_SEND_METRICS=off (same command)    402ms /   481ms
+#
+# A 20x difference that moves with the network. That is exactly the bimodal shape
+# the audit journal had recorded all along and nobody read: of 445 credible
+# sast-security rows, 184 finished under 2s (the metrics POST failed fast) and 225
+# took over 10s (it hung), with the fastest at 191ms and the slowest at 247s.
+# Gate 10 was the single largest p90 share in the chain -- 35.6% -- because its
+# runtime was network wait, which is the one thing a commit gate may not spend
+# time on.
+#
+# Default OFF. The override exists because a team may legitimately want its own
+# semgrep metrics for central rule tuning; what must not be true is that
+# contacting semgrep.dev is the DEFAULT for every commit on every checkout.
+SEMGREP_SEND_METRICS="${XP_GATE_SEMGREP_METRICS:-off}"
+export SEMGREP_SEND_METRICS
 # Semgrep availability check
 SEMGREP_CMD=""
 if command -v semgrep >/dev/null 2>&1; then

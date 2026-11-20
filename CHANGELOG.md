@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.38.67.0] - 2026-11-20
+
+**Gate 12 的三道内容检查在项目内安装下全部静默失效，门禁报 PASS。**
+
+### 缺陷一：扫描器路径永远解析不到
+
+Gate 12 用一个 awk 程序回答三道检查（尾随空白 / 缺 EOF 换行 / 冲突标记）。
+扫描器按自身目录链解析：
+
+```bash
+for _g12_dir in "${GATE_DIR:-}" "$(dirname BASH_SOURCE)/.." …; do
+  [ -f "$_g12_dir/lib/gate-12-blob-scan.awk" ] && …
+```
+
+但扫描器实际在 **`githooks/lib/`**，而 `dirname <门禁>` 已经是 `githooks/`。
+`/../lib` 多了一层，**三个候选全部落空**。
+
+而且在 Windows 上还有第二层问题：`[ -f ".../githooks/../lib/x" ]` 返回**假**——
+git bash 的 `-f` 内建**不解析 `..`**。
+
+结果：`GATE_12_SCANNER` 为空 → `_g12_scan_blobs` 在自己的 `-f` 守卫处返回 →
+三道检查全部报告"没有发现" → **门禁打 PASS**。
+
+实测（含真实冲突标记的 CSV）：
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| 冲突标记 | **PASS（漏检）** | **BLOCK** ✅ |
+| 缺 EOF 换行 | PASS（漏检） | WARN ✅ |
+
+修复：候选目录加 `dirname` 本身，先用 `cd … && pwd` 规范化再 `-f`。
+
+### 缺陷二：Gate 13 在项目内安装下加载陈旧副本
+
+上一次提交 `0ace5365` 给 **adapters 版**加了 `gate13_run_declared_checks()`，
+**没同步 canonical 副本**，两者分叉（1770 行 vs 1458 行）。
+
+项目内安装 `$GATE_DIR=githooks/` → 加载**没有这条臂**的副本；
+CI 和全局安装 → 加载有的。实测：
+
+```
+gate-13-entry.sh: line 796: gate13_run_declared_checks: command not found
+Gate 13 (PASS) completed in 0s
+```
+
+`go vet`、`cargo check`、`dart analyze` 在本地**从未执行过**。
+
+修复：恢复 #532 的不变量——把 canonical 补到同一内容，两份字节一致。
+（先试过"让 entry 优先 adapters"，方向错了：注释明确 canonical 是 `githooks/<f>`。）
+
+同一次提交改后：`-> declared compile-time checker: go vet ./...` + `OK`。
+
+### 缺陷三：另外 3 个门禁有同样的分叉
+
+新测试的通用规则一次性查出：
+
+```
+gate scripts whose two copies have diverged: gate-7.sh gate-8.sh gate-10.sh
+```
+
+全部是 adapters 版超集（缺函数/缺修复），已回填至字节一致。
+`gate-10` 恰好是上一轮修过的门禁——**那次修复只进了一份**。
+
+### 测试
+
+- `gate-12-binary-guard` / `gate-12-eof-newline`：谓词改成集合查询后，测试仍只提取
+  谓词、不跑扫描，问的是"空集合"而不是真问题。已补上扫描步骤。
+- `gate-13-declared-check-reachable.test.bats`（5 条）：canonical 有这条臂、两份字节一致、
+  **所有双份门禁都字节一致**（通用规则）、项目内安装能 `type` 到函数。
+
+**Gate 12 全部 26 条测试通过（此前 5 条红），Gate 13 全部 38 条通过。**
+
 ## [0.38.66.0] - 2026-11-20
 
 **Gate 13 在项目内安装下加载了一份过期的副本，5 个检查函数不存在，而它报 PASS。**

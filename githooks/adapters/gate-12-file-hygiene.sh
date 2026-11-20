@@ -124,10 +124,25 @@ EOF
 # The AWK scanner that answers all three content checks in one process. Resolved
 # next to this script's own directory chain, like every other shared library, so
 # a global install (~/.config/xp-gate/) and the tracked tree both work.
+#
+# The layouts this must cover, all of which keep the scanner in a `lib/` beside
+# the gate script:
+#
+#     githooks/gate-12-file-hygiene.sh          -> githooks/lib/gate-12-blob-scan.awk
+#     githooks/adapters/gate-12-file-hygiene.sh -> githooks/lib/gate-12-blob-scan.awk   (one level up)
+#     ~/.config/xp-gate/adapters/gate-12-...sh  -> ~/.config/xp-gate/lib/...           (one level up)
+#
+# Candidates are normalised with `cd ... && pwd` before the `-f` test: measured
+# 2026-11-20 on Git for Windows, `[ -f ".../githooks/../lib/x" ]` answers FALSE --
+# the test builtin does not resolve `..`. When the loop finds nothing,
+# GATE_12_SCANNER stays empty, `_g12_scan_blobs` bails at its own `-f` guard, and
+# all three checks report nothing while the gate prints PASS.
 if [ -z "${GATE_12_SCANNER:-}" ]; then
-  for _g12_dir in "${GATE_DIR:-}" "$(dirname "${BASH_SOURCE[0]}")/.." \
-                  "$(dirname "${BASH_SOURCE[0]}")/../.."; do
+  _g12_here=$(dirname "${BASH_SOURCE[0]}")
+  for _g12_dir in "${GATE_DIR:-}" "$_g12_here" "$_g12_here/.." "$_g12_here/../.."; do
     [ -n "$_g12_dir" ] || continue
+    # Normalise; a directory that cannot be entered is not a candidate.
+    _g12_dir=$(cd "$_g12_dir" 2>/dev/null && pwd) || continue
     if [ -f "$_g12_dir/lib/gate-12-blob-scan.awk" ]; then
       GATE_12_SCANNER="$_g12_dir/lib/gate-12-blob-scan.awk"
       break
