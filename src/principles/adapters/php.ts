@@ -72,10 +72,19 @@ export class PhpAdapter extends BaseAdapter implements Adapter {
     const m = target as Record<string, unknown>;
     const body = typeof m.code === 'string' ? m.code : '';
 
+    // Strip literals ONCE and derive every metric from that view.
+    //
+    // `hasTryCatch` originally tested the RAW body, so a method whose only
+    // `try {` sat inside a string or a comment reported error handling it did not
+    // have -- measured: a method holding `$s = 'try { x } catch (E $e) { }'`
+    // returned true. missing-error-handling is the rule that consumes this field,
+    // so the mistake made the rule stay silent on a method with no catch at all.
+    const code = stripPhpLiterals(body);
+
     m.length = body === '' ? 0 : body.split(/\r?\n/).length;
-    m.nestingDepth = measureNesting(body);
-    m.hasTryCatch = /\btry\s*\{/.test(body) && /\bcatch\s*[({]/.test(body);
-    m.paramCount = countParameters(body);
+    m.nestingDepth = measureNesting(code);
+    m.hasTryCatch = /\btry\s*\{/.test(code) && /\bcatch\s*[({]/.test(code);
+    m.paramCount = countParameters(code);
   }
 
   extractClasses(): unknown[] {
@@ -227,47 +236,62 @@ function stripPhpLiterals(code: string): string {
 }
 
 /**
- * Count a declaration's parameters from its `code` (which starts at the
- * `function` keyword and therefore includes the parameter list).
- *
- * Returns 0 for an empty list. Nested generics/arrays are counted at the top
- * level only, so `array $a, ?Foo $b = null` is 1 rather than counting the comma
- * inside a default value.
+ * What a parameter list scan found: the outermost-level comma count and whether
+ * any non-whitespace sat between the parentheses.
  */
-/** What a parameter list scan found: the top-level comma count and whether any
- *  non-whitespace sat between the parentheses. */
 interface ParamScan {
   commas: number;
   sawContent: boolean;
 }
 
 /**
- * Scan from `open` (the `(`) to its matching `)`, counting commas at depth 1.
+ * Scan from `open` (the `(`) to its matching `)`, counting commas that separate
+ * parameters.
  *
- * Separated from countParameters so the loop's brace counter is not tangled with
- * the "is this list empty" decision -- together they measured CCN 11.
+ * ALL THREE bracket pairs are tracked, not just parentheses. A default value can
+ * be a short-array literal, and this scanner originally counted parens only:
+ * measured, `function shortArray($a = [1,2], $b = [3,4])` reported FOUR
+ * parameters instead of two. `too-many-params` blocks above 7, so a handful of
+ * array defaults turned correct code into a false block -- the expensive
+ * direction, and one a user resolves by disabling the rule.
+ *
+ * Curly braces are tracked for the same reason (`$a = ['k' => ['x' => 1]]`).
+ * Literals are already blanked by the caller, so braces inside strings do not
+ * reach this scan.
  */
+/** Nesting delta contributed by each bracket character. */
+const BRACKET_DELTA: Readonly<Record<string, readonly [number, number, number]>> = {
+  '(': [1, 0, 0],
+  ')': [-1, 0, 0],
+  '[': [0, 1, 0],
+  ']': [0, -1, 0],
+  '{': [0, 0, 1],
+  '}': [0, 0, -1],
+};
+
 function scanParamList(stripped: string, open: number): ParamScan {
-  let depth = 0;
+  let parens = 0;
+  let brackets = 0;
+  let braces = 0;
   let commas = 0;
   let sawContent = false;
   for (let i = open; i < stripped.length; i++) {
     const ch = stripped[i];
-    if (ch === '(') {
-      depth++;
+    const delta = BRACKET_DELTA[ch];
+
+    // Brackets are a table lookup, not a branch cascade: the cascade measured
+    // CCN 14-15 against a block threshold of 10 while each arm was one increment.
+    if (delta) {
+      parens += delta[0];
+      brackets += delta[1];
+      braces += delta[2];
+      if (parens === 0 && i > open) break;
       continue;
     }
-    if (ch === ')') {
-      depth--;
-      if (depth === 0) break;
-      continue;
-    }
-    if (depth !== 1) continue;
-    if (ch === ',') {
-      commas++;
-      continue;
-    }
+
     if (!/\s/.test(ch)) sawContent = true;
+    // A comma separates parameters only at the list's own outermost level.
+    if (ch === ',' && parens === 1 && brackets === 0 && braces === 0) commas++;
   }
   return { commas, sawContent };
 }
@@ -276,8 +300,9 @@ function scanParamList(stripped: string, open: number): ParamScan {
  * Count a declaration's parameters from its `code` (which starts at the
  * `function` keyword and therefore includes the parameter list).
  *
- * Returns 0 for an empty list. Commas inside a nested default value are not
- * counted, because the scan only tallies at depth 1.
+ * Returns 0 for an empty list. Commas inside a default value -- array literals,
+ * nested calls, string content -- are not counted, because the scan only tallies
+ * at the list's outermost level.
  */
 function countParameters(code: string): number {
   const open = code.indexOf('(');
