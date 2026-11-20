@@ -1,5 +1,97 @@
 # Changelog
 
+## [0.38.75.0] - 2026-11-20
+
+**两道门禁都学会了说真话：Gate 2 不再崩溃，也不再假装通过；doctor 不再对好钩子报警。**
+
+三个 issue（#853 / #854 / #817）里，有两个相反方向的缺陷，危险程度不同。
+
+### #853 — Gate 2 恒失败，修好后又变成恒通过
+
+第一个缺陷是**工具跑不起来**。两处叠加：
+
+`runJscpd` 的 `npmGlobalRoots` 元素已经以 `node_modules` 结尾
+（全局 npm prefix 就是 `<...>/npm/node_modules`），代码又拼了一次，
+探测的是 `node_modules/node_modules/jscpd/bin/jscpd`。实测：
+
+```text
+roots[5] = C:\Users\...\AppData\Roaming\npm\node_modules
+  → 探测 ...\npm\node_modules\node_modules\jscpd\bin\jscpd   (不存在)
+真实路径 ...\npm\node_modules\jscpd\run-jscpd.js            (存在)
+```
+
+`entry` 恒为 `undefined`，落到 `npx --no-install jscpd`，在 Windows 上报
+`spawnSync npx ENOENT`。
+
+第二处：jscpd 5.x 把入口从 `bin/jscpd` 换成了 `run-jscpd.js`
+（`package.json` 的 `bin` 为 `{"jscpd": "./run-jscpd.js"}`）。硬编码
+`bin/jscpd` 即便路径拼对了也找不到。
+
+**修法不是再拼一次路径，而是不再拼路径**：`findJscpdEntry()` 读安装包的
+`package.json` 的 `bin` 字段决定入口，因此上游再改文件名也不会让门禁静默失效
+——而那正是 5.x 做的事。
+
+**第二个缺陷更危险，issue 里没提但必须一起修**：jscpd 在不传 `--threshold`
+时，即使发现 66.7% 的重复也返回 exit 0。`runJscpd` 直接转发它的退出码，
+所以 Gate 2 **对任何仓库恒为 PASS**。实测：
+
+```text
+jscpd .                        → exit 0   (66.7% 重复)
+jscpd . --threshold 5          → exit 1   ERROR: too many duplicates (66.7%) over threshold (5.0%)
+jscpd . --threshold 90         → exit 0
+```
+
+只修路径会把门禁从"崩溃"变成"静默通过"——后者看起来是绿的，更难发现。
+`buildJscpdArgs()` 现在传 `--threshold 15`，与 `clean-code.code-duplication`
+规则同值：两道门禁判断"多少重复算多"不该给出不同答案。项目自己的
+`jscpd.conf.json` 声明了 `threshold` 时以项目为准（与 ignore 同一原则）。
+
+### #854 — doctor 对完好的 pre-push 恒报"Missing or not xp-gate"
+
+`SIGNATURES['pre-push']` 写的是 `'Pre-push Hook — 8 gates:'`，而实际钩子横幅是
+`'Pre-push Hook: Gate 10 (Build Integrity) + M/...'`。两者从来没有匹配过，
+所以**对任何正常安装这条检查恒为 FAIL**，而 `--fix` 清不掉（没有可修的东西）。
+
+修法不是把字符串改成"现在这句"——那样下次改横幅还会烂。签名改为稳定的身份前缀
+`'Pre-push Hook:'`，并新增 `BANNER_SELF_ID` 判据：横幅改写后，只要文件仍自我声明
+为该钩子且带 xp-gate 机制标记（`_LE_CR` 自检等），仍判定为自家钩子。
+
+判据不能太松：`githooks/pre-commit` 在注释里两次提到 `pre-push`，所以最初
+用 `content.includes(hookName)` 的版本**接受了放错名字的文件**，被测试抓住后
+改为要求自我声明。测试还固定了"任何签名都不得包含门禁数量"这条不变量——
+`pre-commit` 的横幅接着写 `- 12 numbered gates`，签名一旦跨过那个数字，
+下次加门禁就同样恒 FAIL。
+
+顺带修正了 `doctor.test.js` / `issue-566` 里的 fixture：它们用的是
+`'# Pre-push Hook — 8 gates:'` 这个**产品里从不存在的字符串**，所以这些
+"健康安装"用例一直是拿 fixture 测 fixture。
+
+### #817 — `audit --check` 恒 MODULE_NOT_FOUND
+
+`bin/xp-gate.js` 从 `bin/` 出发走三个 `..` 已经到达 `<global>/node_modules`，
+再拼 `node_modules/tsx` 就是 `<global>/node_modules/node_modules/tsx/dist/cli.mjs`。
+实测：
+
+```text
+__dirname/../../.. = C:\Users\...\AppData\Roaming\npm\node_modules
++ node_modules/tsx → ...\npm\node_modules\node_modules\tsx\dist\cli.mjs   (不存在)
+真实 tsx            → ...\npm\node_modules\tsx\dist\cli.mjs
+```
+
+新增 `lib/tsx-resolve.js` 的 `findTsxCliFrom()`：向上逐层找
+`node_modules/tsx/dist/cli.mjs`，与 Node 自己的解析方式一致，因此对全局安装、
+本地安装、monorepo 都成立。找不到时给安装提示而非 MODULE_NOT_FOUND 栈——
+`audit --check` 正是 doctor 在缺审计证据时推荐的恢复路径，它崩了用户就没有退路。
+
+### 验证
+
+- 新增 4 个测试文件、18 个用例，全部先红后绿；`lib/__tests__` 1437 通过
+- 真实环境端到端：`check 2` 有重复 exit 1 / 无重复 exit 0；`audit --check` 正常输出
+- `tsc --noEmit` 0 错误
+
+两条既有失败（C# 相关）与 26 条 CCN 违规与本次无关，已在撤销本次改动的对照运行中
+确认同样存在。
+
 ## [0.38.74.0] - 2026-11-20
 
 **PHP 的 Gate 4 一直"检查过了"——什么都没查。**
