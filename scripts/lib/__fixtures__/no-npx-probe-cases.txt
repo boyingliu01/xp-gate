@@ -1,0 +1,52 @@
+# Boundary corpus for the npx probe guard.
+#
+# Read by githooks/__tests__/no-npx-probe-awk-equivalence.test.bats, which feeds
+# every line through BOTH predicates -- the shell functions in
+# scripts/check-no-npx-probe.sh and the awk translation in
+# scripts/lib/no-npx-probe.awk -- and demands identical output.
+#
+# The lines are here to separate the two predicated shapes, not to be tidy:
+# is_probe_line() flags `npx ... --version`, npx_runs_tool() flags `npx <tool>`
+# with its documented exemptions, and several inputs below are flagged by one and
+# not the other. A rewrite that collapses them into one predicate will fail.
+
+# --- flagged by is_probe_line, not by npx_runs_tool (no tool argument) --------
+npx eslint --version
+if npx vitest --version; then echo ok; fi
+x=$(npx prettier --write .)
+npx semgrep --version 2>&1
+
+# --- flagged by npx_runs_tool, not by is_probe_line (no --version) -----------
+npx biome check .
+
+# --- flagged by BOTH --------------------------------------------------------
+npx tool --version
+(cd foo && npx @archlinter/cli --version) >/dev/null 2>&1
+
+# --- exempt in npx_runs_tool: existence checks on npx itself -----------------
+command -v npx
+type -P npx
+which npx
+
+# --- exempt in npx_runs_tool: npx's own flags -------------------------------
+npx --version
+npx --help
+
+# --- exempt in npx_runs_tool: guidance printed for a human -------------------
+echo "Run 'npx biome check --write .' to auto-fix"
+printf '%s' "npx tool"
+
+# --- not matched at all: comment is stripped first --------------------------
+# npx foo --version
+
+# --- not matched: prose that never invokes npx ------------------------------
+plain text with no npx at all
+the word npx appears but no flags
+
+# --- shape edges ------------------------------------------------------------
+npx
+
+foo npx
+
+npx tool 2>&1 --version
+npx tool --version # trailing comment

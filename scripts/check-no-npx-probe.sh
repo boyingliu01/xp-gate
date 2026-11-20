@@ -68,6 +68,10 @@ done
 # escape hatch; it must keep it GATED.
 allowed_file='githooks/lib/toolchain-path.sh'
 
+# The awk form of the per-line predicates. Optional: the shell loop below is the
+# fallback, so a host without awk still runs the guard (slower).
+scan_awk="$(dirname "$0")/lib/no-npx-probe.awk"
+
 # A SECOND defect shape, and the expensive one: RUNNING a tool through npx.
 #
 # `npx <tool> --version` costs a registry round trip. `npx <tool> check .` costs a
@@ -167,21 +171,62 @@ is_probe_line() {
 violations=""
 files_checked=0
 
-while IFS= read -r file; do
-  [ -n "$file" ] || continue
-  files_checked=$((files_checked + 1))
-  lineno=0
-  while IFS= read -r line; do
-    lineno=$((lineno + 1))
-    if is_probe_line "$line"; then
-      [ "$file" = "$allowed_file" ] && continue
-      violations="${violations}${file}:${lineno}: ${line}
+scan_files=$(find "${scan_roots[@]}" -type f \( -name '*.sh' -o -name 'pre-commit' -o -name 'pre-push' -o -name 'post-commit' -o -name 'post-merge' \) -not -path '*/__tests__/*' | sort)
+files_checked=$(printf '%s\n' "$scan_files" | grep -c . || true)
+
+# The per-line predicate runs in awk when it is available.
+#
+# WHY: the shell form below calls is_probe_line() once per line. Measured
+# 2026-11-20 on this repository (load 0.00, three runs) the shell scan took
+# 7301 / 6478 / 6445 ms over ~33.4k lines in 112 files, while reading the same
+# bytes with `cat | wc -l` takes 258 ms -- the ~6.2 s remainder is per-line bash
+# call overhead on Windows, a fifth of a whole commit spent in the interpreter.
+# The awk translation answers the same question in 190 ms.
+#
+# The awk program is a LINE-FOR-LINE translation of the two shell predicates
+# (scripts/lib/no-npx-probe.awk documents that), and the shell predicates below
+# are kept as the fallback -- if awk is missing the scan still runs, just slower.
+# Neither is allowed to become a simplification of the other: this guard has
+# already been broken twice by "tidying" a predicate.
+if command -v awk >/dev/null 2>&1 && [ -f "$scan_awk" ]; then
+  # ONE awk process for the whole change set. Launching awk per file is worse
+  # than the shell loop it replaces: measured 2026-11-20, a per-file launch took
+  # 10101 / 9916 / 9901 ms against the shell's 7301 / 6478 / 6445 -- process
+  # creation on Windows costs more than the loop saved. The whole set in one
+  # process takes 190 ms.
+  #
+  # The allowed file is excluded from the INPUT, not from the results, so the
+  # exemption cannot be forgotten in a branch.
+  _awk_input=$(printf '%s\n' "$scan_files" | grep -v -x -F "$allowed_file" || true)
+  if [ -n "$_awk_input" ]; then
+    # Paths as ARGUMENTS, not on stdin. Measured 2026-11-20: this MSYS awk (gawk
+    # under Git for Windows) prints nothing when the same lines arrive through a
+    # pipe, while the identical content passed as a filename argument is
+    # detected. The failure is silent -- no error, just no findings -- which is
+    # exactly the "not checked" reads as "passed" shape this guard exists to
+    # prevent, so the argument form is used and the pipe form is not.
+    #
+    # shellcheck disable=SC2086  # word splitting on purpose: one path per word
+    violations=$(awk -v mode=probe -f "$scan_awk" $_awk_input 2>/dev/null)
+    [ -n "$violations" ] && violations="${violations}
 "
-    fi
-  done <"$file"
-done <<EOF
-$(find "${scan_roots[@]}" -type f \( -name '*.sh' -o -name 'pre-commit' -o -name 'pre-push' -o -name 'post-commit' -o -name 'post-merge' \) -not -path '*/__tests__/*' | sort)
+  fi
+else
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    lineno=0
+    while IFS= read -r line; do
+      lineno=$((lineno + 1))
+      if is_probe_line "$line"; then
+        [ "$file" = "$allowed_file" ] && continue
+        violations="${violations}${file}:${lineno}: ${line}
+"
+      fi
+    done <"$file"
+  done <<EOF
+$scan_files
 EOF
+fi
 
 # Anti-vacuity: if the scan saw no files, every assertion below passes without
 # having looked at anything. That is exactly the failure mode this guard exists
