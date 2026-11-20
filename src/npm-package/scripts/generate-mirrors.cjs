@@ -62,6 +62,11 @@ const GENERATED_TREES = Object.freeze([
   { mirror: 'hooks/lib', canonical: path.join(REPO_ROOT, 'githooks', 'lib'), sync: 'hooks' },
   { mirror: 'build-integrity', canonical: path.join(REPO_ROOT, 'src', 'build-integrity'), sync: 'module' },
   { mirror: 'skills', canonical: path.join(REPO_ROOT, 'skills'), sync: 'skills' },
+  // These two shipped in the package's `files[]` and were maintained by hand: no
+  // generator knew about them, so they were the last mirror pairs whose "edit the
+  // right copy" depended on memory. Same shape as build-integrity, so `module`.
+  { mirror: 'mutation', canonical: path.join(REPO_ROOT, 'src', 'mutation'), sync: 'module' },
+  { mirror: 'mock-policy', canonical: path.join(REPO_ROOT, 'src', 'mock-policy'), sync: 'module' },
 ]);
 
 function quiet(argv) {

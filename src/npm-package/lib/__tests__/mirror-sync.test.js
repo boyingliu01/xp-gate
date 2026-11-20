@@ -28,7 +28,40 @@ const {
   syncMirrors,
   handleSyncMirrors,
   SYNC_EXCLUDES,
+  KNOWN_PAIRS,
+  HAND_LISTED_PAIRS,
 } = require('../mirror-sync');
+
+/**
+ * Directories that are mirrors of a canonical tree rather than this package's own
+ * source.
+ *
+ * `bin/`, `lib/` and `scripts/` are the package's own code, not copies.
+ *
+ * `hooks/`, `plugins/` and `gates/` are supervised ELSEWHERE and are deliberately
+ * omitted here rather than being reported as unsupervised:
+ *   - `hooks/`  -> HOOK_MIRROR_FILES in scripts/check-hook-mirror.sh (a curated
+ *                  file list, not the whole tree; same reason KNOWN_PAIRS omits it)
+ *   - `plugins/`-> syncPlugins in sync-package-content.js
+ *   - `gates/`  -> listed in files[] but the directory does not exist at all, so
+ *                  there is nothing to compare. Left alone: removing a stale
+ *                  files[] entry is a packaging change, not a mirror one.
+ * Including them would make this case report three permanent failures that no
+ * mirror work could ever fix.
+ */
+const MIRROR_DIR_CANDIDATES = [
+  'adapters',
+  'skills',
+  'principles',
+  'mutation',
+  'mock-policy',
+  'build-integrity',
+];
+
+/** Package-relative mirror dirs supervised by an explicit pair, not a generator. */
+const HAND_LISTED_MIRRORS = HAND_LISTED_PAIRS.map((pair) =>
+  pair.mirror.replace(/^src\/npm-package\//, '')
+);
 
 let TMP_REPO;
 
@@ -467,5 +500,67 @@ describe('syncMirrors — AC-713-04 safety', () => {
       const mode = fs.statSync(path.join(TMP_REPO, 'mirror/hook.sh')).mode;
       expect(mode & 0o111).toBeTruthy();
     }
+  });
+});
+
+describe('KNOWN_PAIRS — P1-E the pair list is derived, not hand-copied', () => {
+  it('every mirror directory the package ships is supervised by something', () => {
+    // The real question, and the one a naive version of this case got wrong.
+    //
+    // Asserting "KNOWN_PAIRS contains every GENERATED_TREES row" is VACUOUS:
+    // KNOWN_PAIRS is derived from GENERATED_TREES, so it holds by construction.
+    // Verified by deleting the mock-policy row from the generator -- the assertion
+    // still passed, which is proof it could never fail.
+    //
+    // What actually went wrong historically is different: `mutation` and
+    // `mock-policy` were in the package's `files[]` with NO generator and NO pair,
+    // so nothing ever compared them against their source. That state is
+    // undetectable from inside the pair list; it needs the SHIPPED list as the
+    // starting set. Every shipped mirror directory must be either generated or
+    // explicitly hand-listed -- silence is the bug.
+    const pkg = require('../../package.json');
+    const { GENERATED_TREES } = require('../../scripts/generate-mirrors.cjs');
+    // Directory-shaped `files[]` entries (a trailing slash). Loose files like
+    // `gate-3.sh` and `adapter-common.sh` are mirrors of individual gates and are
+    // covered by HOOK_MIRROR_FILES in check-hook-mirror.sh, not by this table.
+    const shippedDirs = pkg.files
+      .filter((f) => f.endsWith('/'))
+      .map((f) => f.replace(/\/$/, ''))
+      // Only entries that have a canonical counterpart under the repo are mirror
+      // pairs; `bin/`, `lib/`, `scripts/` are this package's own source.
+      .filter((d) => MIRROR_DIR_CANDIDATES.some((c) => d === c));
+
+    const generated = new Set(GENERATED_TREES.map((t) => t.mirror));
+    const handListed = new Set(HAND_LISTED_MIRRORS);
+    const unsupervised = shippedDirs.filter((d) => !generated.has(d) && !handListed.has(d));
+    expect(unsupervised).toEqual([]);
+  });
+
+  it('declares no pair whose mirror the package does not ship', () => {
+    // The other direction. A pair pointing at a directory absent from `files[]`
+    // would check something that never reaches a consumer, which reads as coverage
+    // without being any.
+    const pkg = require('../../package.json');
+    // KNOWN_PAIRS holds REPO-relative paths; files[] holds PACKAGE-relative ones.
+    const PRE = 'src/npm-package/';
+    // files[] entries carry a trailing slash ('adapters/'). Comparing the raw
+    // strings reports EVERY pair as unshipped -- which is exactly how this case
+    // failed on its first version, and why the check is written against the
+    // normalised entry rather than trusting the two lists to be spelled alike.
+    const shipped = (p) =>
+      p.startsWith(PRE) &&
+      pkg.files.some((f) => {
+        const entry = f.replace(/\/$/, '');
+        const rel = p.slice(PRE.length);
+        return rel === entry || rel.startsWith(`${entry}/`);
+      });
+    for (const pair of KNOWN_PAIRS) {
+      expect(shipped(pair.mirror)).toBe(true);
+    }
+  });
+
+  it('has no duplicate canonical tree', () => {
+    const canonicals = KNOWN_PAIRS.map((p) => p.canonical);
+    expect(new Set(canonicals).size).toBe(canonicals.length);
   });
 });
