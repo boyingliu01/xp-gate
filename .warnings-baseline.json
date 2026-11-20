@@ -42,5 +42,17 @@
   "src/mock-policy/__tests__/integration.test.ts": {
     "totalWarnings": 9,
     "lastAnalyzed": "2026-10-31T07:31:43.881Z"
+  },
+  "src/npm-package/lib/doctor.js": {
+    "totalWarnings": 22,
+    "lastAnalyzed": "2026-11-20T14:42:46.812Z"
+  },
+  "src/npm-package/lib/gate-runner.js": {
+    "totalWarnings": 2,
+    "lastAnalyzed": "2026-11-20T14:42:46.813Z"
+  },
+  "src/npm-package/lib/__tests__/doctor.test.js": {
+    "totalWarnings": 40,
+    "lastAnalyzed": "2026-11-20T14:42:46.813Z"
   }
 }
