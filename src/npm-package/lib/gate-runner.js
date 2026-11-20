@@ -937,6 +937,16 @@ function buildJscpdArgs(opts = {}) {
     if (!isFiniteNumber(parsedConfig.threshold)) args.push('--threshold', String(JSCPD_THRESHOLD));
     return args;
   }
+  if (jscpdConfig) {
+    // The config exists but cannot be used. Saying so is not optional: silently
+    // dropping the project's ignore/min-tokens rules changes what gets scanned,
+    // and the operator would have no way to tell that from a real result. The
+    // gate still runs (fail-open on the config, fail-closed on the threshold).
+    process.stderr.write(
+      `[gate-2] ignoring unreadable jscpd config ${jscpdConfig}; `
+      + `using the built-in ignore set and --threshold ${JSCPD_THRESHOLD}\n`,
+    );
+  }
   // The ignore set is passed ONLY when the project has no config of its own.
   //
   // jscpd's --ignore is a REGEX while jscpd.conf.json's ignore is GLOB. Passing
@@ -974,6 +984,28 @@ function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+/**
+ * The npm global prefixes worth probing for an installed tool.
+ *
+ * Built conditionally because `path.join('', 'npm')` yields the RELATIVE path
+ * `npm`, which `findJscpdEntry` would then resolve against the current directory:
+ * an unset APPDATA/HOME would silently point the search at `./npm` and
+ * `./.npm-global`. A candidate is only included when its base variable exists.
+ *
+ * @param {{binDir: string, appData?: string, home?: string}} env
+ * @returns {string[]} absolute prefixes, most likely first
+ */
+function buildGlobalPrefixes(env) {
+  const prefixes = [env.binDir];
+  // A POSIX global prefix puts the binary in <prefix>/bin, so its parent is the
+  // prefix packages hang off. Walking up avoids hardcoding "/usr".
+  if (env.binDir) prefixes.push(path.dirname(env.binDir));
+  if (env.appData) prefixes.push(path.join(env.appData, 'npm'));
+  if (env.home) prefixes.push(path.join(env.home, '.npm-global'));
+  // Only absolute results are usable as prefixes.
+  return prefixes.filter((p) => typeof p === 'string' && p.length > 0 && path.isAbsolute(p));
+}
+
 function runJscpd(args, targetPath) {
   // Invoke jscpd's JS entry through `node` rather than going through .bin/.
   //
@@ -1006,14 +1038,11 @@ function runJscpd(args, targetPath) {
   // `<prefix>/node_modules`, `<prefix>/lib/node_modules` (POSIX global installs)
   // and, when the prefix is itself named node_modules, the prefix directly.
   const nodeBinDir = path.dirname(process.execPath);
-  const globalPrefixes = [
-    nodeBinDir,
-    // A POSIX global prefix puts the binary in <prefix>/bin, so its parent is the
-    // prefix the packages hang off. Walking up avoids hardcoding "/usr".
-    path.dirname(nodeBinDir),
-    path.join(process.env.APPDATA || '', 'npm'),
-    path.join(process.env.USERPROFILE || process.env.HOME || '', '.npm-global'),
-  ].filter((r) => r && r !== path.sep);
+  const globalPrefixes = buildGlobalPrefixes({
+    binDir: nodeBinDir,
+    appData: process.env.APPDATA,
+    home: process.env.USERPROFILE || process.env.HOME,
+  });
   const entry = findJscpdEntry({ searchRoots: [targetPath, process.cwd(), ...globalPrefixes] });
   let lastErr = null;
   // Third fallback is deliberately `--no-install`: a global jscpd is on PATH on the
@@ -1086,13 +1115,31 @@ function findJscpdConfig(basePath) {
   const target = basePath || '.';
   for (const name of JSCPD_CONFIG_FILENAMES) {
     const candidate = path.join(target, name);
-    if (fs.existsSync(candidate)) return candidate;
+    if (isRegularFile(candidate)) return candidate;
   }
   for (const name of JSCPD_CONFIG_FILENAMES) {
     const candidate = path.join(process.cwd(), name);
-    if (fs.existsSync(candidate)) return candidate;
+    if (isRegularFile(candidate)) return candidate;
   }
   return null;
+}
+
+/**
+ * True only for an existing REGULAR FILE.
+ *
+ * `fs.existsSync` is also true for a directory, and a directory named
+ * `.jscpd.json` would be handed to jscpd as `--config <dir>`, failing the gate for
+ * a reason unrelated to duplication.
+ *
+ * @param {string} candidate
+ * @returns {boolean}
+ */
+function isRegularFile(candidate) {
+  try {
+    return fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1247,7 +1294,7 @@ async function invokeGateHandler(gateId, gate, targetPath, opts) {
   }
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
+module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
   // AC-670-03 asserts the --all preamble END-TO-END: that an all-mode run hands
   // the security gates a non-empty file population sourced from the list file and
   // sets GATE_SCOPE="all". With these unexported, the case could only take its
