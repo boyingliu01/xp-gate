@@ -91,6 +91,29 @@ $s = 'try { x } catch (E $e) { }';   // 只有字符串里有 try/catch
 
 `scanParamList` 的分支级联使 CCN 升到 14–15（阈值 10），改成括号增量查表后清零。
 
+### 评审的第二轮更正：heredoc 会**多计**，不是少计
+
+技术席在批准时纠正了我写在适配器注释里的一句判断：heredoc/nowdoc 未剥离
+"只会少计"。**反了。** 实测：
+
+| 场景 | 修复前 | 修复后 |
+|---|---|---|
+| heredoc 内容是 `{ { { { {`（无真实嵌套） | `depth=6` → 假 ERROR | `depth=1` |
+| heredoc 里有 `try { x } catch (E $e) {}` | `hasTryCatch=true` → 假阳性 | `false` |
+| 真实五层嵌套 | `depth=6` | `depth=6`（仍正确检出） |
+
+`deep-nesting` 阈值是 4，所以一段 SQL 模板或内联 CSS/JS 就能让正确代码被 BLOCK。
+这是**误报**方向，代价最高。
+
+修复牵出第二个问题：基类 `extractCodeBlock` 逐字符数花括号，遇到 heredoc 里的 `{`
+就把函数体截断在 heredoc 内部——后续五层 `if` 根本没进入 `code`，
+`depth` 报 1。因此 PHP 适配器现在覆写 `extractCodeBlock`，先剥离字面量再定边界。
+
+新增 4 个测试（heredoc 花括号、nowdoc、heredoc 里的 try/catch、
+**heredoc 之后的代码仍被测量**）。最后一条是反空转：一个"剥离到文件尾"的实现
+能通过前三条，却会让方法后半段的所有规则永久失效。
+
+
 ### 同时修复的既有漂移
 
 `githooks/gate-entries/gate-0-entry.sh` 的 PHP 语言路由（#731：暂存的 `.php`
