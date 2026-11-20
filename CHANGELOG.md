@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.38.74.0] - 2026-11-20
+
+**PHP 的 Gate 4 一直"检查过了"——什么都没查。**
+
+### 怎么发现的
+
+不是读代码发现的，是拿两个文件对比出来的。同一段五层嵌套：
+
+| 文件 | 结果 |
+|---|---|
+| `Same.ts` | `✗ [ERROR] clean-code.deep-nesting` — 5 levels (maximum: 4) |
+| `Legacy.php` | `✓ No violations found` |
+
+两个都不是"跳过了"。`gate-4.sh` 的 `PRINCIPLES_FILES` 正则接受 `.php`，
+`getAdapterForFile()` 返回真的 `PhpAdapter`，检查器输出
+`Files checked: 1, Rules run: 21`。链条上每一环都显示成功。
+
+### 根因
+
+`PhpAdapter.extractFunctions()` 直接返回 `createCodeMatch()`，而它只给
+`{name, type, line, code}`。问函数**形状**的规则读的是
+`nestingDepth` / `paramCount` / `length` / `hasTryCatch` —— 四个字段一个都不存在。
+于是规则遍历每个函数、每个都跳过，最后报告"0 违规"。
+
+三条规则在 PHP 上结构性失效：`clean-code.deep-nesting`、
+`clean-code.too-many-params`、`clean-code.missing-error-handling`。
+
+这是 `csharp.ts` 注释里写明的 #446 形状：**缺字段是不可见的**，因为规则不是
+"报告测不出来"，而是"找到零个问题"。那个教训让 12 条规则在 TypeScript 上
+失效过，PHP 重犯了它。
+
+### 修复
+
+`PhpAdapter` 补上四个字段：`nestingDepth`、`paramCount`、`length`、`hasTryCatch`。
+
+**嵌套深度按字面量感知的方式测**，这一条是关键。PHP 里花括号大量出现在字符串中
+（`sprintf('{{%s}}')`、内嵌 JSON、HTML 模板），基类默认的 `advanceBraceTracker`
+会把它们全部计入 —— 一个"嵌套深度"其实来自模板串的方法会被判为深层嵌套。
+这种误报会让一条规则在一周内被关掉。因此新增 `stripPhpLiterals()`：单引号串、
+双引号串、`//` 与 `#` 行注释、`/* */` 块注释一律替换为等长空格，保持位置对齐。
+未处理 heredoc/nowdoc，那只导致**少计**，是类注释指定的可接受方向。
+
+### 验证
+
+- 新增 `src/principles/__tests__/adapter-php.test.ts`，10 个用例，**先红后绿**：
+  修复前 9 个失败（字段全是 `undefined`、规则返回 0 违规），修复后 10/10 通过
+- 重跑原始场景，`Legacy.php` 现在报
+  `✗ [ERROR] clean-code.deep-nesting: 6 levels (maximum: 4)`，与其 TypeScript 孪生一致
+- 两条**反空转**用例才是关键：同一个类里的深层方法与扁平方法必须**各自独立**测量
+  （朴素的"数整个文件的花括号"实现能过第一条断言，必挂在后两条）；
+  `'{{{{{{'` 与 `// }}}}}}` 不得抬高深度
+- `npx vitest run src/principles/` 782/782；`npx tsc --noEmit` 0 错误
+- `ccn-report --check`：本次新增函数无违规（`stripPhpLiterals` 初版 CCN 23、
+  `countParameters` 11，按 CCN 棘轮重构到阈值内）
+
+### 同时修复的既有漂移
+
+`githooks/gate-entries/gate-0-entry.sh` 的 PHP 语言路由（#731：暂存的 `.php`
+必须把 `php` 加进 `PROJECT_LANGS`，且按扩展名判定、不看 `composer.json`）
+在 canonical 里存在、在 npm 镜像里缺失。也就是说**已发布的包根本不识别 PHP 项目**，
+无论 `adapters/php.sh` 多正确。已同步。
+
 ## [0.38.73.0] - 2026-11-20
 
 **交付物：门禁 × 语言可用性矩阵，以及"函数存在"≠"门禁工作"。**
