@@ -1102,23 +1102,26 @@ const JSCPD_CONFIG_FILENAMES = ['jscpd.conf.json', '.jscpd.json'];
 /**
  * Locate a jscpd config the tool will actually honour.
  *
- * Tries every supported filename under the TARGET before falling back to the
- * working directory. Trying one filename across both locations first would let a
- * `jscpd.conf.json` in the cwd shadow a `.jscpd.json` in the project being
- * checked -- so `xp-gate check 2 <other-repo>` would judge that repo by THIS
- * repo's config.
+ * Discovery follows ONE root, chosen by whether the caller named a target:
  *
- * @param {string} [basePath]
+ *  - An explicit target means that target: its config decides. Falling back to the
+ *    working directory would let `xp-gate check 2 /other/repo` judge that repo by
+ *    THIS repo's ignore list and threshold. Measured before this rule existed:
+ *    with only this repo holding a jscpd.conf.json, a target with no config of its
+ *    own still received `--config <this repo>/jscpd.conf.json`.
+ *  - No target means the working directory, which is the tree the scan covers.
+ *
+ * Every supported filename is tried in the chosen root before giving up; trying
+ * one name across both roots first let a `jscpd.conf.json` in the cwd shadow a
+ * `.jscpd.json` in the project being checked.
+ *
+ * @param {string} [basePath] the explicit target, if the caller gave one
  * @returns {string|null}
  */
 function findJscpdConfig(basePath) {
-  const target = basePath || '.';
+  const root = basePath || process.cwd();
   for (const name of JSCPD_CONFIG_FILENAMES) {
-    const candidate = path.join(target, name);
-    if (isRegularFile(candidate)) return candidate;
-  }
-  for (const name of JSCPD_CONFIG_FILENAMES) {
-    const candidate = path.join(process.cwd(), name);
+    const candidate = path.join(root, name);
     if (isRegularFile(candidate)) return candidate;
   }
   return null;
