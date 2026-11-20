@@ -55,6 +55,38 @@ export class PhpAdapter extends BaseAdapter implements Adapter {
   }
 
   /**
+   * Cut the function body with heredoc/nowdoc awareness.
+   *
+   * The inherited implementation counts braces character by character, so a
+   * heredoc containing `{` grows its brace depth without any matching `}` in real
+   * code. Measured on a method whose heredoc held `{ { {`: the cut stopped inside
+   * the heredoc and the rest of the method -- including a five-level `if` chain --
+   * never reached the rules at all, reporting nestingDepth 1.
+   *
+   * Blanking the literals first means the brace scan only ever sees code, and the
+   * cut lands on the method's real closing brace. The returned text is the
+   * ORIGINAL slice, not the blanked one: `length` is a line count of the source as
+   * written, and `code` is what a human reads in a finding.
+   */
+  protected extractCodeBlock(startPos: number, maxFallback: number = 100): string {
+    const blanked = stripPhpLiterals(this.fileContent);
+    let depth = 0;
+    let seenBrace = false;
+    for (let i = startPos; i < blanked.length; i++) {
+      if (blanked[i] === '{') {
+        depth++;
+        seenBrace = true;
+      } else if (blanked[i] === '}') {
+        depth--;
+        if (seenBrace && depth === 0) {
+          return this.fileContent.substring(startPos, i + 1);
+        }
+      }
+    }
+    return this.fallbackCodeBlock(startPos, maxFallback);
+  }
+
+  /**
    * Add the fields the Gate 4 rules actually read.
    *
    * `createCodeMatch` supplies only {name, type, line, code}. Every rule that
@@ -121,8 +153,7 @@ export class PhpAdapter extends BaseAdapter implements Adapter {
  * The body's own braces contribute one level, so a flat method reads 1. That
  * matches how the csharp adapter measures and how the rule's threshold is tuned.
  */
-function measureNesting(body: string): number {
-  const stripped = stripPhpLiterals(body);
+function measureNesting(stripped: string): number {
   let depth = 0;
   let maxDepth = 0;
   for (const ch of stripped) {
@@ -151,8 +182,7 @@ function blankLineComment(code: string, start: number): { emit: string; last: nu
 }
 
 /** Blank one block comment, including its delimiters. */
-function blankBlockComment(code: string, start: number): { emit: string; last: number } {
-  let i = start + 2;
+function blankBlockComment(code: string, start: number): { emit: string; last: number } {  let i = start + 2;
   let emit = '  ';
   while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
     emit += ' ';
@@ -187,19 +217,65 @@ function blankQuoted(code: string, start: number): { emit: string; last: number 
   return { emit, last: i };
 }
 
+/** A heredoc/nowdoc opener: `<<<SQL`, `<<<"SQL"`, `<<<'SQL'`. */
+const HEREDOC_OPEN = /<<<[ \t]*(["']?)([A-Za-z_]\w*)\1[ \t]*\r?\n/y;
+
 /**
- * Replace string/comment contents with spaces, preserving length so brace
- * positions stay meaningful.
+ * Blank a heredoc or nowdoc block from its `<<<` opener to its closing
+ * identifier.
  *
- * Covers the literal forms that actually appear in PHP: single- and
- * double-quoted strings, line comments (`//`, `#`), and block comments.
- * Deliberately not a full lexer -- heredoc/nowdoc are not stripped, which can
- * only cause UNDER-counting, the acceptable direction per the class comment.
+ * These MUST be stripped, and the earlier assumption that leaving them alone only
+ * caused under-counting was wrong -- measured, it caused false positives:
  *
- * Split into one helper per literal form because the single-loop version measured
- * CCN 23: seven branch points sharing one index variable read as deeply nested
- * even though each branch is trivial.
+ *     function sqlTemplate() { $sql = <<<SQL  { { { { {  SQL;  ... }
+ *       -> nestingDepth 6 on a method with no nesting
+ *     function heredocTry() { $s = <<<TXT  try { x } catch (E $e) { }  TXT; ... }
+ *       -> hasTryCatch true with no try/catch in code
+ *
+ * deep-nesting's threshold is 4, so a SQL template or an inline CSS/JS block was
+ * enough to report a violation against correct code. False positives in a gate
+ * are resolved by switching the rule off, which is the expensive direction.
+ *
+ * The closing identifier must start a line (optional indentation, PHP 7.3+) and be
+ * followed by a non-identifier character, so a line whose content merely starts
+ * with the same word does not terminate the block early.
  */
+function blankHeredoc(code: string, start: number): { emit: string; last: number } | undefined {
+  HEREDOC_OPEN.lastIndex = start;
+  const opener = HEREDOC_OPEN.exec(code);
+  if (!opener) return undefined;
+
+  const terminator = opener[2];
+  let i = start + opener[0].length;
+  let emit = ' '.repeat(opener[0].length);
+
+  while (i < code.length) {
+    const lineStart = i;
+    let lineEnd = code.indexOf('\n', i);
+    if (lineEnd < 0) lineEnd = code.length;
+    const line = code.slice(lineStart, lineEnd);
+    const trimmed = line.trimStart();
+
+    if (trimmed.startsWith(terminator)) {
+      const afterWord = trimmed.charAt(terminator.length);
+      // Followed by end of line or a statement terminator -- not a longer word.
+      if (afterWord === '' || /[;,)\]}]/.test(afterWord) || /\s/.test(afterWord)) {
+        emit += ' '.repeat(line.length);
+        i = lineEnd;
+        break;
+      }
+    }
+    emit += ' '.repeat(line.length);
+    if (lineEnd < code.length) {
+      emit += '\n';
+      i = lineEnd + 1;
+    } else {
+      i = lineEnd;
+    }
+  }
+  return { emit, last: i };
+}
+
 /**
  * Recognise the literal form starting at `index`, or return undefined when the
  * character is ordinary code.
@@ -207,17 +283,53 @@ function blankQuoted(code: string, start: number): { emit: string; last: number 
  * One dispatcher rather than an `if/else if` chain inside the scan loop: the
  * chain measured CCN 13 on its own, over the Gate 3 block threshold, and the
  * forms are a lookup rather than a cascade.
+ *
+ * `#` is checked before the heredoc opener would ever see it, and `<<<` is
+ * checked before `<` could be read as an operator, so the order of these tests is
+ * load-bearing rather than stylistic.
  */
+/**
+ * Single-character literal openers. `#` and both quote forms are unambiguous, so
+ * they need no lookahead and live in a table rather than in the branch chain.
+ */
+const SINGLE_CHAR_LITERAL: Readonly<Record<string, (code: string, at: number) => { emit: string; last: number }>> = {
+  '#': blankLineComment,
+  "'": blankQuoted,
+  '"': blankQuoted,
+};
+
 function blankLiteralAt(code: string, index: number): { emit: string; last: number } | undefined {
   const ch = code[index];
-  const next = code[index + 1];
-  if (ch === '/' && next === '/') return blankLineComment(code, index);
-  if (ch === '/') return next === '*' ? blankBlockComment(code, index) : undefined;
-  if (ch === '#') return blankLineComment(code, index);
-  if (ch === "'" || ch === '"') return blankQuoted(code, index);
+
+  const single = SINGLE_CHAR_LITERAL[ch];
+  if (single) return single(code, index);
+
+  // `//` versus `/*`: same first character, so this needs lookahead.
+  if (ch === '/') {
+    if (code[index + 1] === '/') return blankLineComment(code, index);
+    return code[index + 1] === '*' ? blankBlockComment(code, index) : undefined;
+  }
+  // `<<<` opens a heredoc/nowdoc; a lone `<` is an operator.
+  if (ch === '<' && code[index + 1] === '<' && code[index + 2] === '<') {
+    return blankHeredoc(code, index);
+  }
   return undefined;
 }
 
+/**
+ * Replace string/comment/heredoc contents with spaces, preserving length so brace
+ * positions stay meaningful.
+ *
+ * Covers every literal form PHP code actually uses: single- and double-quoted
+ * strings, `//` and `#` line comments, block comments, and heredoc/nowdoc blocks.
+ * It is still not a full lexer, but every remaining omission must fail in the
+ * UNDER-counting direction -- leaving a constructor out can only make a gate
+ * quieter, never fabricate a finding.
+ *
+ * Split into one helper per literal form because the single-loop version measured
+ * CCN 23: seven branch points sharing one index variable read as deeply nested
+ * even though each branch is trivial.
+ */
 function stripPhpLiterals(code: string): string {
   let out = '';
   for (let i = 0; i < code.length; i++) {
@@ -304,10 +416,10 @@ function scanParamList(stripped: string, open: number): ParamScan {
  * nested calls, string content -- are not counted, because the scan only tallies
  * at the list's outermost level.
  */
-function countParameters(code: string): number {
-  const open = code.indexOf('(');
+function countParameters(stripped: string): number {
+  const open = stripped.indexOf('(');
   if (open < 0) return 0;
-  const scan = scanParamList(stripPhpLiterals(code), open);
+  const scan = scanParamList(stripped, open);
   if (!scan.sawContent) return 0;
   return scan.commas + 1;
 }

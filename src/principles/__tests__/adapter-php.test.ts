@@ -82,8 +82,15 @@ function extract(source: string): Extracted[] {
 describe('PhpAdapter — fields the Gate 4 rules read (AC-PHP-ADAPTER-01)', () => {
   it('is reachable from the analyzer for .php and .phtml', () => {
     (readFileSync as Mock).mockReturnValue('<?php class A {}');
-    expect(getAdapterForFile('A.php')).toBeInstanceOf(PhpAdapter);
-    expect(getAdapterForFile('A.phtml')).toBeInstanceOf(PhpAdapter);
+    const php = getAdapterForFile('A.php');
+    const phtml = getAdapterForFile('A.phtml');
+    expect(php).toBeInstanceOf(PhpAdapter);
+    expect(phtml).toBeInstanceOf(PhpAdapter);
+    // Reachability alone is what PHP already had while checking nothing; assert
+    // the factory returns a distinct, correctly-typed adapter per extension too.
+    expect((php as PhpAdapter).detectLanguage()).toBe('php');
+    expect((phtml as PhpAdapter).detectLanguage()).toBe('php');
+    expect(php).not.toBe(phtml);
   });
 
   it('reports nestingDepth for a deeply nested method', () => {
@@ -334,5 +341,86 @@ class B
 }
 `);
     expect(fn.hasTryCatch).toBe(true);
+  });
+});
+
+describe('PhpAdapter — heredoc/nowdoc content is not code (AC-PHP-ADAPTER-06)', () => {
+  // The technical reviewer corrected a claim I had written in the adapter's own
+  // doc comment: un-stripped heredoc text does not merely UNDER-count, it
+  // OVER-counts. Measured before the fix:
+  //
+  //   function heredocBraces() { $sql = <<<SQL  { { { { {  SQL; ... }
+  //     -> nestingDepth 6, on a method with no nesting at all
+  //   function heredocTry() { $s = <<<TXT  try { x } catch (E $e) { }  TXT; ... }
+  //     -> hasTryCatch true, with no try/catch in code
+  //
+  // Both are false positives, which is the direction that produces a wrong BLOCK:
+  // a SQL template or an inline CSS/JS block becomes "deep nesting", and
+  // deep-nesting has a threshold of 4.
+  it('does not count braces inside a heredoc', () => {
+    const [fn] = extract(`<?php
+class H
+{
+    public function sqlTemplate()
+    {
+        $sql = <<<SQL
+        { { { { {
+        SQL;
+        return $sql;
+    }
+}
+`);
+    expect(fn.nestingDepth).toBeLessThanOrEqual(2);
+  });
+
+  it('does not credit a try/catch that only appears inside a heredoc', () => {
+    const [fn] = extract(`<?php
+class H
+{
+    public function heredocTry()
+    {
+        $s = <<<TXT
+        try { something } catch (E $e) { }
+        TXT;
+        return $s;
+    }
+}
+`);
+    expect(fn.hasTryCatch).toBe(false);
+  });
+
+  it('does not count braces inside a nowdoc', () => {
+    const [fn] = extract(`<?php
+class H
+{
+    public function nowdoc()
+    {
+        $s = <<<'TXT'
+        { { { { {
+        TXT;
+        return $s;
+    }
+}
+`);
+    expect(fn.nestingDepth).toBeLessThanOrEqual(2);
+  });
+
+  it('still measures code after a heredoc ends', () => {
+    // Anti-vacuity: a stripper that blanks to end-of-file would pass every case
+    // above and silently disable the rules for the rest of the method.
+    const [fn] = extract(`<?php
+class H
+{
+    public function afterHeredoc($a)
+    {
+        $s = <<<TXT
+        { { {
+        TXT;
+        if ($a) { if ($a) { if ($a) { if ($a) { if ($a) { return 1; } } } } }
+        return 0;
+    }
+}
+`);
+    expect(fn.nestingDepth).toBeGreaterThan(4);
   });
 });
