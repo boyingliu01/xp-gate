@@ -747,14 +747,35 @@ if [ "${XP_GATE_DISABLE_13:-}" = "1" ]; then
   GATE_13_STATUS="SKIP"
   GATE_13_DETAIL="kill_switch"
   record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)"
-elif [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-13-compiler-strictness.sh" ]; then
+elif [ -f "$GATE_DIR/adapters/gate-13-compiler-strictness.sh" ] || [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/adapters/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-13-compiler-strictness.sh" ]; then
   echo "⚙️  Gate 13: Compiler Strictness Check..."
   GATE13_START=$(gate_start_ms)
   (
     # Each stage runs inside the subshell so its shell state cannot leak back
     # into pre-commit. Verdicts are reduced to the WORST code seen:
     # FAIL/BLOCK (1/2) always win; WARN (3) only beats PASS (0).
-    _g13_script="$GATE_DIR/gate-13-compiler-strictness.sh"
+    # adapters/ FIRST. The file exists in two places and they are NOT the same
+    # program: githooks/adapters/gate-13-compiler-strictness.sh is the maintained
+    # one (it carries the gate13_run_declared_checks arm), while the copy at
+    # githooks/ root is an older snapshot that lacks it. $GATE_DIR resolves to the
+    # directory holding adapter-common.sh -- githooks/ for a project install,
+    # ~/.config/xp-gate/adapters for a global one -- so the root copy won for
+    # project installs only.
+    #
+    # Measured 2026-11-20 on this repository, committing a Go fixture:
+    #   gate-13-entry.sh: line 796: gate13_run_declared_checks: command not found
+    #   Gate 13 (PASS) completed in 0s
+    # Every adapter-declared compile-time check (Go, Rust, Dart, Kotlin, ...) had
+    # been silently absent while the gate reported PASS -- locally only, because CI
+    # and global installs resolve the adapters/ copy. The local run was therefore
+    # validating a different program from the one users get.
+    #
+    # After the fix the same commit prints:
+    #   -> declared compile-time checker: go vet ./...
+    #   OK Declared compile-time check passed (go vet ./...)
+    _g13_script="$GATE_DIR/adapters/gate-13-compiler-strictness.sh"
+    [ -f "$_g13_script" ] || _g13_script="$GATE_DIR/gate-13-compiler-strictness.sh"
+    [ -f "$_g13_script" ] || _g13_script="$(git rev-parse --show-toplevel)/githooks/adapters/gate-13-compiler-strictness.sh"
     [ -f "$_g13_script" ] || _g13_script="$(git rev-parse --show-toplevel)/githooks/gate-13-compiler-strictness.sh"
     # shellcheck source=/dev/null
     . "$_g13_script"

@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.38.66.0] - 2026-11-20
+
+**Gate 13 在项目内安装下加载了一份过期的副本，5 个检查函数不存在，而它报 PASS。**
+
+实测（本仓库，提交一个 Go 夹具）：
+
+```
+gate-13-entry.sh: line 796: gate13_run_declared_checks: command not found
+Gate 13 (PASS) completed in 0s
+```
+
+### 根因：同一个文件存在两份，且不是同一个程序
+
+- `githooks/gate-13-compiler-strictness.sh` —— 1458 行，最后提交 2026-11-18
+- `githooks/adapters/gate-13-compiler-strictness.sh` —— 1770 行，最后提交 2026-11-20
+
+只有 adapters 版定义了 `gate13_run_declared_checks()`——**适配器声明编译期检查**的那条臂
+（`go vet`、`cargo check`、`dart analyze` 等）。
+
+`$GATE_DIR` 解析到"放 `adapter-common.sh` 的目录"：项目内安装是 `githooks/`，
+全局安装是 `~/.config/xp-gate/adapters`。于是**只有项目内安装**命中了根目录那份旧副本。
+
+### 后果：本地验证的不是用户拿到的那个程序
+
+CI 和全局安装走 adapters 版（正常），**本地走根副本（旧版）**。
+这是最坏的一种分裂：本地通过不代表线上通过，而且方向是"本地更松"。
+
+Go、Rust、Dart、Kotlin 的编译期检查在本地被静默跳过，门禁却打 PASS。
+
+### 修复
+
+1. entry 的解析顺序改为 **adapters/ 优先**（四段回退，两个路径根都覆盖）
+2. **删除根目录陈旧副本**——adapters 版是完整超集（函数集对比：多 6 个，少 0 个）
+3. 原 `gate-13-compiler-strictness.test.bats` 测的是根副本，已指向 adapters 版
+
+同一次提交改后：
+
+```
+-> declared compile-time checker: go vet ./...
+OK Declared compile-time check passed (go vet ./...)
+```
+
+`go vet` **第一次真正执行**。
+
+### 测试
+
+`gate-13-declared-check-reachable.test.bats`（4 条）：
+
+- adapters 版定义了这条臂
+- entry 的**第一处**解析指向 adapters/（用实际赋值行，不用注释）
+- 端到端：按真实解析顺序 source 后能 `type gate13_run_declared_checks`
+- 只要根副本还存在，它就不能是 adapters 版的真子集
+
+最后一条正是这次缺陷的形状：**一个落后的重复文件，使错的那份成为可达的**。
+根副本删除后该条 skip 并说明原因。
+
+现有 33 条 Gate 13 测试全部仍通过。
+
 ## [0.38.65.0] - 2026-11-20
 
 **Gate 12c 的扫描脚本占了一次提交五分之一的耗时，而它只是在做逐行字符串匹配。**

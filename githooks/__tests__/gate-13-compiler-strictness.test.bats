@@ -31,7 +31,7 @@
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  GATE="$REPO_ROOT/githooks/gate-13-compiler-strictness.sh"
+  GATE="$REPO_ROOT/githooks/adapters/gate-13-compiler-strictness.sh"
   TEST_DIR="$(mktemp -d)"
   export TEST_DIR
 
