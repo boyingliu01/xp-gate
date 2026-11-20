@@ -82,8 +82,19 @@ describe('#853 Gate 2 must be able to fail', () => {
 
   it('falls back to the default threshold when the config is malformed', () => {
     // An unparseable config must not crash the gate or disable the threshold.
+    // Measured on jscpd 5.4.3: passing a corrupt --config makes jscpd exit 1 with
+    // "key must be a string at line 1 column 3" -- which the gate would report as
+    // "duplicate code found". A broken config must not read as a finding.
     fs.writeFileSync(path.join(tmpDir, 'jscpd.conf.json'), '{ not valid json');
     const args = buildJscpdArgs({ targetPath: tmpDir });
     expect(args[args.indexOf('--threshold') + 1]).toBe('15');
+    expect(args).not.toContain('--config');
+  });
+
+  it('does not pass a --config jscpd would reject', () => {
+    // Same rule, stated as the invariant: whatever --config we pass must parse.
+    fs.writeFileSync(path.join(tmpDir, 'jscpd.conf.json'), '{ not valid json');
+    const args = buildJscpdArgs({ targetPath: tmpDir });
+    expect(args).not.toContain('--config');
   });
 });

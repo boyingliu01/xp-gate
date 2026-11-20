@@ -86,6 +86,17 @@ describe('#853 jscpd entry resolution', () => {
     expect(entry).toBe(path.join(pkg, 'dist', 'start.js'));
   });
 
+  it('finds jscpd in a POSIX global prefix (<prefix>/lib/node_modules)', () => {
+    // `path.dirname(process.execPath)` is `<prefix>/bin` on Linux and macOS, and a
+    // global jscpd there lives in `<prefix>/lib/node_modules` -- NOT in
+    // `<prefix>/bin/node_modules`. #853's own scenario was Windows, but a fix that
+    // only works there would leave the same bug on every Unix install.
+    const prefix = path.join(tmpDir, 'prefix');
+    const pkg = plantJscpd(path.join(prefix, 'lib', 'node_modules', 'jscpd'), { jscpd: './run-jscpd.js' });
+    const entry = findJscpdEntry({ searchRoots: [prefix] });
+    expect(entry).toBe(path.join(pkg, 'run-jscpd.js'));
+  });
+
   it('returns null when jscpd is genuinely absent', () => {
     // "not installed" must stay distinguishable from "installed but unfindable":
     // the first is a SKIP, the second was the bug.
