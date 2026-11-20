@@ -15,7 +15,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { findJscpdEntry } = require('../gate-runner');
+const { findJscpdEntry, buildGlobalPrefixes } = require('../gate-runner');
 
 let tmpDir;
 
@@ -101,6 +101,32 @@ describe('#853 jscpd entry resolution', () => {
     // "not installed" must stay distinguishable from "installed but unfindable":
     // the first is a SKIP, the second was the bug.
     expect(findJscpdEntry({ searchRoots: [tmpDir] })).toBeNull();
+  });
+
+  it('never yields a relative prefix when the env vars are unset', () => {
+    // path.join('', 'npm') is the RELATIVE path 'npm'. Left in the list it would be
+    // resolved against the current directory, so an unset APPDATA/HOME would point
+    // the search at ./npm -- a directory that has nothing to do with any global
+    // install, and one an attacker-ish layout could populate.
+    const prefixes = buildGlobalPrefixes({ binDir: path.join(tmpDir, 'nodejs') });
+    expect(prefixes.length).toBeGreaterThan(0);
+    for (const p of prefixes) {
+      expect(path.isAbsolute(p)).toBe(true);
+    }
+    expect(prefixes).not.toContain('npm');
+    expect(prefixes).not.toContain('.npm-global');
+  });
+
+  it('includes the APPDATA and home prefixes when those variables exist', () => {
+    const appData = path.join(tmpDir, 'appdata');
+    const home = path.join(tmpDir, 'home');
+    const prefixes = buildGlobalPrefixes({
+      binDir: path.join(tmpDir, 'nodejs'),
+      appData,
+      home,
+    });
+    expect(prefixes).toContain(path.join(appData, 'npm'));
+    expect(prefixes).toContain(path.join(home, '.npm-global'));
   });
 
   it('ignores a half-written install with no resolvable entry file', () => {
