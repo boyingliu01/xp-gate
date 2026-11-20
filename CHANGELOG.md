@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.38.72.0] - 2026-11-20
+
+**Gate 5 记录了一个事实，写进一个没人读的变量。**
+
+语言适配器可以声明"我的覆盖率运行已经包含测试"，此时 Gate 5 推迟单独跑测试。
+这条分支做了两件事：
+
+```bash
+echo "ℹ️  ... deferring test execution to a single pass."
+TESTS_DEFERRED=true      # ← 没有任何读者
+```
+
+实测（2026-11-20）：
+
+```
+$ grep -rn TESTS_DEFERRED --include='*.sh' --include='*.ts' --include='*.cjs' .
+githooks/gate-entries/gate-5-entry.sh:980:          TESTS_DEFERRED=true
+src/npm-package/hooks/gate-entries/gate-5-entry.sh:980:  TESTS_DEFERRED=true
+```
+
+**两处赋值，零处读取**——不在 pre-commit、不在 driver、不在 `githooks/lib/`、
+不在任何其他门禁体里。
+
+后果不是崩溃，这正是它活下来的原因：
+
+- 控制台说"推迟到单次运行"
+- 审计日志对这个语言的测试**为什么没跑**一个字都没有
+- 同一个提交里横向比较两个语言的人，**分不清"推迟"和"跑过"**
+
+这正是 AGENTS.md 里反复写的那条：**"没检查"绝不能和"通过"长得一样**。
+
+变量上方原有的注释已经诊断出这一点，并写明"删掉是安全的，属于独立提交"。
+这次就是那个提交。
+
+### 处理方式
+
+直接删会**丢掉这个事实**，所以事实搬到 `GATE_5_DETAIL`——那个字段已经承载了
+另一种"测试为什么没跑"的答案（委派给 CI），并且通过 `record_gate_audit` 进日志。
+
+**刻意不追加到 `DELEGATED_LANGS`**：那个变量在下游被报告成
+"tests delegated to **CI**"，而覆盖率推迟不是 CI 委派，复用会把一种情况
+错误地标成另一种。
+
+### 测试
+
+`gate-5-deferral-recorded.test.bats`（5 条）：
+
+1. 源码树里不再有 `TESTS_DEFERRED=` 赋值
+2. 推迟原因出现在 `GATE_5_DETAIL`
+3. `GATE_5_DETAIL` 确实进入 `record_gate_audit` 调用
+4. **按行号**定位该分支，确认它写 DETAIL 且**不碰** `DELEGATED_LANGS`
+5. 门禁体语法正确、分支存在
+
+第 4 条最初用 awk 范围匹配 `else`，结果匹配到分支体内的文本、量到空集，
+自己先红了一次。改成按行号取，并断言两个端点都存在。
+
+**Gate 5 全部 70 条测试通过**（原有 65 + 新增 5）。
+
 ## [0.38.71.0] - 2026-11-20
 
 **给"一个门禁两份拷贝"加通用检查——这是上一轮五个缺陷的共同形状。**
