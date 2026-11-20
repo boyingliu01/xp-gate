@@ -131,6 +131,7 @@ const MODULE_FILES = Object.freeze([
   'lib/coverage-total.sh',
   'lib/diff-coverage.sh',
   'lib/docs-only.sh',
+  'lib/gate-12-blob-scan.awk',
   'lib/gate-5c-alignment.sh',
   'lib/java-test-selection.sh',
   'lib/jscpd-run.sh',
