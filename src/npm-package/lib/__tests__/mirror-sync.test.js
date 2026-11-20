@@ -99,6 +99,21 @@ function trackAll(root) {
   execFileSync('git', ['add', '-A', '-f'], { cwd: root });
 }
 
+/**
+ * Stage the canonical tree and `.gitignore`, leaving the mirror untracked.
+ *
+ * `trackAll` cannot be used for the generated-mirror cases: its `-f` overrides
+ * `.gitignore`, so `mirror/` gets staged and the "the mirror is untracked" premise
+ * disappears. Verified in a scratch repo: `git add -A -f` lists `mirror/a.sh` in
+ * `git ls-files` even with `mirror/` ignored.
+ *
+ * @param {string} root
+ * @param {string} canonical directory to track
+ */
+function trackCanonicalOnly(root, canonical) {
+  execFileSync('git', ['add', '--', '.gitignore', canonical], { cwd: root });
+}
+
 describe('diffTrees — AC-713-01 untracked artifacts are not drift', () => {
   it('ignores an untracked build artifact in the canonical tree', () => {
     write(TMP_REPO, 'canonical/a.sh', 'echo a\n');
@@ -150,22 +165,139 @@ describe('diffTrees — AC-713-01 untracked artifacts are not drift', () => {
 
 describe('diffTrees — per-pair excludes', () => {
   it('honours a pair-specific exclude, matching the guard script it mirrors', () => {
-    // check-hook-mirror.sh:98 compares src/principles with `-x __tests__`.
-    // A sync that copied tests into the package would ship test code and make
-    // the guard fail on the very next run.
+    // The mechanism under test is the per-pair `exclude` option. It used to be
+    // demonstrated with `__tests__`, but that is now a GLOBAL rule (MIRROR_EXCLUDES)
+    // because the generator never copies test code for any pair -- keeping the old
+    // example would assert that an undeclared `__tests__` still reports drift,
+    // which is the bug this file now pins. `fixtures` stands in for a directory
+    // only one pair wants to skip.
     write(TMP_REPO, 'canonical/lib.ts', 'export const a = 1;\n');
-    write(TMP_REPO, 'canonical/__tests__/lib.test.ts', 'test\n');
+    write(TMP_REPO, 'canonical/fixtures/data.json', '{}\n');
     write(TMP_REPO, 'mirror/lib.ts', 'export const a = 1;\n');
     trackAll(TMP_REPO);
 
     const withoutExclude = diffTrees(TMP_REPO, 'canonical', 'mirror');
     expect(withoutExclude.inSync).toBe(false);
 
-    const withExclude = diffTrees(TMP_REPO, 'canonical', 'mirror', { exclude: ['__tests__'] });
+    const withExclude = diffTrees(TMP_REPO, 'canonical', 'mirror', { exclude: ['fixtures'] });
     expect(withExclude.inSync).toBe(true);
     expect(withExclude.missing).toEqual([]);
   });
+
+  it('does not let a pair-specific exclude re-enable the global ones', () => {
+    // The lists compose. `exclude: ['fixtures']` must not silently drop
+    // `__tests__` back into the comparison, or every caller that names one
+    // directory reintroduces the drift this section exists to prevent.
+    write(TMP_REPO, 'canonical/lib.ts', 'export const a = 1;\n');
+    write(TMP_REPO, 'canonical/__tests__/lib.test.ts', 'test\n');
+    write(TMP_REPO, 'mirror/lib.ts', 'export const a = 1;\n');
+    trackAll(TMP_REPO);
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror', { exclude: ['fixtures'] });
+    expect(diff.inSync).toBe(true);
+  });
 });
+
+describe('diffTrees — P1-E a generated mirror is untracked, not missing', () => {
+  it('does not report drift when the mirror tree is gitignored and byte-identical', () => {
+    // P1-E step 2 took four mirror trees out of version control: prepack
+    // regenerates them from canonical, so tracking them IS the duplication the
+    // decision set out to remove.
+    //
+    // Measured after that landed: `xp-gate sync-mirrors` reported DRIFT for
+    // adapters, hooks/lib, build-integrity AND skills -- the four trees the
+    // generator had just written correctly. Both sides were compared on their
+    // tracked file set, and a gitignored tree has none, so every canonical file
+    // read as "missing from the mirror".
+    write(TMP_REPO, 'canonical/a.sh', 'echo a\n');
+    write(TMP_REPO, 'canonical/sub/b.sh', 'echo b\n');
+    write(TMP_REPO, 'mirror/a.sh', 'echo a\n');
+    write(TMP_REPO, 'mirror/sub/b.sh', 'echo b\n');
+    write(TMP_REPO, '.gitignore', 'mirror/\n');
+    trackCanonicalOnly(TMP_REPO, 'canonical');
+
+    // Premise asserted before the verdict: if the fixture stages the mirror, the
+    // case passes vacuously and stops covering what it names.
+    const tracked = execFileSync('git', ['ls-files', '--', 'mirror'], {
+      cwd: TMP_REPO,
+      encoding: 'utf8',
+    }).trim();
+    expect(tracked).toBe('');
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror');
+    expect(diff.missing).toEqual([]);
+    expect(diff.differing).toEqual([]);
+    expect(diff.extra).toEqual([]);
+    expect(diff.inSync).toBe(true);
+  });
+
+  it('still reports a byte difference inside an untracked mirror tree', () => {
+    // Control. Relaxing to "the mirror is untracked, stop looking" would make the
+    // case above pass and destroy the check.
+    write(TMP_REPO, 'canonical/a.sh', 'echo a\n');
+    write(TMP_REPO, 'mirror/a.sh', 'echo DRIFTED\n');
+    write(TMP_REPO, '.gitignore', 'mirror/\n');
+    trackCanonicalOnly(TMP_REPO, 'canonical');
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror');
+    expect(diff.inSync).toBe(false);
+    expect(diff.differing).toContain('a.sh');
+  });
+
+  it('still reports a genuinely absent file inside an untracked mirror tree', () => {
+    write(TMP_REPO, 'canonical/a.sh', 'echo a\n');
+    write(TMP_REPO, 'canonical/b.sh', 'echo b\n');
+    write(TMP_REPO, 'mirror/a.sh', 'echo a\n');
+    write(TMP_REPO, '.gitignore', 'mirror/\n');
+    trackCanonicalOnly(TMP_REPO, 'canonical');
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror');
+    expect(diff.inSync).toBe(false);
+    expect(diff.missing).toContain('b.sh');
+  });
+
+  it('reports an orphan in an untracked mirror tree, not just missing files', () => {
+    // `extra` is the verdict a disk-walk fix is most likely to drop: on the tracked
+    // path it came from the mirror's own set, which is now empty.
+    write(TMP_REPO, 'canonical/a.sh', 'echo a\n');
+    write(TMP_REPO, 'mirror/a.sh', 'echo a\n');
+    write(TMP_REPO, 'mirror/gone.sh', 'echo orphan\n');
+    write(TMP_REPO, '.gitignore', 'mirror/\n');
+    trackCanonicalOnly(TMP_REPO, 'canonical');
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror');
+    expect(diff.extra).toContain('gone.sh');
+    expect(diff.inSync).toBe(false);
+  });
+
+  it('keeps an untracked artifact in an untracked mirror out of the verdict', () => {
+    // Both relaxations at once, which is the real repo's shape: the mirror is
+    // gitignored AND holds build noise. The disk fallback must not start reporting
+    // cache files as orphans -- that is the #587/#588 false failure reintroduced.
+    write(TMP_REPO, 'canonical/a.sh', 'echo a\n');
+    write(TMP_REPO, 'mirror/a.sh', 'echo a\n');
+    write(TMP_REPO, 'mirror/__pycache__/a.pyc', 'binary');
+    write(TMP_REPO, '.gitignore', 'mirror/\n');
+    trackCanonicalOnly(TMP_REPO, 'canonical');
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror');
+    expect(diff.extra).toEqual([]);
+    expect(diff.inSync).toBe(true);
+  });
+
+  it('still respects a pair-specific exclude in an untracked mirror tree', () => {
+    write(TMP_REPO, 'canonical/lib.ts', 'export const a = 1;\n');
+    write(TMP_REPO, 'mirror/lib.ts', 'export const a = 1;\n');
+    write(TMP_REPO, 'mirror/__tests__/lib.test.ts', 'test\n');
+    write(TMP_REPO, '.gitignore', 'mirror/\n');
+    trackCanonicalOnly(TMP_REPO, 'canonical');
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror', { exclude: ['__tests__'] });
+    expect(diff.inSync).toBe(true);
+    expect(diff.extra).toEqual([]);
+  });
+});
+
 
 describe('collectMirrorPairs — AC-713-02 pair discovery', () => {
   it('discovers a pair only when both sides exist', () => {

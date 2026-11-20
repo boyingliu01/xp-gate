@@ -39,6 +39,22 @@ const { execFileSync } = require('child_process');
 const SYNC_EXCLUDES = Object.freeze(['__pycache__', 'node_modules', '.git', '.DS_Store']);
 
 /**
+ * Directory names never mirrored into the package, for every pair.
+ *
+ * `__tests__` belongs here rather than in a per-pair `exclude`, because the
+ * decision is global and already made once: `sync-package-content.js` puts
+ * `__tests__` in its `SKIP_DIRS`, so no mirror ever receives test code.
+ *
+ * Declaring it per-pair made the same rule exist twice, and the copies drifted.
+ * Measured: `skills/sprint-flow/__tests__/` is tracked source, the generator
+ * correctly does not copy it, and `sync-mirrors` reported the whole pair as DRIFT
+ * on any checkout that has that directory. `src/principles` declared the exclude
+ * and stayed green; `skills` and `src/build-integrity` did not declare it and went
+ * red. One rule, one place.
+ */
+const MIRROR_EXCLUDES = Object.freeze([...SYNC_EXCLUDES, '__tests__']);
+
+/**
  * The canonical -> mirror pairs this repository maintains for whole trees.
  *
  * Declared rather than discovered recursively: a glob that silently matches
@@ -53,14 +69,13 @@ const SYNC_EXCLUDES = Object.freeze(['__pycache__', 'node_modules', '.git', '.DS
  * treating "canonical has it" as "the mirror should have it" where the project
  * never said so.
  *
- * Per-pair `exclude` mirrors the guard scripts exactly. `src/principles` already
- * excludes `__tests__` (check-hook-mirror.sh:98); a sync that copied them would
- * ship test code in the package and make the guard fail immediately afterwards.
+ * Per-pair `exclude` stays available for a rule that genuinely applies to one
+ * pair only. `__tests__` is not one of those -- see `MIRROR_EXCLUDES`.
  */
 const KNOWN_PAIRS = Object.freeze([
   { canonical: 'githooks/adapters', mirror: 'src/npm-package/adapters' },
   { canonical: 'githooks/lib', mirror: 'src/npm-package/hooks/lib' },
-  { canonical: 'src/principles', mirror: 'src/npm-package/principles', exclude: ['__tests__'] },
+  { canonical: 'src/principles', mirror: 'src/npm-package/principles' },
   { canonical: 'src/build-integrity', mirror: 'src/npm-package/build-integrity' },
   { canonical: 'skills', mirror: 'src/npm-package/skills' },
 ]);
@@ -83,7 +98,7 @@ function listFiles(root, dir) {
       return;
     }
     for (const entry of entries) {
-      if (SYNC_EXCLUDES.includes(entry.name)) continue;
+      if (MIRROR_EXCLUDES.includes(entry.name)) continue;
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
         walk(path.join(current, entry.name), rel);
@@ -97,6 +112,36 @@ function listFiles(root, dir) {
 }
 
 /**
+ * Is `dir` excluded from version control by an ignore rule?
+ *
+ * `--no-index` is required to get a straight answer. Without it, `git check-ignore`
+ * reports nothing for paths that ARE tracked, so a tree that is both tracked and
+ * matched by an ignore rule answers "not ignored" -- the opposite of what the rule
+ * says. Verified in a scratch repo: with the file staged, plain `check-ignore`
+ * exits 1 while `--no-index` exits 0.
+ *
+ * A path that is not ignored exits 1, and so does a path outside any repository.
+ * Both mean "cannot claim this tree is generated", which is the safe answer: the
+ * caller then keeps the pre-existing tracked comparison.
+ *
+ * @param {string} root repository root
+ * @param {string} dir directory relative to root
+ * @returns {boolean}
+ */
+function isIgnored(root, dir) {
+  const normalised = dir.replace(/\\/g, '/');
+  try {
+    execFileSync('git', ['check-ignore', '--no-index', '-q', '--', normalised], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * List the files git tracks under `dir` that also exist on disk.
  *
  * The disk check matters: `git ls-files` reports the index, so a file deleted
@@ -106,6 +151,16 @@ function listFiles(root, dir) {
  * When `dir` is not inside a git repository (or git is unavailable), fall back to
  * a plain walk — the caller is then responsible for the artifact caveat, but a
  * check that crashes outside git is worse than one that reports what it sees.
+ *
+ * P1-E: when `dir` is IGNORED, an empty `git ls-files` result means "nobody tracks
+ * this tree", not "this tree is empty". The mirror trees are generated at prepack
+ * and gitignored on purpose, so the tracked question has no answer for them, and
+ * asking it reports every canonical file as missing from its mirror. Measured on
+ * the real repo after P1-E landed: DRIFT for adapters, hooks/lib, build-integrity
+ * and skills -- the four trees the generator had just written correctly.
+ *
+ * The fallback is gated on the ignore RULE, not on an empty result, so a mirror
+ * tree someone genuinely emptied still reports its files as missing.
  *
  * @param {string} root repository root
  * @param {string} dir directory relative to root
@@ -126,13 +181,23 @@ function listTrackedFiles(root, dir) {
       .map((p) => p.replace(/\\/g, '/'))
       .filter((p) => p.startsWith(`${normalised}/`))
       .map((p) => p.slice(normalised.length + 1))
-      .filter((p) => !p.split('/').some((seg) => SYNC_EXCLUDES.includes(seg)));
+      .filter((p) => !p.split('/').some((seg) => MIRROR_EXCLUDES.includes(seg)));
   } catch {
     return listFiles(root, dir);
   }
 
   // Keep only what is actually on disk; a tracked-but-deleted file must read as
   // "missing from this side", which is what the caller then repairs.
+  // P1-E: an IGNORED tree has no tracked files by design, so "git tracks nothing
+  // here" must not be read as "there are no files here". The walk returns the same
+  // set the generator enumerates, and SYNC_EXCLUDES still filters it, so cache
+  // directories do not resurface as orphans (the #587/#588 false failure).
+  if (tracked.length === 0 && isIgnored(root, dir)) {
+    return listFiles(root, dir).filter(
+      (p) => !p.split('/').some((seg) => MIRROR_EXCLUDES.includes(seg))
+    );
+  }
+
   return tracked
     .filter((p) => fs.existsSync(path.join(root, dir, p)))
     .sort();
@@ -142,7 +207,10 @@ function listTrackedFiles(root, dir) {
  * Compare a canonical tree against its mirror.
  *
  * Both sides are compared on the tracked file set so an untracked artifact in
- * either tree cannot be mistaken for drift.
+ * either tree cannot be mistaken for drift. A tree that is gitignored entirely
+ * (a generated mirror) is compared on its disk contents instead -- see
+ * `listTrackedFiles` for why. The choice is per tree, so a pair with a tracked
+ * canonical tree and a generated mirror behaves correctly on both sides.
  *
  * @param {string} root repository root
  * @param {string} canonical canonical dir (relative)
@@ -151,7 +219,9 @@ function listTrackedFiles(root, dir) {
  * @returns {{inSync: boolean, missing: string[], differing: string[], extra: string[]}}
  */
 function diffTrees(root, canonical, mirror, options = {}) {
-  const exclude = options.exclude || [];
+  // The per-pair list ADDS to the global rule, it does not replace it: a caller
+  // passing `exclude: ['dist']` must not silently re-enable `__tests__`.
+  const exclude = [...MIRROR_EXCLUDES, ...(options.exclude || [])];
   const keep = (rel) => !rel.split('/').some((seg) => exclude.includes(seg));
   const canonicalFiles = listTrackedFiles(root, canonical).filter(keep);
   const mirrorFiles = listTrackedFiles(root, mirror).filter(keep);
