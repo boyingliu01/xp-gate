@@ -1802,3 +1802,96 @@ fixture 里 `.xp-gate/audit.jsonl` 不生成。原因是审计 CLI 解析到
 
 这是**有意的 fire-and-forget**：审计绝不能阻断提交。记录在此，
 以免下次被当成新缺陷重新"修复"一遍。
+
+## 十四、第十九轮：门禁 × 语言可用性矩阵，以及"函数存在"≠"门禁工作"
+
+### 14.1 两类证据必须分开
+
+这一轮把两件事拆开计数，因为它们证明的东西完全不同：
+
+| 证据类型 | 证明什么 | 证明不了什么 |
+|---|---|---|
+| **声明矩阵**：适配器里有 `run_lint()` 等函数 | 这个语言**声称**支持该能力 | 这个函数真的被调用、真的能用 |
+| **端到端轨迹**：真实提交里出现判定 | 门禁**实际**产生了 PASS/BLOCK | 覆盖了全部语言 |
+
+本仓库历史上一半的缺陷恰好落在两者之间——函数在、门禁报 PASS、函数从未被调用
+（Gate 13 的 `gate13_run_declared_checks: command not found` 就是标本）。
+
+所以下面两张表**不合并**。
+
+### 14.2 声明矩阵（由适配器源码提取，非人工填写）
+
+生成方式（可复现）：
+
+```bash
+for a in cpp csharp dart flutter go iac java kotlin objectivec php powershell python shell swift typescript; do
+  f="githooks/adapters/$a.sh"
+  for c in run_static_analysis run_lint run_tests run_coverage coverage_runs_tests run_mutation; do
+    grep -qE "^${c}\(\)" "$f" && echo "✅" || echo "—"
+  done
+done
+```
+
+| 语言 | static_analysis | lint | tests | coverage | coverage_runs_tests |
+|---|---|---|---|---|---|
+| cpp | ✅ | ✅ | ✅ | ✅ | — |
+| csharp | ✅ | ✅ | ✅ | ✅ | ✅ |
+| dart | ✅ | ✅ | ✅ | ✅ | ✅ |
+| flutter | ✅ | ✅ | ✅ | ✅ | — |
+| go | ✅ | ✅ | ✅ | ✅ | ✅ |
+| iac | ✅ | ✅ | ✅ | ✅ | — |
+| java | ✅ | ✅ | ✅ | ✅ | ✅ |
+| kotlin | ✅ | ✅ | ✅ | ✅ | ✅ |
+| objectivec | ✅ | ✅ | ✅ | ✅ | — |
+| php | ✅ | ✅ | ✅ | ✅ | ✅ |
+| powershell | ✅ | ✅ | ✅ | ✅ | — |
+| python | ✅ | ✅ | ✅ | ✅ | — |
+| shell | ✅ | ✅ | ✅ | ✅ | — |
+| swift | ✅ | ✅ | ✅ | ✅ | ✅ |
+| typescript | ✅ | ✅ | ✅ | ✅ | — |
+
+`coverage_runs_tests` 为 ✅ 的 8 个语言，其测试由覆盖率步骤一并执行——
+这正是本轮 Gate 5 `TESTS_DEFERRED` 缺陷所在的分支。**该分支对一半的语言生效**，
+而在此之前它记录的东西没有任何人读。
+
+### 14.3 端到端轨迹（本轮实测，可复现）
+
+探测方式：新建 `git init -b probelang` 的探针仓库，`core.hooksPath` 指向本仓库，
+提交真实文件，读链条输出。用 `probelang` 而非 `main` 是因为
+`XP_GATE_ONLY_GATE` 在受保护分支被拒绝。
+
+| 步骤 | 提交内容 | 门禁判定 | 结论 |
+|---|---|---|---|
+| 1 | `main.go` + 语法错误的 `app.py` | **Gate 1 BLOCK**：`RUFF ERRORS detected` | python 适配器真实执行 |
+| 2 | 修好 `app.py` | Gate 1 **PASS**：ruff / ruff format / mypy / golangci-lint 四条独立 PASS | python + go 同时真实执行 |
+| 3 | 加 `test_app.py` | **Gate 5 BLOCK**：`No tests were collected — nothing actually ran` | 空测试集**不会**记成通过 |
+| 4 | 加无测试的 `main.go` | **Gate 5 BLOCK**：`Go tests FAILED` | go 的测试缺失也被抓到 |
+| 5 | 移除 `main.go` | **Gate 6 BLOCK**：`ARCHITECTURE CONFIG MISSING` | 缺配置 fail-closed，不静默放行 |
+
+**这五步全部是真实提交，不是单元测试的模拟。** 每一步被拦下都是正确行为：
+没有一步是"门禁想拦但理由不明"，也没有一步是"该拦却放行"。
+
+### 14.4 仍然未覆盖的部分（诚实记录）
+
+- **其余 13 个语言没有端到端轨迹。** 上表只实证了 python + go 两个。
+  java/kotlin/dart/flutter/csharp/swift/objectivec/cpp/php/powershell/shell/iac/typescript
+  的"声明存在"已核实（`source` 后 `type run_lint` 等函数可解析），但**没有**用探针提交
+  证明它们产生真实判定。typescript 尤其值得注意：它的 Gate 9 会先拦，需要单独处理。
+- **本地环境缺 rustc / swift / swiftlint / phpstan / composer**，这些工具缺失时门禁
+  走 SKIP 路径。SKIP 带原因是正确的，但它证明的是"能正确报告未检查"，
+  **不**证明"能检出问题"。
+- 声明矩阵是**静态提取**，反映的是当前文件内容；若某适配器的 `run_lint()` 内部
+  只是 `return 0`，矩阵仍显示 ✅。
+
+  **已排除**（2026-11-20 逐个读函数体）：15 个 `run_lint()` 中没有空壳。
+  其中 7 个只有 3 行且形如 `run_static_analysis`（带参数或不带）：
+  cpp / csharp / java / kotlin / objectivec / iac / powershell。这些语言没有
+  独立于静态分析的 linter，委派是对的（iac 与 powershell 都带了说明注释）。
+  剩余 8 个（dart / flutter / go / php / python / shell / swift / typescript）
+  函数体都长于 6 行且调用各自的真实工具。
+
+  **关于重复分析**：AGENTS.md 记录过"某些适配器把 lint 定义成静态分析的调用，
+  于是同时跑两者的门禁做两遍同样的工作，约占某门禁 30% 运行时间"。
+  2026-11-20 核实：**当前代码里已不存在**。Gate 1 直接调用
+  `run_static_analysis`（gate-1-entry.sh:711/767/855），从不调用 `run_lint`；
+  Gate 4（principles）两个都不调用。那 7 个委派适配器因此不会造成重复执行。

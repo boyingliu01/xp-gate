@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.38.73.0] - 2026-11-20
+
+**交付物：门禁 × 语言可用性矩阵，以及"函数存在"≠"门禁工作"。**
+
+两张表**不合并在**一起，因为它们证明的东西不同：
+
+- **声明矩阵**（适配器源码提取）：这个语言**声称**支持什么
+- **端到端轨迹**（真实提交）：门禁**实际**产生过什么判定
+
+本仓库一半的缺陷正好落在两者之间——函数在、门禁报 PASS、函数从未被调用。
+Gate 13 的 `gate13_run_declared_checks: command not found` 就是标本。
+
+### 实测的端到端轨迹（不是模拟）
+
+探针仓库 + `core.hooksPath` 指向本仓库，五次真实提交：
+
+| 步骤 | 内容 | 判定 |
+|---|---|---|
+| 1 | 语法错误的 `app.py` | **Gate 1 BLOCK**：RUFF ERRORS detected |
+| 2 | 修好 | Gate 1 PASS：ruff / ruff format / mypy / golangci-lint |
+| 3 | 加 `test_app.py` | **Gate 5 BLOCK**：No tests were collected |
+| 4 | 加无测试的 `main.go` | **Gate 5 BLOCK**：Go tests FAILED |
+| 5 | 移除 `main.go` | **Gate 6 BLOCK**：ARCHITECTURE CONFIG MISSING |
+
+五步全部被正确拦下，没有一步是"想拦但理由不明"，也没有"该拦却放行"。
+
+### 排除的一个疑虑
+
+矩阵里 7 个语言的 `run_lint()` 只有 3 行（`run_static_analysis`）。
+逐个读函数体确认**不是空壳**：这些语言没有独立于静态分析的 linter。
+并核实 AGENTS.md 记录的"重复分析约 30% 开销"**在当前代码里已不存在**——
+Gate 1 直接调 `run_static_analysis`，从不调 `run_lint`；Gate 4 两个都不调。
+
+### 诚实记录的未覆盖部分
+
+13 个语言**没有**端到端轨迹；本地缺 rustc/swift/swiftlint/phpstan/composer，
+这些走 SKIP 路径——SKIP 带原因证明的是"能正确报告未检查"，
+**不**证明"能检出问题"。
+
 ## [0.38.72.0] - 2026-11-20
 
 **Gate 5 记录了一个事实，写进一个没人读的变量。**
