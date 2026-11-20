@@ -855,6 +855,10 @@ function jscpdEntryUnder(root) {
   const bases = [path.join(root, 'node_modules')];
   // A global npm prefix (`<...>/npm/node_modules`) is itself a node_modules dir.
   if (path.basename(path.resolve(root)) === 'node_modules') bases.unshift(root);
+  // POSIX global installs put packages in `<prefix>/lib/node_modules`, while
+  // `path.dirname(process.execPath)` is `<prefix>/bin`. Without this, #853's fix
+  // would work on Windows and leave the same bug on every Linux/macOS install.
+  bases.push(path.join(root, 'lib', 'node_modules'));
   for (const base of bases) {
     const entry = jscpdEntryIn(path.join(base, 'jscpd'));
     if (entry) return entry;
@@ -919,13 +923,18 @@ function buildJscpdArgs(opts = {}) {
   // the ignore rules and the discovery working.
   const scanRoot = !targetPath || path.resolve(targetPath) === path.resolve(process.cwd()) ? '.' : targetPath;
   const args = [scanRoot];
-  if (jscpdConfig) {
+  // A config is passed only when jscpd can actually parse it. Measured on
+  // jscpd 5.4.3: `--config <corrupt>` exits 1 with "key must be a string at line 1
+  // column 3", which the gate forwards as a verdict -- so a typo in the project's
+  // config would be reported as "duplicate code found". An unreadable config is
+  // treated as absent, and the default threshold still applies.
+  const parsedConfig = jscpdConfig ? readJscpdConfig(jscpdConfig) : null;
+  if (parsedConfig) {
     args.push('--config', jscpdConfig);
     // A config that declares its own `threshold` owns the decision. Passing ours
     // as well would override the project's number -- the same config-vs-CLI
     // conflict that already cost the ignore list its entries.
-    const declared = readConfiguredThreshold(jscpdConfig);
-    if (declared === null) args.push('--threshold', String(JSCPD_THRESHOLD));
+    if (!isFiniteNumber(parsedConfig.threshold)) args.push('--threshold', String(JSCPD_THRESHOLD));
     return args;
   }
   // The ignore set is passed ONLY when the project has no config of its own.
@@ -943,20 +952,26 @@ function buildJscpdArgs(opts = {}) {
 }
 
 /**
- * Read `threshold` from a jscpd config file.
+ * Parse a jscpd config file.
  *
  * @param {string} configPath
- * @returns {number|null} the declared threshold, or null when absent or invalid
+ * @returns {object|null} the parsed object, or null when unreadable or invalid
  */
-function readConfiguredThreshold(configPath) {
+function readJscpdConfig(configPath) {
   try {
     const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    return typeof parsed.threshold === 'number' && Number.isFinite(parsed.threshold)
-      ? parsed.threshold
-      : null;
+    return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isFiniteNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function runJscpd(args, targetPath) {
@@ -987,8 +1002,15 @@ function runJscpd(args, targetPath) {
   // process.execPath is the node BINARY location, not the npm global prefix; both
   // are probed along with the APPDATA npm tree, because a global package lives in
   // a directory that varies by platform and by install method.
+  // Each entry is a PREFIX, not a node_modules directory: findJscpdEntry probes
+  // `<prefix>/node_modules`, `<prefix>/lib/node_modules` (POSIX global installs)
+  // and, when the prefix is itself named node_modules, the prefix directly.
+  const nodeBinDir = path.dirname(process.execPath);
   const globalPrefixes = [
-    path.dirname(process.execPath),
+    nodeBinDir,
+    // A POSIX global prefix puts the binary in <prefix>/bin, so its parent is the
+    // prefix the packages hang off. Walking up avoids hardcoding "/usr".
+    path.dirname(nodeBinDir),
     path.join(process.env.APPDATA || '', 'npm'),
     path.join(process.env.USERPROFILE || process.env.HOME || '', '.npm-global'),
   ].filter((r) => r && r !== path.sep);
