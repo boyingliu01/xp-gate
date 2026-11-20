@@ -111,13 +111,17 @@ function generatedPairs() {
   }));
 }
 
-/** Hand-listed pairs the generator does NOT own. */
-const HAND_LISTED_PAIRS = Object.freeze([
-  // `principles` has its own generation path (a compiled TS build, not a copy), so
-  // it is not a GENERATED_TREES row. It is still a mirror pair and still needs
-  // drift detection.
-  { canonical: 'src/principles', mirror: 'src/npm-package/principles' },
-]);
+/**
+ * Pairs supervised by something OTHER than `GENERATED_TREES`.
+ *
+ * Empty as of P1-E step 4. `principles` was the last entry: it had a separate
+ * generation path and was listed here by hand, then moved into the generator once
+ * the workstream editing it in place landed. Keeping the named empty list rather
+ * than deleting it gives the next genuinely non-generatable pair an obvious home,
+ * instead of someone hand-adding it back to `KNOWN_PAIRS` and recreating the
+ * two-lists-that-disagree problem this file just removed.
+ */
+const HAND_LISTED_PAIRS = Object.freeze([]);
 
 const KNOWN_PAIRS = Object.freeze([...generatedPairs(), ...HAND_LISTED_PAIRS]);
 
