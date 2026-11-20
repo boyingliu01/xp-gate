@@ -1724,3 +1724,81 @@ Gate 12（file-hygiene，2636ms）排在 Gate 12c（mirror-parity，234ms）**�
 而本轮实测分别为 1938~2395ms、1548~1607ms。**历史样本混入了高负载或冷启动。**
 
 这也说明：**没有记录负载的耗时数据不可用于基线**。本轮所有测量都记录了负载。
+
+---
+
+## 十三、第十八轮：Gate 12 在全局安装里是假的
+
+### 13.1 缺陷
+
+Gate 12 用**一个 awk 程序**回答三个内容检查：尾随空白、缺 EOF 换行、冲突标记。
+适配器按自身目录链解析它，让全局安装与仓库内都能工作。
+
+实测（fixture + 全局安装）：
+
+```
+缺 EOF 换行的文件  → PASS   （应为 WARN）
+含冲突标记的文件  → PASS   （应为 BLOCK）
+bash -x          → GATE_12_SCANNER=   （空）
+```
+
+### 13.2 根因：部署清单漏了一个扩展名
+
+`DEPLOY_MODULE_FILES` 列出了 `lib/` 下所有其他文件——`.sh`、`.cjs`、`.py`、`.ps1`
+——**唯独没有 `.awk`**。三条解析路径全部落空，`awk -f ""` 失败，
+调用点的 `|| return 0` 把**失败变成了「没有发现」**。
+
+> 这是本项目明令禁止的形状：**「没检查」被记成了「通过」。**
+
+**它只影响已安装的仓库。** 仓库自己的目录里文件存在,本地开发和 CI 都看不出来。
+装了 xp-gate 的每一个用户都在跑一个假的 Gate 12。
+
+### 13.3 修复与验证
+
+| 用例 | 修复前 | 修复后 |
+|---|---|---|
+| clean | PASS | PASS ✅ |
+| 缺 EOF 换行 | **PASS（漏检）** | **WARN** ✅ |
+| 冲突标记 | **PASS（漏检）** | **BLOCK** ✅ |
+
+测试的第 3 条是**通用规则**而非单文件检查：
+
+> 任何在 `githooks/lib/` 下存在、被适配器引用、但未在部署清单中声明的文件，都是缺陷。
+
+因为问题不是「漏了 gate-12 的 awk」，而是**「清单必须是完备的」**。
+
+### 13.4 我两次改错了文件
+
+修复时我先改 `githooks/deploy-manifest.sh`（**生成的产物**），再改
+`src/npm-package/hooks/deploy-manifest.sh`（**镜像**）。两次都被 Gate 12b 挡下。
+
+真正的源是 `src/npm-package/lib/deploy-manifest.js`，`.sh` 是它的派生物：
+
+```bash
+node scripts/generate-deploy-manifest.cjs   # .js → .sh
+```
+
+> **Gate 12b 正确地抓住了我两次。** 这一轮它阻断了提交，
+> 而它阻断的理由与我改的文件名一字不差。
+
+### 13.5 Gate 11 验证完成
+
+矩阵里 Gate 11 此前只有统计观察。本轮确认 `gate-11-verdict-integrity.test.bats`
+已有 **10 条测试全部通过**，覆盖：
+
+- `decision=deny` 但 `exit 0` 仍必须 **BLOCK**（AC-806-G11b）
+- `decision=skip` + `exit 0` 记 SKIP 而非 BLOCK
+- 两条 anti-vacuity（allow 真通过 / allow 但阶段未达须 SKIP）
+- SKIP 的 reason 进入 journal 而非只在屏幕上
+
+fixture 实测：非 sprint 项目 → `SKIPPED - not a sprint project`，报告 `status: SKIP`。
+
+**Gate 11 无需补充，已达到目标标准。**
+
+### 13.6 一个已知的设计权衡（非缺陷）
+
+fixture 里 `.xp-gate/audit.jsonl` 不生成。原因是审计 CLI 解析到
+`PROJECT_ROOT_FOR_AUDIT/src/npm-package/lib/gate-audit.ts`，只在源码仓库内存在。
+
+这是**有意的 fire-and-forget**：审计绝不能阻断提交。记录在此，
+以免下次被当成新缺陷重新"修复"一遍。
