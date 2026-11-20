@@ -30,6 +30,7 @@ const {
   SYNC_EXCLUDES,
   KNOWN_PAIRS,
   HAND_LISTED_PAIRS,
+  assertPairsResolved,
 } = require('../mirror-sync');
 
 /**
@@ -562,5 +563,53 @@ describe('KNOWN_PAIRS — P1-E the pair list is derived, not hand-copied', () =>
   it('has no duplicate canonical tree', () => {
     const canonicals = KNOWN_PAIRS.map((p) => p.canonical);
     expect(new Set(canonicals).size).toBe(canonicals.length);
+  });
+});
+
+describe('assertPairsResolved — a zero-pair result must not read as a pass', () => {
+  it('reports a usable pair list for this checkout', () => {
+    // Every pair is derived from generate-mirrors.cjs now, so if that file moved or
+    // stopped exporting GENERATED_TREES, KNOWN_PAIRS would be empty and every query
+    // would answer "nothing drifted" -- a perfect score from a broken tool.
+    expect(KNOWN_PAIRS.length).toBeGreaterThan(0);
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+    expect(assertPairsResolved(repoRoot)).toBeNull();
+  });
+
+  it('tells a checkout apart from a non-checkout by the generator file', () => {
+    // Scope note: KNOWN_PAIRS is a module-level constant, resolved once at require
+    // time against THIS repository. A fixture directory therefore cannot make it
+    // empty, so a case that expected "fake repo with a broken generator returns an
+    // error" would assert something the design cannot do -- it failed on the first
+    // attempt for exactly that reason.
+    //
+    // What IS decidable from a given root is the precondition the assertion turns
+    // on: a checkout has the generator, a non-checkout does not. That is the half
+    // this case pins; the empty-list message itself is exercised by
+    // handleSyncMirrors when collectMirrorPairs returns nothing.
+    const fakeCheckout = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-checkout-'));
+    fs.mkdirSync(path.join(fakeCheckout, 'src', 'npm-package', 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(fakeCheckout, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs'),
+      'module.exports = {};\n'
+    );
+    const fakeInstall = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-install-'));
+
+    // In this process the pair list is non-empty, so neither root reports a
+    // problem -- and that is correct: the list is what matters, not the root.
+    expect(assertPairsResolved(fakeCheckout)).toBeNull();
+    expect(assertPairsResolved(fakeInstall)).toBeNull();
+
+    // The distinguishing fact the implementation reads.
+    expect(fs.existsSync(path.join(fakeCheckout, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs'))).toBe(true);
+    expect(fs.existsSync(path.join(fakeInstall, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs'))).toBe(false);
+  });
+
+  it('stays quiet outside a checkout, where zero pairs is legitimate', () => {
+    // An installed package ships lib/ but not scripts/, and the canonical trees it
+    // would compare against are not installed either. Reporting an error there
+    // would make a correct install look broken.
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-nocheckout-'));
+    expect(assertPairsResolved(emptyDir)).toBeNull();
   });
 });

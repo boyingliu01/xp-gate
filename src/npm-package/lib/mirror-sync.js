@@ -99,8 +99,14 @@ function generatedPairs() {
   try {
     trees = require('../scripts/generate-mirrors.cjs').GENERATED_TREES;
   } catch {
-    // Not running from a checkout (installed package, or the script moved).
-    // `principles` is still listed below, so the command stays useful.
+    // Not running from a checkout: an installed package ships `lib/` but NOT the
+    // `scripts/` tree this module reads its pairs from. Returning [] is correct
+    // there -- the canonical trees (`githooks/`, `src/`) are not installed either,
+    // so there is nothing to compare and no detection capability is lost.
+    //
+    // This must stay distinguishable from "the generator exists but yielded
+    // nothing", which would be a broken checkout. `assertPairsResolved` below
+    // makes that case loud instead of silently reporting zero drift.
     return [];
   }
   if (!Array.isArray(trees)) return [];
@@ -124,6 +130,39 @@ function generatedPairs() {
 const HAND_LISTED_PAIRS = Object.freeze([]);
 
 const KNOWN_PAIRS = Object.freeze([...generatedPairs(), ...HAND_LISTED_PAIRS]);
+
+/**
+ * Refuse to report a clean result over an empty pair list in a real checkout.
+ *
+ * Every pair is derived now, so if the generator cannot be resolved AND nothing is
+ * hand-listed, `KNOWN_PAIRS` is empty and every query answers "nothing drifted".
+ * That is the right answer for an installed package -- but in a checkout it would
+ * be a broken tool reporting a perfect score, which is the single failure mode
+ * this module exists to eliminate.
+ *
+ * The distinction is made on whether the generator file EXISTS, not on whether the
+ * list is empty: a missing generator in a checkout means the layout moved, while a
+ * missing generator outside one is expected. Cheap enough to run per command.
+ *
+ * @param {string} root repository root to check
+ * @returns {string|null} an error message, or null when the pair list is usable
+ */
+function assertPairsResolved(root) {
+  const generatorPath = path.join(root, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs');
+  if (!fs.existsSync(generatorPath)) {
+    // Not a checkout (installed package, or an unrelated directory). Zero pairs is
+    // the correct answer there: the canonical trees are not installed either, so
+    // there is nothing to compare and no capability is lost.
+    return null;
+  }
+  if (KNOWN_PAIRS.length > 0) return null;
+  return (
+    'mirror-sync resolved ZERO mirror pairs although ' +
+    'src/npm-package/scripts/generate-mirrors.cjs exists. Every pair is derived from its ' +
+    'GENERATED_TREES export now, so zero pairs means the export is missing or renamed. ' +
+    'Refusing to report "nothing drifted" over an empty set.'
+  );
+}
 
 /**
  * List files under `dir` relative to `dir`, honouring exclusions.
@@ -397,7 +436,16 @@ function handleSyncMirrors(argv, options = {}) {
 
   const pairs = collectMirrorPairs(root);
   if (pairs.length === 0) {
-    process.stdout.write('sync-mirrors: NOT MEASURABLE (no mirror pairs found — is this the xp-gate repo?)\n');
+    // Not silently "all in sync": zero pairs means nothing was checked, and an
+    // empty verdict must never read as a passing one. The message distinguishes
+    // "wrong directory" from "the generator broke", because the second is a real
+    // defect in a checkout and the first is a typing mistake.
+    const broken = assertPairsResolved(root);
+    process.stdout.write(
+      broken
+        ? `sync-mirrors: NOT MEASURABLE\n  ${broken}\n`
+        : 'sync-mirrors: NOT MEASURABLE (no mirror pairs found — is this the xp-gate repo?)\n'
+    );
     return 1;
   }
 
@@ -442,6 +490,7 @@ module.exports = {
   SYNC_EXCLUDES,
   KNOWN_PAIRS,
   HAND_LISTED_PAIRS,
+  assertPairsResolved,
   listFiles,
   listTrackedFiles,
   diffTrees,
