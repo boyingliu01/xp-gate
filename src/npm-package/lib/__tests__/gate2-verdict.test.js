@@ -56,4 +56,34 @@ describe('#853 Gate 2 must be able to fail', () => {
     expect(args).toContain('--config');
     expect(args).not.toContain('--threshold');
   });
+
+  it('honours a threshold declared in .jscpd.json, not just jscpd.conf.json', () => {
+    // jscpd reads several config filenames. Measured on jscpd 5.4.3 with a fixture
+    // at 66.7% duplication:
+    //   .jscpd.json {threshold: 90}                -> exit 0  (config respected)
+    //   .jscpd.json {threshold: 90} + --threshold 15 -> exit 1  (CLI won)
+    // A project that sets 90 in .jscpd.json would have been overridden by our 15,
+    // silently taking the decision away from the project that declared it.
+    fs.writeFileSync(path.join(tmpDir, '.jscpd.json'), JSON.stringify({ threshold: 90 }));
+    const args = buildJscpdArgs({ targetPath: tmpDir });
+    expect(args).toContain('--config');
+    expect(args).not.toContain('--threshold');
+  });
+
+  it('falls back to the default threshold when the config declares none', () => {
+    // A config that exists but says nothing about the threshold must still let the
+    // gate decide; otherwise Gate 2 would silently stop enforcing anything, which
+    // is the very defect this change exists to fix.
+    fs.writeFileSync(path.join(tmpDir, 'jscpd.conf.json'), JSON.stringify({ ignore: ['**/x/**'] }));
+    const args = buildJscpdArgs({ targetPath: tmpDir });
+    expect(args).toContain('--config');
+    expect(args[args.indexOf('--threshold') + 1]).toBe('15');
+  });
+
+  it('falls back to the default threshold when the config is malformed', () => {
+    // An unparseable config must not crash the gate or disable the threshold.
+    fs.writeFileSync(path.join(tmpDir, 'jscpd.conf.json'), '{ not valid json');
+    const args = buildJscpdArgs({ targetPath: tmpDir });
+    expect(args[args.indexOf('--threshold') + 1]).toBe('15');
+  });
 });

@@ -908,7 +908,7 @@ const JSCPD_THRESHOLD = 15;
  */
 function buildJscpdArgs(opts = {}) {
   const targetPath = opts.targetPath;
-  const jscpdConfig = findConfig(targetPath, 'jscpd.conf.json');
+  const jscpdConfig = findJscpdConfig(targetPath);
   // The scan root is '.' whenever we are running inside the target.
   //
   // jscpd 4.x does not apply its glob ignore rules to an ABSOLUTE scan path:
@@ -1029,6 +1029,46 @@ function findConfig(basePath, fileName) {
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+/**
+ * Config filenames jscpd itself reads, in the order it prefers them.
+ *
+ * Only `jscpd.conf.json` used to be looked for. Measured on jscpd 5.4.3 against a
+ * fixture at 66.7% duplication, a project setting `{"threshold": 90}` in
+ * `.jscpd.json`:
+ *   `jscpd .`                      -> exit 0 (project's 90 respected)
+ *   `jscpd . --threshold 15`       -> exit 1 (our CLI value overrode it)
+ * So a project that declared its own threshold in `.jscpd.json` had the gate
+ * impose 15 instead -- taking the decision away from the project that made it.
+ * `.jscpdrc` is NOT read by jscpd (verified: still exit 0), so it is excluded
+ * rather than pretended to work.
+ */
+const JSCPD_CONFIG_FILENAMES = ['jscpd.conf.json', '.jscpd.json'];
+
+/**
+ * Locate a jscpd config the tool will actually honour.
+ *
+ * Tries every supported filename under the TARGET before falling back to the
+ * working directory. Trying one filename across both locations first would let a
+ * `jscpd.conf.json` in the cwd shadow a `.jscpd.json` in the project being
+ * checked -- so `xp-gate check 2 <other-repo>` would judge that repo by THIS
+ * repo's config.
+ *
+ * @param {string} [basePath]
+ * @returns {string|null}
+ */
+function findJscpdConfig(basePath) {
+  const target = basePath || '.';
+  for (const name of JSCPD_CONFIG_FILENAMES) {
+    const candidate = path.join(target, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  for (const name of JSCPD_CONFIG_FILENAMES) {
+    const candidate = path.join(process.cwd(), name);
+    if (fs.existsSync(candidate)) return candidate;
   }
   return null;
 }
