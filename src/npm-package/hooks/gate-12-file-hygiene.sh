@@ -34,6 +34,9 @@ if [ -z "$STAGED_FILES" ]; then
   echo "     ✅ PASSED - File Hygiene (no files to check)"
   GATE_12_STATUS="SKIP"
   record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START"
+  # shellcheck disable=SC2317  # the gate body is SOURCED, never run to completion here:
+  # the driver calls gate_12_run and treats a returned rc as the verdict, so the
+  # lines after this return ARE reachable in production (see pre-commit).
   return 0 2>/dev/null || true
 fi
 
@@ -63,30 +66,129 @@ HYGIENE_FILES=""
 # NUL), and `grep -I` only suppresses output on a binary input -- it does not make
 # `grep -q` fail, which is why that shortcut still reported text.
 is_binary_staged_file() {
-  local _file="$1"
-  case "$(git diff --cached --numstat -- "$_file" 2>/dev/null)" in
-    -[[:space:]]-*) return 0 ;;   # binary: git could not count lines
-    *) return 1 ;;                # text (or empty -- nothing for the line checks)
+  case " $GATE_12_BINARY_SET " in
+    *" $1 "*) return 0 ;;   # binary: git could not count lines
+    *) return 1 ;;          # text (or empty -- nothing for the line checks)
+  esac
+}
+
+# Classify the WHOLE change set in one git call.
+#
+# This used to be `git diff --cached --numstat -- "$file"` inside
+# is_binary_staged_file, i.e. one process per file PER CHECK that asked. Three
+# checks ask, so every staged text file cost three git spawns just to learn
+# "text", before any check looked at a byte:
+#
+#     measured 2026-11-19, plain-text fixture, this machine:
+#       300 staged files   4m22s    (~0.87 s/file)
+#       100 staged files   2m36s
+#         0 staged files   0.5s     (the loop never runs)
+#
+# and the audit journal agrees -- 1208 credible file-hygiene rows, median 4.2s,
+# p90 41.7s, 244 over 20s. The cost is process creation, not bytes examined, so
+# it scales with the change set; a text check should not be the second most
+# expensive gate in the chain.
+#
+# `--numstat` already reports the whole index in one shot and marks a binary
+# entry as `-\t-\t<path>`. Same predicate, computed once. If git fails the set
+# stays empty and every file is treated as text -- identical to the old per-file
+# fallback (a failed `git diff` produced no finding).
+GATE_12_BINARY_SET=" "
+while IFS=$'\t' read -r _g12_adds _g12_dels _g12_path; do
+  [ -z "$_g12_path" ] && continue
+  case "$_g12_adds" in
+    -) GATE_12_BINARY_SET="${GATE_12_BINARY_SET}${_g12_path} " ;;
+  esac
+done <<EOF
+$(git diff --cached --numstat --diff-filter=d 2>/dev/null | grep -vE '(^|/)(node_modules|\.stryker-tmp|vendor)/')
+EOF
+
+# --- Checks 1 and 2 share ONE process per file, not two --------------------
+#
+# Both checks read the same blob. They used to read it separately:
+#
+#     git show ":$file" | grep -qE '[[:space:]]$'   # trailing whitespace
+#     git show ":$file" | tail -c 1                 # missing EOF newline
+#
+# so the content was produced twice per file. `git cat-file --batch` streams both
+# answers from a single process for the whole change set.
+#
+# The two predicates are unchanged, which is the point of the rewrite:
+#   trailing whitespace -> a line ending in space/tab exists in the blob
+#   missing EOF newline -> the blob is non-empty and its last byte is not \n
+#
+# The last byte is taken with `od`, not command substitution: `$(...)` strips
+# every trailing newline, which is the original defect this check documents --
+# a correctly terminated file reported its last visible character and was flagged
+# every time.
+# The AWK scanner that answers all three content checks in one process. Resolved
+# next to this script's own directory chain, like every other shared library, so
+# a global install (~/.config/xp-gate/) and the tracked tree both work.
+#
+# The layouts this must cover, all of which keep the scanner in a `lib/` beside
+# the gate script:
+#
+#     githooks/gate-12-file-hygiene.sh          -> githooks/lib/gate-12-blob-scan.awk
+#     githooks/adapters/gate-12-file-hygiene.sh -> githooks/lib/gate-12-blob-scan.awk   (one level up)
+#     ~/.config/xp-gate/adapters/gate-12-...sh  -> ~/.config/xp-gate/lib/...           (one level up)
+#
+# Candidates are normalised with `cd ... && pwd` before the `-f` test: measured
+# 2026-11-20 on Git for Windows, `[ -f ".../githooks/../lib/x" ]` answers FALSE --
+# the test builtin does not resolve `..`. When the loop finds nothing,
+# GATE_12_SCANNER stays empty, `_g12_scan_blobs` bails at its own `-f` guard, and
+# all three checks report nothing while the gate prints PASS.
+if [ -z "${GATE_12_SCANNER:-}" ]; then
+  _g12_here=$(dirname "${BASH_SOURCE[0]}")
+  for _g12_dir in "${GATE_DIR:-}" "$_g12_here" "$_g12_here/.." "$_g12_here/../.."; do
+    [ -n "$_g12_dir" ] || continue
+    # Normalise; a directory that cannot be entered is not a candidate.
+    _g12_dir=$(cd "$_g12_dir" 2>/dev/null && pwd) || continue
+    if [ -f "$_g12_dir/lib/gate-12-blob-scan.awk" ]; then
+      GATE_12_SCANNER="$_g12_dir/lib/gate-12-blob-scan.awk"
+      break
+    fi
+  done
+  unset _g12_dir
+fi
+GATE_12_SCANNER="${GATE_12_SCANNER:-}"
+
+GATE_12_HAS_TRAILING_WS=" "
+GATE_12_MISSING_EOF=" "
+GATE_12_HAS_CONFLICT=" "
+
+_g12_scan_blobs() {
+  # ONE awk process for the whole change set (see githooks/lib/gate-12-blob-scan.awk
+  # for the measurements that made this a rewrite rather than a tidy-up).
+  #
+  # The path list is |-separated because a staged path may contain a newline.
+  local _paths _out
+  _paths=$(printf %s "$STAGED_FILES" | tr '\n' '|')
+  [ -z "$_paths" ] && return 0
+  _out=$(printf '%s\n' "$STAGED_FILES" | sed 's/^/:/' \
+    | git cat-file --batch 2>/dev/null \
+    | awk -v paths="$_paths" -f "$GATE_12_SCANNER" 2>/dev/null) || return 0
+  [ -z "$_out" ] && return 0
+  GATE_12_HAS_TRAILING_WS=$(printf %s "$_out" | sed -n 's/^WS://p')
+  GATE_12_MISSING_EOF=$(printf %s "$_out" | sed -n 's/^NOEOF://p')
+  GATE_12_HAS_CONFLICT=$(printf %s "$_out" | sed -n 's/^CONFLICT://p')
+}
+
+if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
+  _g12_scan_blobs
+fi
+
+_g12_in_set() {
+  case " $1 " in
+    *" $2 "*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
 # --- Check 1: Trailing whitespace ---
 TRAILING_WS_FILES=""
-if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
-while IFS= read -r file; do
-  [ -z "$file" ] && continue
-  # Skip binary files : they have no lines to check
-  if is_binary_staged_file "$file"; then
-    continue
-  fi
-  # Check staged content for trailing whitespace (spaces/tabs at end of lines)
-  if git show ":$file" 2>/dev/null | grep -qE '[[:space:]]$'; then
-    TRAILING_WS_FILES="$TRAILING_WS_FILES $file"
-  fi
-done <<EOF
-$STAGED_FILES
-EOF
-fi
+for file in $GATE_12_HAS_TRAILING_WS; do
+  TRAILING_WS_FILES="$TRAILING_WS_FILES $file"
+done
 
 if [ -n "$TRAILING_WS_FILES" ]; then
   echo "     ⚠️  Trailing whitespace detected in:"
@@ -105,26 +207,17 @@ fi
 # Every staged text file was a false positive, which is how a check that always
 # fires looks exactly like a strict check. `git show | tail -c 1` keeps the byte.
 file_missing_eof_newline() {
-  local last_byte
-  last_byte=$(git show ":$1" 2>/dev/null | tail -c 1)
-  # Empty output means the blob is empty: there is no line to terminate.
-  [ -n "$last_byte" ]
+  # Answered by _g12_scan_blobs, from the same single process that answered
+  # Check 1. Kept as a named predicate because that is the question being asked;
+  # the implementation is a set lookup now.
+  _g12_in_set "$GATE_12_MISSING_EOF" "$1"
 }
 
 NO_EOF_NEWLINE_FILES=""
 if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
-while IFS= read -r file; do
-  [ -z "$file" ] && continue
-  # Skip binary files
-  if is_binary_staged_file "$file"; then
-    continue
-  fi
-  if file_missing_eof_newline "$file"; then
-    NO_EOF_NEWLINE_FILES="$NO_EOF_NEWLINE_FILES $file"
-  fi
-done <<EOF
-$STAGED_FILES
-EOF
+for file in $GATE_12_MISSING_EOF; do
+  NO_EOF_NEWLINE_FILES="$NO_EOF_NEWLINE_FILES $file"
+done
 fi
 
 if [ -n "$NO_EOF_NEWLINE_FILES" ]; then
@@ -148,19 +241,9 @@ if [ "${GATE_12_DOCS_ONLY:-false}" = true ]; then
     CONFLICT_MARKER_FILES="$STAGED_FILES"
   fi
 else
-while IFS= read -r file; do
-  [ -z "$file" ] && continue
-  # Skip binary files
-  if is_binary_staged_file "$file"; then
-    continue
-  fi
-  # Check for conflict markers in staged content
-  if git show ":$file" 2>/dev/null | grep -qE '^(<{7}|={7}|>{7})([[:space:]]|$)'; then
-    CONFLICT_MARKER_FILES="$CONFLICT_MARKER_FILES $file"
-  fi
-done <<EOF
-$STAGED_FILES
-EOF
+for file in $GATE_12_HAS_CONFLICT; do
+  CONFLICT_MARKER_FILES="$CONFLICT_MARKER_FILES $file"
+done
 fi
 
 if [ -n "$CONFLICT_MARKER_FILES" ]; then
@@ -178,7 +261,22 @@ if [ "${GATE_12_DOCS_ONLY:-false}" != true ]; then
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   [ ! -f "$file" ] && continue
-  FILE_SIZE=$(wc -c < "$file" 2>/dev/null | tr -d ' ')
+  # `wc -c` is a process per file; measured 300 files = 12.6s on this machine,
+  # which after the blob scanner was the largest remaining share of a 36.9s run.
+  # `$(<file)` is a bash builtin with no fork, and `LC_ALL=C` makes ${#var} a
+  # BYTE count rather than a character count -- the threshold is in bytes
+  # (XP_GATE_MAX_FILE_SIZE, default 1 MiB), so a multibyte file must not measure
+  # short and slip under it.
+  #
+  # Binary files are not excluded from this check, so the read must not choke on
+  # them: an unreadable blob leaves FILE_SIZE empty and the comparison is skipped,
+  # exactly as a failed `wc -c` did.
+  FILE_SIZE=""
+  if [ -r "$file" ]; then
+    _g12_content=$(LC_ALL=C IFS= read -r -d '' _g12_all < "$file" 2>/dev/null; printf '%s' "${#_g12_all}")
+    FILE_SIZE=$((${_g12_content:-0}))
+    unset _g12_content
+  fi
   if [ -n "$FILE_SIZE" ] && [ "$FILE_SIZE" -gt "$MAX_FILE_SIZE_BYTES" ]; then
     SIZE_MB=$((FILE_SIZE / 1048576))
     OVERSIZED_FILES="$OVERSIZED_FILES $file(${SIZE_MB}MB)"
@@ -248,7 +346,8 @@ except yaml.YAMLError as e:
 except Exception:
     pass
 " 2>&1)
-        if [ $? -ne 0 ] && [ -n "$YAML_ERROR" ]; then
+        _g12_rc=$?
+        if [ "$_g12_rc" -ne 0 ] && [ -n "$YAML_ERROR" ]; then
           YAML_JSON_ERRORS+=("$file(yaml:$YAML_ERROR)")
         fi
       fi
@@ -259,13 +358,15 @@ except Exception:
         JSON_ERROR=$(git show ":$file" 2>/dev/null | node -e "
 let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{JSON.parse(d)}catch(e){console.log(e.message.split('\\n')[0]);process.exit(1)}})
 " 2>&1)
-        if [ $? -ne 0 ] && [ -n "$JSON_ERROR" ]; then
+        _g12_rc=$?
+        if [ "$_g12_rc" -ne 0 ] && [ -n "$JSON_ERROR" ]; then
           YAML_JSON_ERRORS+=("$file(json:$JSON_ERROR)")
         fi
       elif [ "$JSON_CMD" = "jq" ]; then
         JSON_ERROR=$(git show ":$file" 2>/dev/null | jq empty 2>&1)
-        if [ $? -ne 0 ] && [ -n "$JSON_ERROR" ]; then
-          YAML_JSON_ERRORS+=("$file(json:syntax error)")
+        _g12_rc=$?
+        if [ "$_g12_rc" -ne 0 ] && [ -n "$JSON_ERROR" ]; then
+          YAML_JSON_ERRORS+=("$file(json:$JSON_ERROR)")
         fi
       fi
       ;;
@@ -290,6 +391,9 @@ if [ "${GATE_12_DOCS_ONLY:-false}" = true ] && [ "$HYGIENE_ISSUES" -eq 0 ]; then
   echo "     ✅ PASSED - File Hygiene (docs-only commit: diff-scoped conflict-marker + YAML/JSON checks clean)."
   GATE_12_STATUS="PASS"
   record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START" "" "docs_only_change"
+  # shellcheck disable=SC2317  # the gate body is SOURCED, never run to completion here:
+  # the driver calls gate_12_run and treats a returned rc as the verdict, so the
+  # lines after this return ARE reachable in production (see pre-commit).
   return 0 2>/dev/null || true
 fi
 if [ "$HYGIENE_ISSUES" -eq 0 ]; then

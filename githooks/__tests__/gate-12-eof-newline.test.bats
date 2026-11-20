@@ -31,11 +31,25 @@ teardown() {
 # The check is inline in the gate body, so extract the predicate it relies on.
 # The fix must answer "is the final byte a newline" from the raw bytes rather
 # than from a command substitution that has already eaten them.
+#
+# file_missing_eof_newline is a SET LOOKUP since ed5da9f8 ("one awk process instead
+# of four git spawns per file"): it answers from $GATE_12_MISSING_EOF, which
+# _g12_scan_blobs fills for the whole change set. Extracting only the predicate
+# answers "not missing" for everything, because the set it reads was never built --
+# so the scan is loaded and run too, and the real question is asked.
 load_predicate() {
-  awk '/^file_missing_eof_newline\(\) \{/,/^\}/' "$GATE" > "$WORK/pred.sh" 2>/dev/null
+  awk '/^_g12_in_set\(\) \{/,/^\}/' "$GATE" > "$WORK/pred.sh" 2>/dev/null
+  awk '/^_g12_scan_blobs\(\) \{/,/^\}/' "$GATE" >> "$WORK/pred.sh" 2>/dev/null
+  awk '/^file_missing_eof_newline\(\) \{/,/^\}/' "$GATE" >> "$WORK/pred.sh" 2>/dev/null
   if [ -s "$WORK/pred.sh" ]; then
+    GATE_12_MISSING_EOF=" "
+    GATE_12_HAS_TRAILING_WS=" "
+    GATE_12_HAS_CONFLICT=" "
+    STAGED_FILES="$(git diff --cached --name-only)"
+    GATE_12_SCANNER="$REPO_ROOT/githooks/lib/gate-12-blob-scan.awk"
     # shellcheck disable=SC1091
     . "$WORK/pred.sh"
+    _g12_scan_blobs
     return 0
   fi
   # Fall back to the exact expression the gate body uses, so this test still

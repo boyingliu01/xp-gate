@@ -28,7 +28,72 @@ gate8_cleanup() {
     rm -f "${GATE8_TEMP[@]}" 2>/dev/null
   fi
 }
-trap gate8_cleanup EXIT
+# CHAIN the previous EXIT trap instead of replacing it.
+#
+# Measured 2026-11-19: `trap gate8_cleanup EXIT` overwrote whatever trap was
+# already installed. pre-commit installs `_quality_report_on_exit` at its top
+# precisely so that a BLOCKED commit still writes its report, and Gate 8 runs
+# before the blocking gates -- so from the moment Gate 8 ran, that trap was gone.
+#
+# The consequence is the worst possible shape: a commit that PASSES writes its
+# report (the epilogue calls generate_quality_report directly), and a commit that
+# is BLOCKED writes nothing. The one run an operator needs to diagnose is the one
+# with no record.
+#
+# Reproduced in a go fixture: the chain stopped at Gate 5, and
+#
+#     ls .xp-gate/reports/pre-commit | wc -l   ->  0
+#
+# while the same fixture with XP_GATE_ONLY_GATE=8 (chain completes) produced 1.
+# Reading the live trap at the end of the hook showed `trap -- 'gate8_cleanup'
+# EXIT` -- the report trap had been replaced, not chained.
+#
+# `trap -p EXIT` prints a form that can be eval'd back, which is the same
+# technique pre-commit's own source_gate_lib uses to survive a sourced library
+# that installs a trap. The difference here: that library wants to REINSTALL the
+# old trap, whereas this gate has to RUN it, so only the command body is kept.
+#
+# Stripping matters and was caught by the test, not by reading: evaluating the
+# whole string ("trap -- 'cmd' EXIT") reinstalls the old trap instead of invoking
+# it, so the chain silently did nothing and the report still went missing.
+_GATE8_PREV_EXIT_TRAP=""
+_gate8_raw_trap="$(trap -p EXIT 2>/dev/null || true)"
+if [ -n "$_gate8_raw_trap" ]; then
+  _gate8_body="${_gate8_raw_trap#trap -- }"   # drop 'trap -- '
+  _gate8_body="${_gate8_body% EXIT}"          # drop the trailing ' EXIT'
+  _gate8_body="${_gate8_body#\'}"             # drop the surrounding quotes
+  _gate8_body="${_gate8_body%\'}"
+  _GATE8_PREV_EXIT_TRAP="$_gate8_body"
+fi
+
+gate8_cleanup_and_chain() {
+  # CAPTURE $? FIRST, then RESTORE it before handing control on.
+  #
+  # pre-commit's `_quality_report_on_exit` reads `$?` as its very first statement
+  # and exits with that status -- that is what makes the hook exit non-zero when a
+  # gate blocked. Running cleanup first overwrote $? with the status of `rm`, so
+  # the chained trap saw 0 and the hook exited 0.
+  #
+  # Measured 2026-11-19, go fixture, Gate 5 blocked (coverage 0%):
+  #   before any fix          : commit refused (rc=1), report NOT written
+  #   chain without restoring : commit ALLOWED  (rc=0), report written
+  #
+  # The second row is a WORSE bug than the one being fixed -- a chain that
+  # preserves the report by letting blocked commits through. `( exit N )` on its
+  # own does not help (the subshell's status is discarded), but it does set $? to
+  # N for the next command in this shell, which is what the eval below observes.
+  # Verified directly: a chained trap reading $? after this sequence sees the
+  # original status, and the hook still exits with it.
+  local _g8_saved=$?
+  gate8_cleanup
+  if [ -n "${_GATE8_PREV_EXIT_TRAP:-}" ]; then
+    (exit "$_g8_saved")
+    eval "$_GATE8_PREV_EXIT_TRAP"
+    return "$_g8_saved"
+  fi
+  return "$_g8_saved"
+}
+trap gate8_cleanup_and_chain EXIT
 
 # Gitleaks availability check
 GITLEAKS_CMD=""
@@ -90,9 +155,13 @@ GITLEAKS_REPORT="${TMPDIR:-/tmp}/gitleaks-report.json"
 rm -f "$GITLEAKS_REPORT"
 if [ "${GATE_SCOPE:-diff}" = "all" ]; then
   echo "     Scope: --all (scanning the working tree, not the index)"
+  # GITLEAKS_CONFIG is either empty or a single --config=PATH token; quoting it
+  # would pass an empty argument to gitleaks. It is split on purpose.
+  # shellcheck disable=SC2086
   GITLEAKS_OUTPUT=$($GITLEAKS_CMD dir --no-git --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path="$GITLEAKS_REPORT" 2>&1)
   GITLEAKS_EXIT=$?
 else
+  # shellcheck disable=SC2086  # see above: empty or one --config= token
   GITLEAKS_OUTPUT=$($GITLEAKS_CMD git --staged --redact --no-banner $GITLEAKS_CONFIG --report-format=json --report-path="$GITLEAKS_REPORT" 2>&1)
   GITLEAKS_EXIT=$?
 fi

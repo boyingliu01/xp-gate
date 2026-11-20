@@ -38,9 +38,9 @@ else
   # by __tests__/gate-7-adapter-resolution.test.bats).
   IAC_ADAPTER=""
   for _candidate in \
+    "$HOME/.config/xp-gate/adapters/iac.sh" \
     "githooks/adapters/iac.sh" \
-    "${SCRIPT_DIR:-}/adapters/iac.sh" \
-    "$HOME/.config/xp-gate/adapters/iac.sh"; do
+    "${SCRIPT_DIR:-}/adapters/iac.sh"; do
     if [ -n "$_candidate" ] && [ -f "$_candidate" ]; then
       IAC_ADAPTER="$_candidate"
       break
