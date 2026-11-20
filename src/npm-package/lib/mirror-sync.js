@@ -31,6 +31,15 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 /**
+ * The checkout root, derived from this file's location rather than from the
+ * caller's cwd: this module is invoked both from the repo root and from an
+ * installed copy, and `process.cwd()` differs between them.
+ *
+ * `src/npm-package/lib/` -> three levels up.
+ */
+const REPO_ROOT_DIR = path.resolve(__dirname, '..', '..', '..');
+
+/**
  * Directory names that are never mirrored, even when tracked.
  *
  * A build artifact directory is machine state, not source. Copying it would
@@ -71,14 +80,46 @@ const MIRROR_EXCLUDES = Object.freeze([...SYNC_EXCLUDES, '__tests__']);
  *
  * Per-pair `exclude` stays available for a rule that genuinely applies to one
  * pair only. `__tests__` is not one of those -- see `MIRROR_EXCLUDES`.
+ *
+ * P1-E step 3: the pairs a generator owns are now DERIVED from that generator
+ * instead of being listed again here. Two hand-written lists had already drifted:
+ * this table carried five pairs and `generate-mirrors.cjs` carried four (it did
+ * not know about `principles`), and neither knew about `mutation` or
+ * `mock-policy`, which shipped in the package with no generator at all. A pair
+ * that exists in one list and not the other is invisible to exactly the check
+ * meant to catch it.
+ *
+ * A generator tree that cannot be resolved is skipped rather than thrown: this
+ * module also runs from an installed copy, where the repository layout it would
+ * read does not exist. Skipping reproduces the old hand-listed behaviour for that
+ * pair instead of crashing a diagnostic command.
  */
-const KNOWN_PAIRS = Object.freeze([
-  { canonical: 'githooks/adapters', mirror: 'src/npm-package/adapters' },
-  { canonical: 'githooks/lib', mirror: 'src/npm-package/hooks/lib' },
+function generatedPairs() {
+  let trees;
+  try {
+    trees = require('../scripts/generate-mirrors.cjs').GENERATED_TREES;
+  } catch {
+    // Not running from a checkout (installed package, or the script moved).
+    // `principles` is still listed below, so the command stays useful.
+    return [];
+  }
+  if (!Array.isArray(trees)) return [];
+  const repoRelative = (abs) => path.relative(REPO_ROOT_DIR, abs).split(path.sep).join('/');
+  return trees.map((tree) => ({
+    canonical: repoRelative(tree.canonical),
+    mirror: `src/npm-package/${tree.mirror}`,
+  }));
+}
+
+/** Hand-listed pairs the generator does NOT own. */
+const HAND_LISTED_PAIRS = Object.freeze([
+  // `principles` has its own generation path (a compiled TS build, not a copy), so
+  // it is not a GENERATED_TREES row. It is still a mirror pair and still needs
+  // drift detection.
   { canonical: 'src/principles', mirror: 'src/npm-package/principles' },
-  { canonical: 'src/build-integrity', mirror: 'src/npm-package/build-integrity' },
-  { canonical: 'skills', mirror: 'src/npm-package/skills' },
 ]);
+
+const KNOWN_PAIRS = Object.freeze([...generatedPairs(), ...HAND_LISTED_PAIRS]);
 
 /**
  * List files under `dir` relative to `dir`, honouring exclusions.
@@ -396,6 +437,7 @@ function handleSyncMirrors(argv, options = {}) {
 module.exports = {
   SYNC_EXCLUDES,
   KNOWN_PAIRS,
+  HAND_LISTED_PAIRS,
   listFiles,
   listTrackedFiles,
   diffTrees,
