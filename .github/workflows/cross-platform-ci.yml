@@ -332,21 +332,35 @@ jobs:
         run: |
           (cd plugins/dsh && npm install --no-audit --no-fund && npm run build)
 
-      # P1-E step 1: src/npm-package/adapters/ is generated and gitignored, so a
-      # fresh checkout does not contain it at all. This step is what makes the
-      # parity checks below meaningful -- they now assert that the GENERATOR
-      # reproduces githooks/adapters byte-for-byte, which is a stronger claim than
-      # the old "are the two committed trees equal" (two copies can be equally
-      # wrong; a generator either reproduces the source or it does not).
+      # P1-E: EVERY tree this job checks is now generated and gitignored, so a fresh
+      # checkout does not contain any of them. This step is what makes the parity
+      # checks below meaningful -- they assert that the GENERATOR reproduces the
+      # canonical tree byte-for-byte, which is a stronger claim than the old "are
+      # the two committed trees equal" (two copies can be equally wrong; a generator
+      # either reproduces the source or it does not).
+      #
+      # The anti-vacuity counts are per tree and deliberately conservative: an empty
+      # or absent tree would make its parity check pass while the package ships
+      # without that directory. One `test -d` over the whole set would not catch a
+      # tree that generated zero files.
       - name: Generate the npm-package mirror trees
         run: |
           node src/npm-package/scripts/generate-mirrors.cjs
-          # Anti-vacuity: an empty or absent tree would make the parity checks
-          # pass while the package ships without adapters.
-          test -d src/npm-package/adapters || { echo "adapters tree was not generated"; exit 1; }
-          count=$(find src/npm-package/adapters -type f | wc -l)
-          echo "generated $count adapter files"
-          test "$count" -gt 100 || { echo "generated only $count adapter files"; exit 1; }
+          check_tree() {
+            local dir="$1" min="$2"
+            test -d "src/npm-package/$dir" || { echo "FAIL: $dir tree was not generated"; exit 1; }
+            local count
+            count=$(find "src/npm-package/$dir" -type f | wc -l | tr -d ' ')
+            echo "generated $count file(s) in $dir"
+            test "$count" -ge "$min" || { echo "FAIL: $dir has only $count files, expected >= $min"; exit 1; }
+          }
+          check_tree adapters 250
+          check_tree hooks/lib 15
+          check_tree build-integrity 3
+          check_tree skills 40
+          check_tree principles 40
+          check_tree mutation 10
+          check_tree mock-policy 5
 
       - name: Run sync and verify no diff
         run: |

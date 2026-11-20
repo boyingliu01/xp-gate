@@ -67,6 +67,11 @@ const GENERATED_TREES = Object.freeze([
   // right copy" depended on memory. Same shape as build-integrity, so `module`.
   { mirror: 'mutation', canonical: path.join(REPO_ROOT, 'src', 'mutation'), sync: 'module' },
   { mirror: 'mock-policy', canonical: path.join(REPO_ROOT, 'src', 'mock-policy'), sync: 'module' },
+  // P1-E step 4. Long deferred because it was edited in place by another
+  // workstream; that work has landed. `sync-package-content.js` already produced
+  // this tree at prepack, so adding it here changes nothing about what ships --
+  // only whether the tree is generated on demand and therefore safe to untrack.
+  { mirror: 'principles', canonical: path.join(REPO_ROOT, 'src', 'principles'), sync: 'module' },
 ]);
 
 function quiet(argv) {

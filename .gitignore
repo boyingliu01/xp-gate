@@ -45,12 +45,37 @@ src/npm-package/adapters/
 # regenerates from a clean canonical tree and asserts byte equality plus the file
 # count. A tree that drifts back into version control fails REQ-E1-06.
 #
-# src/principles/ is deliberately NOT here yet: it is still edited in place by
-# another workstream, and two producers writing one tree means whichever ran last
-# decides the content. It joins once that work lands.
+# src/principles/ joins this group in P1-E step 4. It was held back because it was
+# being edited in place by another workstream, and two producers writing one tree
+# means whichever ran last decides the content. That work has landed, so the same
+# argument applies as for the trees above.
 src/npm-package/hooks/lib/
 src/npm-package/build-integrity/
 src/npm-package/skills/
+# P1-E step 3: these two shipped in the package with no generator and no mirror
+# pair, so nothing ever compared them against their source. They are generated now
+# (GENERATED_TREES), so the tarball copy is produced at prepack like the rest.
+src/npm-package/mutation/
+src/npm-package/mock-policy/
+src/npm-package/principles/
+
+# src/npm-package/hooks/ and src/npm-package/gates/ stay TRACKED on purpose.
+#
+# Not an oversight, and not "we ran out of time". `hooks/` is a curated file list
+# (57 entries in HOOK_MIRROR_FILES, scripts/check-hook-mirror.sh:54), not a tree
+# copy: `githooks/` also holds `__tests__/`, the adapters subtree, `verify.sh` and
+# `AGENTS.md`, none of which ship. Giving it a generator would mean a second place
+# that enumerates the same 57 files, and two enumerations of one set is the exact
+# failure P1-E exists to remove -- the pair table, the generator and the manifest
+# had already drifted from each other three ways.
+#
+# It already has the strongest guarantee in the repo: a per-file `cmp` against
+# canonical for every entry, which fails closed on a missing or differing file.
+# Untracking it would move it from "checked byte-for-byte" to "produced by a
+# generator that has to be kept in sync with a shell array". That is a downgrade.
+#
+# `gates/` is a stale `files[]` entry for a directory that does not exist; removing
+# it is a packaging change, tracked separately.
 
 # Environment
 .env
