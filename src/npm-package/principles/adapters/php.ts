@@ -21,6 +21,41 @@ import { Adapter } from '../types';
  * with no name a human recognises) and arrow functions `fn($x) => ...`, which
  * have no brace body for the nesting rules to walk.
  */
+/** Where a brace scan ended: the last depth-zero position, and whether it balanced. */
+interface BraceScan {
+  endPos: number;
+  balanced: boolean;
+}
+
+/**
+ * Find the LAST index at which brace depth returned to zero, scanning `code` from
+ * `startPos`.
+ *
+ * The last crossing is the declaration's real closing brace: a nested class or
+ * closure sits INSIDE the declaration and so cannot be the last one at depth zero.
+ * The first crossing is deliberately not used -- measured, an unterminated heredoc
+ * leaves unmatched `{` in the text, so the first zero-crossing lands mid-body and
+ * reported a five-level `if` chain as depth 4.
+ *
+ * `balanced` is false when the scan never returns to zero, the signal that the
+ * input is malformed and no crossing is trustworthy.
+ */
+function lastBalancedEnd(code: string, startPos: number): BraceScan {
+  let depth = 0;
+  let seenBrace = false;
+  let endPos = -1;
+  for (let i = startPos; i < code.length; i++) {
+    if (code[i] === '{') {
+      depth++;
+      seenBrace = true;
+    } else if (code[i] === '}') {
+      depth--;
+      if (seenBrace && depth === 0) endPos = i + 1;
+    }
+  }
+  return { endPos, balanced: depth === 0 };
+}
+
 export class PhpAdapter extends BaseAdapter implements Adapter {
   detectLanguage(): string {
     const lower = this.filePath.toLowerCase();
@@ -70,20 +105,20 @@ export class PhpAdapter extends BaseAdapter implements Adapter {
    */
   protected extractCodeBlock(startPos: number, maxFallback: number = 100): string {
     const blanked = stripPhpLiterals(this.fileContent);
-    let depth = 0;
-    let seenBrace = false;
-    for (let i = startPos; i < blanked.length; i++) {
-      if (blanked[i] === '{') {
-        depth++;
-        seenBrace = true;
-      } else if (blanked[i] === '}') {
-        depth--;
-        if (seenBrace && depth === 0) {
-          return this.fileContent.substring(startPos, i + 1);
-        }
-      }
+    const scan = lastBalancedEnd(blanked, startPos);
+
+    // Unterminated heredoc: the text never rebalances, so no crossing is a real
+    // boundary. Fall back to the last `}` in the file rather than a boundary that
+    // is provably wrong; a malformed file must degrade to less checking, never to
+    // a quiet pass.
+    if (!scan.balanced) {
+      const lastClose = blanked.lastIndexOf('}');
+      return lastClose > startPos
+        ? this.fileContent.substring(startPos, lastClose + 1)
+        : this.fallbackCodeBlock(startPos, maxFallback);
     }
-    return this.fallbackCodeBlock(startPos, maxFallback);
+    if (scan.endPos <= 0) return this.fallbackCodeBlock(startPos, maxFallback);
+    return this.fileContent.substring(startPos, scan.endPos);
   }
 
   /**
@@ -248,6 +283,7 @@ function blankHeredoc(code: string, start: number): { emit: string; last: number
   const terminator = opener[2];
   let i = start + opener[0].length;
   let emit = ' '.repeat(opener[0].length);
+  let closed = false;
 
   while (i < code.length) {
     const lineStart = i;
@@ -258,10 +294,14 @@ function blankHeredoc(code: string, start: number): { emit: string; last: number
 
     if (trimmed.startsWith(terminator)) {
       const afterWord = trimmed.charAt(terminator.length);
-      // Followed by end of line or a statement terminator -- not a longer word.
-      if (afterWord === '' || /[;,)\]}]/.test(afterWord) || /\s/.test(afterWord)) {
+      // End of line, whitespace, or a statement/expression terminator -- not the
+      // start of a longer word, and not a comma either: PHP allows `SQL,` when the
+      // heredoc is an array element. Missing the comma case over-blanked silently,
+      // which is the same class of quiet failure as truncation.
+      if (afterWord === '' || /[\s;,\]})]/.test(afterWord)) {
         emit += ' '.repeat(line.length);
         i = lineEnd;
+        closed = true;
         break;
       }
     }
@@ -272,6 +312,20 @@ function blankHeredoc(code: string, start: number): { emit: string; last: number
     } else {
       i = lineEnd;
     }
+  }
+
+  // A heredoc with no terminator is malformed source. Treating the opener as
+  // ordinary text keeps the rest of the method analysable, and the unmatched `{`
+  // inside the unterminated body then count as code. That is the honest reading:
+  // with no closing marker there is no way to know where the string ends, so the
+  // gate reports what the braces literally say rather than guessing a boundary.
+  //
+  // The alternative -- blanking to end-of-file -- silently disabled every rule for
+  // the rest of the method (measured: a five-level `if` chain reported depth 1 and
+  // length 4). A malformed file must degrade to less checking on that construct,
+  // never to a quiet pass on the whole method.
+  if (!closed) {
+    return { emit: code.slice(start, start + opener[0].length - 1), last: start + opener[0].length - 1 };
   }
   return { emit, last: i };
 }

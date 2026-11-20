@@ -79,6 +79,27 @@ function extract(source: string): Extracted[] {
   return adapterFor(source).extractFunctions() as Extracted[];
 }
 
+/**
+ * Wrap a method body in the minimal class shell and return the first function.
+ *
+ * Most cases below differ only in what sits inside one method, and spelling out
+ * the class/braces each time pushed the file's own duplicate ratio past the 15%
+ * clean-code.code-duplication threshold -- a quality gate the file has to pass to
+ * be committed.
+ */
+function methodOf(body: string, name = 'subject'): Extracted {
+  const [fn] = extract(`<?php
+class Subject
+{
+    public function ${name}()
+    {
+${body}
+    }
+}
+`);
+  return fn;
+}
+
 describe('PhpAdapter — fields the Gate 4 rules read (AC-PHP-ADAPTER-01)', () => {
   it('is reachable from the analyzer for .php and .phtml', () => {
     (readFileSync as Mock).mockReturnValue('<?php class A {}');
@@ -303,7 +324,7 @@ class B
 {
     public function fake()
     {
-        $s = 'try { x } catch (E $e) { }';
+        $s = 'try { x } catch (E $e) { return 1; }';
         return $s;
     }
 }
@@ -317,7 +338,7 @@ class B
 {
     public function commented()
     {
-        // try { x } catch (E $e) { }
+        // try { x } catch (E $e) { return 1; }
         return 1;
     }
 }
@@ -351,76 +372,74 @@ describe('PhpAdapter — heredoc/nowdoc content is not code (AC-PHP-ADAPTER-06)'
   //
   //   function heredocBraces() { $sql = <<<SQL  { { { { {  SQL; ... }
   //     -> nestingDepth 6, on a method with no nesting at all
-  //   function heredocTry() { $s = <<<TXT  try { x } catch (E $e) { }  TXT; ... }
+  //   function heredocTry() { $s = <<<TXT  try { x } catch (E $e) { return 1; }  TXT; ... }
   //     -> hasTryCatch true, with no try/catch in code
   //
   // Both are false positives, which is the direction that produces a wrong BLOCK:
   // a SQL template or an inline CSS/JS block becomes "deep nesting", and
   // deep-nesting has a threshold of 4.
   it('does not count braces inside a heredoc', () => {
-    const [fn] = extract(`<?php
-class H
-{
-    public function sqlTemplate()
-    {
-        $sql = <<<SQL
+    const fn = methodOf(`        $sql = <<<SQL
         { { { { {
         SQL;
-        return $sql;
-    }
-}
-`);
+        return $sql;`, 'sqlTemplate');
     expect(fn.nestingDepth).toBeLessThanOrEqual(2);
   });
 
   it('does not credit a try/catch that only appears inside a heredoc', () => {
-    const [fn] = extract(`<?php
-class H
-{
-    public function heredocTry()
-    {
-        $s = <<<TXT
-        try { something } catch (E $e) { }
+    const fn = methodOf(`        $s = <<<TXT
+        try { something } catch (E $e) { return 1; }
         TXT;
-        return $s;
-    }
-}
-`);
+        return $s;`, 'heredocTry');
     expect(fn.hasTryCatch).toBe(false);
   });
 
   it('does not count braces inside a nowdoc', () => {
-    const [fn] = extract(`<?php
-class H
-{
-    public function nowdoc()
-    {
-        $s = <<<'TXT'
+    const fn = methodOf(`        $s = <<<'TXT'
         { { { { {
         TXT;
-        return $s;
-    }
-}
-`);
+        return $s;`, 'nowdoc');
     expect(fn.nestingDepth).toBeLessThanOrEqual(2);
   });
 
   it('still measures code after a heredoc ends', () => {
     // Anti-vacuity: a stripper that blanks to end-of-file would pass every case
     // above and silently disable the rules for the rest of the method.
-    const [fn] = extract(`<?php
-class H
-{
-    public function afterHeredoc($a)
-    {
-        $s = <<<TXT
+    const fn = methodOf(`        $s = <<<TXT
         { { {
         TXT;
         if ($a) { if ($a) { if ($a) { if ($a) { if ($a) { return 1; } } } } }
-        return 0;
-    }
-}
-`);
+        return 0;`, 'afterHeredoc');
     expect(fn.nestingDepth).toBeGreaterThan(4);
+  });
+});
+
+describe('PhpAdapter — a malformed heredoc must not blank the rest of the file (AC-PHP-ADAPTER-07)', () => {
+  // The technical reviewer flagged this as a non-blocking follow-up; it is the
+  // exact vacuity failure the previous test was written to prevent, so it is
+  // covered here rather than deferred.
+  //
+  // Measured before the fix: an unterminated heredoc blanked to end-of-file, so a
+  // method with a five-level if chain AFTER the opener reported nestingDepth 1 and
+  // length 4 -- the rest of the method was never measured at all. A gate that goes
+  // quiet on malformed input is indistinguishable from one that found nothing.
+  it('does not blank to end-of-file when a heredoc is never closed', () => {
+    const fn = methodOf(`        $s = <<<TXT
+        { { {
+        no closing marker here
+        if ($a) { if ($a) { if ($a) { if ($a) { if ($a) { return 1; } } } } }
+        return 0;`, 'unterminated');
+    // The malformed heredoc is treated as ordinary text, so the real nesting after
+    // it is still measured.
+    expect(fn.nestingDepth).toBeGreaterThan(4);
+  });
+
+  it('still strips a heredoc that IS terminated', () => {
+    // The guard above must not be satisfied by giving up on heredocs entirely.
+    const fn = methodOf(`        $s = <<<TXT
+        { { { { { { { {
+        TXT;
+        return $s;`, 'terminated');
+    expect(fn.nestingDepth).toBeLessThanOrEqual(2);
   });
 });
