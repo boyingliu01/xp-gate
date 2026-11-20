@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.38.69.0] - 2026-11-20
+
+**补齐 gate-13-entry 镜像（上一提交遗漏）。**
+
+canonical 的 `githooks/gate-entries/gate-13-entry.sh` 已恢复为原样，
+但镜像 `src/npm-package/hooks/gate-entries/gate-13-entry.sh` 还停留在带解析改动的版本。
+pre-push 的镜像一致性检查拦下了这次推送，并准确报出了文件名。
+
 ## [0.38.68.0] - 2026-11-20
 
 **镜像同步（无行为变更）。**
