@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.38.70.0] - 2026-11-20
+
+**修正文件模式不一致。**
+
+`githooks/gate-13-compiler-strictness.sh` 在 git 里的模式是 `100644`，
+镜像 `src/npm-package/gate-13-compiler-strictness.sh` 是 `100755`。
+
+pre-push 的镜像一致性检查拦下了推送并准确报出模式差异——
+内容早已字节一致，差的只是索引里的权限位。
+
 ## [0.38.69.0] - 2026-11-20
 
 **补齐 gate-13-entry 镜像（上一提交遗漏）。**
