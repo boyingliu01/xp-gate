@@ -1,6 +1,20 @@
 # XP-Gate Architecture
 
-XP-Gate 是一个 AI 驱动的开发工作流工具，通过 6 道质量门禁和多专家 AI 评审，确保每次代码提交都符合高质量标准。
+XP-Gate 是一个 AI 驱动的开发工作流工具，通过确定性质量门禁和多专家 AI 评审，确保每次代码提交都符合高质量标准。
+
+> **本文件不写门禁数量、阶段数量、行数、语言数等任何可被命令重新计算的值。**
+> 这类数字曾在此处写成四种互相矛盾的形式（同一份文件里"6 道"与"12 道"并存，Phase
+> 写作 11 而实际为 6），且没有任何检查会发现——因为写死的是**声明**，改它的是**代码**。
+> 要真实值，问工具：
+>
+> | 想知道 | 运行 |
+> |---|---|
+> | 全部门禁及其真实执行顺序 | `grep XP_GATE_ORDER githooks/gate-driver.sh` |
+> | 门禁名 ↔ 决定它的脚本 | `githooks/gate-registry.sh` |
+> | Sprint Flow 的阶段 | `skills/sprint-flow/SKILL.md` |
+>
+> 这条规则由 `scripts/__tests__/arch-doc-counts.test.cjs` 强制执行：一旦有人再次把
+> 会漂移的数字写回来，测试立即变红。
 
 ---
 
@@ -34,7 +48,7 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │   │  sprint-flow/   │  │  delphi-review/ │  │test-spec-align/ │            │
 │   │   SKILL.md      │  │   SKILL.md      │  │   SKILL.md      │            │
 │   │                 │  │                 │  │                 │            │
-│   │ 11 Phase Flow   │  │ 2 Expert Modes  │  │ 2 Phase Check   │            │
+│   │ Phase Flow      │  │ 2 Expert Modes  │  │ 2 Phase Check   │            │
 │   │ Output Contract │  │ Consensus >=90% │  │ Freeze/Unfreeze │            │
 │   └─────────────────┘  └─────────────────┘  └─────────────────┘            │
 │                                                                              │
@@ -82,14 +96,14 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 │                       Layer 1: Git Hooks (Deterministic)                     │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │              pre-commit (Gate 0-11 阻断, Gate 12 警告)              │   │
+│   │              pre-commit (编号门禁阻断, Gate 12 警告)                 │   │
 │   ├─────────────────────────────────────────────────────────────────────┤   │
 │   │ Gate 1 │ Gate 2 │ Gate 3 │ Gate 4 │ Gate 5 │ Gate 6                 │   │
 │   │ Code   │ Dup    │ CCN    │Principles│ Tests │Arch +                │   │
 │   │ Quality│ Code   │Complexity│Checker │Coverage│Boy Scout             │   │
 │   ├────────┴────────┴────────┴──────────┴────────┴──────────────────────┤   │
 │   │  adapter-common.sh: detect_project_lang() + route_to_adapter()      │   │
-│   │  adapters/*.sh: 12 Language Adapters                                │   │
+│   │  adapters/*.sh: 语言适配器（数量见目录，不在此处）                  │   │
 │   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │   ┌─────────────────────────────────────────────────────────────────────┐   │
@@ -110,9 +124,9 @@ XP-Gate 将确定性质量门禁（纯代码）与 AI 智能评审（多专家�
 
 #### 3.1.1 pre-commit 钩子
 
-pre-commit 在每次 `git commit` 时自动运行 12 道编号门禁（Gate 0–11），任何一道失败都会阻止提交；Gate 12 (File Hygiene) 只报警告，不阻断。
+pre-commit 在每次 `git commit` 时自动运行编号门禁列表（顺序由 `XP_GATE_ORDER` 决定），任何一道失败都会阻止提交；Gate 12 (File Hygiene) 只报警告，不阻断。确切的门禁数量与顺序问 `grep XP_GATE_ORDER githooks/gate-driver.sh`——本文件不复制这个数字。
 
-**12 道编号门禁 (Gate 0-11) + Gate 12 (warning-only)**
+**编号门禁（可阻断）+ Gate 12 (warning-only)**
 
 | Gate | 名称 | 检查内容 | 标准 |
 |------|------|----------|------|
@@ -132,8 +146,8 @@ pre-commit 在每次 `git commit` 时自动运行 12 道编号门禁（Gate 0–
 
 **关键文件**
 
-- `githooks/pre-commit` — 门禁主编排脚本 (Gate 0-12, ~3000 行)
-- `githooks/adapter-common.sh` — 语言检测与路由 (130 行)
+- `githooks/pre-commit` — 门禁主编排脚本（入口；门禁体在 `githooks/gate-entries/`）
+- `githooks/adapter-common.sh` — 语言检测与路由
 
 #### 3.1.2 语言适配器模式
 
@@ -188,7 +202,7 @@ pre-push 在 `git push` 前验证代码走查结果：
 
 ### 3.2 Layer 2: Principles Checker (TypeScript)
 
-Principles Checker 是一个独立的 TypeScript 项目，实现 14 条代码规范检查规则。
+Principles Checker 是一个独立的 TypeScript 项目，实现代码规范检查规则。规则集以 `src/npm-package/principles/rules/` 目录为准，本节不复制规则数量。
 
 #### 3.2.1 核心组件
 
@@ -201,18 +215,18 @@ Principles Checker 是一个独立的 TypeScript 项目，实现 14 条代码规
 | `src/principles/boy-scout.ts` | 童子军规则: 差分警告强制执行 |
 | `src/principles/baseline.ts` | 历史基线存储 `.warnings-baseline.json` |
 
-#### 3.2.2 规则体系 (14 条)
+#### 3.2.2 规则体系
 
-**Clean Code 规则 (9 条)**
+**Clean Code 规则**
 
 | 规则 | ID | 检查内容 | 默认阈值 |
 |------|-----|----------|----------|
 | Long Function | `clean-code.long-function` | 函数行数过多 | 50 行 |
-| Large File | `clean-code.large-file` | 文件行数过多 | 300 行 |
+| Large File | `clean-code.large-file` | 文件行数过多 | 1150 行 |
 | Magic Numbers | `clean-code.magic-numbers` | 魔术数字 | 白名单: 0,1,-1,2,10,100... |
 | God Class | `clean-code.god-class` | 上帝类 | 15 个方法 |
 | Deep Nesting | `clean-code.deep-nesting` | 深层嵌套 | 4 层 |
-| Too Many Params | `clean-code.too-many-params` | 参数过多 | 4 个 |
+| Too Many Params | `clean-code.too-many-params` | 参数过多 | 7 个 |
 | Missing Error Handling | `clean-code.missing-error-handling` | 缺少错误处理 | — |
 | Unused Imports | `clean-code.unused-imports` | 未使用导入 | — |
 | Code Duplication | `clean-code.code-duplication` | 代码重复 | — |
@@ -227,21 +241,30 @@ Principles Checker 是一个独立的 TypeScript 项目，实现 14 条代码规
 | ISP | `solid.isp` | 接口隔离原则 |
 | DIP | `solid.dip` | 依赖倒置原则 |
 
-#### 3.2.3 语言适配器 (9 种)
+#### 3.2.3 语言适配器
 
-`src/principles/adapters/` 目录包含 9 种语言的 AST 解析适配器：
+`src/principles/adapters/` 目录存放各语言的 AST 解析适配器。**支持哪些语言以目录内容为准**，本节不列数量——该目录在 90 天内变更过 94 次，任何写死的数量都会过期（曾写 "9 种"，实测已远多于此，且这一节还漏列了 C# 与 PHP）。查询真实覆盖：
+
+```bash
+ls src/principles/adapters/*.ts          # 全部适配器文件
+xp-gate detect-languages                 # 当前项目检测到的语言与工具
+```
+
+> 目录中同时含**语言适配器**与**共享工具模块**（`duplication`、`member-scan`、
+> `position-analysis`、`quote-state` 等），两者不在同一层级，直接数文件会把它们混为一谈。
+
+代表性适配器及其解析技术：
 
 | 适配器 | 技术 | 说明 |
 |--------|------|------|
 | `typescript.ts` | ast-grep + TypeScript AST | 完整 AST 支持 |
 | `python.ts` | ast-grep | Python 语法树解析 |
-| `go.ts` | ast-grep | Go 语法树解析 |
-| `java.ts` | ast-grep | Java 语法树解析 |
-| `kotlin.ts` | ast-grep | Kotlin 语法树解析 |
-| `dart.ts` | ast-grep | Dart 语法树解析 |
-| `swift.ts` | ast-grep | Swift 语法树解析 |
-| `cpp.ts` | Regex | C++ 正则提取 (无完整 AST) |
-| `objectivec.ts` | Regex | Objective-C 正则提取 |
+| `go.ts` / `java.ts` / `kotlin.ts` | ast-grep | JVM 与 Go 语法树解析 |
+| `dart.ts` / `swift.ts` / `csharp.ts` | ast-grep | Dart / Swift / C# 语法树解析 |
+| `php.ts` | ast-grep | PHP 语法树解析 |
+| `cpp.ts` / `objectivec.ts` | Regex | C++ / Objective-C 正则提取（无完整 AST） |
+
+> 上表是**举例**而非全集，刻意不做数量声明。
 
 #### 3.2.4 童子军规则 (Boy Scout Rule)
 
@@ -274,16 +297,16 @@ layers:
     pattern: "src/domain/**"
     allowedImports: ["src/shared/**"]
     forbiddenImports: ["src/infrastructure/**", "src/application/**"]
-    
+
   application:     # 应用服务层
     pattern: "src/application/**"
     allowedImports: ["src/domain/**", "src/shared/**"]
     forbiddenImports: ["src/infrastructure/**"]
-    
+
   infrastructure:  # 基础设施层
     pattern: "src/infrastructure/**"
     allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
-    
+
   presentation:    # 表示层
     pattern: "src/presentation/**"
     allowedImports: ["src/application/**", "src/domain/**", "src/shared/**"]
@@ -365,16 +388,13 @@ triggers:
 
 **sprint-flow/SKILL.md** — Sprint 流程编排器
 
-```yaml
-11 Phases:
-  Phase 0: THINK      → brainstorming → Pain Document + Design Document
-  Phase 1: PLAN       → autoplan + delphi-review → specification.yaml
-  Phase 2: BUILD      → TDD + freeze + blind-review → MVP v1
-  Phase 3: REVIEW     → code-walkthrough + test-alignment + browse
-  Phase 4: USER ACCEPTANCE → 必须人工验收
-  Phase 5: FEEDBACK   → learn + retro + systematic-debugging
-  Phase 6: SHIP       → finishing-a-development-branch + deploy + canary
-```
+> 阶段的权威定义在上面这个 skill 文件里（`grep -A2 "phase end-to-end" skills/sprint-flow/SKILL.md`）。
+> 本节曾经列出七个早已不存在的阶段，并标称了一个与 skill 定义不符的阶段数，冲突了很久
+> 而无人发现。**枚举复制品**与**数字复制品**是同一类腐化，所以这里只描述编排形态，
+> 不再重列阶段名、也不再写阶段数。
+
+Sprint Flow 把一个功能从需求推进到发布：需求探索 → 设计评审 → TDD 构建 → 验证 →
+发布 → 复盘收尾，关键节点暂停等待用户决策，随时纳入涌现需求并要求人工验收。
 
 **delphi-review/SKILL.md** — 多专家共识评审
 
@@ -387,7 +407,7 @@ Modes:
   design:            # 设计评审
     - 需求/设计/架构/PR 评审
     - 输出: 共识报告 + specification.yaml
-    
+
   code-walkthrough:  # 代码走查
     - 变更代码评审
     - 输出: .code-walkthrough-result.json
@@ -751,9 +771,11 @@ root/
 
 ## 7. 设计决策
 
-### 7.1 门禁数量演进 (9 → 6 → 10 → 12)
+### 7.1 门禁数量演进
 
-原始设计有 9 道门禁；中期重构合并为 6 道；v0.8.x 安全审计阶段又新增 3 道安全门禁 + Gate 0 版本一致性预检，得到 10 道 (Gate 0-9)；v0.14.x 起补入构建完整性、SAST、Sprint Flow 与文件卫生，得到当前的 **12 道编号门禁 (Gate 0-11) + Gate 12（warning-only）**。
+<!-- historic:start — 本区记录历史状态，其中的数字属于当时的真实值。检查 present-tense 数字声称的测试会跳过本区，所以新增历史数字必须放在这两行标记之间。 -->
+
+原始设计有 9 道门禁；中期重构合并为 6 道；v0.8.x 安全审计阶段又新增 3 道安全门禁 + Gate 0 版本一致性预检，得到 10 道 (Gate 0-9)；v0.14.x 起补入构建完整性、SAST、Sprint Flow 与文件卫生。此后编号门禁继续增加与拆分（含 `12b`/`12c` 这类字母后缀门禁），**当前的真实集合与顺序只在 `XP_GATE_ORDER` 里，不在本段文字里**。
 
 **阶段一：原始 9 道（拆分过细）**
 
@@ -762,7 +784,7 @@ root/
 | Gate 1 (Static) + Gate 2 (Lint) + Gate 5 (Shell) | Gate 1 (Code Quality) | 都是静态代码分析，按语言统一处理 |
 | Gate 3 (Tests) + Gate 4 (Coverage) | Gate 5 (Tests + Coverage) | 测试和覆盖率紧密相关，适配器统一提供 |
 | Gate 8 (Boy Scout) + Gate 9 (Architecture) | Gate 6 (Architecture + Boy Scout) | 都属于代码长期健康度检查 |
-| Gate 6 (Principles) | Gate 4 (Principles) | 独立保留，14 条规则需要专门检查 |
+| Gate 6 (Principles) | Gate 4 (Principles) | 独立保留，规则集需要专门检查（规则数见 `src/npm-package/principles/rules/`） |
 | Gate 7 (Complexity) | Gate 3 (Complexity) | 独立保留，圈复杂度是核心指标 |
 | — | Gate 2 (Duplicate Code) | 新增门禁，代码重复检测 |
 
@@ -784,13 +806,15 @@ root/
 | Gate 11 (Sprint Flow) | `githooks/sprint-gate.sh` | 校验 sprint 状态一致性（BUILD 前需 delphi-review APPROVED），v0.11.0 重编号 |
 | Gate 12 (File Hygiene) | `githooks/gate-12-file-hygiene.sh` | 尾部空白 / 缺 EOF 换行 / 冲突标记 / 超大文件 / YAML-JSON 语法，v0.14.15 新增；仅冲突标记与语法错误硬阻断，其余警告 |
 
-**当前总数**: Gate 0-11 = 12 道编号门禁（脚本数字编号，全部可阻断）+ Gate 12 (File Hygiene, warning-only)；用户文档仍可以 "代码质量(1+2+5) / 复杂度(3) / 原则(4) / 架构(6) / 安全(7+8+10)" 5 个概念簇 + Gate 0 预检的旧 "6 道" 视角阅读。
+**当前总数**: 编号门禁（脚本数字编号，可阻断）+ Gate 12 (File Hygiene, warning-only)。确切数量不在本文件维护——它由 `XP_GATE_ORDER` 决定，加一个字母后缀门禁（如 `12b`）就会变，而文字不会跟着变。这正是本节历史上写错的地方：它曾断言 "Gate 0-11 = 12 道"，而同一份文件的另两处说 "6 道"。
 
 **关键收益**:
 - 适配器统一封装语言工具链，跨语言一致行为
 - 安全审计随 v0.8.x 一并补齐（密钥/SAST/IaC）
 - Gate 0 防止版本漂移这种"易发现但慢中毒"的问题
 - 工具缺失 = SKIP（不阻断），避免一刀切（例外：Gate 8 密钥扫描自 #499 起 fail-closed）
+
+<!-- historic:end -->
 
 ### 7.2 为什么使用 Delphi 方法
 
@@ -872,7 +896,7 @@ Phase 2 (Execute): 禁止修改 ← 测试是"防护网"，确保实现正确
 XP-Gate 通过 5 层架构实现了从代码提交到部署发布的全流程质量保障：
 
 1. **Git Hooks 层** — 确定性质量门禁，每次提交必检
-2. **Principles Checker** — 14 条代码规范，9 语言支持
+2. **Principles Checker** — 代码规范检查，多语言适配
 3. **Architecture Validation** — Clean Architecture 分层边界验证
 4. **AI Skills** — 多专家共识评审，测试与需求对齐
 5. **Sprint Flow** — 一键编排完整开发流程
