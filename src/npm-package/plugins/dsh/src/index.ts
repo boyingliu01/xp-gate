@@ -629,8 +629,13 @@ function registerHooks(
   if (cfg.delphiGuard !== "off") {
     ctx.on("tools/pre-execute", async (exec, next) => {
       const cwd = sessionCwd(exec) ?? process.cwd()
+      // The file decides which worktree is judged when the call names one: sprints
+      // run in separate worktrees with their own `.sprint-state`, so judging by the
+      // session cwd alone let one sprint block another (and let one APPROVED verdict
+      // authorise writes anywhere). See guardRoot in hooks.ts.
+      const target = { path: writtenPath(exec.arguments) }
       // Deny before dispatch so the edit never reaches the filesystem.
-      return delphiGuardDecision(cwd, exec.name) ?? next()
+      return delphiGuardDecision(cwd, exec.name, target) ?? next()
     })
   }
   if (cfg.principlesCheck !== "off") {

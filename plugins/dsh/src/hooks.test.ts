@@ -175,3 +175,73 @@ describe("delphiGuardDecision deadlock", () => {
     }
   })
 })
+
+/**
+ * @test REQ-DSH-016 worktrees do not gate each other
+ * @intent 复现并锁定「worktree 互锁」：判定只读会话 cwd 下的 .sprint-state，
+ *         不看目标文件属于哪个 worktree，导致 A worktree 的未通过评审
+ *         拦住 B worktree 的写入（反之亦然）。
+ * @covers AC-DSH-016-01 AC-DSH-016-02
+ *
+ * `.sprint-state/` is gitignored, so every worktree carries its OWN copy and every
+ * sprint runs its review inside its own worktree. Measured against a real session
+ * before the fix: with the session cwd in a REQUEST_CHANGES worktree, an edit aimed
+ * at a *different* worktree that had already reached APPROVED was still denied --
+ * the two sprints jailed each other. Only one could be unblocked at a time, and
+ * running a second review made it worse rather than better.
+ */
+describe("delphiGuardDecision across worktrees", () => {
+  /** Build a checkout-shaped directory with a given verdict. */
+  function checkout(verdict: "APPROVED" | "REQUEST_CHANGES" | "none"): string {
+    const root = mkdtempSync(join(dir, "wt-"))
+    if (verdict === "none") return root
+    try {
+      mkdirSync(join(root, ".sprint-state"), { recursive: true })
+      writeFileSync(
+        join(root, ".sprint-state", "delphi-reviewed.json"),
+        JSON.stringify({ verdict, timestamp: "2026-10-27T10:00:00.000Z" }),
+        "utf8",
+      )
+    } catch (error) {
+      throw new Error(`cannot build scratch worktree: ${(error as Error).message}`)
+    }
+    return root
+  }
+
+  it("judges the worktree the file belongs to, not the one the session opened in", () => {
+    // The failing worktree opened first; the approved one is the actual target.
+    const rejected = checkout("REQUEST_CHANGES")
+    const approved = checkout("APPROVED")
+    const target = join(approved, "src", "impl.ts")
+
+    expect(
+      delphiGuardDecision(rejected, "edit", { path: target }),
+      "a write into the APPROVED worktree must not be stopped by another worktree's rejection",
+    ).toBeUndefined()
+
+    // And the converse still holds: the rejected worktree stays gated from itself.
+    expect(
+      delphiGuardDecision(rejected, "edit", { path: join(rejected, "src", "impl.ts") }),
+      "the REQUEST_CHANGES worktree must still gate its own writes",
+    ).toBeDefined()
+  })
+
+  it("does not let an approved worktree authorise writes elsewhere", () => {
+    // Without this, the fix would be a hole: opening the session in an approved
+    // worktree would unlock every other checkout on disk.
+    const approved = checkout("APPROVED")
+    const rejected = checkout("REQUEST_CHANGES")
+
+    expect(
+      delphiGuardDecision(approved, "edit", { path: join(rejected, "src", "impl.ts") }),
+      "an APPROVED verdict must not travel to another worktree",
+    ).toBeDefined()
+  })
+
+  it("keeps the session cwd as the fallback when the tool names no target", () => {
+    // `bash` carries no file_path. It must still be judged against the session's
+    // worktree, which is the only root the guard can attribute it to.
+    const rejected = checkout("REQUEST_CHANGES")
+    expect(delphiGuardDecision(rejected, "bash")).toBeDefined()
+  })
+})

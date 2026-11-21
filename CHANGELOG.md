@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.38.76.0] - 2026-11-20
+
+**多个 worktree 不再互相锁死。** DSH 的 Delphi 门禁此前只认「会话 cwd」，不看你要写哪个文件。
+
+### 缺陷：两个 sprint 互相关进牢里
+
+`.sprint-state/` 被 gitignore，所以**每个 worktree 各有一份**，每个 sprint 也都在自己的
+worktree 里跑评审。但 `delphiGuardDecision()` 的判定依据是 `sessionCwd(exec)` —— 会话启动目录，
+与实际要写的 `file_path` 无关。于是：
+
+```text
+会话在主仓库（REQUEST_CHANGES），写 worktree B 的文件（APPROVED）→ DENY ❌
+会话在 worktree B（APPROVED），写主仓库的文件（REQUEST_CHANGES）→ ALLOW ❌
+```
+
+第一行是**互锁**：两个 sprint 只能有一个处于可写状态，跑第二个评审反而让局面更糟。
+第二行更危险：一个 APPROVED verdict 会泄露到磁盘上任何一个 checkout。
+
+修复前用真实 worktree 实测复现过，也在已发布的 0.38.75 产物上确认了
+`delphiGuardDecision.length === 2`（根本没有目标参数）。
+
+### 修复
+
+`delphiGuardDecision(root, toolName, target?)` 现在接受调用目标。目标带文件时，
+**从该文件向上找最近的、含 `.sprint-state` 的祖先目录**来确定它属于哪个 worktree ——
+就近判定，所以嵌套的 `.worktrees/x` 会盖过包含它的外层 checkout。
+不带文件的工具（`bash`）仍用会话 cwd，那是唯一能诚实归属给它的根。
+
+`index.ts` 把 `file_path` / `path` 透传进去，复用已有的 `writtenPath()`。
+
+修复后实测：
+
+```text
+会话在 main(REQUEST_CHANGES)，写 main 文件  → DENY  ✅
+会话在 main(REQUEST_CHANGES)，写 wtB 文件   → ALLOW ✅
+会话在 wtB(APPROVED)，写 wtB 文件           → ALLOW ✅
+会话在 wtB(APPROVED)，写 main 文件          → DENY  ✅
+bash（无 file_path），会话在 main           → DENY  ✅
+```
+
+### 只有 DSH 有这个缺陷
+
+`claude-code` 与 `qoder` 的门禁都用 `git rev-parse --show-toplevel` 定位状态目录，
+按构造就是 per-worktree 的。DSH 是唯一问错问题的那个。
+
+### 顺带
+
+新增 3 个用例（先红后绿）：双向隔离，以及无目标工具回落到会话 cwd 的行为。
+`plugins/dsh` 214 个测试通过，`tsc` 干净。
+
 ## [0.38.75.0] - 2026-11-20
 
 **两道门禁都学会了说真话：Gate 2 不再崩溃，也不再假装通过；doctor 不再对好钩子报警。**
