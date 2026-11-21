@@ -62,6 +62,16 @@ const GENERATED_TREES = Object.freeze([
   { mirror: 'hooks/lib', canonical: path.join(REPO_ROOT, 'githooks', 'lib'), sync: 'hooks' },
   { mirror: 'build-integrity', canonical: path.join(REPO_ROOT, 'src', 'build-integrity'), sync: 'module' },
   { mirror: 'skills', canonical: path.join(REPO_ROOT, 'skills'), sync: 'skills' },
+  // These two shipped in the package's `files[]` and were maintained by hand: no
+  // generator knew about them, so they were the last mirror pairs whose "edit the
+  // right copy" depended on memory. Same shape as build-integrity, so `module`.
+  { mirror: 'mutation', canonical: path.join(REPO_ROOT, 'src', 'mutation'), sync: 'module' },
+  { mirror: 'mock-policy', canonical: path.join(REPO_ROOT, 'src', 'mock-policy'), sync: 'module' },
+  // P1-E step 4. Long deferred because it was edited in place by another
+  // workstream; that work has landed. `sync-package-content.js` already produced
+  // this tree at prepack, so adding it here changes nothing about what ships --
+  // only whether the tree is generated on demand and therefore safe to untrack.
+  { mirror: 'principles', canonical: path.join(REPO_ROOT, 'src', 'principles'), sync: 'module' },
 ]);
 
 function quiet(argv) {

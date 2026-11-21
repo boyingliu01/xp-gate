@@ -403,7 +403,14 @@ $principles_diff"
 # the v0.27.3 plugin drift above.
 [ -d src/mutation ] || fail "missing canonical mutation directory: src/mutation"
 [ -d src/npm-package/mutation ] || fail "missing mirror mutation directory: src/npm-package/mutation"
-mutation_diff=$(diff -rq src/mutation src/npm-package/mutation 2>&1 || true)
+# `-x '__tests__'` for the same reason the principles and mock-policy checks below
+# already use it: the generator never copies test code (SKIP_DIRS in
+# sync-package-content.js), so a mirror that included it would be the anomaly. This
+# check was the only one of the three without the exclusion, which made it demand
+# exactly what the generator refuses to produce -- a permanent failure for anyone
+# who had ever tracked the mirror. Reproduced: P1-E untracked the tree, the
+# generator regenerated it correctly, and this line was the only thing still red.
+mutation_diff=$(diff -rq -x '__tests__' src/mutation src/npm-package/mutation 2>&1 || true)
 [ -z "$mutation_diff" ] || fail "mutation mirror tree drift:
 $mutation_diff"
 
