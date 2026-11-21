@@ -51,7 +51,7 @@ skill(name="grill-with-docs", user_message="[需求描述]")
 grill-with-docs 执行：
 1. **逐个追问决策树** — 每题附推荐答案；事实自行探查，决策留给用户
 2. **同步维护 CONTEXT.md** — 项目上下文沉淀（`domain-modeling` 内置）
-3. **同步维护 ADR** — `docs/adr/ADR-NNNN-*.md` 架构决策记录
+3. **同步维护 ADR** — 架构决策记录，路径与命名以 `skills/domain-modeling/ADR-FORMAT.md` 为准（`docs/adr/{NNNN}-{kebab-case-title}.md`）
 4. **达成共享理解** — 需求边界、用户场景、验收标准清晰化
 
 ### Step 2: R1 需求评审（#368 恢复的第一点评审）
@@ -131,6 +131,66 @@ orchestrator 基于访谈记录 + CONTEXT.md + R1 评审结论生成设计文档
 - 收到用户 APPROVED 后，自动进入 Part B
 - 如果用户未 APPROVED，BLOCK 并等待
 
+### Step 4b: ADR 门 — 每个 sprint 都必须交付一条记录
+
+> **为什么这一步存在**：`docs/adr/` 曾长期只有 3 份记录，而 `grill-with-docs` 有能力写
+> ADR、文档也把 ADR 列在"输出"里——但**没有任何条件要求它发生**。于是它没有发生。
+> 这正是 ADR-0003 记录的缺陷形态：**声明了，但没执行**。
+> 清单里的一项只是建议；**完成条件**才是保证。
+
+**这一步不要求你"判断本次 sprint 是否触碰架构"**——那种判断没有产物、无法审计，
+执行者会不自觉地答"没有"，于是门形同不存在。改为：**任何 sprint 都必须写出一个文件**，
+写的是哪个由你决定，但"没写"不是选项。
+
+**产物**：`.sprint-state/phase-outputs/phase-2-adr.json`
+
+```json
+{
+  "decision": "recorded",
+  "adr": "docs/adr/0007-switch-to-riverpod.md",
+  "reason": "引入新的状态管理方案替代 provider，属于难以回退的技术选型变更；ADR 记录了被否决的选项 B/C 及理由"
+}
+```
+
+或
+
+```json
+{
+  "decision": "not_needed",
+  "reason": "只修改 src/gate-12 内部的条件判断，未新增或删除模块边界，未改变依赖方向，未引入或替换技术选型"
+}
+```
+
+`decision` 只允许这两个值。`reason` 在两种情况下都必填：`recorded` 时说明这条决策
+**为什么值得记**，`not_needed` 时说明**凭什么判定不需要**。
+
+**若有 ADR**：路径必须真实存在，命名遵循 `skills/domain-modeling/ADR-FORMAT.md`
+（`docs/adr/{NNNN}-{kebab-case-title}.md`，`{NNNN}` 为零填充递增序号）。
+内容必须包含**决策**与**被否决的备选方案及理由**——后者是未来读者唯一无法自行重建的
+部分，也是 ADR 存在的全部价值；只写结论的 ADR 等于没有。
+
+**哪些改动通常生成 ADR**（用于提高 `recorded` 的比例，不是豁免清单）：
+
+| 信号 | 例子 |
+|---|---|
+| 新增或取消模块、层边界 | 拆包、合并包、新增目录层级 |
+| 改变依赖方向 | A 依赖 B 改为 B 依赖 A |
+| 引入或替换关键技术选型 | 换 ORM、换构建工具、换通信协议 |
+| 做出**难以回退**的决策 | 数据模型、公开 API 形状、存储格式 |
+| 出现被否决的备选方案且有理由 | 选了 A 而不是 B，B 更好为什么不用 |
+
+> 与 AGENTS.md 的 SKIP 规则同源：**"没有决策要记"与"忘了记决策"必须可区分**。
+> 前者是一份带理由的 JSON，后者是该文件不存在。差别在产物上，不在措辞上。
+
+**门禁行为**（四条都由脚本判定，不看叙述）：
+
+1. `.sprint-state/phase-outputs/phase-2-adr.json` 不存在 → BLOCK，不可进入 Part B。
+2. `decision` 不是 `recorded` / `not_needed` 之一 → BLOCK。
+3. `reason` 为空或短于 20 字符 → BLOCK（`无`、`n/a`、`skip` 这类不算理由）。
+4. `decision` 为 `recorded` 但 `adr` 指向的文件不存在 → BLOCK。
+
+> 第 1 条是这一步的全部要点：**门检查的是产物是否存在，不是你声称自己想过**。
+
 ### 暂停点
 
 | 暂停点 | 触发条件 | 用户操作 | 自动恢复条件 |
@@ -141,7 +201,7 @@ orchestrator 基于访谈记录 + CONTEXT.md + R1 评审结论生成设计文档
 ### 输出
 
 - CONTEXT.md（项目上下文沉淀）
-- ADR 文件（`docs/adr/ADR-NNNN-*.md`）
+- ADR 文件（`docs/adr/{NNNN}-{kebab-case-title}.md`，Step 4b 的产出；若豁免则记录理由）
 - requirements-reviewed.json（`.sprint-state/phase-outputs/`）
 - Design Document（`docs/plans/YYYY-MM-DD-<topic>-design.md`）
 - 进入 Part B 自动执行（使用设计文档作为输入）
