@@ -62,10 +62,26 @@ function historicLineIndexes(text) {
   text.split('\n').forEach((line, i) => {
     // The marker may carry an explanatory comment after the token, so match the
     // token rather than requiring an immediate `-->`.
-    if (/<!--\s*historic:start\b/i.test(line)) { inside = true; exempt.add(i); return; }
-    if (/<!--\s*historic:end\b/i.test(line)) { inside = false; exempt.add(i); return; }
+    if (/<!--\s*historic:start\b/i.test(line)) {
+      // Nesting would make "inside" ambiguous, and an ambiguous exemption region
+      // is how a guard grows a hole it cannot report.
+      if (inside) throw new Error(`line ${i + 1}: nested historic:start (region already open)`);
+      inside = true;
+      exempt.add(i);
+      return;
+    }
+    if (/<!--\s*historic:end\b/i.test(line)) {
+      if (!inside) throw new Error(`line ${i + 1}: historic:end without a matching start`);
+      inside = false;
+      exempt.add(i);
+      return;
+    }
     if (inside) exempt.add(i);
   });
+  // An unclosed region would silently exempt everything to end-of-file -- measured
+  // at 129 of 905 lines when `historic:end` is dropped. That is the same
+  // silent-skip class this suite exists to remove, so it fails loudly instead.
+  if (inside) throw new Error('unclosed historic:start — the exemption would run to EOF');
   return exempt;
 }
 
@@ -94,7 +110,16 @@ describe('ARCHITECTURE.md cannot contradict the code it describes', () => {
     const offenders = [];
     doc.split('\n').forEach((line, i) => {
       if (exempt.has(i)) return;
-      for (const m of line.matchAll(/(\d+)\s*道(?:编号)?门禁/g)) {
+      // The measure word is either 道 or 个 and the qualifier is optional and
+      // interchangeable: "6 道门禁", "16 道编号门禁", "6 道质量门禁" and "6 个门禁"
+      // all make the same claim. Leaving either out let a contradiction through --
+      // proven both times by inserting the missed wording and watching the suite
+      // stay green ("6 道质量门禁" at line 20, then "6 个门禁" at the same line).
+      // Chinese numerals stay unmatched on purpose: the false-positive surface is
+      // unbounded, and the document header already forbids restating any
+      // recomputable value, so the remaining escape requires contradicting that
+      // stated rule first.
+      for (const m of line.matchAll(/(\d+)\s*[道个](?:编号|质量)?门禁/g)) {
         if (Number(m[1]) !== actual) offenders.push(`line ${i + 1}: ${m[0]}`);
       }
     });
@@ -165,10 +190,19 @@ describe('ARCHITECTURE.md cannot contradict the code it describes', () => {
       const thresholdCell = cells[cells.length - 2] ?? '';
       const claimed = thresholdCell.match(/(\d+)\s*(?:行|个|层)?/);
       if (!claimed) {
-        // A non-numeric descriptor ("—", "白名单: …") means the row makes no
-        // numeric claim, so there is nothing to contradict. This is the ONLY
-        // legitimate skip in this file, and it is stated explicitly so that
-        // "no claim" cannot be confused with "could not check".
+        // The single legitimate skip in this file: the cell carries no number at
+        // all, so the row makes no numeric claim and there is nothing to
+        // contradict. "No claim" must not be confused with "could not check", so
+        // the absence is required to be an explicit placeholder. Anything else --
+        // a word, a symbol like Infinity, a renamed column -- failed to parse for
+        // a reason that could hide a real disagreement, and is reported.
+        const isPlaceholder = /^[\s—–\-]*$/.test(thresholdCell);
+        if (!isPlaceholder) {
+          offenders.push(
+            `${ruleId}: threshold cell "${thresholdCell}" has no number and is not an ` +
+              `explicit placeholder -- documentation NOT verified`,
+          );
+        }
         continue;
       }
       if (Number(claimed[1]) !== real) {
