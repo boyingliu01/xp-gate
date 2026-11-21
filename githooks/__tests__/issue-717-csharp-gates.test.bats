@@ -22,12 +22,14 @@ setup() {
 # ---------------------------------------------------------------------------
 
 @test "#717 AC-717-05: Gate 3's source filter accepts .cs" {
-  run grep -F 'm|mm|kt' "$REPO_ROOT/githooks/adapters/gate-3.sh"
-  # The extension alternation was extended with `cs`; assert the token directly
-  # so the test fails on a revert rather than on any unrelated rewrite.
-  run grep -E '\.\(ts\|tsx\|js\|jsx\|py\|go\|java\|swift\|cpp\|c\|hpp\|h\|m\|mm\|kt\|cs\)\$' \
-    "$REPO_ROOT/githooks/adapters/gate-3.sh"
+  # #732 moved the extension list out of this file into the shared classifier, so
+  # grepping for the old inline literal now fails for a reason that has nothing to
+  # do with C#. Assert the CONTRACT instead: ask the classifier for the ccn family
+  # and check that `cs` survives into the pattern the gate actually uses. Still
+  # goes red if `cs` is ever dropped from the population.
+  run bash -c ". '$REPO_ROOT/githooks/lib/file-classifier.sh' && xp_gate_ext_regex \"\$(xp_gate_source_exts ccn)\""
   [ "$status" -eq 0 ]
+  [[ "$output" == *"|cs|"* ]]
 }
 
 @test "#717 AC-717-05: the TS gate-3 lizard filter accepts .cs" {
@@ -53,9 +55,11 @@ setup() {
 # ---------------------------------------------------------------------------
 
 @test "#717 AC-717-06: Gate 4's principles filter accepts .cs" {
-  run grep -E '\.\(ts\|tsx\|js\|jsx\|py\|go\|java\|kt\|dart\|swift\|cpp\|c\|hpp\|h\|m\|mm\|cs\)\$' \
-    "$REPO_ROOT/githooks/adapters/gate-4.sh"
+  # Same reasoning as AC-717-05: #732 moved this literal into the shared
+  # classifier, so the assertion asks the classifier for the principles family.
+  run bash -c ". '$REPO_ROOT/githooks/lib/file-classifier.sh' && xp_gate_ext_regex \"\$(xp_gate_source_exts principles)\""
   [ "$status" -eq 0 ]
+  [[ "$output" == *"|cs|"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -335,12 +339,15 @@ CAP_DOC() { echo "$REPO_ROOT/docs/plans/2026-11-03-csharp-adapter-design.md"; }
 
 @test "#717 AC-717-10: a covered claim has code behind it (Gate 3 + Gate 4)" {
   # If the doc says covered, the extension must actually be in the filter.
-  # Matched with -F on the literal "|cs)" that ends each alternation -- never a
-  # regex, whose backslashes were mangled twice while writing this file.
-  run grep -F "|cs)" "$REPO_ROOT/githooks/adapters/gate-3.sh"
+  # #732 moved both alternations into the shared classifier, so the old
+  # "|cs)" literal no longer exists in either gate file. Ask the classifier for
+  # each family instead -- same claim, checked where it now lives.
+  run bash -c ". '$REPO_ROOT/githooks/lib/file-classifier.sh' && xp_gate_ext_regex \"\$(xp_gate_source_exts ccn)\""
   [ "$status" -eq 0 ]
-  run grep -F "|cs)" "$REPO_ROOT/githooks/adapters/gate-4.sh"
+  [[ "$output" == *"|cs|"* ]]
+  run bash -c ". '$REPO_ROOT/githooks/lib/file-classifier.sh' && xp_gate_ext_regex \"\$(xp_gate_source_exts principles)\""
   [ "$status" -eq 0 ]
+  [[ "$output" == *"|cs|"* ]]
 }
 
 @test "#717 AC-717-10: the doc does not claim full C# support" {
