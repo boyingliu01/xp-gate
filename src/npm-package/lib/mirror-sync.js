@@ -144,7 +144,24 @@ const KNOWN_PAIRS = Object.freeze([...generatedPairs(), ...HAND_LISTED_PAIRS]);
  * list is empty: a missing generator in a checkout means the layout moved, while a
  * missing generator outside one is expected. Cheap enough to run per command.
  *
+ * CONTRACT -- `null` has two different causes, and callers must not conflate them:
+ *
+ *   - generator absent  -> null, because this is not a checkout. A caller that
+ *                          reacts to null as "you are in the wrong directory" is
+ *                          right; a caller that reacts as "your pairs are broken"
+ *                          is wrong.
+ *   - pairs non-empty   -> null, because there is something to compare and the
+ *                          generator was found. This is the silent, healthy case.
+ *
+ * An empty `pairs` array in a checkout is NEVER silent: it is the broken-tool case
+ * the function exists to catch, and it returns the reason string. Review flagged
+ * this as a load-bearing but undocumented assumption, which is why it is written
+ * down here rather than only implied by the tests.
+ *
  * @param {string} root repository root to check
+ * @param {ReadonlyArray<object>} [pairs] pair list to judge; defaults to KNOWN_PAIRS
+ *   so call sites never pass it. Injectable purely so the zero-pair branch is
+ *   reachable from a test -- a module-level constant cannot be emptied by a fixture.
  * @returns {string|null} an error message, or null when the pair list is usable
  */
 function assertPairsResolved(root, pairs = KNOWN_PAIRS) {

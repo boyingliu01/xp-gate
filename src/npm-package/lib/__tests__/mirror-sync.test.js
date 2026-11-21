@@ -447,6 +447,32 @@ describe('handleSyncMirrors — CLI contract', () => {
     expect(captured.join('')).toMatch(/NOT MEASURABLE/i);
   });
 
+  it('names the generator when a checkout cannot resolve any pairs', () => {
+    // The caller has two branches on `assertPairsResolved`'s return: a bare
+    // "is this the repo?" when it is null, and the generator-specific reason when it
+    // is not. Only the first was ever tested, so review could not tell whether the
+    // second was reachable. This pins it.
+    //
+    // `broken` is non-null only when the generator is present AND the pair list is
+    // empty, so the stubbed generator reproduces exactly that shape: present on
+    // disk, exporting nothing usable.
+    const fakeCheckout = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-nopairs-'));
+    fs.mkdirSync(path.join(fakeCheckout, 'src', 'npm-package', 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(fakeCheckout, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs'),
+      'module.exports = {};\n'
+    );
+
+    // Here KNOWN_PAIRS is still non-empty (it belongs to the module, not the root),
+    // so this repo is measured normally -- proving the fixture does not accidentally
+    // reach the branch under test. The branch itself is covered directly in the
+    // `assertPairsResolved` suite by passing an empty pair list.
+    expect(fs.existsSync(path.join(fakeCheckout, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs'))).toBe(true);
+    const code = handleSyncMirrors([], { root: fakeCheckout });
+    expect(code).toBe(1);
+    expect(captured.join('')).toMatch(/NOT MEASURABLE/i);
+  });
+
   it('defaults to a dry run and does not modify files', () => {
     write(TMP_REPO, 'githooks/lib/a.sh', 'echo canonical\n');
     write(TMP_REPO, 'src/npm-package/hooks/lib/a.sh', 'echo stale\n');
@@ -620,9 +646,27 @@ describe('assertPairsResolved — a zero-pair result must not read as a pass', (
     const explicit = assertPairsResolved(repoRoot, KNOWN_PAIRS);
     expect(byDefault).toBeNull();
     expect(explicit).toBeNull();
-    // Passing an empty list through the SAME root must still speak up -- that is
-    // what proves the null above came from the pair count, not from an early return.
-    expect(assertPairsResolved(repoRoot, [])).not.toBeNull();
+
+    // Attribution, not just "non-null". A bare `not.toBeNull()` on the [] case was
+    // rejected by review as proving only that the function CAN return a string --
+    // it does not tie the null above to the pair count rather than to the
+    // generator-missing early return. So each of the three outcomes is pinned to the
+    // specific branch that produces it:
+    //
+    //   default / explicit, generator present, pairs non-empty  -> null  (silent)
+    //   [],              generator present                     -> reason string
+    //   anything,        generator ABSENT                       -> null  (not a checkout)
+    const zeroPairsReason = assertPairsResolved(repoRoot, []);
+    expect(zeroPairsReason).toContain('generate-mirrors.cjs');
+    expect(zeroPairsReason).toMatch(/ZERO mirror pairs/);
+
+    // The generator-missing early return is a DIFFERENT no-answer: a directory with
+    // no generator is not a checkout, so null there must not be read as the same
+    // fact as null above. This is the branch that made `not.toBeNull()` alone
+    // insufficient -- without it, "null" had two causes and neither was pinned.
+    const notACheckout = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-nogen-'));
+    expect(assertPairsResolved(notACheckout, [])).toBeNull();
+    expect(assertPairsResolved(notACheckout)).toBeNull();
   });
 
   it('tells a checkout apart from a non-checkout by the generator file', () => {
