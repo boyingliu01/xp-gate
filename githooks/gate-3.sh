@@ -383,7 +383,7 @@ else
     # Three places to look, in order: the driver's own resolution ($GATE_DIR),
     # this file's own directory (covers a test that `source`s the gate directly,
     # where no driver ran and $GATE_DIR is unset), and the repo root.
-    XP_FC_LIB="$GATE_DIR/lib/file-classifier.sh"
+    XP_FC_LIB="${GATE_DIR:-}/lib/file-classifier.sh"
     [ -f "$XP_FC_LIB" ] || XP_FC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/lib/file-classifier.sh"
     [ -f "$XP_FC_LIB" ] || XP_FC_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/file-classifier.sh"
     # A missing library must not degrade into "no files": an empty pattern would
