@@ -67,6 +67,33 @@ function toRepoRelative(filePath) {
 }
 
 /**
+ * Make a coverage artifact's absolute path comparable to `root`.
+ *
+ * Node writes POSIX-style absolute paths even on Windows:
+ *
+ *   "/d/projects/repo/src/x.mjs"     (what coverage-summary.json holds)
+ *   "D:\\projects\\repo\\src\\x.mjs"   (what process.cwd() holds)
+ *
+ * `path.isAbsolute` accepts the first form on win32, so the artifact path took
+ * the "is absolute" branch — and `path.relative` then compared two different
+ * drive spellings and produced `../../d/projects/repo/src/x.mjs`, a key that
+ * matches no source file. Measured: `xp-gate crap` read the coverage map and
+ * still reported every function unmeasured.
+ *
+ * Converting `/x/...` to `x:\...` before relativising is what makes the two forms
+ * agree. On POSIX this is a no-op, because the root and the artifact are then
+ * spelled the same way already.
+ */
+function relativiseArtifactPath(absPath, root) {
+  const asPosixDrive = /^\/([A-Za-z])\//.exec(absPath);
+  if (process.platform === 'win32' && asPosixDrive) {
+    const drivePath = `${asPosixDrive[1].toUpperCase()}:${absPath.slice(2).split('/').join('\\')}`;
+    return path.relative(root, drivePath);
+  }
+  return path.relative(root, absPath);
+}
+
+/**
  * Attach each function's file coverage and CRAP score.
  *
  * @param {Array<{file:string,name:string,ccn:number}>} functions
@@ -127,7 +154,54 @@ function buildCrapReport(functions, options = {}) {
 }
 
 /**
- * Read per-file coverage ratios out of an istanbul coverage-final.json.
+ * Per-file coverage ratio read out of ONE Node `coverage-summary.json` entry.
+ *
+ * Node reports several metrics per file; the function ratio is the one CRAP
+ * needs, because CRAP ranks functions. Falling back through functions -> lines ->
+ * branches is deliberate: a file with no function data but real line data is
+ * still partly measured, while a file with none of the three is not measured at
+ * all and must stay absent (see AC-858-03 — recording it as 0 would put every
+ * such file at the top of a ranking built on no evidence).
+ *
+ * @returns {number|null} ratio in [0,1], or null when the entry holds no metric
+ */
+function ratioFromNodeSummary(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  for (const metric of ['functions', 'lines', 'branches', 'statements']) {
+    const m = entry[metric];
+    if (!m || typeof m !== 'object') continue;
+    // `pct` is a percentage; `total`/`covered` are the raw counts the percentage
+    // was derived from. Prefer the counts (no rounding), fall back to pct.
+    if (typeof m.covered === 'number' && typeof m.total === 'number' && m.total > 0) {
+      return m.covered / m.total;
+    }
+    if (typeof m.pct === 'number' && Number.isFinite(m.pct)) {
+      // Node writes 100 for "nothing to measure" as well as for full coverage.
+      // A zero total is not full coverage; it is no measurement.
+      if (m.total === 0) return null;
+      return m.pct / 100;
+    }
+  }
+  return null;
+}
+
+/**
+ * Read per-file coverage ratios out of a coverage artifact.
+ *
+ * Two shapes are accepted, because two tools produce them and both are normal:
+ *
+ *   istanbul / vitest  coverage/coverage-final.json
+ *     { "<abs path>": { s: { "<stmt id>": count } } }
+ *
+ *   Node built-in      coverage/coverage-summary.json
+ *     { "total": {...}, "<path>": { lines: {pct}, functions: {pct}, ... } }
+ *     produced by `node --test --experimental-test-coverage`
+ *
+ * #858: only the first was understood. A project on Node's own runner therefore
+ * got "No coverage artifact" forever — its Gate 5 could accept the very same file
+ * at 86.82% while CRAP called coverage absent. case 2 is the one this function
+ * exists for.
+ *
  * Missing or unreadable input yields an empty map, which surfaces as "every
  * function unmeasured" rather than as a silently perfect score.
  */
@@ -149,14 +223,31 @@ function readFileCoverage(coverageFile) {
 
   const root = process.cwd();
   for (const [absPath, entry] of Object.entries(parsed)) {
-    if (!entry || !entry.s) continue;
-    const counts = Object.values(entry.s);
-    if (!counts.length) continue;
-    const covered = counts.filter((c) => c > 0).length;
+    if (!entry || typeof entry !== 'object') continue;
+
+    // `total` is Node's aggregate across every file, not a file. Recording it
+    // would put a phantom entry in the map under a key no source path can match,
+    // and worse, it reads as a real measurement (#858).
+    if (absPath === 'total') continue;
+
+    let ratio;
+    if (entry.s) {
+      // istanbul: statement hit counts. Unchanged behaviour (#858 AC-02).
+      const counts = Object.values(entry.s);
+      if (!counts.length) continue;
+      const covered = counts.filter((c) => c > 0).length;
+      ratio = covered / counts.length;
+    } else {
+      // Node summary. A file entry with no metric stays absent rather than
+      // becoming a fabricated 0.
+      ratio = ratioFromNodeSummary(entry);
+    }
+    if (ratio === null || ratio === undefined) continue;
+
     const rel = path.isAbsolute(absPath)
-      ? toRepoRelative(path.relative(root, absPath))
+      ? toRepoRelative(relativiseArtifactPath(absPath, root))
       : toRepoRelative(absPath);
-    coverage.set(rel, covered / counts.length);
+    coverage.set(rel, ratio);
   }
   return coverage;
 }

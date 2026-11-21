@@ -190,11 +190,26 @@ export function getTempDir(): string {
  * never a tool limitation: lizard reports the CCN 11-22 functions the issue
  * names, and the gate dropped those files before lizard was invoked, so the
  * report said "no source files to check" for a tree full of them.
+ *
+ * #732 is the same defect with a different four letters. mjs/cjs/mts/cts were
+ * missing, so a .cjs build script was never a candidate and Gate 3 answered
+ * "no source files to check" about a file that HAD changed. They lead the list
+ * because they are what this entry exists to keep.
+ *
+ * Must stay equivalent to XP_GATE_CCN_EXTS in githooks/lib/file-classifier.sh,
+ * which the commit-time hook uses. Pinned by gate-732-source-extensions.test.bats.
  */
-const LIZARD_EXTENSIONS = /\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs)$/;
+const LIZARD_EXTENSIONS = /\.(mjs|cjs|mts|cts|ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs|dart|php|phtml)$/;
 
-/** File extensions that semgrep supports. */
-const SEMGREP_EXTENSIONS = /\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)$/;
+/**
+ * File extensions that semgrep supports.
+ *
+ * #732: mjs/cjs/mts/cts added. semgrep parses and flags them — measured 6
+ * ERROR-level findings on a real .mjs/.cjs fixture — so excluding them meant
+ * "the scanner never looked", which is not a verdict.
+ * Kept equivalent to XP_GATE_SEMGREP_EXTS in githooks/lib/file-classifier.sh.
+ */
+const SEMGREP_EXTENSIONS = /\.(mjs|cjs|mts|cts|ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift|ps1|psm1)$/;
 
 /** IaC file patterns. */
 const IAC_PATTERN = /\.(tf|yaml|yml)$|Dockerfile/;

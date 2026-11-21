@@ -376,7 +376,22 @@ else
     # the one under `adapters/`. A fix applied to only one of them leaves the
     # other silently wrong -- which is how this edit was first written and how
     # the accompanying test failed. Any change here must land in BOTH.
-    CC_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt|cs|dart|php|phtml)$' || true)
+    # #732: the extension list lives in ONE place now. Four gates each wrote out
+    # their own literal, and all four had forgotten mjs/cjs/mts/cts -- so a .cjs
+    # build script was never a candidate for grading, and the gate's "no changed
+    # source files" SKIP was factually wrong about a file that HAD changed.
+    XP_FC_LIB="$GATE_DIR/lib/file-classifier.sh"
+    [ -f "$XP_FC_LIB" ] || XP_FC_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/file-classifier.sh"
+    # A missing library must not degrade into "no files": an empty pattern would
+    # match nothing and report a clean SKIP, which is the exact fail-open this
+    # change removes. Refuse instead.
+    if [ ! -f "$XP_FC_LIB" ]; then
+      echo "BLOCKED - source classifier missing (githooks/lib/file-classifier.sh); refusing to grade an unknown population."
+      return 1
+    fi
+    # shellcheck source=/dev/null
+    . "$XP_FC_LIB"
+    CC_FILES=$(echo "$CHANGED_FILES" | grep -E "$(xp_gate_ext_regex "$(xp_gate_source_exts ccn)")" || true)
 
     # Grade exactly the population the baseline was written from. The two must
     # match or the ratchet reports pre-existing code as "new", which is a false

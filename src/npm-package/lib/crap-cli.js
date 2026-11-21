@@ -41,12 +41,37 @@ every untested file at the top of the ranking; treating them as 100% would hide
 them.
 `;
 
+/**
+ * Pick the coverage artifact to read when --coverage was not given.
+ *
+ * #858: this used to be hardcoded to coverage/coverage-final.json, which only
+ * istanbul-shaped tools (vitest, jest, nyc) write. Node's built-in
+ * `--experimental-test-coverage` writes coverage/coverage-summary.json and never
+ * the other file, so on such a project CRAP was permanently unavailable rather
+ * than merely waiting for coverage to be generated.
+ *
+ * Order: an explicit --coverage, then istanbul (richer, per-statement), then the
+ * Node summary. Returning the istanbul path when NEITHER exists is deliberate --
+ * that is the path the error message names, and it is the more common layout.
+ */
+function discoverCoverageFile(explicit, cwd) {
+  if (explicit) return explicit;
+  const coverageDir = path.join(cwd || process.cwd(), 'coverage');
+  const candidates = ['coverage-final.json', 'coverage-summary.json'];
+  for (const name of candidates) {
+    const candidate = path.join(coverageDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(coverageDir, candidates[0]);
+}
+
 function parseArgs(argv) {
   const opts = {
     top: 20,
     threshold: 6,
     json: false,
-    coverage: path.join(process.cwd(), 'coverage', 'coverage-final.json'),
+    // #858: discovered after parsing, not fixed here. `--coverage` still wins.
+    coverage: null,
     paths: ['src'],
     includeMirrors: false,
     help: false,
@@ -161,9 +186,19 @@ async function handleCrap(argv) {
     return 1;
   }
 
+  opts.coverage = discoverCoverageFile(opts.coverage);
+
   if (!fs.existsSync(opts.coverage)) {
+    // #858: name the artifact that WOULD have been accepted. A user on Node's own
+    // runner is told "npx vitest run --coverage" and reasonably concludes CRAP
+    // needs vitest — but the file `node --test --experimental-test-coverage`
+    // writes is one this tool now reads. Only suggesting vitest turned a format
+    // gap into a "you picked the wrong test runner" answer.
     console.error(`✗ No coverage artifact at ${opts.coverage}`);
-    console.error('  Run the test suite with coverage first: npx vitest run --coverage');
+    console.error('  Generate one with either runner:');
+    console.error('    npx vitest run --coverage                              -> coverage/coverage-final.json');
+    console.error('    node --test --experimental-test-coverage               -> coverage/coverage-summary.json');
+    console.error('  Both formats are read; pass either one with --coverage <file>.');
     console.error('  (Without it every function is unmeasured, which is not a ranking.)');
     return 1;
   }
@@ -188,4 +223,4 @@ async function handleCrap(argv) {
   return 0;
 }
 
-module.exports = { handleCrap, parseArgs, render, runLizard };
+module.exports = { handleCrap, parseArgs, render, runLizard, discoverCoverageFile };

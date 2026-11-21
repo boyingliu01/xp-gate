@@ -14,6 +14,7 @@ const {
   joinCoverage,
   buildCrapReport,
   isMirrorPath,
+  readFileCoverage,
 } = require('../crap.js');
 
 describe('crap.js - CRAP formula', () => {
@@ -133,5 +134,188 @@ describe('crap.js - mirror exclusion', () => {
     ];
     const report = buildCrapReport(mixed, { threshold: 6, mirrors: true });
     expect(report.hotspots.map((h) => h.name)).toEqual(['mirrorFn', 'realFn']);
+  });
+});
+
+/**
+ * @test REQ-CRAP-858 `xp-gate crap` must accept the coverage Node itself produces
+ * @intent #858: handleCrap only looked for istanbul's `coverage/coverage-final.json`.
+ *         A project using Node's built-in runner —
+ *
+ *           node --test --experimental-test-coverage
+ *
+ *         — gets `coverage/coverage-summary.json` and NEVER a coverage-final.json,
+ *         so `xp-gate crap` was permanently unavailable there, not merely
+ *         "coverage not generated yet". Measured on a real repo whose Gate 5
+ *         accepted the same artifact at 86.82% lines while CRAP said
+ *         "No coverage artifact".
+ *
+ *         Two artifacts, two shapes:
+ *
+ *           istanbul coverage-final.json   { "<abs path>": { s: { "<id>": count } } }
+ *           node coverage-summary.json     { "total": {...}, "<path>": { lines: {pct}, ... } }
+ *
+ *         readFileCoverage knew only the first. Given the second it found no
+ *         `entry.s` anywhere and returned an empty map — which surfaces as "every
+ *         function unmeasured", indistinguishable from having no coverage at all.
+ *
+ *         CRAP is the tool that finds "which function most needs a test", so the
+ *         cost of this gap is the ranking itself: the repo's worst file
+ *         (functions 25%) was diluted by an 86.82% overall figure that Gate 5
+ *         passes, and CRAP was the only thing positioned to surface it.
+ *
+ * @covers AC-858-01 the Node summary format is read into per-file ratios
+ * @covers AC-858-02 istanbul output still reads exactly as before
+ * @covers AC-858-03 a file with no function data does not become a fabricated 0
+ * @covers AC-858-04 an unrecognised JSON shape yields no coverage, not bogus values
+ */
+describe('#858 readFileCoverage accepts Node coverage-summary.json', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+
+  let dir;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crap858-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function writeCoverage(name, payload) {
+    const p = path.join(dir, name);
+    fs.writeFileSync(p, JSON.stringify(payload));
+    return p;
+  }
+
+  it('AC-858-01: reads node coverage-summary.json into per-file ratios', () => {
+    const file = writeCoverage('coverage-summary.json', {
+      total: { lines: { total: 100, covered: 80, pct: 80 } },
+      [`${dir}/tools.mjs`]: {
+        lines: { total: 100, covered: 52, pct: 52.26 },
+        branches: { total: 10, covered: 10, pct: 100 },
+        functions: { total: 4, covered: 1, pct: 25 },
+      },
+    });
+
+    const coverage = readFileCoverage(file);
+    // The per-file ratio is keyed repo-relative, like the istanbul reader.
+    const key = [...coverage.keys()].find((k) => k.endsWith('tools.mjs'));
+    expect(key).toBeDefined();
+    // Node reports functions 25%; that is the factor CRAP needs.
+    expect(coverage.get(key)).toBeCloseTo(0.25, 2);
+  });
+
+  it('AC-858-02: istanbul coverage-final.json still reads as before', () => {
+    const file = writeCoverage('coverage-final.json', {
+      [`${dir}/alpha.js`]: { s: { '0': 1, '1': 0, '2': 1, '3': 1 } },
+    });
+
+    const coverage = readFileCoverage(file);
+    const key = [...coverage.keys()].find((k) => k.endsWith('alpha.js'));
+    expect(key).toBeDefined();
+    expect(coverage.get(key)).toBeCloseTo(0.75, 5);
+  });
+
+  it('AC-858-03: an entry with no measurable data is skipped, not scored 0', () => {
+    // `total` carries no filename; a file entry with no functions/lines data
+    // must not be recorded as 0% -- that would push every such file to the top
+    // of the ranking on evidence that does not exist. Unmeasured is not zero.
+    const file = writeCoverage('coverage-summary.json', {
+      total: { lines: { total: 10, covered: 10, pct: 100 } },
+      [`${dir}/measured.mjs`]: { functions: { total: 2, covered: 1, pct: 50 } },
+      [`${dir}/empty.mjs`]: {},
+    });
+
+    const coverage = readFileCoverage(file);
+    expect([...coverage.keys()].some((k) => k.endsWith('measured.mjs'))).toBe(true);
+    expect([...coverage.keys()].some((k) => k.endsWith('empty.mjs'))).toBe(false);
+  });
+
+  it('AC-858-03b: the "total" aggregate is not recorded as a file', () => {
+    // Node writes a "total" entry holding the whole-project ratio. It has no
+    // filename, and recording it put a phantom path in the map that no source
+    // file could ever match -- while reading, to a human, like a real measurement.
+    const file = writeCoverage('coverage-summary.json', {
+      total: { lines: { total: 100, covered: 80, pct: 80 } },
+      [`${dir}/real.mjs`]: { functions: { total: 4, covered: 1, pct: 25 } },
+    });
+
+    const coverage = readFileCoverage(file);
+    expect(coverage.has('total')).toBe(false);
+    expect([...coverage.keys()].some((k) => k === 'total')).toBe(false);
+    expect(coverage.size).toBe(1);
+  });
+
+  it('AC-858-03c: a POSIX-spelled absolute path is joinable, not ../../d/...', () => {
+    // Node on Windows writes "/d/projects/repo/src/x.mjs" while process.cwd() is
+    // "D:\projects\repo". Both pass path.isAbsolute, so path.relative compared two
+    // drive spellings and returned "../../d/projects/.../x.mjs" -- a key that
+    // matched no source file, making every function look unmeasured (#858).
+    // The fixture is derived from the real cwd so the assertion holds on any drive.
+    const cwd = process.cwd();
+    const drive = /^([A-Za-z]):/.exec(cwd);
+    if (!drive) {
+      // POSIX: no drive-letter mismatch to reproduce.
+      return;
+    }
+    const posixPath = `/${drive[1].toLowerCase()}${cwd.slice(2).split(path.sep).join('/')}/src/posixy.mjs`;
+    const file = writeCoverage('coverage-summary.json', {
+      total: { lines: { total: 1, covered: 1, pct: 100 } },
+      [posixPath]: { functions: { total: 4, covered: 1, pct: 25 } },
+    });
+
+    const coverage = readFileCoverage(file);
+    const keys = [...coverage.keys()];
+    expect(keys).toEqual(['src/posixy.mjs']);
+    expect(coverage.get('src/posixy.mjs')).toBeCloseTo(0.25, 5);
+  });
+
+  it('AC-858-04: an unrecognised JSON shape yields an empty map, never a guess', () => {
+    const file = writeCoverage('weird.json', { foo: 'bar', baz: [1, 2, 3] });
+    const coverage = readFileCoverage(file);
+    expect(coverage.size).toBe(0);
+  });
+});
+
+/**
+ * @test REQ-CRAP-858-B the CLI finds a Node coverage artifact without being told
+ * @intent Reading coverage-summary.json (above) is useless if handleCrap never
+ *         looks for it. The default path was hardcoded to istanbul's
+ *         coverage-final.json, so a project producing only the Node summary was
+ *         told "No coverage artifact" while the file sat right there.
+ *         Pinned separately because the reader and the discovery are two
+ *         different failures with the same symptom.
+ * @covers AC-858-05 an existing coverage-summary.json is discovered
+ * @covers AC-858-06 istanbul still wins when both exist, and --coverage overrides
+ */
+describe('#858 discoverCoverageFile', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { discoverCoverageFile } = require('../crap-cli.js');
+
+  // vitest workers forbid process.chdir(), so the root is passed in. The
+  // production default is process.cwd(); that is exercised end-to-end below.
+  let dir;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crap858b-'));
+    fs.mkdirSync(path.join(dir, 'coverage'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('AC-858-05: discovers coverage-summary.json when it is the only artifact', () => {
+    fs.writeFileSync(path.join(dir, 'coverage', 'coverage-summary.json'), '{}');
+    expect(discoverCoverageFile(null, dir)).toBe(path.join(dir, 'coverage', 'coverage-summary.json'));
+  });
+
+  it('AC-858-06: prefers istanbul when both exist, and --coverage always wins', () => {
+    fs.writeFileSync(path.join(dir, 'coverage', 'coverage-summary.json'), '{}');
+    fs.writeFileSync(path.join(dir, 'coverage', 'coverage-final.json'), '{}');
+    expect(discoverCoverageFile(null, dir)).toBe(path.join(dir, 'coverage', 'coverage-final.json'));
+
+    expect(discoverCoverageFile('/tmp/explicit.json')).toBe('/tmp/explicit.json');
   });
 });

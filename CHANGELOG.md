@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.38.79.0] - 2026-11-21
+
+**三个 issue 同一天修完，共同点都是「文件没被当成候选」，然后门禁把「没看」报成了「没问题」。**
+
+### #732 — 四个门禁看不见 .mjs / .cjs / .mts / .cts
+
+扩展名白名单被写了四遍，四份都漏了同样四个后缀：
+
+```text
+Gate 3  (ts|tsx|js|jsx|py|go|java|swift|cpp|c|hpp|h|m|mm|kt)
+Gate 4  (ts|tsx|js|jsx|py|go|java|kt|dart|swift|cpp|c|hpp|h|m|mm)
+Gate 9  (ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift)
+Gate 10 (…|ps1|psm1)
+```
+
+实测后果：14 个 `.mjs`/`.cjs` 文件里 24 个 CCN>5 的生产函数从未被评级；
+semgrep 直接跑同一批文件会报 **6 条 ERROR 级发现**，门禁却因为 `grep -E` 过滤根本没把文件交给它。
+
+四份白名单意味着四次遗忘的机会，所以按 issue 自己的建议**收成一处**：
+新增 `githooks/lib/file-classifier.sh`，导出 `ccn` / `principles` / `semgrep` 三个家族。
+未知家族**报错而不是返回空列表**——空列表会构造出 `\.()$`，匹配不到任何文件然后报一个干净的 SKIP，正是这次要消灭的 fail-open。
+
+修的过程中发现第三处独立路径：`xp-gate check 3` 走的是 `src/gates/gate-3.ts` →
+`common.ts` 的 `LIZARD_EXTENSIONS`/`SEMGREP_EXTENSIONS`，**不是** shell adapter。
+只修 shell 侧的话，`xp-gate check 3` 对 `.cjs` 文件仍然报「no source files to check」。
+两处都改了。端到端实测：改动只有一个 `tool.cjs` 时，修复前 `SKIPPED - Complexity (no source files to check)`，修复后 `Checking complexity for source files...`。
+
+> 顺带纠正 issue 表述：`Gate 9 (SAST)` 是过时的。`xp-gate gate-capability` 报
+> 9 = build-integrity、10 = sast，registry 里也有 #717 的同款注记。没有 `gate-9.sh` 可改。
+
+### #857 — PBT 门禁看不见 `*.test.mjs`
+
+`TEST_SUFFIXES` 只有 `['.test.ts','.test.js','.spec.ts','.spec.js']`。用 `node --test`
+（Node 内置，无需第三方框架）且文件叫 `tests/*.test.mjs` 的项目，被测文件数报 0。
+与 #732 同根因但**是另一条代码路径** —— 修完 #732 不会影响它。
+
+修的时候发现**第二个原因**：只扫 `src/`。issue 自己的复现仓库把测试放在 `tests/`，
+所以即使只补后缀，仍然会是 0。现在扫 `src/ tests/ test/ __tests__/ lib/` 五个约定根。
+
+还有第三件事：**0% 是测量结果，没扫到文件时不该渲染成 0%**。
+`PBT files: 0 (0%)` 会被读成「这个项目没有属性测试」，而事实是「扫描器没看」。
+现在输出 `PBT files: not measured (no test files were found to inspect)`。
+
+端到端：`tests/` 下 14 个 `.test.mjs`（含 5 个 fast-check）→ `Test files: 14`、
+`PBT files: 5 (36%)`、`Frameworks: fast-check`。
+
+### #858 — `xp-gate crap` 不认 Node 自带的覆盖率产物
+
+`readFileCoverage` 只懂 istanbul 的 `coverage-final.json`（`entry.s` 语句命中计数）。
+`node --test --experimental-test-coverage` 产出的是 `coverage-summary.json`，
+**永远不会**生成另一个文件——所以 CRAP 在这类项目上是**永久不可用**，不是「还没生成」。
+
+修的过程中发现三个叠加的问题，全部实测确认：
+
+1. **格式不认**（issue 报的）——现在四种指标都认，优先用 `covered/total` 原始计数
+   （避免 `pct` 的舍入），函数覆盖率优先（CRAP 排的是函数）。
+2. **`total` 被当成一个文件**——Node 的汇总条目被写进 map，路径 `total` 永远匹配不到
+   任何源文件，却读起来像一次真实测量。已排除。
+3. **Windows 上路径永远对不上**——Node 写 `/d/projects/repo/src/x.mjs`，而 `process.cwd()`
+   是 `D:\projectsepo`。两者都 `path.isAbsolute` 为真，于是 `path.relative` 比较了
+   两种盘符写法，产出 `../../d/projects/...` 这个匹配不到任何文件的 key。
+   实测症状：覆盖率读进来了，仍然报「全部函数未测量」。已做盘符规范化。
+
+另外 `--coverage` 的默认值改为**自动发现**（istanbul 优先，其次 Node 摘要），
+错误提示也从只给 vitest 一条路，补上了 `node --test --experimental-test-coverage`。
+唯一建议一个不需要引入 vitest 的方案，等于把格式缺口说成「你选错了测试框架」。
+
+端到端：`src/math.mjs` 的 `complexRank` → `CCN 6, cov 50%, CRAP 24.0`，正确上榜。
+
+### 验证
+
+`src/gates` + `src/npm-package/lib` **1613 通过**（2 个既有 C# 失败不变）；BATS 14 通过 0 失败；
+`tsc` 干净；镜像 PASS。
+
+新文件 `githooks/lib/file-classifier.sh` 被部署清单完整性测试当场抓出未登记 —— 补进
+`githooks/deploy-manifest.sh`、`src/npm-package/lib/deploy-manifest.js` 与
+`scripts/check-hook-mirror.sh` 三处（前两者顺序必须逐项一致，这是既有的 parity 契约）。
+
 ## [0.38.78.0] - 2026-11-21
 
 **Gate 2 不再把「一个文件都没看」报成「没有重复」。** 这是 #855，也是 #853 家族在 CLI 路径上的最后一条 fail-open。

@@ -307,3 +307,41 @@ describe('common.ts', () => {
     });
   });
 });
+
+/**
+ * @test REQ-GATE-EXT-732 The CLI's gate path must also see .mjs/.cjs
+ * @intent #732 was filed against the shell gates' `grep -E` regexes, and while
+ *         fixing those I found the CLI uses a DIFFERENT implementation:
+ *         `xp-gate check 3` routes to src/gates/gate-3.ts, which filters through
+ *         LIZARD_EXTENSIONS / SEMGREP_EXTENSIONS here. Fixing only the shell side
+ *         would have left `xp-gate check 3` on a .cjs file reporting "no source
+ *         files to check" — the issue's own symptom, through the path most users
+ *         actually invoke.
+ *
+ *         Measured end-to-end on a fixture whose only changed file was tool.cjs:
+ *         `xp-gate check 3` printed "SKIPPED - Complexity (no source files to
+ *         check)" before this fix.
+ *
+ * @covers AC-732-07 the lizard filter selects mjs/cjs/mts/cts
+ * @covers AC-732-08 the semgrep filter selects mjs/cjs/mts/cts
+ * @covers AC-732-09 non-source files are still rejected by both
+ */
+describe('#732 the CLI gate path selects .mjs/.cjs too', () => {
+  it('AC-732-07: filterSourceFiles accepts the four module variants', () => {
+    const moduleFiles = ['a.mjs', 'b.cjs', 'c.mts', 'd.cts'];
+    expect(filterSourceFiles(moduleFiles)).toEqual(moduleFiles);
+  });
+
+  it('AC-732-08: filterSemgrepFiles accepts the four module variants', () => {
+    // semgrep parses and flags these files (measured: 6 ERROR-level findings on a
+    // real .mjs/.cjs fixture), so excluding them meant "the scanner never looked".
+    const moduleFiles = ['a.mjs', 'b.cjs', 'c.mts', 'd.cts'];
+    expect(filterSemgrepFiles(moduleFiles)).toEqual(moduleFiles);
+  });
+
+  it('AC-732-09: non-source files are still rejected', () => {
+    // Anti-vacuity: a filter that accepted everything would also pass above.
+    expect(filterSourceFiles(['notes.md', 'data.json', 'a.mjs.bak'])).toEqual([]);
+    expect(filterSemgrepFiles(['notes.md', 'data.json'])).toEqual([]);
+  });
+});
