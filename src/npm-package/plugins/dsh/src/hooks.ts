@@ -20,7 +20,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 /**
  * Tools the sprint guard must never block. Everything else is gated.
@@ -78,6 +78,58 @@ const VERDICT_FILE = "delphi-reviewed.json"
 export interface GuardDenial {
   readonly kind: "deny"
   readonly reason: string
+}
+
+/** Where a tool call is aimed, when it names a file. */
+export interface GuardTarget {
+  /** Absolute or cwd-relative path of the file being written. */
+  readonly path?: string
+}
+
+/**
+ * The filesystem root that should be judged for this call.
+ *
+ * `.sprint-state/` is gitignored, so EVERY worktree carries its own copy and every
+ * sprint runs its review inside its own worktree. Judging by the session cwd
+ * instead has two consequences, both measured against a real session:
+ *
+ *  - sprints jail each other: one worktree's REQUEST_CHANGES blocked writes into a
+ *    DIFFERENT worktree that had already reached APPROVED, so only one sprint could
+ *    be unblocked at a time;
+ *  - an APPROVED verdict leaks: a session opened in an approved worktree would
+ *    authorise writes into any other checkout on disk.
+ *
+ * So the target file decides when there is one. Tools that name no file (`bash`)
+ * keep the session cwd, which is the only root they can honestly be attributed to.
+ */
+function guardRoot(cwd: string, target?: GuardTarget): string {
+  if (!target?.path) return cwd
+  const absolute = isAbsolute(target.path) ? target.path : resolve(cwd, target.path)
+  return findWorktreeRoot(dirname(absolute)) ?? resolveWorktreeRoot(cwd)
+}
+
+/**
+ * Walk up from `start` to the nearest directory holding `.sprint-state`, and report
+ * the worktree root that directory belongs to.
+ *
+ * Stopping at the first `.sprint-state` is what keeps two worktrees apart: each has
+ * its own, so the walk finds the closest one rather than a parent checkout's.
+ */
+function findWorktreeRoot(start: string): string | undefined {
+  let dir = start
+  // Bounded: a malformed tree must not spin, and a real path never needs more.
+  for (let depth = 0; depth < 64; depth += 1) {
+    if (existsSync(join(dir, SPRINT_STATE_DIR))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return undefined
+}
+
+/** The worktree root a cwd sits in, whether or not it has sprint state yet. */
+function resolveWorktreeRoot(cwd: string): string {
+  return findWorktreeRoot(cwd) ?? cwd
 }
 
 /** The file extensions the principles engine actually covers. */
@@ -155,12 +207,21 @@ function readVerdict(root: string): { verdict?: string; unreadable?: string } {
  * Decide whether an edit may proceed.
  *
  * Returns undefined to mean "allow" so the caller can `if (denial) return denial`.
+ *
+ * `target` is what the call is aimed at. When it names a file, that file's worktree
+ * decides -- passing the session cwd alone is what let concurrent sprints jail each
+ * other; see {@link guardRoot}.
  */
-export function delphiGuardDecision(root: string, toolName: string): GuardDenial | undefined {
+export function delphiGuardDecision(
+  root: string,
+  toolName: string,
+  target?: GuardTarget,
+): GuardDenial | undefined {
   if (!mayModifyFiles(toolName)) return undefined
-  if (!existsSync(join(root, SPRINT_STATE_DIR))) return undefined
+  const stateRoot = guardRoot(root, target)
+  if (!existsSync(join(stateRoot, SPRINT_STATE_DIR))) return undefined
 
-  const verdictFile = join(root, SPRINT_STATE_DIR, VERDICT_FILE)
+  const verdictFile = join(stateRoot, SPRINT_STATE_DIR, VERDICT_FILE)
   if (!existsSync(verdictFile)) {
     return {
       kind: "deny",
@@ -170,7 +231,7 @@ export function delphiGuardDecision(root: string, toolName: string): GuardDenial
     }
   }
 
-  const { verdict, unreadable } = readVerdict(root)
+  const { verdict, unreadable } = readVerdict(stateRoot)
   if (unreadable !== undefined) {
     return {
       kind: "deny",
