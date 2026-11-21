@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.38.80.0] - 2026-11-21
+
+**0.38.79.0 的三处修复本身有两处缺陷，这是补丁。** 两处都是「测试存在但没有跑」——
+不,更准确地说：一处是测试跑了但被我的改动弄红了，另一处是我改错了文件。
+
+### 修正 #732 的 loader：$GATE_DIR 在 source 场景下不存在
+
+0.38.79.0 的 loader 这样找分类器:
+
+```text
+$GATE_DIR/lib/file-classifier.sh     ← 由 pre-commit 设置
+$(git rev-parse --show-toplevel)/...  ← 或仓库根
+```
+
+两者都假定「有驱动跑过」。但测试直接 `source gate-3.sh`（`#543` 那批就是这样），
+此时 `$GATE_DIR` **未设置**，脚本又被复制到仓库外的临时目录，于是:
+
+```text
+BLOCKED - source classifier missing (githooks/lib/file-classifier.sh)
+```
+
+Gate 3 拒绝给任何东西评级，三个 `#543` 测试转红。CI 的 BATS 分片里能看到它们。
+
+修法是在两个来源之间插入脚本自身位置（由 `BASH_SOURCE` 推导）。gate-4、gate-10
+有同样的问题，只是暂时没有测试直接 source 它们——一并改了。
+
+### 修正我自己的镜像疏漏：gate-4.sh / gate-10.sh 只改了 adapters/
+
+`CI` 的 `AC-717-17` 当场抓到：`githooks/gate-4.sh` 与 `githooks/adapters/gate-4.sh`
+内容不一致。gate-3 我做了 twin 同步，另两个忘了。
+
+这条测试的价值正在于此——**它不看我说了什么，只看五个副本是否逐字节相同**。
+已补齐并重新生成镜像。
+
+### 验证
+
+`#543` 3/3、`AC-717-17` 8/8、`gate-3` 12/12、`#732` 6/6、镜像 PASS。
+`AC-493-06` 仍是红的，但它在**既有基线**里（`/tmp/base.txt`），与本次改动无关。
+
 ## [0.38.79.0] - 2026-11-21
 
 **三个 issue 同一天修完，共同点都是「文件没被当成候选」，然后门禁把「没看」报成了「没问题」。**
@@ -59,7 +98,8 @@ semgrep 直接跑同一批文件会报 **6 条 ERROR 级发现**，门禁却因�
 2. **`total` 被当成一个文件**——Node 的汇总条目被写进 map，路径 `total` 永远匹配不到
    任何源文件，却读起来像一次真实测量。已排除。
 3. **Windows 上路径永远对不上**——Node 写 `/d/projects/repo/src/x.mjs`，而 `process.cwd()`
-   是 `D:\projectsepo`。两者都 `path.isAbsolute` 为真，于是 `path.relative` 比较了
+   是 `D:\projects
+epo`。两者都 `path.isAbsolute` 为真，于是 `path.relative` 比较了
    两种盘符写法，产出 `../../d/projects/...` 这个匹配不到任何文件的 key。
    实测症状：覆盖率读进来了，仍然报「全部函数未测量」。已做盘符规范化。
 

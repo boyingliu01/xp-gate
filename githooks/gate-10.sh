@@ -271,7 +271,22 @@ else
   # #547 finding 3: ps1|psm1 were missing, so a PowerShell-only commit never
   # reached semgrep even when Gate 10 ran -- the SAST gate was simply absent
   # for that language.
-  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx|js|jsx|py|go|java|c|cpp|cs|rb|php|scala|swift|ps1|psm1)$' || true)
+  # #732: one shared extension list. This gate's literal had forgotten
+  # mjs/cjs/mts/cts, so a .cjs file was never a candidate and a SKIP for "no
+  # changed source files" was factually wrong about a file that HAD changed.
+  # Three places to look, in order: the driver's own resolution ($GATE_DIR),
+  # this file's own directory (covers a test that `source`s the gate directly,
+  # where no driver ran and $GATE_DIR is unset), and the repo root.
+  XP_FC_LIB="$GATE_DIR/lib/file-classifier.sh"
+  [ -f "$XP_FC_LIB" ] || XP_FC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/lib/file-classifier.sh"
+  [ -f "$XP_FC_LIB" ] || XP_FC_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/file-classifier.sh"
+  if [ ! -f "$XP_FC_LIB" ]; then
+    echo "BLOCKED - source classifier missing (githooks/lib/file-classifier.sh); refusing to grade an unknown population."
+    return 1
+  fi
+  # shellcheck source=/dev/null
+  . "$XP_FC_LIB"
+  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E "$(xp_gate_ext_regex "$(xp_gate_source_exts semgrep)")" || true)
 
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"

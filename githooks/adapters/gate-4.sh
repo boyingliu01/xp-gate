@@ -79,7 +79,11 @@ else
   # #732: one shared extension list. This gate's literal had forgotten
   # mjs/cjs/mts/cts, so a .cjs file was never a candidate and a SKIP for "no
   # changed source files" was factually wrong about a file that HAD changed.
+  # Three places to look, in order: the driver's own resolution ($GATE_DIR),
+  # this file's own directory (covers a test that `source`s the gate directly,
+  # where no driver ran and $GATE_DIR is unset), and the repo root.
   XP_FC_LIB="$GATE_DIR/lib/file-classifier.sh"
+  [ -f "$XP_FC_LIB" ] || XP_FC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)/lib/file-classifier.sh"
   [ -f "$XP_FC_LIB" ] || XP_FC_LIB="$(git rev-parse --show-toplevel 2>/dev/null)/githooks/lib/file-classifier.sh"
   if [ ! -f "$XP_FC_LIB" ]; then
     echo "BLOCKED - source classifier missing (githooks/lib/file-classifier.sh); refusing to grade an unknown population."
