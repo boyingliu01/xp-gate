@@ -576,6 +576,30 @@ describe('assertPairsResolved — a zero-pair result must not read as a pass', (
     expect(assertPairsResolved(repoRoot)).toBeNull();
   });
 
+  it('refuses to stay quiet over zero pairs in a checkout', () => {
+    // The error branch used to be unreachable: it read the module-level KNOWN_PAIRS,
+    // resolved once at require time against this repository, so no fixture could
+    // make it empty and no test could execute it. `pairs` is now a parameter with
+    // KNOWN_PAIRS as its default, which is what makes this case possible at all.
+    //
+    // This branch is the whole reason the function exists: it is the guard against a
+    // broken generator reporting a perfect score.
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+    const message = assertPairsResolved(repoRoot, []);
+    expect(message).toMatch(/ZERO mirror pairs/);
+    expect(message).toContain('generate-mirrors.cjs');
+    // And a non-empty list stays silent -- the contrast that makes the message mean
+    // "zero", not "something is wrong here".
+    expect(assertPairsResolved(repoRoot, [{ canonical: 'a', mirror: 'b' }])).toBeNull();
+  });
+
+  it('keeps KNOWN_PAIRS as the default so call sites need no argument', () => {
+    // The parameterisation must not change behaviour for existing callers: the only
+    // production call passes just a root.
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+    expect(assertPairsResolved(repoRoot)).toBe(assertPairsResolved(repoRoot, KNOWN_PAIRS));
+  });
+
   it('tells a checkout apart from a non-checkout by the generator file', () => {
     // Scope note: KNOWN_PAIRS is a module-level constant, resolved once at require
     // time against THIS repository. A fixture directory therefore cannot make it
