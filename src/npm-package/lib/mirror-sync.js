@@ -28,7 +28,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+// Module reference, not a destructure. A load-time copy binds the function once,
+// so a later spy on the module property never reaches it -- which is exactly how
+// the git-invocation count is measured here. A test that cannot observe the call
+// cannot pin it, and an unpinned call count drifts back to one-per-side unnoticed.
+const childProcess = require('child_process');
 
 /**
  * The checkout root, derived from this file's location rather than from the
@@ -237,7 +241,7 @@ function listFiles(root, dir) {
 function isIgnored(root, dir) {
   const normalised = dir.replace(/\\/g, '/');
   try {
-    execFileSync('git', ['check-ignore', '--no-index', '-q', '--', normalised], {
+    childProcess.execFileSync('git', ['check-ignore', '--no-index', '-q', '--', normalised], {
       cwd: root,
       stdio: 'ignore',
     });
@@ -272,22 +276,49 @@ function isIgnored(root, dir) {
  * @param {string} dir directory relative to root
  * @returns {string[]}
  */
+/**
+ * Split raw `git ls-files -z` output into repo-relative path names.
+ *
+ * `-z` terminates every record with NUL and escapes nothing, so the only parsing
+ * is the split. Kept separate from the process call so the merging path below can
+ * reuse it on one query covering several directories.
+ *
+ * @param {string} out stdout from `git ls-files -z`
+ * @returns {string[]}
+ */
+function parseLsFiles(out) {
+  return out
+    .split('\0')
+    .filter(Boolean)
+    .map((p) => p.replace(/\\/g, '/'));
+}
+
+/**
+ * Keep the entries under `dir` as paths relative to it, minus excluded segments.
+ *
+ * @param {string[]} repoPaths repo-relative paths
+ * @param {string} dir directory whose subtree to extract
+ * @returns {string[]}
+ */
+function underDir(repoPaths, dir) {
+  const normalised = dir.replace(/\\/g, '/');
+  return repoPaths
+    .filter((p) => p.startsWith(`${normalised}/`))
+    .map((p) => p.slice(normalised.length + 1))
+    .filter((p) => !p.split('/').some((seg) => MIRROR_EXCLUDES.includes(seg)));
+}
+
 function listTrackedFiles(root, dir) {
   const normalised = dir.replace(/\\/g, '/');
+  void normalised;
   let tracked;
   try {
-    const out = execFileSync('git', ['ls-files', '-z', '--', dir], {
+    const out = childProcess.execFileSync('git', ['ls-files', '-z', '--', dir], {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
-    tracked = out
-      .split('\0')
-      .filter(Boolean)
-      .map((p) => p.replace(/\\/g, '/'))
-      .filter((p) => p.startsWith(`${normalised}/`))
-      .map((p) => p.slice(normalised.length + 1))
-      .filter((p) => !p.split('/').some((seg) => MIRROR_EXCLUDES.includes(seg)));
+    tracked = underDir(parseLsFiles(out), dir);
   } catch {
     return listFiles(root, dir);
   }
@@ -310,6 +341,55 @@ function listTrackedFiles(root, dir) {
 }
 
 /**
+ * Read the tracked file set of BOTH sides of a pair in one `git` launch.
+ *
+ * `git ls-files -- <a> <b>` answers for both paths at once, so a pair costs one
+ * process instead of two. On Windows a launch is ~120ms (measured: ten averaged
+ * 120ms), and a suite comparing seven pairs paid it fourteen times per run
+ * (twenty-eight when the ignored-tree fallback fired). Nothing about the RESULT
+ * changes, which is why `diffTrees`' own tests would never notice the regression
+ * -- the count is pinned separately.
+ *
+ * Falls back to the per-side function when git is unavailable, so a non-repo
+ * caller degrades exactly as before.
+ *
+ * @param {string} root repository root
+ * @param {string} canonical canonical dir (relative)
+ * @param {string} mirror mirror dir (relative)
+ * @returns {{canonical: string[], mirror: string[]}}
+ */
+function readBothSides(root, canonical, mirror) {
+  let repoPaths;
+  try {
+    const out = childProcess.execFileSync('git', ['ls-files', '-z', '--', canonical, mirror], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    repoPaths = parseLsFiles(out);
+  } catch {
+    return {
+      canonical: listTrackedFiles(root, canonical),
+      mirror: listTrackedFiles(root, mirror),
+    };
+  }
+
+  const collect = (dir) => {
+    const tracked = underDir(repoPaths, dir);
+    // An ignored tree has nothing tracked by design; asking git again would only
+    // repeat "no answer" at the cost of another process. See listTrackedFiles.
+    if (tracked.length === 0 && isIgnored(root, dir)) {
+      return listFiles(root, dir).filter(
+        (p) => !p.split('/').some((seg) => MIRROR_EXCLUDES.includes(seg))
+      );
+    }
+    return tracked.filter((p) => fs.existsSync(path.join(root, dir, p))).sort();
+  };
+
+  return { canonical: collect(canonical), mirror: collect(mirror) };
+}
+
+/**
  * Compare a canonical tree against its mirror.
  *
  * Both sides are compared on the tracked file set so an untracked artifact in
@@ -329,8 +409,9 @@ function diffTrees(root, canonical, mirror, options = {}) {
   // passing `exclude: ['dist']` must not silently re-enable `__tests__`.
   const exclude = [...MIRROR_EXCLUDES, ...(options.exclude || [])];
   const keep = (rel) => !rel.split('/').some((seg) => exclude.includes(seg));
-  const canonicalFiles = listTrackedFiles(root, canonical).filter(keep);
-  const mirrorFiles = listTrackedFiles(root, mirror).filter(keep);
+  const both = readBothSides(root, canonical, mirror);
+  const canonicalFiles = both.canonical.filter(keep);
+  const mirrorFiles = both.mirror.filter(keep);
   const mirrorSet = new Set(mirrorFiles);
   const canonicalSet = new Set(canonicalFiles);
 

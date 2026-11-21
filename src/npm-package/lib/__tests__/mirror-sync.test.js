@@ -20,7 +20,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+// Deliberately the MODULE, not `const { execFileSync } = ...`: the spy in the
+// "git invocations per pair" block has to replace `childProcess.execFileSync`,
+// and a load-time destructure would keep calling the pre-spy binding. That is
+// the same trap `init.test.js` documents — but there it was the SUBJECT holding
+// the stale reference; here it is the test.
+const childProcess = require('child_process');
+const { execFileSync } = childProcess;
 
 const {
   collectMirrorPairs,
@@ -147,6 +153,82 @@ function trackAll(root) {
 function trackCanonicalOnly(root, canonical) {
   execFileSync('git', ['add', '--', '.gitignore', canonical], { cwd: root });
 }
+
+describe('diffTrees — git invocations per pair', () => {
+  /**
+   * Each `git` launch costs ~120ms on Windows (measured: 10 launches averaged
+   * 120ms). `diffTrees` used to launch one process per side, so every pair paid
+   * twice, and a test asserting three pairs paid six times. The count is the
+   * contract this block pins: it is the difference between a suite that finishes
+   * and one that does not, and it is invisible to any assertion about *results*.
+   *
+   * Counted by spying on the real module, not by timing: timing on this machine
+   * is noise-dominated (load 80-100%), the count is deterministic.
+   */
+  let spawnCount;
+
+  beforeEach(() => {
+    spawnCount = 0;
+    const real = childProcess.execFileSync;
+    vi.spyOn(childProcess, 'execFileSync').mockImplementation((cmd, args, opts) => {
+      if (cmd === 'git') spawnCount += 1;
+      return real(cmd, args, opts);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reads both sides of one pair in a single git call', () => {
+    write(TMP_REPO, 'canonical/a.sh', 'echo a\n');
+    write(TMP_REPO, 'mirror/a.sh', 'echo a\n');
+    trackAll(TMP_REPO);
+
+    const diff = diffTrees(TMP_REPO, 'canonical', 'mirror');
+    expect(diff.inSync).toBe(true);
+    // One query for both sides. Two would still be correct, and that is exactly
+    // why this needs a test: nothing about the RESULT changes when it regresses.
+    expect(spawnCount).toBe(1);
+  });
+
+  it('falls back to a disk walk when the directory is not a checkout', () => {
+    // The merged read added this branch: one failed `git ls-files` now has to
+    // answer for BOTH sides. If the fallback returned early for only one of them,
+    // the other side would compare a disk walk against an empty set and report
+    // every file as missing -- a crash-shaped bug dressed as drift.
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-sync-nogit-'));
+    try {
+      fs.mkdirSync(path.join(outside, 'a'), { recursive: true });
+      fs.mkdirSync(path.join(outside, 'b'), { recursive: true });
+      fs.writeFileSync(path.join(outside, 'a', 'x.sh'), 'echo x\n');
+      fs.writeFileSync(path.join(outside, 'b', 'x.sh'), 'echo x\n');
+
+      expect(diffTrees(outside, 'a', 'b').inSync).toBe(true);
+
+      fs.writeFileSync(path.join(outside, 'b', 'x.sh'), 'echo DIFFERENT\n');
+      const bad = diffTrees(outside, 'a', 'b');
+      expect(bad.inSync).toBe(false);
+      expect(bad.differing).toEqual(['x.sh']);
+      expect(bad.missing).toEqual([]);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('does not grow linearly when the caller asks about several pairs', () => {
+    write(TMP_REPO, 'c1/a.sh', 'echo a\n');
+    write(TMP_REPO, 'm1/a.sh', 'echo a\n');
+    write(TMP_REPO, 'c2/b.sh', 'echo b\n');
+    write(TMP_REPO, 'm2/b.sh', 'echo b\n');
+    trackAll(TMP_REPO);
+
+    expect(diffTrees(TMP_REPO, 'c1', 'm1').inSync).toBe(true);
+    expect(spawnCount).toBe(1);
+    expect(diffTrees(TMP_REPO, 'c2', 'm2').inSync).toBe(true);
+    expect(spawnCount).toBe(2);
+  });
+});
 
 describe('diffTrees — AC-713-01 untracked artifacts are not drift', () => {
   it('ignores an untracked build artifact in the canonical tree', () => {
