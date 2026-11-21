@@ -567,12 +567,23 @@ describe('KNOWN_PAIRS — P1-E the pair list is derived, not hand-copied', () =>
 });
 
 describe('assertPairsResolved — a zero-pair result must not read as a pass', () => {
+  // Resolve the checkout once, and fail here rather than deep inside an assertion.
+  // The review flagged the bare `path.resolve(__dirname, '..', '..', '..', '..')`
+  // used inline: if this suite ever moves, that walk lands somewhere else and the
+  // failure surfaces as `Cannot read properties of null` on a toMatch, which reads
+  // like a logic bug in the guard rather than a broken path in the test.
+  const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+  const generatorPath = path.join(repoRoot, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs');
+
+  it('can locate the checkout it claims to test', () => {
+    expect(fs.existsSync(generatorPath)).toBe(true);
+  });
+
   it('reports a usable pair list for this checkout', () => {
     // Every pair is derived from generate-mirrors.cjs now, so if that file moved or
     // stopped exporting GENERATED_TREES, KNOWN_PAIRS would be empty and every query
     // would answer "nothing drifted" -- a perfect score from a broken tool.
     expect(KNOWN_PAIRS.length).toBeGreaterThan(0);
-    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
     expect(assertPairsResolved(repoRoot)).toBeNull();
   });
 
@@ -584,7 +595,6 @@ describe('assertPairsResolved — a zero-pair result must not read as a pass', (
     //
     // This branch is the whole reason the function exists: it is the guard against a
     // broken generator reporting a perfect score.
-    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
     const message = assertPairsResolved(repoRoot, []);
     expect(message).toMatch(/ZERO mirror pairs/);
     expect(message).toContain('generate-mirrors.cjs');
@@ -596,8 +606,23 @@ describe('assertPairsResolved — a zero-pair result must not read as a pass', (
   it('keeps KNOWN_PAIRS as the default so call sites need no argument', () => {
     // The parameterisation must not change behaviour for existing callers: the only
     // production call passes just a root.
-    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
-    expect(assertPairsResolved(repoRoot)).toBe(assertPairsResolved(repoRoot, KNOWN_PAIRS));
+    //
+    // Written first as `assertPairsResolved(root) === assertPairsResolved(root,
+    // KNOWN_PAIRS)`, which the review correctly called near-tautological: that is
+    // just what a default parameter means, and if the generator were absent BOTH
+    // calls would return null and the assertion would pass having checked nothing.
+    // The precondition below removes that vacuous pass, and the real signal is that
+    // the default must behave like the non-empty list -- i.e. stay silent.
+    expect(KNOWN_PAIRS.length).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(repoRoot, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs'))).toBe(true);
+
+    const byDefault = assertPairsResolved(repoRoot);
+    const explicit = assertPairsResolved(repoRoot, KNOWN_PAIRS);
+    expect(byDefault).toBeNull();
+    expect(explicit).toBeNull();
+    // Passing an empty list through the SAME root must still speak up -- that is
+    // what proves the null above came from the pair count, not from an early return.
+    expect(assertPairsResolved(repoRoot, [])).not.toBeNull();
   });
 
   it('tells a checkout apart from a non-checkout by the generator file', () => {
@@ -647,6 +672,6 @@ describe('assertPairsResolved — a zero-pair result must not read as a pass', (
     ).toBe(false);
     // And the real repository, which has the generator and a resolved pair list,
     // also reports no problem -- the contrast that makes the null above meaningful.
-    expect(assertPairsResolved(path.resolve(__dirname, '..', '..', '..', '..'))).toBeNull();
+    expect(assertPairsResolved(repoRoot)).toBeNull();
   });
 });
