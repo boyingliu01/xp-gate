@@ -147,7 +147,7 @@ const KNOWN_PAIRS = Object.freeze([...generatedPairs(), ...HAND_LISTED_PAIRS]);
  * @param {string} root repository root to check
  * @returns {string|null} an error message, or null when the pair list is usable
  */
-function assertPairsResolved(root) {
+function assertPairsResolved(root, pairs = KNOWN_PAIRS) {
   const generatorPath = path.join(root, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs');
   if (!fs.existsSync(generatorPath)) {
     // Not a checkout (installed package, or an unrelated directory). Zero pairs is
@@ -155,7 +155,12 @@ function assertPairsResolved(root) {
     // there is nothing to compare and no capability is lost.
     return null;
   }
-  if (KNOWN_PAIRS.length > 0) return null;
+  // `pairs` is a parameter rather than a closed-over constant so the error branch
+  // below is REACHABLE. Reading KNOWN_PAIRS directly made it unreachable: that
+  // constant is resolved once at require time against this repository, so no
+  // fixture could make it empty and no test could ever execute the branch. The
+  // default keeps every existing call site unchanged.
+  if (pairs.length > 0) return null;
   return (
     'mirror-sync resolved ZERO mirror pairs although ' +
     'src/npm-package/scripts/generate-mirrors.cjs exists. Every pair is derived from its ' +
