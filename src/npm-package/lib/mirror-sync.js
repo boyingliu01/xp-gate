@@ -31,12 +31,37 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 /**
+ * The checkout root, derived from this file's location rather than from the
+ * caller's cwd: this module is invoked both from the repo root and from an
+ * installed copy, and `process.cwd()` differs between them.
+ *
+ * `src/npm-package/lib/` -> three levels up.
+ */
+const REPO_ROOT_DIR = path.resolve(__dirname, '..', '..', '..');
+
+/**
  * Directory names that are never mirrored, even when tracked.
  *
  * A build artifact directory is machine state, not source. Copying it would
  * make the mirror differ between machines for reasons no commit explains.
  */
 const SYNC_EXCLUDES = Object.freeze(['__pycache__', 'node_modules', '.git', '.DS_Store']);
+
+/**
+ * Directory names never mirrored into the package, for every pair.
+ *
+ * `__tests__` belongs here rather than in a per-pair `exclude`, because the
+ * decision is global and already made once: `sync-package-content.js` puts
+ * `__tests__` in its `SKIP_DIRS`, so no mirror ever receives test code.
+ *
+ * Declaring it per-pair made the same rule exist twice, and the copies drifted.
+ * Measured: `skills/sprint-flow/__tests__/` is tracked source, the generator
+ * correctly does not copy it, and `sync-mirrors` reported the whole pair as DRIFT
+ * on any checkout that has that directory. `src/principles` declared the exclude
+ * and stayed green; `skills` and `src/build-integrity` did not declare it and went
+ * red. One rule, one place.
+ */
+const MIRROR_EXCLUDES = Object.freeze([...SYNC_EXCLUDES, '__tests__']);
 
 /**
  * The canonical -> mirror pairs this repository maintains for whole trees.
@@ -53,17 +78,113 @@ const SYNC_EXCLUDES = Object.freeze(['__pycache__', 'node_modules', '.git', '.DS
  * treating "canonical has it" as "the mirror should have it" where the project
  * never said so.
  *
- * Per-pair `exclude` mirrors the guard scripts exactly. `src/principles` already
- * excludes `__tests__` (check-hook-mirror.sh:98); a sync that copied them would
- * ship test code in the package and make the guard fail immediately afterwards.
+ * Per-pair `exclude` stays available for a rule that genuinely applies to one
+ * pair only. `__tests__` is not one of those -- see `MIRROR_EXCLUDES`.
+ *
+ * P1-E step 3: the pairs a generator owns are now DERIVED from that generator
+ * instead of being listed again here. Two hand-written lists had already drifted:
+ * this table carried five pairs and `generate-mirrors.cjs` carried four (it did
+ * not know about `principles`), and neither knew about `mutation` or
+ * `mock-policy`, which shipped in the package with no generator at all. A pair
+ * that exists in one list and not the other is invisible to exactly the check
+ * meant to catch it.
+ *
+ * A generator tree that cannot be resolved is skipped rather than thrown: this
+ * module also runs from an installed copy, where the repository layout it would
+ * read does not exist. Skipping reproduces the old hand-listed behaviour for that
+ * pair instead of crashing a diagnostic command.
  */
-const KNOWN_PAIRS = Object.freeze([
-  { canonical: 'githooks/adapters', mirror: 'src/npm-package/adapters' },
-  { canonical: 'githooks/lib', mirror: 'src/npm-package/hooks/lib' },
-  { canonical: 'src/principles', mirror: 'src/npm-package/principles', exclude: ['__tests__'] },
-  { canonical: 'src/build-integrity', mirror: 'src/npm-package/build-integrity' },
-  { canonical: 'skills', mirror: 'src/npm-package/skills' },
-]);
+function generatedPairs() {
+  let trees;
+  try {
+    trees = require('../scripts/generate-mirrors.cjs').GENERATED_TREES;
+  } catch {
+    // Not running from a checkout: an installed package ships `lib/` but NOT the
+    // `scripts/` tree this module reads its pairs from. Returning [] is correct
+    // there -- the canonical trees (`githooks/`, `src/`) are not installed either,
+    // so there is nothing to compare and no detection capability is lost.
+    //
+    // This must stay distinguishable from "the generator exists but yielded
+    // nothing", which would be a broken checkout. `assertPairsResolved` below
+    // makes that case loud instead of silently reporting zero drift.
+    return [];
+  }
+  if (!Array.isArray(trees)) return [];
+  const repoRelative = (abs) => path.relative(REPO_ROOT_DIR, abs).split(path.sep).join('/');
+  return trees.map((tree) => ({
+    canonical: repoRelative(tree.canonical),
+    mirror: `src/npm-package/${tree.mirror}`,
+  }));
+}
+
+/**
+ * Pairs supervised by something OTHER than `GENERATED_TREES`.
+ *
+ * Empty as of P1-E step 4. `principles` was the last entry: it had a separate
+ * generation path and was listed here by hand, then moved into the generator once
+ * the workstream editing it in place landed. Keeping the named empty list rather
+ * than deleting it gives the next genuinely non-generatable pair an obvious home,
+ * instead of someone hand-adding it back to `KNOWN_PAIRS` and recreating the
+ * two-lists-that-disagree problem this file just removed.
+ */
+const HAND_LISTED_PAIRS = Object.freeze([]);
+
+const KNOWN_PAIRS = Object.freeze([...generatedPairs(), ...HAND_LISTED_PAIRS]);
+
+/**
+ * Refuse to report a clean result over an empty pair list in a real checkout.
+ *
+ * Every pair is derived now, so if the generator cannot be resolved AND nothing is
+ * hand-listed, `KNOWN_PAIRS` is empty and every query answers "nothing drifted".
+ * That is the right answer for an installed package -- but in a checkout it would
+ * be a broken tool reporting a perfect score, which is the single failure mode
+ * this module exists to eliminate.
+ *
+ * The distinction is made on whether the generator file EXISTS, not on whether the
+ * list is empty: a missing generator in a checkout means the layout moved, while a
+ * missing generator outside one is expected. Cheap enough to run per command.
+ *
+ * CONTRACT -- `null` has two different causes, and callers must not conflate them:
+ *
+ *   - generator absent  -> null, because this is not a checkout. A caller that
+ *                          reacts to null as "you are in the wrong directory" is
+ *                          right; a caller that reacts as "your pairs are broken"
+ *                          is wrong.
+ *   - pairs non-empty   -> null, because there is something to compare and the
+ *                          generator was found. This is the silent, healthy case.
+ *
+ * An empty `pairs` array in a checkout is NEVER silent: it is the broken-tool case
+ * the function exists to catch, and it returns the reason string. Review flagged
+ * this as a load-bearing but undocumented assumption, which is why it is written
+ * down here rather than only implied by the tests.
+ *
+ * @param {string} root repository root to check
+ * @param {ReadonlyArray<object>} [pairs] pair list to judge; defaults to KNOWN_PAIRS
+ *   so call sites never pass it. Injectable purely so the zero-pair branch is
+ *   reachable from a test -- a module-level constant cannot be emptied by a fixture.
+ * @returns {string|null} an error message, or null when the pair list is usable
+ */
+function assertPairsResolved(root, pairs = KNOWN_PAIRS) {
+  const generatorPath = path.join(root, 'src', 'npm-package', 'scripts', 'generate-mirrors.cjs');
+  if (!fs.existsSync(generatorPath)) {
+    // Not a checkout (installed package, or an unrelated directory). Zero pairs is
+    // the correct answer there: the canonical trees are not installed either, so
+    // there is nothing to compare and no capability is lost.
+    return null;
+  }
+  // `pairs` is a parameter rather than a closed-over constant so the error branch
+  // below is REACHABLE. Reading KNOWN_PAIRS directly made it unreachable: that
+  // constant is resolved once at require time against this repository, so no
+  // fixture could make it empty and no test could ever execute the branch. The
+  // default keeps every existing call site unchanged.
+  if (pairs.length > 0) return null;
+  return (
+    'mirror-sync resolved ZERO mirror pairs although ' +
+    'src/npm-package/scripts/generate-mirrors.cjs exists. Every pair is derived from its ' +
+    'GENERATED_TREES export now, so zero pairs means the export is missing or renamed. ' +
+    'Refusing to report "nothing drifted" over an empty set.'
+  );
+}
 
 /**
  * List files under `dir` relative to `dir`, honouring exclusions.
@@ -83,7 +204,7 @@ function listFiles(root, dir) {
       return;
     }
     for (const entry of entries) {
-      if (SYNC_EXCLUDES.includes(entry.name)) continue;
+      if (MIRROR_EXCLUDES.includes(entry.name)) continue;
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
         walk(path.join(current, entry.name), rel);
@@ -97,6 +218,36 @@ function listFiles(root, dir) {
 }
 
 /**
+ * Is `dir` excluded from version control by an ignore rule?
+ *
+ * `--no-index` is required to get a straight answer. Without it, `git check-ignore`
+ * reports nothing for paths that ARE tracked, so a tree that is both tracked and
+ * matched by an ignore rule answers "not ignored" -- the opposite of what the rule
+ * says. Verified in a scratch repo: with the file staged, plain `check-ignore`
+ * exits 1 while `--no-index` exits 0.
+ *
+ * A path that is not ignored exits 1, and so does a path outside any repository.
+ * Both mean "cannot claim this tree is generated", which is the safe answer: the
+ * caller then keeps the pre-existing tracked comparison.
+ *
+ * @param {string} root repository root
+ * @param {string} dir directory relative to root
+ * @returns {boolean}
+ */
+function isIgnored(root, dir) {
+  const normalised = dir.replace(/\\/g, '/');
+  try {
+    execFileSync('git', ['check-ignore', '--no-index', '-q', '--', normalised], {
+      cwd: root,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * List the files git tracks under `dir` that also exist on disk.
  *
  * The disk check matters: `git ls-files` reports the index, so a file deleted
@@ -106,6 +257,16 @@ function listFiles(root, dir) {
  * When `dir` is not inside a git repository (or git is unavailable), fall back to
  * a plain walk — the caller is then responsible for the artifact caveat, but a
  * check that crashes outside git is worse than one that reports what it sees.
+ *
+ * P1-E: when `dir` is IGNORED, an empty `git ls-files` result means "nobody tracks
+ * this tree", not "this tree is empty". The mirror trees are generated at prepack
+ * and gitignored on purpose, so the tracked question has no answer for them, and
+ * asking it reports every canonical file as missing from its mirror. Measured on
+ * the real repo after P1-E landed: DRIFT for adapters, hooks/lib, build-integrity
+ * and skills -- the four trees the generator had just written correctly.
+ *
+ * The fallback is gated on the ignore RULE, not on an empty result, so a mirror
+ * tree someone genuinely emptied still reports its files as missing.
  *
  * @param {string} root repository root
  * @param {string} dir directory relative to root
@@ -126,13 +287,23 @@ function listTrackedFiles(root, dir) {
       .map((p) => p.replace(/\\/g, '/'))
       .filter((p) => p.startsWith(`${normalised}/`))
       .map((p) => p.slice(normalised.length + 1))
-      .filter((p) => !p.split('/').some((seg) => SYNC_EXCLUDES.includes(seg)));
+      .filter((p) => !p.split('/').some((seg) => MIRROR_EXCLUDES.includes(seg)));
   } catch {
     return listFiles(root, dir);
   }
 
   // Keep only what is actually on disk; a tracked-but-deleted file must read as
   // "missing from this side", which is what the caller then repairs.
+  // P1-E: an IGNORED tree has no tracked files by design, so "git tracks nothing
+  // here" must not be read as "there are no files here". The walk returns the same
+  // set the generator enumerates, and SYNC_EXCLUDES still filters it, so cache
+  // directories do not resurface as orphans (the #587/#588 false failure).
+  if (tracked.length === 0 && isIgnored(root, dir)) {
+    return listFiles(root, dir).filter(
+      (p) => !p.split('/').some((seg) => MIRROR_EXCLUDES.includes(seg))
+    );
+  }
+
   return tracked
     .filter((p) => fs.existsSync(path.join(root, dir, p)))
     .sort();
@@ -142,7 +313,10 @@ function listTrackedFiles(root, dir) {
  * Compare a canonical tree against its mirror.
  *
  * Both sides are compared on the tracked file set so an untracked artifact in
- * either tree cannot be mistaken for drift.
+ * either tree cannot be mistaken for drift. A tree that is gitignored entirely
+ * (a generated mirror) is compared on its disk contents instead -- see
+ * `listTrackedFiles` for why. The choice is per tree, so a pair with a tracked
+ * canonical tree and a generated mirror behaves correctly on both sides.
  *
  * @param {string} root repository root
  * @param {string} canonical canonical dir (relative)
@@ -151,7 +325,9 @@ function listTrackedFiles(root, dir) {
  * @returns {{inSync: boolean, missing: string[], differing: string[], extra: string[]}}
  */
 function diffTrees(root, canonical, mirror, options = {}) {
-  const exclude = options.exclude || [];
+  // The per-pair list ADDS to the global rule, it does not replace it: a caller
+  // passing `exclude: ['dist']` must not silently re-enable `__tests__`.
+  const exclude = [...MIRROR_EXCLUDES, ...(options.exclude || [])];
   const keep = (rel) => !rel.split('/').some((seg) => exclude.includes(seg));
   const canonicalFiles = listTrackedFiles(root, canonical).filter(keep);
   const mirrorFiles = listTrackedFiles(root, mirror).filter(keep);
@@ -282,7 +458,16 @@ function handleSyncMirrors(argv, options = {}) {
 
   const pairs = collectMirrorPairs(root);
   if (pairs.length === 0) {
-    process.stdout.write('sync-mirrors: NOT MEASURABLE (no mirror pairs found — is this the xp-gate repo?)\n');
+    // Not silently "all in sync": zero pairs means nothing was checked, and an
+    // empty verdict must never read as a passing one. The message distinguishes
+    // "wrong directory" from "the generator broke", because the second is a real
+    // defect in a checkout and the first is a typing mistake.
+    const broken = assertPairsResolved(root);
+    process.stdout.write(
+      broken
+        ? `sync-mirrors: NOT MEASURABLE\n  ${broken}\n`
+        : 'sync-mirrors: NOT MEASURABLE (no mirror pairs found — is this the xp-gate repo?)\n'
+    );
     return 1;
   }
 
@@ -326,6 +511,8 @@ function handleSyncMirrors(argv, options = {}) {
 module.exports = {
   SYNC_EXCLUDES,
   KNOWN_PAIRS,
+  HAND_LISTED_PAIRS,
+  assertPairsResolved,
   listFiles,
   listTrackedFiles,
   diffTrees,
