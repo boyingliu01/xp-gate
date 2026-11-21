@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { buildJscpdArgs } = require('../gate-runner');
+const { buildJscpdArgs, classifyJscpdRun } = require('../gate-runner');
 
 let tmpDir;
 
@@ -122,5 +122,62 @@ describe('#853 Gate 2 must be able to fail', () => {
     fs.writeFileSync(path.join(tmpDir, 'jscpd.conf.json'), '{ not valid json');
     const args = buildJscpdArgs({ targetPath: tmpDir });
     expect(args).not.toContain('--config');
+  });
+});
+
+/**
+ * @test REQ-GATE2-NO-FILES the CLI must not report "clean" when jscpd analysed zero files
+ * @intent `xp-gate check 2` captures jscpd's stream and classifies it BEFORE deciding the
+ *         verdict. The shell hook already does this (`classify_jscpd_run` in
+ *         githooks/lib/jscpd-run.sh, pinned by gate-2-no-files.test.bats); the CLI path
+ *         had no equivalent, so the same defect survived there.
+ * @covers AC-855-01 AC-855-02 AC-855-03 AC-855-04
+ *
+ * #855 measured on 0.38.76: a two-file fixture jscpd refuses to parse (below its
+ * min-tokens floor) produced `Files analyzed: 0`, jscpd's own
+ * `Warning: jscpd analyzed no files`, and `exit 0` from `xp-gate check 2` with
+ * "No duplicates found." A scan that read nothing was indistinguishable from a scan
+ * that read the change set and found it clean -- the exact failure family both
+ * AGENTS.md files name.
+ */
+describe('#855 Gate 2 must not call an empty scan clean', () => {
+  it('classifies an "analyzed no files" warning as no_files, not clean', () => {
+    const out = [
+      'No duplicates found.',
+      '| Format | Files analyzed | Total lines | Total tokens | Clones found |',
+      'Found 0 clones.',
+      'time: 8.279ms',
+      'Warning: jscpd analyzed no files: check the paths and the --format, --ignore and --pattern filters',
+    ].join('\n');
+    expect(classifyJscpdRun(0, out)).toBe('no_files');
+  });
+
+  it('keeps a real scan with zero clones as clean', () => {
+    // Anti-vacuity: if every "Found 0 clones" became no_files the gate would skip
+    // every project, trading a silent pass for a permanent skip.
+    const out = ['| Total: | 12 | 340 | 2100 | 0 |', 'Found 0 clones.'].join('\n');
+    expect(classifyJscpdRun(0, out)).toBe('clean');
+  });
+
+  it('keeps a real scan with clones as duplicates', () => {
+    const out = ['| Total: | 12 | 340 | 2100 | 3 |', 'Found 3 clones.'].join('\n');
+    expect(classifyJscpdRun(0, out)).toBe('duplicates');
+  });
+
+  it('lets a non-zero exit win over the no-files warning', () => {
+    // A failed run is the more specific fact; calling it no_files would hide it.
+    expect(classifyJscpdRun(2, 'Warning: jscpd analyzed no files: check the paths')).toBe('error');
+  });
+
+  it('treats a report with no clones line and no files line as no_files', () => {
+    // Measured shape: an --ignore that excludes everything prints one timing line.
+    expect(classifyJscpdRun(0, 'time: 0.156ms')).toBe('no_files');
+  });
+
+  it('does not turn an unfamiliar but non-empty report into a skip', () => {
+    // The pre-existing tolerance, kept deliberately: a future jscpd format must not
+    // disable the gate for everyone whose output we do not recognise.
+    const out = 'some future jscpd format\nformat v9\nclones: none detected\nfiles scanned: 14';
+    expect(classifyJscpdRun(0, out)).toBe('clean');
   });
 });

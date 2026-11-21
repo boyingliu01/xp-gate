@@ -601,7 +601,21 @@ const GATE_REGISTRY = {
     aliases: ['duplicates', 'dup', '2'],
     run: (targetPath) => {
       const args = buildJscpdArgs({ targetPath });
-      runJscpd(args, targetPath);
+      const outcome = runJscpd(args, targetPath);
+      // A run that examined nothing is NOT a pass. Say so with a reason, per the
+      // SKIP contract both AGENTS.md files state: "not checked" must never be
+      // recordable as "passed". Returning GATE_NOT_RUN is how the rest of this file
+      // reports the same condition, so the caller records a skip rather than a
+      // verdict it never computed.
+      if (outcome === 'no_files') {
+        process.stderr.write(
+          '[gate-2] SKIP: jscpd analysed no files, so "Found 0 clones" is not a verdict. '
+          + 'Check --ignore / --format / --pattern, or whether the target holds any '
+          + 'source this tool recognises.\n',
+        );
+        return GATE_NOT_RUN;
+      }
+      return undefined;
     },
   },
   '3': {
@@ -1006,6 +1020,62 @@ function buildGlobalPrefixes(env) {
   return prefixes.filter((p) => typeof p === 'string' && p.length > 0 && path.isAbsolute(p));
 }
 
+/**
+ * What a finished jscpd run tells us, as one of four values.
+ *
+ * `no_files` is the one that did not exist before #855, and it is the reason this
+ * function exists at all. jscpd answers "Found 0 clones" for a run that examined
+ * nothing and for a run that examined the change set and found it clean -- the two
+ * are only the same statement if something was actually read. It says so itself, on
+ * the stream, and exits 0 anyway:
+ *
+ *   Warning: jscpd analyzed no files: check the paths and the --format, --ignore
+ *   and --pattern filters
+ *   Found 0 clones.
+ *
+ * Measured on a fixture below jscpd's min-tokens floor: `xp-gate check 2` printed
+ * "No duplicates found.", a table with `Files analyzed: 0`, and exited 0. A gate
+ * that examined nothing was indistinguishable from a passing one.
+ *
+ * "error" is wrong here (jscpd did not fail), "clean" is wrong (nothing was read),
+ * and "duplicates" is wrong. Hence a fourth value.
+ *
+ * The shell hook has classified this way since gate-2-no-files.test.bats landed
+ * (`classify_jscpd_run` in githooks/lib/jscpd-run.sh); the CLI path had no
+ * equivalent, which is how #855 survived its fix.
+ *
+ * @param {number|null} exitCode jscpd's exit status
+ * @param {string} output the combined stdout+stderr
+ * @returns {'error'|'no_files'|'duplicates'|'clean'}
+ */
+function classifyJscpdRun(exitCode, output) {
+  const text = typeof output === 'string' ? output : '';
+  // A failed run is the more specific fact, so it is checked first: reporting it as
+  // no_files would hide a genuine tool failure behind a plausible excuse.
+  if (typeof exitCode !== 'number' || exitCode !== 0) return 'error';
+
+  const clones = text.match(/Found (\d+) (?:clones?|duplicates?)/i);
+  if (clones) {
+    // A clone count above zero is a finding whatever else the run said.
+    if (Number.parseInt(clones[1], 10) > 0) return 'duplicates';
+    // Zero clones is a verdict only when files were read.
+    if (/analyzed no files/i.test(text)) return 'no_files';
+    const scanned = text.match(/\|\s*Total:\s*\|\s*(\d+)\s*\|/i);
+    if (scanned && Number.parseInt(scanned[1], 10) === 0) return 'no_files';
+    return 'clean';
+  }
+
+  // No clone line at all. A report with any content other than a bare timing is
+  // still treated as a scan that happened -- turning every unfamiliar future jscpd
+  // format into a SKIP would disable the gate for everyone.
+  const meaningful = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !/^time:\s/i.test(line));
+  if (meaningful.length === 0) return 'no_files';
+  return 'clean';
+}
+
 function runJscpd(args, targetPath) {
   // Invoke jscpd's JS entry through `node` rather than going through .bin/.
   //
@@ -1059,13 +1129,22 @@ function runJscpd(args, targetPath) {
       ];
   for (const [cmd, cmdArgs] of attempts) {
     try {
-      // cwd must be the scan target. Without it jscpd runs in whatever directory
-      // the CLI was started from, so `xp-gate check 2 <path>` scanned the CURRENT
-      // directory and the path argument only affected its display name. Measured:
-      // a 3-copy fixture reported 0 clones because the scan happened in the xp-gate
-      // repo instead of the fixture.
-      execFileSync(cmd, cmdArgs, { stdio: 'inherit', cwd: targetPath || process.cwd() });
-      return;
+      // The stream is CAPTURED and replayed rather than inherited, because the
+      // verdict depends on what jscpd said. With `stdio: 'inherit'` the output went
+      // straight to the terminal, so the gate could not tell a clean scan from one
+      // that examined nothing -- #855. Replaying it immediately keeps the operator's
+      // view identical to before.
+      const result = spawnSync(cmd, cmdArgs, {
+        cwd: targetPath || process.cwd(),
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      if (result.error) throw result.error;
+      const outcome = classifyJscpdRun(result.status, `${result.stdout || ''}\n${result.stderr || ''}`);
+      if (result.status === 0) return outcome;
+      lastErr = new Error(`jscpd exited ${result.status}`);
     } catch (err) {
       lastErr = err;
     }
@@ -1297,7 +1376,7 @@ async function invokeGateHandler(gateId, gate, targetPath, opts) {
   }
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
+module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
   // AC-670-03 asserts the --all preamble END-TO-END: that an all-mode run hands
   // the security gates a non-empty file population sourced from the list file and
   // sets GATE_SCOPE="all". With these unexported, the case could only take its

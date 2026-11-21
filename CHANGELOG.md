@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.38.78.0] - 2026-11-21
+
+**Gate 2 不再把「一个文件都没看」报成「没有重复」。** 这是 #855，也是 #853 家族在 CLI 路径上的最后一条 fail-open。
+
+### 缺陷
+
+钩子早就有 `classify_jscpd_run` 这个分类器（`githooks/lib/jscpd-run.sh`，由
+`gate-2-no-files.test.bats` 的 6 个用例钉住），它认得 jscpd 这句警告：
+
+```text
+Warning: jscpd analyzed no files: check the paths and the --format, --ignore and --pattern filters
+Found 0 clones.
+```
+
+**但 `xp-gate check 2` 走的是另一条路**（`src/npm-package/lib/gate-runner.js`），
+那里 `runJscpd` 用 `stdio: 'inherit'` 把输出直接甩给终端，**从不捕获**，所以无从判断
+jscpd 到底看了文件没有。实测（0.38.76，两个低于 jscpd min-tokens 下限的小文件）：
+
+```text
+No duplicates found.
+│ Total: │ 0 │ 0 │ 0 │ 0 │ 0 (0.00%) │ 0 (0.00%) │
+Found 0 clones.
+Warning: jscpd analyzed no files: ...
+exit=0
+```
+
+`Files analyzed: 0` 却报「没发现重复」并 exit 0 —— 「没检查」与「检查后没问题」在退出码上
+完全一样。这正是两份 AGENTS.md 都点名的缺陷家族。
+
+### 修复
+
+`runJscpd` 改为捕获输出、原样回放（操作者看到的内容不变），再交给新的
+`classifyJscpdRun(exitCode, output)` 分类成四种结果之一：
+
+| 结果 | 含义 |
+|---|---|
+| `error` | jscpd 非零退出 |
+| `no_files` | 跑了，但一个文件都没分析 |
+| `duplicates` | 发现克隆 |
+| `clean` | 真的分析了且干净 |
+
+`no_files` 时 Gate 2 返回 `GATE_NOT_RUN`（与本文件其他门禁同一约定）并打印理由：
+
+```text
+[gate-2] SKIP: jscpd analysed no files, so "Found 0 clones" is not a verdict.
+Check --ignore / --format / --pattern, or whether the target holds any source this tool recognises.
+```
+
+### 刻意保留的行为
+
+- **未知但非空**的 jscpd 输出仍按 `clean` 处理。把每个不认识的格式都变成 SKIP，等于对所有
+  输出格式变化的用户关掉门禁。只有「除了一行 `time:` 之外什么都没有」才算 `no_files`。
+- **非零退出优先于 no-files 警告**：失败是更具体的事实，报成 `no_files` 会把它藏起来。
+- **真实克隆永远优先**：`Found N clones` 且 N>0 时，不管流里还有什么都是 `duplicates`。
+
+### 验证
+
+```text
+0 文件              → SKIP + 理由（不再 "No duplicates found" 作为判决）
+有文件、无重复      → exit 0（正常 PASS，不误 skip）
+有文件、有重复      → exit 1（照常拦截）
+```
+
+6 个新用例先红后绿；`gate-2-no-files.test.bats` 6/6 仍通过；`lib/__tests__` 1469 通过
+（2 个既有 C# 失败不变）；`tsc` 干净；镜像 PASS。
+
 ## [0.38.77.0] - 2026-11-21
 
 **镜像副本离开版本控制。** `src/npm-package/` 里那些逐字节副本不再被 git 跟踪——"改错副本"
