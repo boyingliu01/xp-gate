@@ -514,43 +514,108 @@ else
           if declare -F ccn_file_in_population >/dev/null 2>&1; then
             _cc_pop_kept=""
             _cc_pop_skipped=""
-            while IFS= read -r _cc_row; do
-              [ -n "$_cc_row" ] || continue
-              # The path is column 7 (index 6) of a lizard --csv row, NOT column 1.
-              #
-              # Column order (lizard --csv, no header, 11 fields):
-              #   0 NLOC | 1 CCN | 2 token_len | 3 param_count | 4 location_size
-              #   5 "name@start-end@path" | 6 path | 7 name | 8 signature | ...
-              # This read `$1` -- that is NLOC, not the path -- so every path
-              # handed to ccn_file_in_population was a bare number like "17".
-              # No number matches a declared root or extension, so EVERY row was
-              # classified "outside the baseline population" and dropped: the gate
-              # graded nothing, printed "not graded, not ratcheted", and fell
-              # through to "UNVERIFIED no parsable CCN row". The population filter
-              # therefore disabled the ratchet for ALL languages, not just the one
-              # it was being added for.
-              #
-              # Quote-aware via the shared awk helper rather than a second `-F,`
-              # split: the signature column (8) contains commas, so a naive field
-              # split lands on the wrong column as soon as a signature is present.
-              _cc_row_path=$(printf '%s' "$_cc_row" | csv_to_unit_separated | awk -F'\\037' '{print $7}')
+            # ONE awk pass for the whole CSV, not one process per row.
+            #
+            # The path is column 7 (index 6) of a lizard --csv row, NOT column 1.
+            # Column order (lizard --csv, no header, 11 fields):
+            #   0 NLOC | 1 CCN | 2 token_len | 3 param_count | 4 location_size
+            #   5 "name@start-end@path" | 6 path | 7 name | 8 signature | ...
+            # This once read `$1` -- that is NLOC, not the path -- so every path
+            # handed to ccn_file_in_population was a bare number like "17". No
+            # number matches a declared root or extension, so EVERY row was
+            # classified "outside the baseline population" and dropped: the gate
+            # graded nothing and fell through to "UNVERIFIED no parsable CCN row".
+            # That disabled the ratchet for ALL languages, not just the new one.
+            #
+            # Quote-aware via the shared awk helper rather than a second `-F,`
+            # split: the signature column (8) contains commas, so a naive field
+            # split lands on the wrong column as soon as a signature is present.
+            #
+            # WHY THIS IS ONE CALL AND NOT A LOOP (measured 2026-11-23): every
+            # pipeline stage in the old loop was a fresh process, and on Windows
+            # process startup dominates — `csv_to_unit_separated` alone cost
+            # ~211ms per row, so 85 rows spent ~18s extracting one column.
+            #
+            # The standalone here parses the CSV once and emits "path<TAB>row",
+            # with the row carried verbatim as $0 so what reaches the verifier is
+            # the row lizard produced. Do NOT rebuild the row from split fields:
+            # the split is lossy (CSV quoting around field 5 is dropped), so a
+            # rebuilt row would silently differ from the real one. Verified on a
+            # real 85-row CSV: identical to the original apart from CRLF.
+            # ONE awk pass decides the whole CSV. Every earlier version of this loop
+            # paid process startup per row, and on Windows that dominates: measured
+            # 2026-11-23, gate 3 on ONE changed file spent 55.4s, of which ~34.5s
+            # was this filter relaunching csv_to_unit_separated (~211ms) and sed
+            # (~190ms) for each of 85 rows. Nothing in it depended on other rows.
+            #
+            # The predicate arrives as data (roots and extensions) from
+            # ccn_baseline_population, so the decision still has exactly ONE
+            # definition; awk only applies it. Kept rows go to stdout verbatim,
+            # skipped paths to a temp file.
+            #
+            # Rows are carried as $0, never rebuilt from parsed fields: the parse is
+            # lossy (CSV quoting around field 5 is dropped), so a rebuilt row would
+            # differ from the one lizard produced. Verified on a real 85-row CSV:
+            # byte-identical apart from CRLF.
+            _cc_pop=$(ccn_baseline_population ".ccn-baseline.json")
+            _cc_roots="${_cc_pop%%|*}"
+            _cc_exts="${_cc_pop#*|}"
+            [ "$_cc_exts" = "$_cc_pop" ] && _cc_exts=""
+            _cc_skip_file=$(mktemp)
+            _cc_kept=$(printf '%s\n' "$CC_CSV" | CC_ROOTS="$_cc_roots" CC_EXTS="$_cc_exts" CC_SKIP="$_cc_skip_file" awk '
+              BEGIN {
+                nroots = split(ENVIRON["CC_ROOTS"], R, ",")
+                nexts = split(ENVIRON["CC_EXTS"], E, ",")
+                skip = ENVIRON["CC_SKIP"]
+                unrestricted = (nroots == 0 && nexts == 0)
+                BS = sprintf("%c", 92)
+                Q = sprintf("%c", 34)
+              }
+              # Quoting is read through Q, built from its byte value, because a
+              # literal quote inside this awk program cannot be escaped reliably
+              # through the shell layer: the escape collapses before awk parses.
+              function parse(line,   cur, i, ch, q, nf) {
+                nf = 1; cur = ""; q = 0
+                for (i = 1; i <= length(line); i++) {
+                  ch = substr(line, i, 1)
+                  if (q) {
+                    if (ch == Q) { if (substr(line, i + 1, 1) == Q) { cur = cur Q; i++ } else q = 0 }
+                    else cur = cur ch
+                  } else if (ch == Q) q = 1
+                  else if (ch == ",") { f[nf++] = cur; cur = "" }
+                  else cur = cur ch
+                }
+                f[nf] = cur
+              }
+              function in_population(path,   k, n, hit) {
+                if (unrestricted) return 1
+                while ((bsi = index(path, BS)) > 0) { path = substr(path, 1, bsi - 1) "/" substr(path, bsi + 1) }
+                if (nroots > 0) {
+                  hit = 0
+                  for (k = 1; k <= nroots; k++) {
+                    if (path == R[k] || index(path, R[k] "/") == 1) { hit = 1; break }
+                  }
+                  if (!hit) return 0
+                }
+                if (nexts > 0) {
+                  hit = 0
+                  for (k = 1; k <= nexts; k++) {
+                    n = length(E[k])
+                    if (n > 0 && substr(path, length(path) - n + 1) == E[k]) { hit = 1; break }
+                  }
+                  if (!hit) return 0
+                }
+                return 1
+              }
+              { parse($0); p = f[7] }
               # A row we cannot locate cannot be scoped: keep it and let the
-              # verifier decide, rather than silently dropping it as "out of
-              # population" — dropping is how "checked" became "checked nothing".
-              if [ -z "$_cc_row_path" ]; then
-                _cc_pop_kept="${_cc_pop_kept}${_cc_row}
-"
-              elif ccn_file_in_population ".ccn-baseline.json" "$_cc_row_path"; then
-                _cc_pop_kept="${_cc_pop_kept}${_cc_row}
-"
-              else
-                _cc_pop_skipped="${_cc_pop_skipped}${_cc_row_path}
-"
-              fi
-            done <<CC_POP_EOF
-$CC_CSV
-CC_POP_EOF
-            CC_CSV=$(printf '%s' "$_cc_pop_kept")
+              # verifier decide. Dropping is how "checked" became "checked nothing".
+              { if (p == "" || in_population(p)) print $0; else print p > skip }
+            ')
+            CC_CSV="$_cc_kept"
+            _cc_pop_skipped=""
+            if [ -s "$_cc_skip_file" ]; then _cc_pop_skipped=$(cat "$_cc_skip_file"); fi
+            rm -f "$_cc_skip_file"
             if [ -n "$_cc_pop_skipped" ]; then
               _cc_pop_skip_n=$(printf '%s' "$_cc_pop_skipped" | grep -c . || true)
               echo "ℹ️  Gate 3: ${_cc_pop_skip_n:-0} file(s) outside the baseline population — not graded, not ratcheted:"
