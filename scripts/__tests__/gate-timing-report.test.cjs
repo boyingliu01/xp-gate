@@ -74,4 +74,27 @@ describe('gate timing: verdict split', () => {
     expect(split[0].samples).toBe(1);
     expect(split[0].median).toBe(5000);
   });
+  it('marks a bimodal gate so its share is not read as "cheap"', () => {
+    // The share column divides by the sum of per-gate MEDIANS. For a gate whose
+    // real cost lives on the path the median does not describe, that produces a
+    // number that is small and wrong in the same direction -- measured on gate-3
+    // before the fix: 0.9% share while it cost more than the rest of the chain.
+    const rows = summarise([
+      ...Array.from({ length: 18 }, () => rec('gate-3', 'SKIP', 900)),
+      ...Array.from({ length: 15 }, () => rec('gate-3', 'PASS', 59000)),
+    ]);
+    expect(rows).toHaveLength(1);
+    // summarise keeps the flat p90; the RATIO is what the renderer flags on.
+    const ratio = rows[0].p90 / rows[0].median;
+    expect(ratio).toBeGreaterThanOrEqual(10);
+  });
+
+  it('does not flag a gate whose p90 is close to its median', () => {
+    const rows = summarise([
+      rec('gate-stable', 'PASS', 5000),
+      rec('gate-stable', 'PASS', 5200),
+      rec('gate-stable', 'PASS', 5400),
+    ]);
+    expect(rows[0].p90 / rows[0].median).toBeLessThan(10);
+  });
 });

@@ -153,6 +153,23 @@ function pad(s, n) {
   return str.length >= n ? str : str + ' '.repeat(n - str.length);
 }
 
+/**
+ * A bimodal gate's median share is not a share of anything.
+ *
+ * The share column divides by the sum of per-gate medians. When a gate skips
+ * most commits and does the real work on the rest, its median describes the
+ * cheap path -- measured on gate-3 before the fix: median 1.0s, p90 59.1s,
+ * share 0.9%, while that gate cost more than every other gate combined. The
+ * number is small and wrong in the one direction that stops an investigation.
+ *
+ * The marker keeps the number visible (it is not wrong, it answers a different
+ * question than the header promises) and stops it being read as "cheap".
+ */
+function markBimodalShare(row, share) {
+  const bimodal = row.median > 0 && row.p90 / row.median >= 10;
+  return bimodal ? `${share}!` : share;
+}
+
 function printTable(rows, hours) {
   const medianTotal = rows.reduce((a, b) => a + b.median, 0);
   console.log('');
@@ -169,16 +186,22 @@ function printTable(rows, hours) {
   for (const r of rows) {
     const share = medianTotal === 0 ? '0.0%' : `${((100 * r.median) / medianTotal).toFixed(1)}%`;
     const flag = r.samples < MIN_SAMPLES_FOR_PERCENTILE ? ' *' : '';
+    const shareCell = markBimodalShare(r, share);
     console.log(
       `  ${pad(r.gate, 12)}${pad(r.samples, 5)}${pad(`${(r.median / 1000).toFixed(1)}s`, 10)}${pad(
         `${(r.p90 / 1000).toFixed(1)}s`,
         10
-      )}${pad(`${(r.max / 1000).toFixed(1)}s`, 10)}${share}${flag}`
+      )}${pad(`${(r.max / 1000).toFixed(1)}s`, 10)}${shareCell}${flag}`
     );
   }
   console.log('');
   console.log(`  median total across gates: ${(medianTotal / 1000).toFixed(1)}s`);
   console.log('  (a sum of per-gate medians, NOT one commit wall clock)');
+  if (rows.some((r) => r.median > 0 && r.p90 / r.median >= 10)) {
+    console.log('');
+    console.log('  ! share is meaningless for a bimodal gate: the median describes its');
+    console.log('    cheap path, not its cost. Read the verdict split below.');
+  }
 }
 
 function printStatusTable(rows) {
