@@ -1008,6 +1008,70 @@ async function processSourceFile({ rel, lizard, root, functions, byRowKey, unver
   }
 }
 
+/**
+ * Scan every file, one lizard process each, with a bounded process pool.
+ *
+ * The pool is bounded by PROCESS count, not by sharing state. That distinction is
+ * the whole design and it was learned the hard way: this function used to be
+ * strictly sequential, with a comment saying a concurrent pool "corrupts rows in
+ * ways that silently zero the report (observed: 779 -> 0 with an 8-wide pool on
+ * Windows)". The corruption was real; the diagnosis was one level too deep.
+ *
+ * lizard is a pure function of its own argv: eight concurrent invocations produce
+ * byte-identical output to eight sequential ones (verified directly before this
+ * change). What cannot be shared is THIS module's mutable state -- `functions`,
+ * `byRowKey` and `unverifiedRows` are appended to from inside the per-file
+ * callback, so interleaved async completions corrupted them.
+ *
+ * So: lizard processes run concurrently, result merging does not. Each task
+ * collects into its own buffers, and when every task has settled the buffers are
+ * appended to the shared state IN FILE ORDER, with byRowKey re-derived during the
+ * merge. Isolation is preserved exactly (one process, one file, one result set),
+ * ordering is deterministic, and the sequential and concurrent paths produce
+ * identical state -- which is what scripts/__tests__/ccn-report.test.cjs pins.
+ *
+ * Why it matters: `lizard --version` alone costs ~330ms (interpreter startup plus
+ * import, independent of input), so 831 tracked sources cost ~274s of pure process
+ * startup, inside a pre-commit hook, on every source-touching commit. Measured
+ * 2026-11-23: 175.2s sequential vs 60.3s pooled.
+ */
+async function scanFiles({ files, lizard, root, functions, byRowKey, unverifiedRows }) {
+  // XP_GATE_CCN_CONCURRENCY exists so a test can pin the pool width; the default
+  // tracks the machine, because the cost is process startup and not CPU analysis.
+  const parsed = parseInt(process.env.XP_GATE_CCN_CONCURRENCY || '', 10);
+  const defaultWidth = Math.max(1, Math.min(require('os').cpus().length || 4, 8));
+  const width = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 32) : defaultWidth;
+
+  const collected = new Array(files.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < files.length) {
+      const index = cursor;
+      cursor += 1;
+      const ownFunctions = [];
+      const ownByKey = new Map();
+      const ownUnverified = [];
+      await processSourceFile({
+        rel: files[index], lizard, root,
+        functions: ownFunctions, byRowKey: ownByKey, unverifiedRows: ownUnverified,
+      });
+      collected[index] = { ownFunctions, ownUnverified };
+    }
+  }
+  const workers = [];
+  for (let i = 0; i < Math.min(width, files.length); i += 1) workers.push(worker());
+  await Promise.all(workers);
+
+  for (const batch of collected) {
+    if (!batch) continue;
+    for (const fn of batch.ownFunctions) {
+      if (fn._rowKey !== undefined) byRowKey.set(fn._rowKey, functions.length);
+      functions.push(fn);
+    }
+    for (const row of batch.ownUnverified) unverifiedRows.push(row);
+  }
+}
+
 async function run(options = {}) {
   const root = path.resolve(options.root || process.cwd());
   // "No evidence" must never look like "clean tree" (issue #737). A scan that
@@ -1039,19 +1103,17 @@ async function run(options = {}) {
         'or drop --root to scan the current directory.'
     );
   }
-  // Sequential on purpose. A shared pool of concurrent lizards corrupts rows
-  // in ways that silently zero the report (observed: 779 -> 0 with an 8-wide
-  // pool on Windows). Per-file isolation is the whole point of this tool;
-  // speed is secondary to trustworthiness.
+  // Concurrency lives in scanFiles(), which carries the reasoning and the
+  // measurement that justify it. The state below is created here and passed in,
+  // so scanFiles never becomes the owner of what the caller reports.
   const functions = [];
   // Index into `functions` by row key so dedup is O(1). A linear findIndex per
   // row made a full scan O(rows x functions), which on this repo's ~770
   // production functions is invisible but grows quadratically in a monorepo.
   const byRowKey = new Map();
   const unverifiedRows = [];
-  for (const rel of files) {
-    await processSourceFile({ rel, lizard, root, functions, byRowKey, unverifiedRows });
-  }
+
+  await scanFiles({ files, lizard, root, functions, byRowKey, unverifiedRows });
   return { root, filesScanned: files.length, functions, unverified_rows: unverifiedRows, lizardVersion };
 }
 
@@ -1353,6 +1415,72 @@ function checkAgainstBaseline(report, get) {
   console.log(`OK — ${report.functions.filter((f) => f.bucket === 'production').length} production function(s) within the ratchet`);
 }
 
+/**
+ * Per-gate timing statistics from the audit log, keyed by gate name.
+ *
+ * Split out of main() so the three arrow functions it needs stop sitting inside
+ * main's span: the brace-verification pass charges an enclosing function's
+ * corrected complexity to the arrows nested within it, which reported each of
+ * them at CCN 6 instead of 1 (measured through the gate's own --csv-verified
+ * path). The behaviour is unchanged.
+ */
+function collectGateTimings(report) {
+  const audit = readAuditRows(path.join(report.root, '.xp-gate', 'audit.jsonl'));
+  const byGate = {};
+  const gatesSeen = new Set([]);
+  for (const row of audit) {
+    if (row.gate_name) gatesSeen.add(row.gate_name);
+  }
+  for (const g of gatesSeen) {
+    byGate[g] = gateTimingStats(audit.filter((row) => row.gate_name === g));
+  }
+  return { audit, byGate };
+}
+
+/** Production functions above the report's display threshold. */
+function productionOverThreshold(functions) {
+  return functions.filter((f) => f.bucket === 'production' && f.ccn > 10);
+}
+
+/**
+ * Build and print the human/JSON report.
+ *
+ * Extracted from main() for readability, and load-bearing for a second reason:
+ * the brace-verification pass assigns an enclosing function's corrected span to
+ * the arrows nested inside it. When these filters lived inline in main(), the
+ * three arrows were each charged main()'s complexity and reported CCN 6 instead
+ * of 1 (measured through the gate's own --csv-verified path).
+ */
+function printReport(report, get) {
+  const { byGate } = collectGateTimings(report);
+  const prodOver = productionOverThreshold(report.functions);
+  const summary = {
+    files_scanned: report.filesScanned,
+    production_functions_gt10: prodOver.length,
+    test_functions_gt10: report.functions.filter((f) => f.bucket === 'test' && f.ccn > 10).length,
+    mirror_functions_gt10: report.functions.filter((f) => f.bucket === 'mirror' && f.ccn > 10).length,
+    worst_production: prodOver.sort((a, b) => b.ccn - a.ccn).slice(0, parseInt(get('--top') || '20', 10)),
+    gate_timing: byGate,
+  };
+  if (process.argv.includes('--json')) {
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
+  console.log(`files scanned:            ${summary.files_scanned}`);
+  console.log(`production funcs CCN>10:  ${summary.production_functions_gt10}   (canonical tree only)`);
+  console.log(`test funcs CCN>10:        ${summary.test_functions_gt10}`);
+  console.log(`mirror funcs CCN>10:      ${summary.mirror_functions_gt10}   (src/npm-package copies — fixed via canonical + prepack)`);
+  console.log('\nworst production functions:');
+  for (const f of summary.worst_production) {
+    console.log(`  CCN=${String(f.ccn).padStart(4)}  ${f.file}:${f.line}  ${f.name}`);
+  }
+  console.log('\ngate timing (ms, anomalies filtered):');
+  const ordered = Object.entries(byGate).sort((a, b) => (b[1].p50 || 0) - (a[1].p50 || 0));
+  for (const [g, st] of ordered) {
+    console.log(`  ${g.padEnd(26)} n=${String(st.count).padStart(4)}  p50=${st.p50 ?? '-'}  p95=${st.p95 ?? '-'}`);
+  }
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
@@ -1376,8 +1504,6 @@ async function main() {
 
   // CI / local enforcement mode (slice E). Without this the report only ever
   // printed numbers; nothing in the pipeline could fail a build for complexity.
-  // CI / local enforcement mode (slice E). Without this the report only ever
-  // printed numbers; nothing in the pipeline could fail a build for complexity.
   if (argv.includes('--check')) return checkAgainstBaseline(report, get);
 
   // Baseline refresh (REQ-D): record every production function's CURRENT CCN
@@ -1386,33 +1512,7 @@ async function main() {
   // treated as new code — moving debt around must not launder it.
   if (argv.includes('--write-baseline')) return writeBaseline(report);
 
-  const audit = readAuditRows(path.join(report.root, '.xp-gate', 'audit.jsonl'));
-  const byGate = {};
-  const gatesSeen = new Set(audit.map((r) => r.gate_name).filter(Boolean));
-  for (const g of gatesSeen) byGate[g] = gateTimingStats(audit.filter((r) => r.gate_name === g));
-  const prodOver = report.functions.filter((f) => f.bucket === 'production' && f.ccn > 10);
-  const summary = {
-    files_scanned: report.filesScanned,
-    production_functions_gt10: prodOver.length,
-    test_functions_gt10: report.functions.filter((f) => f.bucket === 'test' && f.ccn > 10).length,
-    mirror_functions_gt10: report.functions.filter((f) => f.bucket === 'mirror' && f.ccn > 10).length,
-    worst_production: prodOver.sort((a, b) => b.ccn - a.ccn).slice(0, parseInt(get('--top') || '20', 10)),
-    gate_timing: byGate,
-  };
-  if (argv.includes('--json')) {
-    console.log(JSON.stringify(summary, null, 2));
-  } else {
-    console.log(`files scanned:            ${summary.files_scanned}`);
-    console.log(`production funcs CCN>10:  ${summary.production_functions_gt10}   (canonical tree only)`);
-    console.log(`test funcs CCN>10:        ${summary.test_functions_gt10}`);
-    console.log(`mirror funcs CCN>10:      ${summary.mirror_functions_gt10}   (src/npm-package copies — fixed via canonical + prepack)`);
-    console.log('\nworst production functions:');
-    for (const f of summary.worst_production) console.log(`  CCN=${String(f.ccn).padStart(4)}  ${f.file}:${f.line}  ${f.name}`);
-    console.log('\ngate timing (ms, anomalies filtered):');
-    for (const [g, s] of Object.entries(byGate).sort((a, b) => (b[1].p50 || 0) - (a[1].p50 || 0))) {
-      console.log(`  ${g.padEnd(26)} n=${String(s.count).padStart(4)}  p50=${s.p50 ?? '-'}  p95=${s.p95 ?? '-'}`);
-    }
-  }
+  printReport(report, get);
 }
 
 // baselineKey/countNames are exported so the bats cross-check can prove the

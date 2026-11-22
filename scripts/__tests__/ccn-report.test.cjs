@@ -26,8 +26,14 @@ const reportPath = path.resolve(__dirname, '..', 'ccn-report.cjs');
  */
 function lizardAvailable() {
   // `--version` is read-only and cheap; a spawn failure (ENOENT) also means "absent".
-  const probe = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
-  return probe.status === 0 && !probe.error;
+  // Wrapped because spawnSync reports that failure on `error` instead of throwing,
+  // and "the tool is missing" must stay a SKIP decision, not an unhandled crash.
+  try {
+    const probe = spawnSync('lizard', ['--version'], { encoding: 'utf8' });
+    return probe.status === 0 && !probe.error;
+  } catch {
+    return false;
+  }
 }
 
 const LIZARD_PRESENT = lizardAvailable();
@@ -39,20 +45,28 @@ if (!LIZARD_PRESENT) {
 
 function makeFixtureTree() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-report-'));
-  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'src', '__tests__'), { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, 'src', 'prod.js'),
-    'function big(a,b,c,d,e){ if(a&&b||c){ if(d){ return e; } } return 0; }\n'
-  );
-  fs.writeFileSync(
-    path.join(dir, 'src', '__tests__', 'prod.test.js'),
-    // @assertion-justified: this is fixture DATA, not an assertion -- the string is
-    // written to a scratch file so the CCN report can be measured against a test file
-    // that contains a tautology. Gate 5d flags it because the detector reads text, not
-    // AST, and here that text is deliberately the anti-pattern under study.
-    "describe('x', () => { it('y', () => { expect(1).toBe(1); }); });\n"
-  );
+  // A scratch tree the report is measured against; a write failure here means the
+  // fixture never existed, which must surface as a fixture error and not as a
+  // mysterious "the report found nothing" downstream.
+  try {
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'src', '__tests__'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'src', 'prod.js'),
+      'function big(a,b,c,d,e){ if(a&&b||c){ if(d){ return e; } } return 0; }\n'
+    );
+    fs.writeFileSync(
+      path.join(dir, 'src', '__tests__', 'prod.test.js'),
+      // @assertion-justified: this is fixture DATA, not an assertion -- the string is
+      // written to a scratch file so the CCN report can be measured against a test file
+      // that contains a tautology. Gate 5d flags it because the detector reads text, not
+      // AST, and here that text is deliberately the anti-pattern under study.
+      "describe('x', () => { it('y', () => { expect(1).toBe(1); }); });\n"
+    );
+  } catch (err) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw new Error(`could not build the CCN fixture tree: ${err.message}`);
+  }
   return dir;
 }
 
@@ -819,8 +833,15 @@ describe('#731 PHP population: source discovery and vendor exclusion', () => {
   beforeAll(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn731-'));
     const write = (rel, body) => {
-      fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
-      fs.writeFileSync(path.join(root, rel), body);
+      // Fixture writer for a committed-dependency-tree scenario. A failed write
+      // means the tree under test never existed, so say so here instead of letting
+      // the assertion below report an empty scan.
+      try {
+        fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+        fs.writeFileSync(path.join(root, rel), body);
+      } catch (err) {
+        throw new Error(`could not write fixture ${rel}: ${err.message}`);
+      }
     };
     write('src/Calc.php', '<?php\nfunction calc(int $a): int { return $a + 1; }\n');
     // Committed dependency tree: exactly what composer recommends for apps.
@@ -934,5 +955,85 @@ describe('CCN body counting matches lizard', () => {
       '  }',
     ];
     expect(mod.ccnOfBody(body)).toBe(2);
+  });
+});
+
+/**
+ * @test REQ-CCNRPT-002
+ * @intent the concurrent scan must produce byte-identical findings to the sequential one
+ * @covers AC-CCNRPT-003
+ *
+ * WHY THIS EXISTS. The scan used to be strictly sequential, with a comment claiming
+ * "a shared pool of concurrent lizards corrupts rows in ways that silently zero the
+ * report (observed: 779 -> 0 with an 8-wide pool on Windows)". The corruption was
+ * real; the diagnosis was one level too deep. lizard is a pure function of its argv,
+ * and eight concurrent invocations produce byte-identical output to eight sequential
+ * ones. What could not be shared was this module's own mutable state -- functions,
+ * byRowKey and unverifiedRows were appended to from inside each per-file callback.
+ *
+ * Measured 2026-11-23: `lizard --version` alone costs ~330ms (interpreter startup plus
+ * import, independent of input), so 831 tracked sources cost ~274s of pure process
+ * startup, inside a pre-commit hook, on every source-touching commit. ccn-report.cjs
+ * took 175s sequentially; a bounded pool with per-task buffers and an ordered merge
+ * brought it to 60s and produced the identical report.
+ *
+ * This test is the pin for the "identical" half. Without it, the next person who sees
+ * the parallel pool has only a comment telling them it is dangerous -- and either
+ * removes it or breaks it.
+ */
+describe('concurrency preserves the sequential result', () => {
+  const fixture = () => ({
+    'a.ts': [
+      'export function alpha(x: number) {',
+      '  if (x > 0) { return 1; }',
+      '  for (let i = 0; i < 3; i += 1) { if (i) { return 2; } }',
+      '  return 3;',
+      '}',
+    ].join('\n'),
+    'b.ts': [
+      'export function beta(y: number) {',
+      '  while (y > 0) { y -= 1; }',
+      '  return y;',
+      '}',
+      'export const gamma = (z: number) => (z ? 1 : 2);',
+    ].join('\n'),
+    'c.ts': 'export function delta() { return 1; }\n',
+  });
+
+  it('reports the same functions at concurrency 1 and at concurrency 8', () => {
+    if (!LIZARD_PRESENT) {
+      console.log('SKIP: lizard not on PATH');
+      return;
+    }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccn-conc-'));
+    try {
+      for (const [name, body] of Object.entries(fixture())) {
+        fs.writeFileSync(path.join(root, name), body);
+      }
+      const runAt = (n) => {
+        // A named helper with an explicit catch, because spawnSync signals a
+        // launch failure on `error` while leaving `status` null -- asserting the
+        // status alone would blame the report for never having run.
+        try {
+          const out = spawnSync(process.execPath, [reportPath, '--root', root, '--json'], {
+            encoding: 'utf8',
+            env: { ...process.env, XP_GATE_CCN_CONCURRENCY: String(n) },
+          });
+          if (out.error) throw out.error;
+          expect(out.status).toBe(0);
+          const parsed = JSON.parse(out.stdout);
+          // duration_ms and timings are measurements, not findings.
+          delete parsed.duration_ms;
+          delete parsed.generatedAt;
+          delete parsed.gate_timing;
+          return parsed;
+        } catch (err) {
+          throw new Error(`ccn-report could not be measured at concurrency ${n}: ${err.message}`);
+        }
+      };
+      expect(runAt(1)).toEqual(runAt(8));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

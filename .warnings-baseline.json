@@ -54,5 +54,13 @@
   "src/build-integrity/gate-10.ts": {
     "totalWarnings": 1,
     "lastAnalyzed": "2026-11-22T16:04:06.807Z"
+  },
+  "scripts/__tests__/ccn-report.test.cjs": {
+    "totalWarnings": 4,
+    "lastAnalyzed": "2026-11-22T20:22:40.489Z"
+  },
+  "scripts/ccn-report.cjs": {
+    "totalWarnings": 6,
+    "lastAnalyzed": "2026-11-22T20:22:40.491Z"
   }
 }
