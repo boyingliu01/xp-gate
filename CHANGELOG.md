@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.38.107.0] - 2026-11-23
+
+**Gate 5 内部两个审计条目共享一个时钟，导致计时报告重复计算。**
+
+### 发现
+
+按判定分组后（0.38.106.0），`test-focus` 出现在耗时榜首：
+
+```
+   44.4s  n=16  test-focus|?
+```
+
+而同一段代码上方的注释写着：
+
+> Runs before the expensive Gate 5a machinery so a `.only` commit fails in
+> milliseconds instead of after a full test run.
+
+44 秒与"毫秒"不符。查审计调用：
+
+```sh
+record_gate_audit "gate-5-focus" "test-focus" "FAIL"   "$GATE_5_FOCUS_BLOCKED" "$GATE_5_START" "blocked=1"
+                    #          ^^^^^^^^^^^^^ 这个是 Gate 5 的起点
+```
+
+`GATE_5_START` 是 Gate 5 开始的时间。用它当 test-focus 的起点，记录出来的时长
+就是"Gate 5 从开始到此刻的全部工作"，不是这次检查的成本。
+
+### 为什么这是缺陷而不是显示问题
+
+`gate-timing-report.cjs` 把每个 gate 的 `duration_ms` 当作互不重叠的成本来求和、
+算占比。两条记录报告重叠的时间，会让"这次提交的分钟花在哪"重复计数——
+而重叠的那段时间被算给了**后记录的那个 gate**。这正是 AGENTS.md 里
+"One clock, and never fabricate a duration" 那条规则要防的事：
+**"instant" 和 "not measured" 不能长得一样**，同样，**"44 秒" 和 "44 秒里有 40 秒是别人的"**
+也不能长得一样。
+
+### 修复
+
+`GATE_5_FOCUS_START=$(gate_start_ms)`，在 focus 检查开始前取值；
+`test-focus` 与 `focus-override` 两条记录都改用它。`tests-coverage` 那条保持
+`GATE_5_START` 不变——它是 gate 本身，整个跨度才是它的成本。
+
+### 测试
+
+`githooks/__tests__/issue-audit-clock-gate5.test.bats` 三个用例：
+
+1. test-focus 有自己的时钟，且取值发生在检查**开始之前**
+2. 没有任何 gate-5 子记录使用 Gate 5 的起点
+3. **反向约束**：tests-coverage 仍然测整个 gate——修复不能过头
+
+**证伪**：把 `GATE_5_FOCUS_START` 改回 `GATE_5_START`，用例 2 失败。还原后 3/3 通过。
+
+### 这一条的方法论
+
+第 3 个用例比前两个更重要。一个"把时间改小"的修复很容易顺手把
+本来就该长的那条也改短，从而把真实成本藏起来——那是把"测量不准"换成了
+"测量偏乐观"。所以每条计时修复都要同时钉住"不该改的那条没被改"。
+
 ## [0.38.106.0] - 2026-11-23
 
 **计时报告本身在误导读者：一个门禁一行中位数，把"跳过"和"真跑了"混成同一个数。**

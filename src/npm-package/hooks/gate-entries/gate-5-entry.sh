@@ -172,6 +172,14 @@ else
   # Runs before the expensive Gate 5a machinery so a `.only` commit fails in
   # milliseconds instead of after a full test run.
   # ========================================================================
+  # Its OWN clock. The audit row below used to pass GATE_5_START, so the
+  # test-focus duration was "everything Gate 5 did since it started" rather than
+  # the cost of this check -- measured 2026-11-23: 16 samples, median 44.4s, for
+  # a scan that the comment above says should finish in milliseconds. Two rows
+  # reporting overlapping time is not a display bug: any breakdown of where a
+  # commit's minutes go double-counts the overlap, and the overlap is attributed
+  # to whichever gate happens to be recorded second.
+  GATE_5_FOCUS_START=$(gate_start_ms)
   GATE_5_FOCUS_BLOCKED=0
   GATE_5_SKIP_COUNT=0
   GATE_5_DELETED_TESTS=""
@@ -204,7 +212,7 @@ else
           # opt-in per run and printed, never silent.
           if [ "${XP_GATE_ALLOW_ONLY:-0}" = "1" ]; then
             echo "⚠️  WARN - focus marker in $_tf (allowed by XP_GATE_ALLOW_ONLY=1)"
-            record_gate_audit "gate-5-focus-override" "focus-override" "WARN" 1 "$GATE_5_START" "file=$_tf"
+            record_gate_audit "gate-5-focus-override" "focus-override" "WARN" 1 "$GATE_5_FOCUS_START" "file=$_tf"
           else
             echo "❌ BLOCKED - focus marker(s) in $_tf:"
             printf '%s\n' "$_focus_hits" | sed 's/^/     /'
@@ -347,7 +355,7 @@ else
     echo "   tautological assertions and empty catches verify nothing at all."
     echo "   See skills/test-driven-development/testing-anti-patterns.md"
     echo "   Remove them, or add '@assertion-justified: <reason>' for a reviewed exception."
-    record_gate_audit "gate-5-focus" "test-focus" "FAIL" "$GATE_5_FOCUS_BLOCKED" "$GATE_5_START" "blocked=1"
+    record_gate_audit "gate-5-focus" "test-focus" "FAIL" "$GATE_5_FOCUS_BLOCKED" "$GATE_5_FOCUS_START" "blocked=1"
     return 1
   fi
 
