@@ -293,6 +293,21 @@ generate_quality_report() {
   # never run.
   gate_key_status() {
     case "$1" in
+      0)
+        # Gate 0 was missing here AND from the report's "gates" object, so
+        # version-consistency ran, audited (1705 records) and BLOCKED 58 times
+        # while being completely absent from every quality report. A gate that
+        # can stop a commit but cannot appear in the record of what ran is the
+        # same defect as recording "not checked" as "passed": the reader of the
+        # report gets a confident, wrong picture of the chain.
+        if [ -n "${GATE_0_STATUS:-}" ]; then
+          printf %s "${GATE_0_STATUS}"
+        elif printf ' %s ' "${XP_GATE_NOT_REACHED:-}" | grep -q ' 0 '; then
+          printf %s "NOT_REACHED"
+        else
+          printf %s "SKIP"
+        fi
+        ;;
       1)
         if [ -n "${GATE_1_STATUS:-}" ]; then
           printf %s "${GATE_1_STATUS}"
@@ -460,6 +475,10 @@ generate_quality_report() {
   "coverageMatrix": {${COVERAGE_MATRIX_JSON}},
   "coverageWarnings": [${COVERAGE_WARNINGS_JSON}],
   "gates": {
+    "gate0_version_consistency": {
+      "name": "Version Consistency",
+      "status": "$(gate_key_status 0)"
+    },
     "gate1_static_analysis": {
       "name": "Code Quality (Static + Lint + Shell)",
       "status": "$(gate_key_status 1)",
@@ -537,6 +556,14 @@ generate_quality_report() {
       "name": "File Hygiene Check",
       "status": "${GATE_12_STATUS:-WARN}",
       "tool": "gate-12-file-hygiene.sh"
+    },
+    "gate12b_mirror_parity": {
+      "name": "Mirror Parity",
+      "status": "$(gate_key_status 12b)"
+    },
+    "gate12c_probe_discipline": {
+      "name": "Probe Discipline",
+      "status": "$(gate_key_status 12c)"
     }
   }
 }

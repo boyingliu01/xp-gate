@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.38.112.0] - 2026-11-23
+
+**Gate 0 曾 58 次阻断提交，却完全不在质量报告里。**
+
+### 发现
+
+对比 `.xp-gate/audit.jsonl` 与最新的 `reports/pre-commit/*.json`：
+
+```
+gate-0    审计记录 1705 条    (223 PASS, 58 BLOCK, 8 SKIP)
+报告      gates 对象：gate1_ .. gate13_       —— 没有 gate0
+报告      overall.gatesTotal: 13
+```
+
+gate-0 在 `XP_GATE_ORDER` 里排第一、在 registry 里有行、能 BLOCK（实测 58 次），
+但**报告里连一行都没有**。
+
+同一缺陷还有两个：**gate-12b 和 gate-12c**（各 231 条审计记录）同样缺席。
+更说明问题的是——`gate_key_status()` 里 `12b)` / `12c)` 的 case **一直都在**，
+只是报告模板从来没有调用过它们。**算出来了，没接上。**
+
+### 为什么这一类比反向的更难发现
+
+项目反复修的是"没检查被记成通过"。这里是反方向：**工作做了、审计记了，
+报告把它丢了**。读报告的人会以为链上只有 13 个门禁、且都在表里，
+而实际有 16 个 commit 阶段门禁，缺席的三个里有一个经常在拦人。
+
+报告模板是一个手写的 JSON 字面量，逐条写着 gate1..gate13。
+**新增门禁时 registry 加了行、order 加了键，报告模板不会自动跟上**——
+没有东西会报错，因为少一条记录和"这条门禁不存在"长得一模一样。
+
+### 修复
+
+报告补上 `gate0_version_consistency`、`gate12b_mirror_parity`、
+`gate12c_probe_discipline`，状态都经 `gate_key_status` 解析（不是硬编码），
+并给 `gate_key_status` 补上 `0)` 分支。
+
+12b/12c 的名字**按 registry 绑定**：`mirror-parity` 是 12b、`probe-discipline` 是 12c。
+写反了会得到一个"存在但错误"的行，比缺席更糟。
+
+### 测试
+
+`githooks/__tests__/issue-report-completeness.test.bats` 3 个用例：
+
+1. gate-0 有报告行，且状态经过解析（不是硬编码）
+2. 12b/12c 有行，名字与 registry 的绑定一致
+3. **通用规则**：`XP_GATE_ORDER` 里每个 commit 阶段门禁都必须有报告行——
+   下一个新增的门禁不能再重复这个错误
+
+用例 3 是这条修复真正的价值：它不针对 gate-0，而是针对**"报告模板与链脱节"这个类别**。
+
+**证伪**：删掉 gate0 条目，用例 1 和 3 失败、用例 2 仍通过（说明三者各自独立）。
+还原后 3/3 通过。相关回归 `gate-report-not-reached` + `issue-536-degraded-report` 8/8 通过。
+
 ## [0.38.111.0] - 2026-11-23
 
 **Gate 7 的 adapter 解析顺序与它自己的注释相反：全局旧副本压过项目新副本。**
