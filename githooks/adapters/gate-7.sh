@@ -90,7 +90,7 @@ else
       #
       # So record here, then `return` -- not `exit` -- so the driver keeps its
       # single exit point and the EXIT trap fires with the same status.
-      record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "${IAC_ISSUE_COUNT:-0}" "$GATE_7_START"
+      record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "${IAC_ISSUE_COUNT:-0}" "$GATE_7_START" "${GATE_7_REASON:-}"
       return 1
     fi
   else
@@ -103,4 +103,4 @@ else
 fi
 # The single exit point for the journal, reached on every path now that the
 # blocked arm returns instead of exiting.
-record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "${IAC_ISSUE_COUNT:-0}" "$GATE_7_START"
+record_gate_audit "gate-7" "iac-security" "$GATE_7_STATUS" "${IAC_ISSUE_COUNT:-0}" "$GATE_7_START" "${GATE_7_REASON:-}"
