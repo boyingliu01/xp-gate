@@ -329,6 +329,18 @@ const REGEX_PRECEDERS = new Set([
 
 // Index just past a regex literal starting at `start` (which points at `/`), or
 // -1 when the run does not look like one (no unescaped closing `/` on this line).
+/**
+ * Index just past a regex literal's flag run (g, i, m, u, s, y, d).
+ *
+ * Its own function so the character walk below stays flat: folding the flags
+ * into it put the branch chain five levels deep for no gain.
+ */
+function skipRegexFlags(line, from) {
+  let k = from;
+  while (k < line.length && /[a-z]/i.test(line[k])) k++;
+  return k;
+}
+
 function skipRegexLiteral(line, start) {
   let k = start + 1;
   let inClass = false;
@@ -337,12 +349,7 @@ function skipRegexLiteral(line, start) {
     if (ch === '\\') { k += 2; continue; }
     if (ch === '[') inClass = true;
     else if (ch === ']') inClass = false;
-    else if (ch === '/' && !inClass) {
-      k++;
-      // Consume flags (g, i, m, u, s, y, d).
-      while (k < line.length && /[a-z]/i.test(line[k])) k++;
-      return k;
-    }
+    else if (ch === '/' && !inClass) return skipRegexFlags(line, k + 1);
     k++;
   }
   return -1;
@@ -610,7 +617,15 @@ function verifyCcnForRow({ sourceLines, rowPath, name, ccn, lineNo, endNo, tally
 // whose span cannot be verified above threshold — Gate 3 is fail-closed, so an
 // unverifiable hotspot must BLOCK instead of passing on an unvalidated count.
 function csvRows(srcPath, root, opts = {}) {
-  const lines = fs.readFileSync(srcPath, 'utf8').split(/\r?\n/);
+  // The CSV is the input contract of this whole function. Failing to read it
+  // must name the file, or the caller sees an empty row set and reads that as
+  // "nothing to verify" -- the exact conflation this module exists to prevent.
+  let lines;
+  try {
+    lines = fs.readFileSync(srcPath, 'utf8').split(/\r?\n/);
+  } catch (err) {
+    throw taggedError('ENOCSV', `cannot read lizard CSV at ${srcPath}: ${err.message}`);
+  }
   const lineCache = new Map();
   const sourceLines = (rel) => {
     if (!lineCache.has(rel)) lineCache.set(rel, readSourceLines(root, rel));
@@ -1308,7 +1323,14 @@ function writeBaseline(report) {
   // probe is unsupported; the reader treats null as "unknown, compare anyway"
   // rather than as a mismatch, so an older toolchain still works.
   const document = { analyzer: { tool: 'lizard', version: report.lizardVersion ?? null }, population, entries: baseline };
-  fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
+  // A refused write must be loud. Silently continuing would print "wrote N
+  // entries" for a file that does not exist, and the next gate run would then
+  // grade against the previous baseline while believing it was refreshed.
+  try {
+    fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
+  } catch (err) {
+    throw taggedError('ENOWRITE', `cannot write the complexity baseline to ${target}: ${err.message}`);
+  }
   console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
   console.log(`  analyzer: lizard ${report.lizardVersion ?? '(version unknown)'}`);
   // The reader accepts both shapes (see ccn-ratchet.sh), so an older gate can
