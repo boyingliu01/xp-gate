@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.38.101.0] - 2026-11-22
+
+**Gate 12b 要求镜像，而同步工具生成不了它。**
+
+### 缺陷
+
+Gate 12b 要求每个被改动的 `githooks/*` 文件都有包内镜像，且**不豁免任何文件**。
+它给出的修复办法是 `sync-package-content.js --fix`。
+
+但 `syncHooks` 只复制三样东西：`HOOK_FILES`（5 个根级 hook）、
+`githooks/*.sh`（gate 脚本）、`lib/`。**`gate-entries/` 不在任何一类里。**
+
+实测（改完 `gate-5-entry.sh` 之后）：
+
+```
+$ node src/npm-package/scripts/sync-package-content.js --fix
+[sync] done: ... 20 hook entries ...        ← 退出码 0
+
+$ md5sum githooks/gate-entries/gate-5-entry.sh \
+         src/npm-package/hooks/gate-entries/gate-5-entry.sh
+56475dbf... *githooks/...        (2254 行)
+37833a68... *src/npm-package/... (2191 行)   ← 仍然不同
+```
+
+随后 Gate 12b 拦下提交：
+
+```
+❌ BLOCKED - Gate 12b: src/npm-package/hooks/gate-entries/gate-5-entry.sh
+   differs from canonical githooks/gate-entries/gate-5-entry.sh
+```
+
+**一个门禁给出的修复办法无法满足它自己**，以至于只能手工 `cp` 绕过，
+而下一个人还得重新发现同样的事。
+
+### 修复
+
+`gate-entries/` 按 `lib/` 的同样方式镜像（递归复制，计 1 个条目）。
+同步输出从 `20 hook entries` 变为 `21 hook entries`。
+
+### 验证
+
+故意在镜像尾部追加 `# TAMPERED`，再跑 `--fix`：
+
+- 篡改前镜像 md5：`cd03a7fa`
+- 同步后：两份都是 `56475dbf`，一致
+
+### 测试
+
+`sync-gate-entries-mirrored.test.bats`（3 条）：
+同步工具必须认识 `gate-entries`、每个 canonical 条目都有镜像、
+镜像与 canonical 逐字节相同（这正是 Gate 12b 实际强制的那条性质）。
+
 ## [0.38.100.0] - 2026-11-22
 
 **Gate 5：覆盖率不达标被拦截了，但记录成 SKIP。六个语言分支同一个病。**

@@ -291,6 +291,28 @@ function syncHooks() {
     }
   }
 
+  // Copy gate-entries/ recursively.
+  //
+  // Gate 12b requires a package mirror for every githooks/* file a diff touches,
+  // and it exempts nothing -- but syncHooks only ever copied HOOK_FILES, the
+  // githooks/*.sh gates and lib/. gate-entries/ was in NEITHER list, so the mirror
+  // could only be produced by hand.
+  //
+  // Measured 2026-11-22: after editing githooks/gate-entries/gate-5-entry.sh,
+  // `sync-package-content.js --fix` reported "20 hook entries" and exited 0, yet
+  // the two copies differed (2254 vs 2191 lines) and gate 12b blocked the commit
+  // with "src/npm-package/hooks/gate-entries/gate-5-entry.sh differs from canonical".
+  // The gate's own printed remedy ("run sync --fix") could not satisfy the gate.
+  //
+  // Treated exactly like lib/: mirror the directory, count it as one entry.
+  const entriesSrc = path.join(SRC, 'gate-entries');
+  const entriesDst = path.join(DST, 'gate-entries');
+  if (fs.existsSync(entriesSrc)) {
+    fs.rmSync(entriesDst, { recursive: true, force: true });
+    copyDir(entriesSrc, entriesDst);
+    copied += 1;
+  }
+
   // Copy lib/ subdirectory recursively
   const libSrc = path.join(SRC, 'lib');
   const libDst = path.join(DST, 'lib');
