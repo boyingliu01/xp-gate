@@ -74,3 +74,21 @@ setup() {
   run grep -cE '^[[:space:]]*GATE_10_REASON=' "$G10"
   [ "$output" -ge 2 ]
 }
+
+# @covers gate 13's four journal calls all carry the reason
+@test "every gate-13 journal call passes GATE_13_DETAIL" {
+  # There are four. One carried the detail and three did not, so the same gate
+  # recorded a reason on one path and dropped it on the other three -- gate-6's
+  # self-inconsistency, three times over, inside a single file.
+  run bash -c 'grep -cE "record_gate_audit \"gate-13\".*GATE_13_DETAIL" "$1"' _ "$REPO_ROOT/githooks/gate-entries/gate-13-entry.sh"
+  [ "$output" = "4" ]
+}
+
+# @covers gate 12 names the hygiene rule that fired
+@test "gate-12 records WHICH hygiene check warned, not just how many" {
+  # The console printed the rule names; the journal recorded a bare count.
+  run grep -c 'GATE_12_DETAIL=' "$REPO_ROOT/githooks/gate-12-file-hygiene.sh"
+  [ "$output" -ge 1 ]
+  run bash -c 'grep -cE "record_gate_audit \"gate-12\".*GATE_12_DETAIL" "$1"' _ "$REPO_ROOT/githooks/gate-12-file-hygiene.sh"
+  [ "$output" -ge 2 ]
+}

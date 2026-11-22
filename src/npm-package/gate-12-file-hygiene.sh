@@ -405,7 +405,7 @@ else
     echo ""
     echo "❌ BLOCKED - File hygiene violations must be fixed before commit."
     GATE_12_STATUS="BLOCK"
-    record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "$HYGIENE_ISSUES" "$GATE_12_START"
+    record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "$HYGIENE_ISSUES" "$GATE_12_START" "${GATE_12_DETAIL:-}"
     exit 1
   else
     echo ""
@@ -413,7 +413,15 @@ else
     echo "     Fix recommended but not blocking (no conflict markers or syntax errors)."
     echo "     Issues:$HYGIENE_FILES"
     GATE_12_STATUS="WARN"
+    # The journal carried only a count. Name the checks that fired, so a WARN
+    # in the record says WHICH hygiene rule was broken without re-running the
+    # gate. Same defect family as gate-4/6/10/13: the console knew, the record
+    # did not.
+    _g12_kinds=""
+    [ -n "${GATE_12_HAS_TRAILING_WS:-}" ] && _g12_kinds="${_g12_kinds}${_g12_kinds:+,}trailing_whitespace"
+    [ -n "${GATE_12_MISSING_EOF:-}" ] && _g12_kinds="${_g12_kinds}${_g12_kinds:+,}missing_eof_newline"
+    GATE_12_DETAIL="${_g12_kinds:-hygiene_warnings}"
   fi
 fi
 
-record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "$HYGIENE_ISSUES" "$GATE_12_START"
+record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "$HYGIENE_ISSUES" "$GATE_12_START" "${GATE_12_DETAIL:-}"

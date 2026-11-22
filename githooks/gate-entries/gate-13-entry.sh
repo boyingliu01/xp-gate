@@ -735,7 +735,7 @@ if ! gate_enabled 13; then
   echo "⏭️  SKIPPED - Gate 13: Compiler strictness (not selected by XP_GATE_ONLY_GATE)"
   GATE_13_STATUS="SKIP"
   GATE_13_DETAIL="not_selected"
-  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)"
+  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)" "${GATE_13_DETAIL:-}"
   return 0
 fi
 
@@ -749,7 +749,7 @@ if [ "${XP_GATE_DISABLE_13:-}" = "1" ]; then
   echo "⏭️  SKIPPED - Gate 13: Compiler Strictness (XP_GATE_DISABLE_13=1)"
   GATE_13_STATUS="SKIP"
   GATE_13_DETAIL="kill_switch"
-  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)"
+  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)" "${GATE_13_DETAIL:-}"
 elif [ -f "$GATE_DIR/adapters/gate-13-compiler-strictness.sh" ] || [ -f "$GATE_DIR/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/adapters/gate-13-compiler-strictness.sh" ] || [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/githooks/gate-13-compiler-strictness.sh" ]; then
   echo "⚙️  Gate 13: Compiler Strictness Check..."
   GATE13_START=$(gate_start_ms)
@@ -871,7 +871,7 @@ else
   echo "⏭️  SKIPPED - Gate 13: Compiler Strictness (gate-13-compiler-strictness.sh not found)"
   GATE_13_STATUS="SKIP"
   GATE_13_DETAIL="script_missing"
-  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)"
+  record_gate_audit "gate-13" "compiler-strictness" "$GATE_13_STATUS" "0" "$(gate_start_ms)" "${GATE_13_DETAIL:-}"
 fi
 echo ""
 # ============================================================================
