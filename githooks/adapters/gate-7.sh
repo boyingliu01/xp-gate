@@ -18,6 +18,13 @@ GATE_7_SCANNED_FILES=0
 # Initialised here, not only inside the adapter branch: the journal line at the
 # bottom runs on EVERY path, and an unset variable there is an error under set -u.
 IAC_ISSUE_COUNT=0
+# Why this gate is not checking anything, recorded for the quality report and
+# the audit journal. Gate 7 had NO reason variable at all: both SKIP arms
+# printed a sentence to the console and the journal then recorded a bare SKIP
+# -- this codebase's oldest defect family, "not checked" with nothing saying
+# why. Each arm below sets it.
+# shellcheck disable=SC2034
+GATE_7_REASON=""
 if [ -z "$IAC_FILES" ]; then
   # #800: "nothing to scan" must never be rendered as "scanned and clean".
   # This branch used to print PASSED and set GATE_7_STATUS=PASS, while the report
@@ -26,6 +33,8 @@ if [ -z "$IAC_FILES" ]; then
   # a SKIP with a reason, exactly like the no-adapter branch below.
   echo "⏭️  SKIPPED - IaC security (no IaC files in this change set)."
   GATE_7_STATUS="SKIP"
+  # shellcheck disable=SC2034
+  GATE_7_REASON="no_iac_files_changed"
 else
   # Consumed by the sourcing parent, not here (see #548).
   # shellcheck disable=SC2034
@@ -88,6 +97,8 @@ else
     echo "ℹ️  SKIP - IaC adapter not found"
     echo "⏭️  SKIPPED - IaC security (no IaC adapter found)"
     GATE_7_STATUS="SKIP"
+    # shellcheck disable=SC2034
+    GATE_7_REASON="adapter_not_found"
   fi
 fi
 # The single exit point for the journal, reached on every path now that the

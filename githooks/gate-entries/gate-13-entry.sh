@@ -468,6 +468,7 @@ generate_quality_report() {
     "gate2_dup_code": {
       "name": "Duplicate Code",
       "status": "$(gate_key_status 2)",
+      "reason": "${GATE_2_DETAIL:-}",
       "metric": "similarity <= 5%"
     },
     "gate3_complexity": {
@@ -503,12 +504,14 @@ generate_quality_report() {
     "gate7_iac_security": {
       "name": "IaC Security Scanning",
       "status": "$(gate_key_status 7)",
+      "reason": "${GATE_7_REASON:-}",
       "scanned_files": ${GATE_7_SCANNED_FILES:-0},
       "tools": "checkov, hadolint, kube-score, tflint"
     },
     "gate8_secret_scanning": {
       "name": "Secret Scanning",
       "status": "$(gate_key_status 8)",
+      "reason": "${GATE_8_REASON:-}",
       "tool": "gitleaks"
     },
     "gate9_build_integrity": {

@@ -189,6 +189,13 @@ if [ "$GITLEAKS_EXIT" -eq 0 ]; then
   if [ "$GITLEAKS_FINDINGS" = "0" ]; then
     echo "     ✅ PASSED - No secrets detected."
     GATE_8_STATUS="PASS"
+# Why the gate is not claiming a pass. Gate 8 had no reason variable, so its
+# SKIP arms printed the distinction to the console ("no artifact" vs "no
+# evidence") and the journal recorded a bare SKIP for both -- unreadable
+# afterwards. Assigning it here keeps the two arms distinguishable in the
+# record.
+# shellcheck disable=SC2034
+GATE_8_REASON=""
   elif [ "$GITLEAKS_FINDINGS" = "?" ]; then
     # #592: exit 0 with no usable report has TWO very different causes, and the
     # operator can only act if we tell them which one happened:
@@ -221,9 +228,13 @@ if [ "$GITLEAKS_EXIT" -eq 0 ]; then
       echo "     ⚠️  gitleaks scanned and reported no leaks, but wrote no report file"
       echo "        (${GITLEAKS_REPORT} missing). No artifact means no PASS (#449)."
       echo "     ⏭️  SKIPPED - secret scanning produced no artifact (scan reported clean)."
+      # shellcheck disable=SC2034
+      GATE_8_REASON="no_artifact_scan_reported_clean"
     else
       echo "     ⚠️  gitleaks exited 0 but produced no readable report and no scan summary"
       echo "     ⏭️  SKIPPED - secret scanning produced no evidence (not a pass)"
+      # shellcheck disable=SC2034
+      GATE_8_REASON="no_evidence_no_report_no_summary"
     fi
     GATE_8_STATUS="SKIP"
   else

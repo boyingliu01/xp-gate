@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.38.85.0] - 2026-11-22
+
+**Gate 7 和 Gate 8 的 SKIP 没有任何理由——报告里连 reason 字段都没有。**
+
+### 缺陷
+
+| 门禁 | reason 变量 | 报告字段 |
+|---|---|---|
+| Gate 7 IaC Security | **不存在** | **不存在** |
+| Gate 8 Secret Scanning | **不存在** | **不存在** |
+| Gate 2 Duplicate Code | `GATE_2_DETAIL`（有） | **不存在** |
+
+两者都有**两个不同的 SKIP 分支**，控制台能分清，记录里分不清：
+
+**Gate 7**
+- `no_iac_files_changed` —— 变更集里没有 IaC 文件（没什么可扫）
+- `adapter_not_found` —— 有文件但我扫不了
+
+**Gate 8**
+- `no_artifact_scan_reported_clean` —— gitleaks 扫了、报无泄漏，但没写报告文件
+- `no_evidence_no_report_no_summary` —— 完全没证据
+
+实测（探针仓库）：
+
+```
+gate7: SKIP | reason: undefined
+gate8: PASS | reason: undefined
+```
+
+这在这里**比别处更糟**：两个都是 fail-closed 的**安全**门禁。分不清
+"没什么可扫" 和 "我扫不了" 的读者，会把安全门禁的沉默当成覆盖。
+
+### 为什么 Gate 4 的同类缺陷没被发现，这里也没有
+
+Gate 4 **一直有** `"reason": "${GATE_4_REASON:-}"` 这个字段，只是没人往里写。
+Gate 7/8 **连字段都没有**。前者是"管道通了但没水流"，后者是"根本没有管道"。
+两种都会让 SKIP 变成无理由记录。
+
+### 修复
+
+- 两个门禁各自新增 reason 变量，**每个 SKIP 分支赋不同的值**
+- `gate2_dup_code` / `gate7_iac_security` / `gate8_secret_scanning` 三个报告条目加 `reason` 字段
+- Gate 2 用 `GATE_2_DETAIL`（它真正维护的那个变量），**不是**已经被删掉的 `GATE_2_REASON`。
+  后者曾经"赋值但无人读"，门禁里留着说明这件事的注释。启用一个同名死变量
+  就是同一个缺陷换个名字。
+
+实测修复后：
+
+```
+gate7: SKIP | reason: "no_iac_files_changed"
+gate8: PASS | reason: ""
+```
+
+### 测试
+
+`gate-78-skip-reason-recorded.test.bats`（6 条）。其中第 5 条只认
+`^[[:space:]]*GATE_2_REASON=` 这种**赋值**形式——门禁里解释"为什么删掉它"的注释
+不能被当成活变量。这一条我第一版写成了宽松 grep，把注释也数进去，
+自己先跳过了一次（skip），改成精确匹配后才会真的失败。
+
+### 一个与本次无关的既有失败
+
+`gate-7-adapter-resolution.test.bats` 第 2 条（"prefers a PROJECT copy over the
+global tier"）**在改动前就红**。用 `git stash` 验证过，不是这次引入的。
+
 ## [0.38.84.0] - 2026-11-22
 
 **Gate 4 对"没分析的语言"报 PASS，而且报告里 reason 为空——控制台说了，记录里没说。**
