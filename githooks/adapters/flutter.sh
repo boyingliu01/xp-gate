@@ -33,6 +33,15 @@ run_tests() {
   fi
 }
 
+# `flutter test --coverage` RUNS THE SUITE and then reads the coverage output it
+# just produced. Gate 5 called run_tests first and run_coverage second, so every
+# Flutter commit ran the same test suite twice -- the same defect measured on
+# python (23676/21890/29722 ms combined, roughly half of it the second start).
+#
+# Undeclared adapters keep the conservative double-run default on purpose: an
+# adapter that does not state this gets checked twice, which costs time, while
+# assuming it does costs verification. See adapter-common.sh.
+coverage_runs_tests() { return 0; }
 run_coverage() {
   if command -v flutter &>/dev/null; then
     flutter test --coverage 2>&1 | tail -10

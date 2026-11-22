@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.38.89.0] - 2026-11-22
+
+**检查"哪些适配器重复跑测试"的那条测试，自己就漏了三个适配器。**
+
+### 缺陷一：flutter 和 typescript 仍然重复执行测试
+
+`run_coverage` 里本来就跑了测试：
+
+- `flutter test --coverage`
+- `vitest run --coverage` / `jest --coverage`
+
+但都没声明 `coverage_runs_tests`，于是 Gate 5 先 `run_tests` 再 `run_coverage`——
+**同一批测试跑两遍**。这是 python 那条（实测合并 23676/21890/29722 ms，约一半是
+第二次启动）的同类缺陷，之前只修了 python。
+
+### 缺陷二：守住它的测试用了硬编码语言列表
+
+`AC-798-G5-02` 原文：
+
+```bash
+for lang in csharp go java kotlin dart swift; do
+```
+
+**列表里没有 python，没有 flutter，没有 typescript。**
+
+所以这三个适配器重复执行测试的同时，这条测试一直是绿的。
+
+这恰好违反 `AGENTS.md` 里写明的规则：
+
+> **在原处声明能力，绝不枚举语言名。** 手写的语言列表只能包含有人记得的那几个。
+
+讽刺的地方在于：这条规则正是为这类缺陷写的，而**守卫它的测试自己违反了它**。
+
+### 修复
+
+测试改成**发现式**：遍历 `adapters/*.sh`，凡是 `run_coverage` 里出现测试调用
+（pytest / vitest / jest / go test / dotnet test / mvn / gradle / flutter test /
+phpunit / npm test）却没声明 `coverage_runs_tests` 的，一律报错。
+
+### 证伪
+
+把 flutter 的声明删掉，新测试立刻报：
+
+```
+not ok 1 AC-798-G5-02: each double-running adapter declares coverage_runs_tests
+# adapters run the suite inside run_coverage but do not declare it: flutter
+```
+
+**旧测试在同样操作下保持绿色。** 这是"测试通过"与"测试有效"的差别。
+
+### 复查：cpp 和 powershell 不需要声明
+
+上一轮怀疑它们也重复执行，实际验证 `run_coverage` 里没有测试调用，不声明是对的。
+
 ## [0.38.88.0] - 2026-11-22
 
 **审计日志有 12 处调用不带理由。现在 35 处全部带上，并且有一条不变量测试守着。**

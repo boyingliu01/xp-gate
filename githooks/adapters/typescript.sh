@@ -280,6 +280,13 @@ _run_declared_test_command() {
   run_without_git_context sh -c "$cmd"
 }
 
+# vitest/jest both run the suite to produce coverage -- `--coverage` is a flag on
+# the same invocation, not a separate pass. Gate 5 ran run_tests and then
+# run_coverage, so every TypeScript commit executed the same tests twice.
+#
+# Undeclared adapters keep the conservative double-run default on purpose; see
+# adapter-common.sh.
+coverage_runs_tests() { return 0; }
 run_coverage() {
   echo "Running TypeScript coverage..."
   local runner bin out_file rc

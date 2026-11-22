@@ -49,15 +49,27 @@ setup() {
 # ---------------------------------------------------------------------------
 
 @test "AC-798-G5-02: each double-running adapter declares coverage_runs_tests" {
+  # DISCOVERED, not enumerated. This test used to carry the literal list
+  # "csharp go java kotlin dart swift" -- and python, flutter and typescript all
+  # double-ran while it stayed green, because a hand-written list can only contain
+  # what someone remembered. AGENTS.md states the rule; this test broke it.
+  #
+  # The predicate is now: an adapter whose run_coverage invokes the test runner
+  # must declare that coverage subsumes the test run.
   local missing=""
-  local lang
-  for lang in csharp go java kotlin dart swift; do
-    local f="$ADAPTERS/$lang.sh"
+  local f lang cov
+  for f in "$ADAPTERS"/*.sh; do
     [ -f "$f" ] || continue
+    lang=$(basename "$f" .sh)
+    # Only adapters that implement coverage are candidates.
+    grep -qE '^run_coverage()' "$f" || continue
+    cov=$(sed -n '/^run_coverage()/,/^}/p' "$f")
+    # Does the coverage step itself run the suite?
+    echo "$cov" | grep -qiE 'pytest|vitest|jest|go test|dotnet test|mvn.*test|gradle.*test|flutter test|phpunit|npm (run )?test' || continue
     grep -q 'coverage_runs_tests' "$f" || missing="$missing $lang"
   done
   if [ -n "$missing" ]; then
-    echo "adapters missing the coverage_runs_tests declaration:$missing"
+    echo "adapters run the suite inside run_coverage but do not declare it:$missing"
     return 1
   fi
 }
