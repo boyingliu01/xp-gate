@@ -211,22 +211,66 @@ stage_probe_files() {
   ( cd "$dir" && git add -- "$@" ) >/dev/null 2>&1
 }
 
-# probe_defect <suffix> <gate> <file> <content> <label> [<extra-file>]
-#   extra-file is "path<TAB>content" — C# needs a .csproj beside the .cs.
-probe_defect() {
-  local suffix="$1" gate="$2" file="$3" content="$4" label="$5" extra="${6:-}"
-  local dir out st xpath xcontent
-  dir=$(new_probe "$suffix")
-  write_probe_file "$dir" "$file" "$content"
-  if [ -n "$extra" ]; then
-    # Parameter expansion, NOT `read`: read consumes one line, so a multi-line
-    # second file (a tsconfig.json, a .csproj) was truncated to its first line.
-    # Measured 2026-11-22: a tsconfig became a bare "{" and tsc reported
-    # TS1005 on it, which the probe then read as the gate refusing clean code.
+# Write every extra "path<TAB>content" argument into the probe repo.
+#
+# More than one extra is needed: gate 9 only recognises a TypeScript project when
+# package.json AND tsconfig.json both exist, and a probe that wrote just one of them
+# measured a SKIP that looked like a gate verdict.
+# Give a probe repo the gate's own checker source, so the probe measures THIS
+# repository and not whatever happens to be installed globally.
+#
+# Gate 9 resolves its checker through a three-tier chain:
+#
+#   $PROJECT_ROOT/src/build-integrity/gate-10.ts
+#   .xp-gate/modules/build-integrity/gate-10.ts
+#   $HOME/.config/xp-gate/modules/build-integrity/gate-10.ts
+#
+# A probe repo has none of those, so every measurement silently fell through to the
+# THIRD tier -- a stale global copy. Measured 2026-11-22: the entry-point fix was
+# committed and verified by direct invocation, yet the probe still reported PASS on a
+# manifest whose main pointed nowhere, because the gate had loaded the previous
+# release from ~/.config/xp-gate. A probe that reports the installed artifact while
+# claiming to test the working tree is worse than no probe: it read exactly like a
+# product defect and cost a full round of re-measuring.
+#
+# Linking the real directory (rather than copying) keeps the probe honest when the
+# source changes between runs, and needs no sync step to remember.
+link_gate_source() {
+  local dir="$1"
+  [ -d "$REPO_ROOT/src/build-integrity" ] || return 0
+  # SECOND tier on purpose: .xp-gate/modules/ is where gate 9 looks next, and it is
+  # NOT a path the probe's tsconfig include glob covers. Linking into src/ instead
+  # made the probe compile this repository's own checker sources as if they were the
+  # probe project code. Measured 2026-11-22: 65 tsc errors, and the clean arm that
+  # must never be refused came back BLOCK.
+  local target="$dir/.xp-gate/modules/build-integrity"
+  mkdir -p "$dir/.xp-gate/modules"
+  ln -s "$REPO_ROOT/src/build-integrity" "$target" 2>/dev/null || cp -r "$REPO_ROOT/src/build-integrity" "$target"
+}
+
+write_extra_files() {
+  local dir="$1"; shift
+  local extra xpath xcontent
+  for extra in "$@"; do
+    [ -n "$extra" ] || continue
     xpath=${extra%%"$TAB"*}
     xcontent=${extra#*"$TAB"}
     write_probe_file "$dir" "$xpath" "$xcontent"
-  fi
+  done
+}
+
+# probe_defect <suffix> <gate> <file> <content> <label> [<extra-file>]
+#   extra-file is "path<TAB>content" — C# needs a .csproj beside the .cs.
+probe_defect() {
+  local suffix="$1" gate="$2" file="$3" content="$4" label="$5"
+  shift 5
+  local dir out st
+  dir=$(new_probe "$suffix")
+  write_probe_file "$dir" "$file" "$content"
+  # Gate 9 reads its checker from the PROJECT tree; without this the probe
+  # silently measured the installed release instead of this working tree.
+  [ "$gate" = "9" ] && link_gate_source "$dir"
+  write_extra_files "$dir" "$@"
   stage_probe_files "$dir" "$file"
   out=$(run_gate "$dir" "$gate")
   st=$(gate_status "$dir" "$gate" "$out")
@@ -237,19 +281,15 @@ probe_defect() {
 # probe_clean <suffix> <gate> <file> <content> [<extra-file>]
 #   The same project, written clean: the gate must not refuse it.
 probe_clean() {
-  local suffix="$1" gate="$2" file="$3" content="$4" extra="${5:-}"
-  local dir out st xpath xcontent
+  local suffix="$1" gate="$2" file="$3" content="$4"
+  shift 4
+  local dir out st
   dir=$(new_probe "$suffix")
   write_probe_file "$dir" "$file" "$content"
-  if [ -n "$extra" ]; then
-    # Parameter expansion, NOT `read`: read consumes one line, so a multi-line
-    # second file (a tsconfig.json, a .csproj) was truncated to its first line.
-    # Measured 2026-11-22: a tsconfig became a bare "{" and tsc reported
-    # TS1005 on it, which the probe then read as the gate refusing clean code.
-    xpath=${extra%%"$TAB"*}
-    xcontent=${extra#*"$TAB"}
-    write_probe_file "$dir" "$xpath" "$xcontent"
-  fi
+  # Gate 9 reads its checker from the PROJECT tree; without this the probe
+  # silently measured the installed release instead of this working tree.
+  [ "$gate" = "9" ] && link_gate_source "$dir"
+  write_extra_files "$dir" "$@"
   stage_probe_files "$dir" "$file"
   out=$(run_gate "$dir" "$gate")
   st=$(gate_status "$dir" "$gate" "$out")
@@ -555,6 +595,31 @@ probe_secret_gate8() {
   record "any/gate-8" "$ok" "PAT -> $st"
 }
 
+probe_ts_gate9() {
+  if ! command -v node >/dev/null 2>&1; then skip_case "typescript/gate-9" "node not installed"; return; fi
+  local ok=1 st pkggood pkgbad tsconf src
+  # Gate 9's TypeScript half needs a real package.json: without a "files" field the
+  # pack check SKIPs (by design -- npm ships everything and the question has no
+  # answer), and without package.json at all the gate SKIPs entirely.
+  pkggood='{"name":"p","version":"1.0.0","main":"src/index.ts","files":["src"],"scripts":{"build":"tsc"}}'
+  # The measured defect: main points at a path the tarball does not contain. Before
+  # the fix this produced "pack: PASS, Overall: PASS" for a package with no loadable
+  # entry point.
+  pkgbad='{"name":"p","version":"1.0.0","main":"src/nonexistent.js","files":["src"],"scripts":{"build":"tsc"}}'
+  tsconf='{"compilerOptions":{"strict":true,"target":"ES2020","module":"commonjs","noEmit":true},"include":["src/**/*"]}'
+  src='export function add(a: number, b: number): number {
+  return a + b;
+}
+'
+  # BOTH files are required: gate 9 recognises a TypeScript project only when
+  # package.json AND tsconfig.json exist, and a probe that wrote just one of them
+  # measured a SKIP that looked like a verdict.
+  probe_defect ts-g9-bad 9 src/index.ts "$src" "unreachable main"     "package.json${TAB}${pkgbad}" "tsconfig.json${TAB}${tsconf}" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean ts-g9-ok 9 src/index.ts "$src"     "package.json${TAB}${pkggood}" "tsconfig.json${TAB}${tsconf}" || ok=0
+  record "typescript/gate-9" "$ok" "unreachable main -> $st"
+}
+
 probe_gate12_hygiene() {
   local ok=1 st
   # Trailing whitespace plus a missing final newline: exactly what gate 12 reports
@@ -660,7 +725,7 @@ TF
 ALL_CASES=(
   python_gate1 go_gate1 java_gate1 csharp_gate1 php_gate1
   ts_gate3 gate4_principles gate2_duplicates gate10_sast
-  secret_gate8 iac_gate7 ts_gate13 java_gate13 gate12_hygiene
+  secret_gate8 iac_gate7 ts_gate13 java_gate13 gate12_hygiene ts_gate9
 )
 
 show_list() {
@@ -685,6 +750,7 @@ dispatch() {
     ts_gate13)        say "  ▸ typescript / gate-13"; probe_ts_gate13 ;;
     java_gate13)      say "  ▸ java / gate-13";      probe_java_gate13 ;;
     gate12_hygiene)   say "  ▸ any / gate-12";       probe_gate12_hygiene ;;
+    ts_gate9)         say "  ▸ typescript / gate-9";  probe_ts_gate9 ;;
     *) say "  ? unknown case: $c"; return 1 ;;
   esac
 }

@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.38.99.0] - 2026-11-22
+
+**探针曾测的是"已安装的旧版本"，而不是工作区源码。**
+
+### 缺陷
+
+Gate 9 按三级链解析检查器：
+
+```
+$PROJECT_ROOT/src/build-integrity/gate-10.ts      ← 第一级
+.xp-gate/modules/build-integrity/gate-10.ts        ← 第二级
+$HOME/.config/xp-gate/modules/build-integrity/...  ← 第三级
+```
+
+探针仓库（`/tmp/...` 下的一次性 repo）**三级里前两级都不存在**，
+所以每一次测量都静默落到第三级——**全局安装的旧副本**。
+
+实测：入口点修复已提交、直接用脚本调用验证为 `Overall: BLOCK`，
+而探针仍然报 `PASS`。因为门禁加载的是 `~/.config/xp-gate` 里的
+**上一个发布版本**。
+
+**一个声称测试工作区、实际测试已安装产物的探针，比没有探针更糟**：
+它看起来完全像一个产品缺陷，让我多花了一整轮重新测量。
+
+### 修复
+
+新增 `link_gate_source()`：把本仓库的 `src/build-integrity/`
+链入探针仓库，并**只对 gate 9 生效**。
+
+### 一次链接位置错误的自我纠正
+
+第一次把源码链到探针仓库的 `src/build-integrity/`，结果：
+
+```
+tsc:     FAIL  TypeScript compilation failed with 65 error(s)
+Overall: BLOCK
+```
+
+**干净臂被拒了**——因为 `src/` 在探针 `tsconfig.json` 的 `include` 范围内，
+探针把**本仓库自己的检查器源码**当成探针项目代码一起编译。
+
+改用第二级 `.xp-gate/modules/`：不在 `include` 里，且正是门禁下一步要找的位置。
+
+### 结果
+
+```
+✓ unreachable main not passed: BLOCK
+✓ clean input not refused: PASS
+PASS  typescript/gate-9  unreachable main -> BLOCK
+```
+
+完整探针 **15/15 全通过，0 失败 0 跳过**（新增 typescript/gate-9 一例）。
+
+### 顺带修好探针的一个能力缺口
+
+`probe_defect` / `probe_clean` 原来只接受**一个**额外文件。
+Gate 9 需要 `package.json` **和** `tsconfig.json` 同时存在才被识别为
+TypeScript 项目，只写一个的话测得的是 `SKIP`——而 `SKIP` 被读成了门禁结论。
+
+新增 `write_extra_files()` 支持任意多个 `path<TAB>content` 参数。
+
+### 测试
+
+`gate-language-probe.test.bats` 新增 3 条（共 10 条）：
+gate-9 探针必须链接本仓库检查器、链接必须落在编译 glob 之外、
+链接只对 gate 9 生效。
+
 ## [0.38.98.0] - 2026-11-22
 
 **Gate 9：一个安装后根本无法加载的包，构建完整性判 PASS。**

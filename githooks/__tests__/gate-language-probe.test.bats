@@ -85,3 +85,40 @@ setup() {
     [ "$count" -eq 1 ] || { echo "$name defined $count times"; return 1; }
   done
 }
+
+# @covers the probe measures the working tree, not the installed release
+#
+# Gate 9 resolves its checker through a three-tier chain whose FIRST tier is the
+# project's own src/build-integrity/. A probe repo has no such directory, so every
+# measurement silently fell through to the THIRD tier -- $HOME/.config/xp-gate.
+#
+# Measured 2026-11-22: the entry-point fix was committed and verified by direct
+# invocation, yet the probe still reported PASS for a manifest whose main pointed
+# nowhere, because the gate had loaded the previous release. That result reads
+# exactly like a product defect and cost a full round of re-measuring.
+@test "a gate-9 probe links this repository's checker into the probe repo" {
+  run grep -n 'link_gate_source' "$PROBE"
+  [ "$status" -eq 0 ]
+  # The helper must exist AND be called.
+  echo "$output" | grep -q 'link_gate_source() {'
+  echo "$output" | grep -q 'link_gate_source "\$dir"'
+}
+
+# @covers the link lands on the second tier, not inside the tsconfig include
+#
+# Linking into src/ put this repository's own sources inside the probe's compile
+# glob. Measured: 65 tsc errors, and the clean arm that must never be refused came
+# back BLOCK.
+@test "the gate-9 source link is placed outside the probe's compile glob" {
+  run grep -n 'xp-gate/modules/build-integrity' "$PROBE"
+  [ "$status" -eq 0 ]
+}
+
+# @covers the link is conditional on gate 9
+#
+# No other gate reads its implementation from the project tree, and linking for
+# them would put this repository's sources into every probe.
+@test "the source link only happens for gate 9" {
+  run grep -n '\[ "\$gate" = "9" \] && link_gate_source' "$PROBE"
+  [ "$status" -eq 0 ]
+}
