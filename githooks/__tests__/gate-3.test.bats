@@ -309,6 +309,10 @@ JSON
   cp "$BATS_TEST_DIRNAME/../../scripts/ccn-report.cjs" "$work/scripts/ccn-report.cjs"
   mkdir -p "$work/githooks/lib"
   cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+  # Without the classifier the gate refuses BEFORE reaching the population filter,
+  # which would make every assertion below vacuous. Copy it, then assert below that
+  # the refusal did not happen.
+  cp "$BATS_TEST_DIRNAME/../lib/file-classifier.sh" "$work/githooks/lib/file-classifier.sh"
 
   run bash -c "
     cd '$work' || exit 9
@@ -365,6 +369,10 @@ PY
 JSON
   cp "$BATS_TEST_DIRNAME/../../scripts/ccn-report.cjs" "$work/scripts/ccn-report.cjs"
   cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+  # Without the classifier the gate refuses BEFORE reaching the population filter,
+  # which would make every assertion below vacuous. Copy it, then assert below that
+  # the refusal did not happen.
+  cp "$BATS_TEST_DIRNAME/../lib/file-classifier.sh" "$work/githooks/lib/file-classifier.sh"
 
   run bash -c "
     cd '$work' || exit 9
@@ -396,14 +404,21 @@ def simple(a):
     return a + 1
 PY
   # population declares only .ts, so the .py path is out of scope by declaration.
+  # A ceiling ABOVE the measured CCN, so a graded inside.ts reads as an
+  # improvement. That is the only way to tell "row survived the filter and was
+  # compared" from "row was dropped and nothing complained".
   cat > "$work/.ccn-baseline.json" <<'JSON'
 {
   "population": { "roots": ["lib"], "extensions": [".ts"] },
-  "entries": {}
+  "entries": { "lib/inside.ts::inside": 9 }
 }
 JSON
   cp "$BATS_TEST_DIRNAME/../../scripts/ccn-report.cjs" "$work/scripts/ccn-report.cjs"
   cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+  # Without the classifier the gate refuses BEFORE reaching the population filter,
+  # which would make every assertion below vacuous. Copy it, then assert below that
+  # the refusal did not happen.
+  cp "$BATS_TEST_DIRNAME/../lib/file-classifier.sh" "$work/githooks/lib/file-classifier.sh"
 
   run bash -c "
     cd '$work' || exit 9
@@ -420,4 +435,74 @@ JSON
   # And it must name the FILE, not a number: printing the CCN was the tell that
   # the wrong column had been read.
   [[ "$output" == *"lib/simple.py"* ]]
+}
+
+# The population filter was rewritten from a per-row loop into ONE awk pass
+# (0.38.105.0) to stop paying a process per row. A rewrite that changes how rows
+# are CARRIED is exactly the kind that can silently drop some of them, so the
+# multi-file case is pinned separately from the single-file one above: with two
+# files, one inside the declared population and one outside, the inside file must
+# still be graded and the outside one must still be named.
+@test "#847: a multi-file change set keeps the in-population file and names the other" {
+  command -v lizard > /dev/null 2>&1 || skip "lizard not installed"
+  command -v node > /dev/null 2>&1 || skip "node not installed"
+
+  local work
+  work=$(mktemp -d "${XP_GATE_TEST_TMPROOT:-/c/Users/think/AppData/Local/Temp}/xpg-847multi-XXXXXX")
+  mkdir -p "$work/lib" "$work/scripts" "$work/githooks/lib"
+  git init -q "$work"
+  cat > "$work/lib/inside.ts" <<'TS'
+export function inside(a: number): number {
+  if (a > 0) { return 1; }
+  return 2;
+}
+TS
+  cat > "$work/lib/outside.py" <<'PY'
+def outside(a):
+    return a + 1
+PY
+  # Only .ts is declared, so the .py file is out of scope by declaration while
+  # the .ts file in the same change set stays in. A filter that collapsed the
+  # whole batch on the first out-of-population row would drop inside.ts too.
+  # A ceiling ABOVE the measured CCN, so a graded inside.ts reads as an
+  # improvement. That is the only way to tell "row survived the filter and was
+  # compared" from "row was dropped and nothing complained".
+  cat > "$work/.ccn-baseline.json" <<'JSON'
+{
+  "population": { "roots": ["lib"], "extensions": [".ts"] },
+  "entries": { "lib/inside.ts::inside": 9 }
+}
+JSON
+  cp "$BATS_TEST_DIRNAME/../../scripts/ccn-report.cjs" "$work/scripts/ccn-report.cjs"
+  cp "$BATS_TEST_DIRNAME/../lib/ccn-ratchet.sh" "$work/githooks/lib/ccn-ratchet.sh"
+  # Without the classifier the gate refuses BEFORE reaching the population filter,
+  # which would make every assertion below vacuous. Copy it, then assert below that
+  # the refusal did not happen.
+  cp "$BATS_TEST_DIRNAME/../lib/file-classifier.sh" "$work/githooks/lib/file-classifier.sh"
+
+  run bash -c "
+    cd '$work' || exit 9
+    PROJECT_LANG='typescript'
+    CHANGED_FILES=\$(printf '%s\n' 'lib/inside.ts' 'lib/outside.py')
+    CC_WARNINGS=0
+    GATE_3_STATUS=''
+    gate_start_ms() { echo 0; }
+    record_gate_audit() { :; }
+    source '$BATS_TEST_DIRNAME/../gate-3.sh'
+  "
+
+  # PRECONDITION: the gate must have reached the population filter at all. If it
+  # bailed out earlier (a missing library refuses before this point), every
+  # assertion below would pass against an empty run -- a test that cannot fail.
+  [[ "$output" != *"refusing to grade"* ]]     || { echo "gate refused before the population filter; assertions below would be vacuous:"; echo "$output"; return 1; }
+  # The out-of-population file is announced by NAME.
+  [[ "$output" == *"outside the baseline population"* ]]
+  [[ "$output" == *"lib/outside.py"* ]]
+  # And the in-population file was actually GRADED, not merely left out of the
+  # announcement. Declaring a baseline ceiling above the measured CCN makes the
+  # gate report it as an improvement -- which only happens if inside.ts's row
+  # survived the filter and reached the ratchet.
+  [[ "$output" == *"improved below baseline"* ]]     || { echo "inside.ts was filtered out along with outside.py:"; echo "$output"; return 1; }
+  # It must not be announced as out of scope.
+  [[ "$output" != *"outside the baseline population — not graded"*"lib/inside.ts"* ]]
 }

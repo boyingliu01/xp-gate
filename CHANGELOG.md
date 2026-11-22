@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.38.108.0] - 2026-11-23
+
+**上一版的 gate-3 优化只改了一半：双胞胎文件里，真正被执行的那个没被改。**
+
+### 发现
+
+`githooks/gate-3.sh` 第 374 行的注释写着：
+
+> **THIS FILE HAS A TWIN.** `githooks/gate-3.sh` and `githooks/adapters/gate-3.sh`
+> were byte-identical before this change, and tests source the one under
+> `adapters/`. A fix applied to only one of them leaves the other silently wrong.
+> **Any change here must land in BOTH.**
+
+0.38.105.0 的单次 awk 优化只落在 `adapters/gate-3.sh`，`gate-3.sh` 保持旧的逐行实现。
+而 `xp-gate doctor` 显示 `ADAPTER_DIR: D:\projects\xp-gate\githooks`，
+`gate-3-entry.sh` 走的是 `source "$GATE_DIR/gate-3.sh"` —— 命中的是**没被优化的那个**。
+
+实测同一份变更集：
+
+| 文件 | 实现 | 耗时 |
+|---|---|---|
+| `githooks/gate-3.sh` | 逐行（未优化） | **14.4s** |
+| `githooks/adapters/gate-3.sh` | 单次 awk（0.38.105.0） | **4.5s** |
+
+### 为什么测试没发现
+
+测试 source 的是 `$BATS_TEST_DIRNAME/../gate-3.sh`（即 `githooks/gate-3.sh`），
+本应抓到——但它们断言的是**判定正确**，而两个文件判定都正确，只是快慢不同。
+**一个测"结果对不对"的测试，抓不到"改了但没生效"的缺陷。** 只有计时能抓到。
+
+### 修复
+
+把 0.38.105.0 的单次 awk 实现移植到 `githooks/gate-3.sh`。两个文件现在
+md5 一致（`900d5a79...`），`diff` 为 0。
+
+移植后 `githooks/gate-3.sh`：**14.4s → 5.6s**，与 adapters 版（4.4s）一致，
+两者都输出 `PASSED`。`gate-3.test.bats` 12/12 通过。
+
+### 教训
+
+这一条值得单独写下来：**"我改的文件"和"被执行的文件"是两件事**。
+AGENTS.md 早就记载了这个陷阱（`core.hooksPath`、`ADAPTER_DIR` tier 链、
+双胞胎文件），我还是踩了，因为我用"测试通过"当作生效的证据，
+而测试 source 的是一个文件、运行时 source 的是另一个。
+
+**验证改动生效，要问"改动在那条路径上吗"，不是"测试绿了吗"。**
+下次要验证的是一行能区分两个实现的计时，而不是一个两者都会通过的断言。
+
 ## [0.38.107.0] - 2026-11-23
 
 **Gate 5 内部两个审计条目共享一个时钟，导致计时报告重复计算。**
