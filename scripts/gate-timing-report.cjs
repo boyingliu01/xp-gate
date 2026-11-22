@@ -110,6 +110,44 @@ function summarise(rows) {
   return out;
 }
 
+/**
+ * Per-gate breakdown by VERDICT, which the combined table cannot show.
+ *
+ * A gate that skips almost every commit and does real work on the rest has one
+ * median that describes neither path. Measured 2026-11-22: gate-3 reported a
+ * 0.9 s median and a 46.7 s p90, and the median was simply the SKIP path --
+ * the gate's ACTUAL cost on a source-touching commit was 25-51 s. Reading the
+ * combined row as "gate-3 is cheap" was wrong, and it was wrong in the direction
+ * that stops an investigation.
+ *
+ * Splitting by verdict makes the two populations visible instead of leaving the
+ * reader to infer them from a p90/median ratio.
+ */
+function summariseByStatus(rows) {
+  const byKey = new Map();
+  for (const r of rows) {
+    if (typeof r.duration_ms !== 'number') continue;
+    const id = r.gate_id || '(unknown)';
+    const status = r.gate_status || '(none)';
+    const key = `${id}|${status}`;
+    if (!byKey.has(key)) byKey.set(key, { gate: id, status, durations: [] });
+    byKey.get(key).durations.push(r.duration_ms);
+  }
+  const out = [];
+  for (const entry of byKey.values()) {
+    const sorted = [...entry.durations].sort((a, b) => a - b);
+    out.push({
+      gate: entry.gate,
+      status: entry.status,
+      samples: sorted.length,
+      median: percentile(sorted, 0.5),
+      max: sorted[sorted.length - 1],
+    });
+  }
+  out.sort((a, b) => (a.gate === b.gate ? b.median - a.median : a.gate.localeCompare(b.gate)));
+  return out;
+}
+
 function pad(s, n) {
   const str = String(s);
   return str.length >= n ? str : str + ' '.repeat(n - str.length);
@@ -141,6 +179,34 @@ function printTable(rows, hours) {
   console.log('');
   console.log(`  median total across gates: ${(medianTotal / 1000).toFixed(1)}s`);
   console.log('  (a sum of per-gate medians, NOT one commit wall clock)');
+}
+
+function printStatusTable(rows) {
+  // Only gates with more than one verdict shape are interesting here; a gate
+  // that always passes would just repeat the row above.
+  const gates = new Set(rows.map((r) => r.gate));
+  const multi = [...gates].filter((g) => rows.filter((r) => r.gate === g).length > 1);
+  if (multi.length === 0) return;
+  console.log('');
+  console.log('-'.repeat(RULE_WIDTH));
+  console.log('  SPLIT BY VERDICT — what the gate costs when it ACTUALLY RUNS');
+  console.log('-'.repeat(RULE_WIDTH));
+  console.log('');
+  console.log(
+    `  ${pad('GATE', 12)}${pad('VERDICT', 10)}${pad('N', 5)}${pad('MEDIAN', 10)}MAX`
+  );
+  console.log(
+    `  ${'-'.repeat(11)} ${'-'.repeat(9)} ${'-'.repeat(4)} ${'-'.repeat(9)} ${'-'.repeat(9)}`
+  );
+  for (const r of rows) {
+    if (!multi.includes(r.gate)) continue;
+    console.log(
+      `  ${pad(r.gate, 12)}${pad(r.status, 10)}${pad(r.samples, 5)}${pad(`${(r.median / 1000).toFixed(1)}s`, 10)}${(r.max / 1000).toFixed(1)}s`
+    );
+  }
+  console.log('');
+  console.log('  The combined table above reports ONE median per gate. When a gate');
+  console.log('  mostly skips, that median describes the SKIP path, not the work.');
 }
 
 function printFindings(rows) {
@@ -189,7 +255,15 @@ function main() {
     return;
   }
   printTable(summary, opts.hours);
+  const byStatus = summariseByStatus(rows);
+  printStatusTable(byStatus);
   printFindings(summary);
 }
 
-main();
+
+// Exported for the pinning test. summariseByStatus is the part that was wrong to
+// omit: a gate whose median is dominated by its SKIP path reports a cost it does
+// not have, and the split is what makes that visible.
+module.exports = { summarise, summariseByStatus, percentile };
+
+if (require.main === module) main();

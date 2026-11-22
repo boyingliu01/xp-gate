@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.38.106.0] - 2026-11-23
+
+**计时报告本身在误导读者：一个门禁一行中位数，把"跳过"和"真跑了"混成同一个数。**
+
+### 发现
+
+修完 gate-3（5.4s，原 57.4s）后重跑 `xg-gate gate-timing`，新加的按判定分组视图
+立刻暴露三件事：
+
+```
+  GATE        VERDICT   N    MEDIAN    MAX
+  gate-1      PASS      37   21.3s     27.3s
+  gate-1      SKIP      3    0.0s      0.5s
+  gate-3      PASS      15   58.4s     61.3s   ← 83 倍
+  gate-3      SKIP      18   0.7s      1.3s
+  gate-10     PASS      3    19.6s     25.9s   ← 98 倍
+  gate-10     SKIP      28   0.2s      0.6s
+  gate-2      SKIP      38   5.2s      8.2s    ← 跳过比通过还慢
+  gate-2      PASS      2    0.0s      0.0s
+```
+
+旧报告的 gate-3 一行是"中位 1.0s / p90 59.1s"。那个 1.0s **不是 gate-3 的成本**，
+它描述的是 SKIP 路径。读这一行得出的"gate-3 很便宜"结论，方向恰好相反——
+它恰好是这条链里最贵的门禁。
+
+### 修复
+
+`scripts/gate-timing-report.cjs` 新增 `summariseByStatus()` 和对应表格，
+按 (gate, verdict) 分组。原来的单行视图保留（它仍然是回答"总耗时怎么分布"的正确工具），
+但双峰的事实在它下面是看不见的。
+
+### 顺带发现（尚未修复，先记录）
+
+**gate-2 的 SKIP 比 PASS 慢。** 38 次 SKIP 中位 5.2s，2 次 PASS 只要 0.0s；
+SKIP 原因是 `no_tool_for_powershell`——一个"找不到工具"的判定，本应是毫秒级。
+已定位到 `require_tool` 单次约 1.08s（`bootstrap_toolchain_path` 占 188ms），
+但 5s 的主要来源尚未查清。**不写"已优化"，因为它还没被优化。**
+
+### 测试
+
+`scripts/__tests__/gate-timing-report.test.cjs` 4 个用例，核心那个构造了
+"SKIP 快、PASS 慢"的样本，断言分组视图必须出现两行、且各自保留自己的样本数与中位数。
+
+**证伪**：把 `summariseByStatus` 改成忽略 `gate_status`（退化为按 gate 汇总），
+测试 3/4 失败。还原后 4/4 通过。
+
 ## [0.38.105.0] - 2026-11-23
 
 **上一版优化了扫描引擎，这一版才真正碰到门禁链最大的那一块：gate-3 每处理一行 CSV 就启动 3 个进程。**
