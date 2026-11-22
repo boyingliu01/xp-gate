@@ -800,7 +800,7 @@ if [ -n "${GATE_6_STATUS:-}" ]; then
 else
   GATE_6_STATUS="SKIP"
 fi
-record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCKED:-0}" "$GATE_6_START"
+record_gate_audit "gate-6" "architecture-boy-scout" "$GATE_6_STATUS" "${BS_BLOCKED:-0}" "$GATE_6_START" "${GATE_6_DETAIL:-${GATE_6_REASON:-}}"
 
 # ============================================================================
   return 0

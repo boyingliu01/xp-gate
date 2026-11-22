@@ -680,4 +680,4 @@ console.log("");});
     fi # node available
   fi
 fi
-record_gate_audit "gate-10" "sast-security" "$GATE_10_STATUS" "0" "$GATE_10_START"
+record_gate_audit "gate-10" "sast-security" "$GATE_10_STATUS" "0" "$GATE_10_START" "${GATE_10_REASON:-}"

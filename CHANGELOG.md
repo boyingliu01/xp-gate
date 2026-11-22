@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.38.86.0] - 2026-11-22
+
+**三个门禁算出了跳过理由，却没交给审计日志。**
+
+### 缺陷
+
+`record_gate_audit` 的第 6 个参数是 detail：
+
+```
+record_gate_audit <gate_id> <name> <status> <issues> <start_ms> [detail]
+```
+
+它**默认为空**，所以漏传不报错——日志行照样写、照样有状态、看着很完整。
+这正是它能活下来的原因：**记录格式合法，只是不说为什么。**
+
+实测本仓库自己的审计日志（同一提交）：
+
+| 门禁 | 状态 | detail |
+|---|---|---|
+| gate-4 | SKIP | `""` |
+| gate-6 | SKIP | `""` |
+| gate-10 | SKIP | `""` |
+
+而三者的理由变量**都已经赋了值**：
+
+- `GATE_4_REASON` —— 6 个分支赋值（`documentation_project`、`tool_not_installed`、`checker_not_found`、`no_matching_files_changed` …）
+- `GATE_10_REASON` —— 7 个分支赋值（`tool_not_installed`、`no_supported_files`、`semgrep_timeout`、`output_unparseable`、`zero_rules` …）
+- `GATE_6_DETAIL` —— **gate-6 的提前返回分支传了，主出口没传**
+
+Gate 6 那条最说明问题：**门禁和自己的另一条路径不一致**。一条路径记录理由，
+另一条不记，于是日志"看起来是会带理由的"，没人去查它是不是每次都带。
+
+### 修复
+
+三处把已有变量接到 `record_gate_audit`：
+
+- `gate-4` → `"${GATE_4_REASON:-}"`
+- `gate-10` → `"${GATE_10_REASON:-}"`
+- `gate-6` → `"${GATE_6_DETAIL:-${GATE_6_REASON:-}}"`
+
+### 测试
+
+`gate-journal-detail-reaches.test.bats`（5 条）。已**证伪**：把 gate-4 的
+detail 参数删回去，第 1 条立刻变红（`not ok 1`），恢复后重新变绿。
+
+### 顺带查明：报告只有 13 个门禁，不是缺陷
+
+查询时发现 `generate_quality_report()` 的 `gates` 块只写 gate1–gate13，
+不含 gate-0、12b、12c 和三个 push-only 门禁。
+
+一度以为是缺口，核对审计日志后确认**不是**：`audit.jsonl` 里 19 个门禁全都有记录，
+报告只是它的一个子集视图。**审计日志才是权威记录**，报告少几行不影响
+"没检查"能否被追溯。这条记下来，免得下次重新怀疑一遍。
+
 ## [0.38.85.0] - 2026-11-22
 
 **Gate 7 和 Gate 8 的 SKIP 没有任何理由——报告里连 reason 字段都没有。**

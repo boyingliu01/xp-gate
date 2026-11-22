@@ -308,4 +308,4 @@ else
     GATE_4_REASON="no_matching_files_changed"
   fi
 fi
-record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START"
+record_gate_audit "gate-4" "principles" "$GATE_4_STATUS" "${WARNING_COUNT:-0}" "$GATE_4_START" "${GATE_4_REASON:-}"
