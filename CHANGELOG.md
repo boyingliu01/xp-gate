@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.38.111.0] - 2026-11-23
+
+**Gate 7 的 adapter 解析顺序与它自己的注释相反：全局旧副本压过项目新副本。**
+
+### 发现
+
+`githooks/gate-7.sh` 的注释写着：
+
+> Resolution follows the documented 3-tier convention (adapter-common.sh):
+> **global -> project -> script dir**
+
+而 `adapter-common.sh` 里的 `HOOK_ADAPTER_DIR_TIERS` 实际是 **project 优先**：
+
+```sh
+HOOK_ADAPTER_DIR_TIERS=(
+  'project|PROJECT_GITHOOKS|adapter-common.sh'
+  'global|GLOBAL_ADAPTER_DIR|adapter-common.sh'
+  'script|SCRIPT_DIR|adapter-common.sh'
+)
+```
+
+gate-7 自己维护了一份候选列表，顺序与全局约定相反：
+
+```sh
+for _candidate in \
+  "$HOME/.config/xp-gate/adapters/iac.sh" \   # 全局在前
+  "githooks/adapters/iac.sh" \                # 项目在后
+```
+
+**实测后果**：仓库自带 `githooks/adapters/iac.sh` 时，只要全局装过一份，项目副本就被
+完全绕过。用探针仓库复现，输出是 `fake checkov ran`（全局副本）而不是
+`project adapter ran`（项目副本）。
+
+这正是 AGENTS.md 反复警告的 **"A stale adapter overrides a fresh one"**，
+而危害不止"用了旧版本"：**它静默改变了判定**，一个仓库无法决定自己被怎么检查。
+
+### 修复
+
+候选列表改为 project 优先，全局作为 fallback。归位到与
+`HOOK_ADAPTER_DIR_TIERS` 一致的顺序，并把这个约定写进注释。
+
+### 测试
+
+`githooks/__tests__/gate-7-adapter-resolution.test.bats` **4/4 通过**——
+其中 test 2「prefers a PROJECT copy over the global tier」是**长期存在的红测试**，
+这一轮修好了。test 1 和 test 3 覆盖全局仍可达（fallback 未被破坏）。
+
+**证伪**：把两行顺序换回旧版，test 2 立即失败，test 1/3/4 仍通过。
+说明该测试精确钉住了这条缺陷，而不是碰巧通过。
+
 ## [0.38.110.0] - 2026-11-23
 
 **把这一轮的测量证据写进基线文档，包括一条"测不出来"的。**

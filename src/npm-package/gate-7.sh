@@ -40,15 +40,24 @@ else
   # shellcheck disable=SC2034
   GATE_7_SCANNED_FILES=$(printf '%s\n' "$IAC_FILES" | sed -n '/./p' | wc -l | tr -d '[:space:]')
   # Run IaC adapter. Resolution follows the documented 3-tier convention
-  # (adapter-common.sh): global ~/.config/xp-gate/adapters -> project
-  # githooks/adapters -> script dir. The old cwd-only test silently SKIPped
-  # IaC security in every consumer repo without an in-repo githooks/ dir,
-  # even with the adapter installed globally (e2e sweep 2026-10-17; pinned
-  # by __tests__/gate-7-adapter-resolution.test.bats).
+  # (adapter-common.sh HOOK_ADAPTER_DIR_TIERS), which is PROJECT FIRST:
+  # project githooks/adapters -> global ~/.config/xp-gate/adapters -> script dir.
+  #
+  # This list used to be in the OPPOSITE order while the comment above it already
+  # described the correct one, so the code and its own documentation disagreed and
+  # only the code ran. Measured consequence: a repo carrying its own
+  # githooks/adapters/iac.sh was bypassed outright whenever a global install
+  # existed -- the probe printed "fake checkov ran" instead of the project
+  # adapter. That is the "stale adapter overrides fresh" trap AGENTS.md warns
+  # about, and the damage is not that a stale copy is older: it silently changes
+  # the VERDICT, so a repository cannot decide how it is checked.
+  #
+  # The global tier still exists and is still reachable -- it is the FALLBACK now
+  # (pinned by tests 1 and 3 of __tests__/gate-7-adapter-resolution.test.bats).
   IAC_ADAPTER=""
   for _candidate in \
-    "$HOME/.config/xp-gate/adapters/iac.sh" \
     "githooks/adapters/iac.sh" \
+    "$HOME/.config/xp-gate/adapters/iac.sh" \
     "${SCRIPT_DIR:-}/adapters/iac.sh"; do
     if [ -n "$_candidate" ] && [ -f "$_candidate" ]; then
       IAC_ADAPTER="$_candidate"
