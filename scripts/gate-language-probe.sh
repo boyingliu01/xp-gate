@@ -206,9 +206,18 @@ write_probe_file() {
 # A bare `git add -A` also stages the gate's own output (.xp-gate/,
 # .quality-history.jsonl); on a second run the change set is then entirely gate
 # artefacts and the gate concludes "no changed code files".
+# Stage EVERY file written into the probe repo, not just the primary one.
+#
+# Gates read their change set from git, so a file that exists on disk but is not
+# staged is invisible to them. Measured 2026-11-22: probe_python_gate5 wrote a new
+# pyproject.toml (which forces the FULL suite via the dependency-manifest rule #399)
+# but staged only src/m.py, so gate 5 ran a SUBSET, took the subset exemption, and
+# recorded PASS for 48% coverage against an 80% floor. The probe then reported that
+# PASS as the gate failing to notice -- i.e. it accused the gate of exactly the
+# defect the probe had created.
 stage_probe_files() {
-  local dir="$1"; shift
-  ( cd "$dir" && git add -- "$@" ) >/dev/null 2>&1
+  local dir="$1"
+  ( cd "$dir" && git add -A -- . ) >/dev/null 2>&1
 }
 
 # Write every extra "path<TAB>content" argument into the probe repo.
@@ -595,6 +604,82 @@ probe_secret_gate8() {
   record "any/gate-8" "$ok" "PAT -> $st"
 }
 
+probe_python_gate5() {
+  if ! command -v python >/dev/null 2>&1; then skip_case "python/gate-5" "python not installed"; return; fi
+  if ! python -c "import pytest_cov" >/dev/null 2>&1; then skip_case "python/gate-5" "pytest-cov not installed"; return; fi
+  local ok=1 st pyconf conf uncovered covered testimport
+  # Gate 5's Python arm runs --cov=src on a full run and needs a tests/ directory
+  # that can import the source, so the probe reproduces that layout exactly.
+  pyconf='[project]
+name = "p5"
+version = "1.0.0"
+dependencies = ["pytest"]
+'
+  conf='import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+'
+  # One function, one test: 100% line coverage.
+  covered='def covered():
+    return 1
+'
+  # The same single test against five mostly-unexecuted functions. Measured
+  # 2026-11-22: 48% against the 80% floor.
+  uncovered='def covered():
+    return 1
+
+
+def a():
+    x = 1
+    y = 2
+    z = 3
+    return x + y + z
+
+
+def b():
+    x = 4
+    y = 5
+    z = 6
+    return x + y + z
+
+
+def c():
+    x = 7
+    y = 8
+    z = 9
+    return x + y + z
+
+
+def d():
+    x = 10
+    y = 11
+    z = 12
+    return x + y + z
+'
+  testimport='import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.m import covered
+
+
+def test_covered():
+    assert covered() == 1
+'
+  # A dependency-manifest change forces the FULL suite (#399), so the 80% floor
+  # applies rather than the subset exemption.
+  probe_defect py-g5-low 5 src/m.py "$uncovered" "coverage below floor" \
+    "pyproject.toml${TAB}${pyconf}" "tests/test_m.py${TAB}${testimport}" \
+    "conftest.py${TAB}${conf}" "src/__init__.py${TAB}" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean py-g5-ok 5 src/m.py "$covered" \
+    "pyproject.toml${TAB}${pyconf}" "tests/test_m.py${TAB}${testimport}" \
+    "conftest.py${TAB}${conf}" "src/__init__.py${TAB}" || ok=0
+  record "python/gate-5" "$ok" "coverage below floor -> $st"
+}
+
 probe_ts_gate9() {
   if ! command -v node >/dev/null 2>&1; then skip_case "typescript/gate-9" "node not installed"; return; fi
   local ok=1 st pkggood pkgbad tsconf src
@@ -725,7 +810,7 @@ TF
 ALL_CASES=(
   python_gate1 go_gate1 java_gate1 csharp_gate1 php_gate1
   ts_gate3 gate4_principles gate2_duplicates gate10_sast
-  secret_gate8 iac_gate7 ts_gate13 java_gate13 gate12_hygiene ts_gate9
+  secret_gate8 iac_gate7 ts_gate13 java_gate13 gate12_hygiene ts_gate9 python_gate5
 )
 
 show_list() {
@@ -751,6 +836,7 @@ dispatch() {
     java_gate13)      say "  ▸ java / gate-13";      probe_java_gate13 ;;
     gate12_hygiene)   say "  ▸ any / gate-12";       probe_gate12_hygiene ;;
     ts_gate9)         say "  ▸ typescript / gate-9";  probe_ts_gate9 ;;
+    python_gate5)     say "  ▸ python / gate-5";      probe_python_gate5 ;;
     *) say "  ? unknown case: $c"; return 1 ;;
   esac
 }

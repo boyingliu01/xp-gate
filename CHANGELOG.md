@@ -1,5 +1,85 @@
 # Changelog
 
+## [0.38.100.0] - 2026-11-22
+
+**Gate 5：覆盖率不达标被拦截了，但记录成 SKIP。六个语言分支同一个病。**
+
+### 缺陷
+
+Python 项目，48% 行覆盖率对 80% 门槛：
+
+```
+FAIL Required test coverage of 80% not reached. Total coverage: 48.39%
+❌ BLOCKED - Python coverage 48% below 80% threshold
+  Gate 5: Tests + Coverage                      SKIP (coverage: 48%)
+```
+
+**拦截是生效的**（`return 1`，链条中断）。错的是记录：
+`return 1` 从没给 `GATE_5_STATUS` 赋值，而收尾逻辑只在状态**为空**时
+提升为 PASS——于是空状态渲染成 **SKIP**。
+
+**同一行里，控制台说 blocked，汇总说 skipped。**
+
+### 根因：同一个教训只修了一半
+
+紧邻「无法确定覆盖率」分支的代码里，早就写着这段话：
+
+> A verdict that only reaches the console is a verdict the journal contradicts.
+
+并且那里**确实**先 `GATE_5_STATUS="BLOCK"` 再返回。而「低于门槛」分支
+是同一个缺陷、隔一个条件——**被漏掉了**。
+
+Python 那条更隐蔽：判定被下沉到 `githooks/lib/coverage-total.sh`，
+而那个库只 `return 1`，**没有访问门禁状态变量的能力**。
+所以修复必须在两层：库返回判定，**调用点负责记录**。
+
+### 修复范围：不是一处，是六处
+
+顺着 `grep` 找 `below ${COVERAGE_THRESHOLD:-80}% threshold`，共 **6 个语言分支**
+全部缺状态记录：
+
+| 语言 | 修复 |
+|---|---|
+| TypeScript | 新增 `GATE_5_STATUS="BLOCK"` + 原因 |
+| Java | 同上 |
+| Flutter/Dart | 同上 |
+| PowerShell | 同上 |
+| Go | 同上 |
+| 通用回退 | 同上 |
+
+加上 Python 的调用点，共 **8 处**赋值。每处都带 `coverage_below_floor:` 原因。
+
+### 修复后
+
+```
+❌ BLOCKED - Python coverage 61% below 80% threshold
+  Gate 5: Tests + Coverage                      BLOCK (coverage: 61%)
+```
+
+报告 JSON 同步为 `status: BLOCK | reason: coverage_below_floor: ...`。
+
+### 探针暴露的第二个缺陷：staging 不完整
+
+`stage_probe_files` 原来**只 `git add` 主文件**。`pyproject.toml` 之类
+额外文件写进了磁盘却没进变更集——而门禁只读 git 变更集。
+
+后果：`pyproject.toml` 新增本应触发全量运行（#399 依赖清单规则），
+结果跑的是子集，走了子集豁免，**记录成 PASS**。
+探针于是把这个 PASS 报成「门禁没发现缺陷」——
+**它指控门禁的，正是探针自己制造的问题。**
+
+改为 `git add -A`。
+
+### 测试
+
+`gate-5-floor-block-recorded.test.bats`（5 条）：
+每个 `below floor` 分支必须在返回**之前**赋值状态（向后 12 行内查找，
+因为赋值必须在 return 之前才有意义）、Python 调用点记录库返回的判定、
+原因可被机器读取、库不越权设置它看不见的全局变量、收尾只填空状态。
+
+端到端：`scripts/gate-language-probe.sh python_gate5` ——
+48% 项目 → BLOCK，100% 项目 → PASS。
+
 ## [0.38.99.0] - 2026-11-22
 
 **探针曾测的是"已安装的旧版本"，而不是工作区源码。**

@@ -1395,6 +1395,13 @@ else
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run 'npx vitest run --coverage' for full coverage check."
             else
+              # Record the verdict as well as printing it. Measured 2026-11-22:
+              # these floor-miss branches printed "❌ BLOCKED - <lang> coverage N%
+              # below M% threshold" and returned 1, while GATE_5_STATUS stayed
+              # empty -- and an empty status renders as SKIP, so the summary line
+              # one inch below reported a skip for a commit that was blocked.
+              GATE_5_STATUS="BLOCK"
+              GATE_5_DETAIL="coverage_below_floor: typescript coverage under the 80% floor"
               echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1522,7 +1529,26 @@ else
       # (the old `grep -o '[0-9]*%'` never matched --format=total's bare
       # number, so this branch never reached the threshold). Returns 1 on
       # BLOCK after echoing the verdict.
-      enforce_python_coverage || return 1
+      #
+      # The verdict must be RECORDED as well as echoed. Measured 2026-11-22 on a
+      # Python fixture at 48% against an 80% floor: enforce_python_coverage printed
+      #
+      #     ❌ BLOCKED - Python coverage 48% below 80% threshold
+      #
+      # and this `|| return 1` propagated the exit without ever assigning
+      # GATE_5_STATUS, so the epilogue -- which only promotes an EMPTY status to PASS
+      # -- left it empty and the summary rendered
+      #
+      #     Gate 5: Tests + Coverage    SKIP (coverage: 48%)
+      #
+      # beside that BLOCKED line. Console said blocked, journal said skipped. The
+      # library returns the verdict and cannot record it: it has no access to the
+      # gate's status variable, so the assignment belongs here, at the call site.
+      if ! enforce_python_coverage; then
+        GATE_5_STATUS="BLOCK"
+        GATE_5_DETAIL="coverage_below_floor: python coverage under the 80% floor"
+        return 1
+      fi
       ;;
     "java")
       COVERAGE_ENFORCED=true
@@ -1601,6 +1627,13 @@ else
               echo "⚠️  Partial coverage ${COVERAGE_ROUNDED}% (subset test run, not full suite)."
               echo "    Run the full test suite for a complete Java coverage check."
             else
+              # Record the verdict as well as printing it. Measured 2026-11-22:
+              # these floor-miss branches printed "❌ BLOCKED - <lang> coverage N%
+              # below M% threshold" and returned 1, while GATE_5_STATUS stayed
+              # empty -- and an empty status renders as SKIP, so the summary line
+              # one inch below reported a skip for a commit that was blocked.
+              GATE_5_STATUS="BLOCK"
+              GATE_5_DETAIL="coverage_below_floor: java coverage under the 80% floor"
               echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1682,6 +1715,10 @@ else
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run the full test suite for a complete Flutter/Dart coverage check."
             else
+              # Record the verdict as well as printing it -- see the typescript branch
+              # above for the measurement. An unassigned status renders as SKIP.
+              GATE_5_STATUS="BLOCK"
+              GATE_5_DETAIL="coverage_below_floor: flutter/dart coverage under the 80% floor"
               echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1774,6 +1811,10 @@ else
               echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
               echo "    Run the full Pester suite for a complete PowerShell coverage check."
             else
+              # Record the verdict as well as printing it -- see the typescript branch
+              # above for the measurement. An unassigned status renders as SKIP.
+              GATE_5_STATUS="BLOCK"
+              GATE_5_DETAIL="coverage_below_floor: powershell coverage under the 80% floor"
               echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1893,6 +1934,24 @@ else
             echo "⚠️  Partial coverage ${COVERAGE_PERCENT}% (subset test run, not full suite)."
             echo "    Run the full test suite for a complete ${CURRENT_LANG} coverage check."
           else
+            # Record the verdict, not just print it. Measured 2026-11-22 on a Python
+            # fixture at 48% against an 80% floor: this branch printed
+            #
+            #     ❌ BLOCKED - Python coverage 48% below 80% threshold
+            #
+            # and returned 1, while the summary one inch below still read
+            #
+            #     Gate 5: Tests + Coverage    SKIP (coverage: 48%)
+            #
+            # because the status variable was never assigned and the epilogue only
+            # promotes an EMPTY status to PASS -- an empty status therefore rendered
+            # as SKIP. The identical lesson was already written into the
+            # "could not determine" branch below, which sets BLOCK explicitly; this
+            # branch is the same defect, one condition over, and it was missed. A
+            # verdict that only reaches the console is a verdict the journal
+            # contradicts.
+            GATE_5_STATUS="BLOCK"
+            GATE_5_DETAIL="coverage_below_floor: ${CURRENT_LANG} ${COVERAGE_PERCENT}% < ${COVERAGE_THRESHOLD:-80}%"
             echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
             return 1
           fi
@@ -2175,6 +2234,10 @@ _gate5_go_coverage_arm() {
 
   total=$(go tool cover -func=coverage.out 2>/dev/null | grep "^total:" | awk '{print substr($3, 1, length($3)-1)}')
   if [ -n "$total" ] && (( $(echo "$total < 80" | bc -l 2>/dev/null || echo "0") )); then
+    # Record the verdict as well as printing it -- see the typescript branch
+    # above for the measurement. An unassigned status renders as SKIP.
+    GATE_5_STATUS="BLOCK"
+    GATE_5_DETAIL="coverage_below_floor: go coverage under the 80% floor"
     echo "❌ BLOCKED - Go coverage ${total}% below ${COVERAGE_THRESHOLD:-80}% threshold"
     COV_EXIT=$((COV_EXIT || 1))
     return 1
