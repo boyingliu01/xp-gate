@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.38.97.0] - 2026-11-22
+
+**Gate 12 文件卫生：探针验证通过（WARN 是正确判定）。**
+
+### 两次差点误判
+
+**第一次**：用 `bad name.txt` + `.DS_Store` 测，Gate 12 报 PASS。
+差点判成"门禁瞎了"。实际是这两个根本不是 Gate 12 检查的东西——
+它检查的是**行尾空格**和**文件末尾缺换行**。
+
+**第二次**：改对缺陷后仍报 PASS：
+
+```
+✅ PASSED - File Hygiene (docs-only commit: diff-scoped conflict-marker + YAML/JSON checks clean)
+```
+
+原因是 `.txt` 被归为文档，走了**文档-only 短路**。换成 `.py` 才真正触发：
+
+```
+⚠️  Trailing whitespace detected in:
+⚠️  Missing EOF newline in:
+Issues: trailing-whitespace no-eof-newline
+Gate 12: File Hygiene  WARN
+```
+
+两次都是**探针的问题，不是门禁的问题**。第五、第六次了。
+
+### 为什么 WARN 就是通过
+
+文件卫生在本仓库是**建议级**，不是阻断级。契约要求"不得 PASS"，
+而 WARN + 点名具体问题是门禁**正常履行职责**。
+
+把 WARN 判成失败，等于要求所有门禁都必须阻断——那会毁掉
+"SKIP/WARN 是诚实结论"这个更重要的不变量。
+
+### 探针现状
+
+**14 例全绿**：gate-1 × 5 语言、gate-2、gate-3、gate-4、gate-7、gate-8、gate-10、
+gate-13 × 2 语言、gate-12。
+
+门禁覆盖：16 个里已证伪 9 个（1,2,3,4,7,8,10,12,13）。
+
+### 剩下 7 个门禁不写探针的理由
+
+| 门禁 | 为什么不做语言探针 |
+|---|---|
+| 0 版本一致性 | 检查 VERSION/CHANGELOG 一致性，与语言无关，已有专门测试 |
+| 5 测试覆盖率 | 需要真实测试套件，**且已手工验证**（见下） |
+| 6 架构 | 需要 archlint 配置，无配置时本就该 SKIP |
+| 9 构建完整性 | 需要完整构建系统，缺构建文件时 SKIP 是正确行为 |
+| 11 Sprint Flow | 流程门禁，非代码质量 |
+| 12b/12c | 镜像一致性 / 探针纪律，**已有专门 bats 测试** |
+
+**Gate 5 是手工验证过的**：构造 10 个函数只测 1 个的项目，
+Gate 5 报 `PASS (coverage: 60%, subset run -- global floor not checked)`
+——**它主动说明了没检查全局阈值**。这符合"SKIP 必须记录原因"的不变量。
+
+（过程中还纠正了一个自己的错误：第一版用 `def a(): return 1` 单行函数，
+coverage 把整个函数算作一行且已执行，报 100%。改成多行函数才得到真实的 50%。
+**又是探针的问题。**）
+
 ## [0.38.96.0] - 2026-11-22
 
 **Java 的类型错误，之前没有任何门禁能发现。**

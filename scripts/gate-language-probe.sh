@@ -555,6 +555,28 @@ probe_secret_gate8() {
   record "any/gate-8" "$ok" "PAT -> $st"
 }
 
+probe_gate12_hygiene() {
+  local ok=1 st
+  # Trailing whitespace plus a missing final newline: exactly what gate 12 reports
+  # ("Issues: trailing-whitespace no-eof-newline" -> WARN).
+  #
+  # A CODE file, not a .txt: a documentation-only commit takes the gate's
+  # diff-scoped short-circuit and the heavy checks are skipped by design. Measured
+  # 2026-11-22 -- the first version used bad.txt and read the short-circuit as the
+  # gate being blind.
+  #
+  # WARN is the correct verdict here, not BLOCK: file hygiene is advisory in this
+  # repository. The contract is "must not be PASS", and WARN with named issues is
+  # the gate doing its job.
+  probe_defect g12-bad 12 bad.py 'x = 1   
+y = 2' "trailing ws + no EOF newline" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean g12-ok 12 bad.py 'x = 1
+y = 2
+' || ok=0
+  record "any/gate-12" "$ok" "trailing ws -> $st"
+}
+
 probe_java_gate13() {
   if ! command -v javac >/dev/null 2>&1; then skip_case "java/gate-13" "javac not installed"; return; fi
   local ok=1 st
@@ -638,7 +660,7 @@ TF
 ALL_CASES=(
   python_gate1 go_gate1 java_gate1 csharp_gate1 php_gate1
   ts_gate3 gate4_principles gate2_duplicates gate10_sast
-  secret_gate8 iac_gate7 ts_gate13 java_gate13
+  secret_gate8 iac_gate7 ts_gate13 java_gate13 gate12_hygiene
 )
 
 show_list() {
@@ -662,6 +684,7 @@ dispatch() {
     iac_gate7)        say "  ▸ iac / gate-7";        probe_iac_gate7 ;;
     ts_gate13)        say "  ▸ typescript / gate-13"; probe_ts_gate13 ;;
     java_gate13)      say "  ▸ java / gate-13";      probe_java_gate13 ;;
+    gate12_hygiene)   say "  ▸ any / gate-12";       probe_gate12_hygiene ;;
     *) say "  ? unknown case: $c"; return 1 ;;
   esac
 }
