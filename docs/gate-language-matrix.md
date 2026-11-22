@@ -157,12 +157,38 @@ node scripts/analyze-gate-matrix.cjs <raw.log>
 | 14 | Gate 12 | any | 行尾空格 | WARN |
 | 15 | Gate 13 | typescript | 隐式 any | BLOCK |
 | 16 | Gate 13 | java | 类型错误 | BLOCK |
+| 17 | Gate 0 | any | VERSION 与 package.json 不一致（受保护分支） | BLOCK |
+| 18 | Gate 6 | python | domain 违规导入 infra | FAIL |
+| 19 | Gate 11 | any | phase=2 但缺 delphi 批准 | BLOCK |
+| 20 | Gate 12b | any | 镜像与 canonical 内容不同 | BLOCK |
+| 21 | Gate 12c | any | 用 npx 探测工具可用性 | BLOCK |
 
-**16/16 通过，覆盖 11 个门禁**（1、2、3、4、5、7、8、9、10、12、13）。
+**21 个用例，16 个门禁全部端到端证伪。**
 
-尚未端到端证伪的：Gate 0（版本一致性）、6（架构）、11（Sprint 流程）、
-12b（vendor 排除）、12c。它们的检查对象与语言无关或已被其它路径覆盖，
-**但仍缺一个证明它们会失败的探针**——这是已知缺口，不是"已通过"。
+没有剩下未经证伪的门禁。但要说清这张表证明了什么：
+**每个门禁在注入真实缺陷时会给出非 PASS 的判定**，
+而不是"这个门禁在所有情况下都正确"。两者差别很大。
+
+### 三处探针自身的缺陷（这一轮最值得记住的）
+
+- `gate_status` 在门禁**没有**汇总行时，回退到"整条输出里找 BLOCKED"——
+  于是同一条链上任何门禁的失败都会变成它的失败（Gate 0 就是这样被误报 FAIL）。
+- Gate 6 的 `lint-imports` 两种配置错误（YAML 格式、`root_package = .`）
+  退出码都非零，**都会被读成架构违规**。
+- Gate 12b 的探针复制了 `scripts/generate-deploy-manifest.cjs`，
+  而该路径进入变更集就触发投影新鲜度检查——干净臂被探针自己制造的 BLOCK 判死。
+
+### 每个门禁的前置条件
+
+这五个门禁都不是"随便建个仓库就能测"的。前置条件缺失时，
+**门禁给出的判定依然真实，但证明的不是探针以为的那件事**：
+
+| 门禁 | 缺失时会发生什么 |
+|---|---|
+| 6 | 无 `.archlint.yaml` → `ARCHITECTURE CONFIG MISSING`（真 BLOCK，但证明的是配置检查） |
+| 11 | 无 `started_at` → SKIP（`sprint age unknown`），字面正确但看起来永远不 PASS |
+| 12b | 无 `scripts/check-hook-mirror.sh` → SKIP，原因指向缺失路径 |
+| 12c | 缺任一 hook 源文件 → 检查器退出码 1，被读成违规 |
 
 ## 八、这一轮发现并修复的产品缺陷
 

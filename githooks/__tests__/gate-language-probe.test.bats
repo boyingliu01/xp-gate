@@ -122,3 +122,50 @@ setup() {
   run grep -n '\[ "\$gate" = "9" \] && link_gate_source' "$PROBE"
   [ "$status" -eq 0 ]
 }
+
+# @covers gate actions: the banner fallback must not read another gate's block
+#
+# Gate 0 prints no "  Gate 0: <STATUS>" summary line; it announces its verdict
+# inline ("PASSED - Gate 0: Version Consistency Check ..."). The fallback then
+# scanned the WHOLE output for the word BLOCKED, so any other gate refusing in the
+# same run was reported as gate 0's verdict.
+#
+# MEASURED 2026-11-22: a clean full-chain run where gate 0 passed and gate 11
+# declined to evaluate was reported as "gate 0 FAIL", and the probe's clean arm
+# went red on a project that had done nothing wrong.
+@test "gate_status prefers the gate's own inline verdict over a chain-wide scan" {
+  run grep -n 'grep -E "(PASSED|BLOCKED) - Gate \${gate}:"' "$PROBE"
+  [ "$status" -eq 0 ]
+}
+
+# @covers the inline verdict is consulted BEFORE the BLOCKED fallback
+@test "the inline verdict check precedes the chain-wide BLOCKED scan" {
+  local own_fb
+  own_fb=$(grep -n 'own=\$(printf' "$PROBE" | head -1 | cut -d: -f1)
+  local scan
+  scan=$(grep -n 'grep -q "BLOCKED"' "$PROBE" | tail -1 | cut -d: -f1)
+  [ -n "$own_fb" ]
+  [ -n "$scan" ]
+  [ "$own_fb" -lt "$scan" ]
+}
+
+# @covers every gate that needs a protected branch has a probe
+#
+# Gate 0 checks version consistency ONLY on main/master/develop/trunk/mainline and
+# refuses XP_GATE_ONLY_GATE on those branches, so a probe on probe-<name> measures
+# the non-protected path where gate 0 correctly does nothing and prints PASSED.
+@test "a protected-branch probe helper exists for gate 0" {
+  run grep -n '^new_protected_probe()' "$PROBE"
+  [ "$status" -eq 0 ]
+  run grep -n '^run_full_chain()' "$PROBE"
+  [ "$status" -eq 0 ]
+}
+
+# @covers all six previously-unprobed gates now have a case
+@test "gates 0, 6, 11, 12b and 12c each have a probe case" {
+  local g missing=0
+  for g in gate0_drift python_gate6 gate11_sprint gate12b_mirror gate12c_npx; do
+    grep -q "^    $g)" "$PROBE" || { echo "no case for $g"; missing=$((missing + 1)); }
+  done
+  [ "$missing" -eq 0 ]
+}

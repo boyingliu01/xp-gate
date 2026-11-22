@@ -1,5 +1,79 @@
 # Changelog
 
+## [0.38.103.0] - 2026-11-23
+
+**把最后五个没被证伪的门禁全部补上：0、6、11、12b、12c。**
+
+至此 **16 个门禁全部有端到端负向探针**，而且每条都配了干净臂。
+
+### Gate 0 在非保护分支上"通过"是设计，不是缺陷
+
+第一次测 Gate 0 时，`VERSION=2.0.0` 对 `package.json=1.0.0`，它判 **PASS**。
+看起来是漏检。实际读代码才知道：Gate 0 的整体主体在
+`if [ "$is_protected" = "true" ]` 内部，只有 main/master/develop/trunk/mainline
+才做版本一致性检查。
+
+而受保护分支上又**禁止** `XP_GATE_ONLY_GATE`——两条规则合起来的效果是：
+**唯一能观察 Gate 0 的方式是跑完整链**。
+
+在 `main` 上重测：
+
+```
+VERSION CONSISTENCY CHECK (Gate 0)
+❌ BLOCKED - VERSION is 2.0.0 but these files disagree:
+```
+
+成本 8 秒——一阻断链条就停了，完全可控。
+
+### 但探针自己又错了一次
+
+加上 `new_protected_probe` 后，干净臂（版本一致）被判 FAIL。查下去是
+`gate_status` 的 banner 回退逻辑：Gate 0 **没有** `  Gate 0: <STATUS>`
+汇总行，于是落到"整条输出里找 BLOCKED"——而门禁 11 在同一轮里拒绝，
+被当成了 Gate 0 的判定。
+
+**一条链上任何门禁的失败，都会变成没有汇总行的那个门禁的失败。**
+修复：先找 `(PASSED|BLOCKED) - Gate N:` 这个本门禁自己的内联判定。
+
+### 五个门禁的探针
+
+| 门禁 | 注入的缺陷 | 判定 |
+|---|---|---|
+| 0 | `VERSION=2.0.0` 而 `package.json=1.0.0` | BLOCK |
+| 6 | `domain` 导入 `infra`，违反 import-linter 契约 | FAIL |
+| 11 | `phase=2` 但缺 `delphi-reviewed.json` | BLOCK |
+| 12b | `githooks/pre-commit` 与镜像内容不同 | BLOCK |
+| 12c | `githooks/lib/*.sh` 用 `npx eslint --version` 探测工具 | BLOCK |
+
+### 每个门禁的前置条件（探针必须先满足）
+
+这五个门禁都不是"随便建个仓库就能测"，而**每个前置条件缺失都会伪装成门禁的结论**：
+
+- **Gate 6** 先要求 `.archlint.yaml`，否则报 `ARCHITECTURE CONFIG MISSING`——
+  这个 BLOCK 是真的，但它证明的是配置检查、不是契约检查。
+- **Gate 6** 的 `lint-imports` 读 **INI 不是 YAML**，且 `root_package = .`
+  会被拒（`no package specified for '.'`）。两种错误配置的退出码都非零，
+  **都会被 Gate 6 读成架构违规**。
+- **Gate 11** 需要 `started_at`，否则判 SKIP（`sprint age unknown`）——
+  一个字面正确的判定，但会让人以为门禁永远不会转 PASS。
+- **Gate 12b** 需要仓库自带的 `scripts/check-hook-mirror.sh`，
+  否则 SKIP 且原因指向缺失路径。
+- **Gate 12b** **不能**复制 `scripts/generate-deploy-manifest.cjs`：
+  该路径在变更集里就会触发投影新鲜度检查，而新复制的文件永远在变更集里。
+- **Gate 12c** 的检查器要求**整套** `githooks/` 树存在，缺一个文件就退出码 1——
+  连着报了 `pre-commit`、`pre-push`、`gate-entries/`、adapter 四轮"缺少预期文件"。
+  所以探针直接复制真实 `githooks/`，再注入那一行。
+
+**六次里有五次，缺失的前置条件是探针的问题，不是门禁的问题。**
+
+### 结果
+
+```
+passed=17 failed=0 skipped=0     (完整链，gate 1 有 5 个语言用例)
+```
+
+再加上单独验证过的 6、11、12b、12c 四个用例，共 **21 个用例、16 个门禁**。
+
 ## [0.38.102.0] - 2026-11-22
 
 **把这一轮的证伪进度写进矩阵文档。**

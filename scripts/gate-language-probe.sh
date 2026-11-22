@@ -104,6 +104,38 @@ new_probe() {
   printf '%s' "$dir"
 }
 
+# A probe repo on a PROTECTED branch, for gates that only check there.
+#
+# Gate 0 verifies version consistency only on main/master/develop/trunk/mainline,
+# and it refuses XP_GATE_ONLY_GATE on those very branches -- so the only way to
+# observe its version check is the FULL chain on a protected branch. A probe on
+# probe-<name> measures the non-protected path, where gate 0 correctly does
+# nothing and prints PASSED, which reads exactly like a gate that cannot fail.
+new_protected_probe() {
+  local name="$1"
+  local dir="$WORK_ROOT/$name"
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  ( cd "$dir" \
+    && git init -q -b main \
+    && git config user.email probe@example.com \
+    && git config user.name probe \
+    && git config core.hooksPath "$GATE_HOME" ) >/dev/null 2>&1
+  ( cd "$dir" \
+    && printf 'probe base' > .probe-base \
+    && git add .probe-base \
+    && git -c core.hooksPath="$WORK_ROOT/.nohooks" commit -qm base ) >/dev/null 2>&1
+  printf '%s' "$dir"
+}
+
+# Run the FULL chain (no XP_GATE_ONLY_GATE): the only mode a protected branch
+# accepts. Slow by construction -- every gate a probe skips is a gate it cannot
+# observe -- so this is used only by the gate that requires it.
+run_full_chain() {
+  local dir="$1"
+  ( cd "$dir" && timeout 900 git commit -m "probe" ) 2>&1
+}
+
 # Run one gate in a probe repo; stdout+stderr are the gate's console output.
 # The hook exits non-zero on a refusal, so the exit status is NOT the verdict --
 # the verdict has to be read from the report or from the gate's own banner.
@@ -150,6 +182,20 @@ gate_status() {
       *SKIP*)         printf 'SKIP' ;;
       *PASS*)         printf 'PASS' ;;
       *)              printf 'UNKNOWN' ;;
+    esac
+    return
+  fi
+  # Gate 0 prints no "  Gate 0: <STATUS>" summary line -- it announces its verdict
+  # inline ("PASSED - Gate 0: Version Consistency Check ..."). Falling through to
+  # the repository-wide BLOCKED scan then read ANOTHER gate's block as this gate's
+  # verdict: measured on a clean full-chain run where gate 0 passed and gate 11
+  # refused, reported as gate 0 FAIL.
+  local own
+  own=$(printf '%s' "$out" | grep -E "(PASSED|BLOCKED) - Gate ${gate}:" | tail -1)
+  if [ -n "$own" ]; then
+    case "$own" in
+      *BLOCKED*) printf 'FAIL' ;;
+      *)         printf 'PASS' ;;
     esac
     return
   fi
@@ -604,6 +650,293 @@ probe_secret_gate8() {
   record "any/gate-8" "$ok" "PAT -> $st"
 }
 
+probe_gate12c_npxprobe() {
+  local ok=1 st dir out
+
+  # Gate 12c catches a gate answering "is this tool installed?" by asking the
+  # npm registry. Its checker, scripts/check-no-npx-probe.sh, requires the WHOLE
+  # hook source tree to be present and fails closed when it is not -- measured
+  # while writing this: four successive "missing expected hook source" failures
+  # for pre-commit, pre-push, gate-entries/ and the adapter set, each of which
+  # exits 1 and therefore reads as a violation. A stub repository cannot exercise
+  # this gate at all, so the probe clones the real githooks/ tree and injects the
+  # one bad line.
+  stage() {
+    rm -rf "$1/githooks"
+    cp -r "$REPO_ROOT/githooks" "$1/githooks" 2>/dev/null
+  }
+
+  dir=$(new_probe g12c-bad)
+  mkdir -p "$dir/scripts"
+  cp "$REPO_ROOT/scripts/check-no-npx-probe.sh" "$dir/scripts/" 2>/dev/null
+  stage "$dir"
+  printf '#!/bin/bash\nif npx eslint --version >/dev/null 2>&1; then echo found; fi\n' > "$dir/githooks/lib/bad-probe.sh"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 12c)
+  st=$(gate_status "$dir" 12c "$out")
+  PROBE_STATUS="$st"
+  if [ "$st" = "PASS" ]; then
+    echo "    ✗ npx probe not reported: got PASS (must not be PASS)"
+    ok=0
+  else
+    echo "    ✓ npx probe not passed: $st"
+  fi
+
+  dir=$(new_probe g12c-ok)
+  mkdir -p "$dir/scripts"
+  cp "$REPO_ROOT/scripts/check-no-npx-probe.sh" "$dir/scripts/" 2>/dev/null
+  stage "$dir"
+  printf '#!/bin/bash\nif command -v eslint >/dev/null 2>&1; then echo found; fi\n' > "$dir/githooks/lib/bad-probe.sh"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 12c)
+  st=$(gate_status "$dir" 12c "$out")
+  if [ "$st" = "FAIL" ] || [ "$st" = "BLOCK" ]; then
+    echo "    ✗ command -v probe refused: $st"
+    ok=0
+  else
+    echo "    ✓ command -v probe not refused: $st"
+  fi
+
+  record "any/gate-12c" "$ok" "npx availability probe -> $PROBE_STATUS"
+}
+
+
+probe_gate11_sprint() {
+  local ok=1 st dir out
+
+  # Gate 11 delegates to githooks/sprint-gate.sh, which decides from .sprint-state/.
+  # Two facts drive the deny: phase >= 1 (PLAN is done) and a missing
+  # delphi-reviewed.json. Both are ordinary project files, so the violation is
+  # cheap to stage.
+  #
+  # A sprint-state WITHOUT started_at reports the right verdict through the wrong
+  # words -- "sprint age unknown -- started_at unreadable" and SKIP -- so the clean
+  # arm needs a real timestamp to reach PASS. Measured while writing this: without
+  # it the clean arm produced SKIP, which would have made a working gate look like
+  # one that never certifies anything.
+  local now
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  dir=$(new_probe g11-bad)
+  mkdir -p "$dir/.sprint-state"
+  printf '{"phase":2,"status":"in_progress","started_at":"%s"}\n' "$now" > "$dir/.sprint-state/sprint-state.json"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 11)
+  st=$(gate_status "$dir" 11 "$out")
+  PROBE_STATUS="$st"
+  if [ "$st" = "PASS" ]; then
+    echo "    ✗ missing delphi approval not reported: got PASS (must not be PASS)"
+    ok=0
+  else
+    echo "    ✓ missing delphi approval not passed: $st"
+  fi
+
+  dir=$(new_probe g11-ok)
+  mkdir -p "$dir/.sprint-state"
+  printf '{"phase":2,"status":"in_progress","started_at":"%s"}\n' "$now" > "$dir/.sprint-state/sprint-state.json"
+  printf '{"verdict":"APPROVED","rounds":3}\n' > "$dir/.sprint-state/delphi-reviewed.json"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 11)
+  st=$(gate_status "$dir" 11 "$out")
+  if [ "$st" = "FAIL" ] || [ "$st" = "BLOCK" ]; then
+    echo "    ✗ approved sprint refused: $st"
+    ok=0
+  else
+    echo "    ✓ approved sprint not refused: $st"
+  fi
+
+  record "any/gate-11" "$ok" "missing delphi approval -> $PROBE_STATUS"
+}
+
+
+probe_gate12b_mirror() {
+  local ok=1 st dir out
+
+  # Gate 12b needs the repository's own mirror tooling INSIDE the project: it
+  # resolves $PROJECT_ROOT/scripts/check-hook-mirror.sh, and without it records
+  # SKIP with the reason naming the missing path. That SKIP is honest, but it
+  # means a probe that forgets the script measures the skip and not the check --
+  # measured while writing this, which read like "gate 12b cannot block".
+  #
+  # The scripts are copied from THIS repository rather than reimplemented: the
+  # probe must exercise the real parity check, not a stand-in.
+  with_scripts() {
+    mkdir -p "$1/scripts"
+    cp "$REPO_ROOT/scripts/check-hook-mirror.sh" "$1/scripts/" 2>/dev/null
+    # NOT the generator: gate 12b's projection-freshness half fires whenever
+    # scripts/generate-deploy-manifest.cjs is IN THE CHANGE SET, and a freshly
+    # copied file is always in it. Copying it turned the clean arm into
+    # "deploy-manifest.sh is STALE vs deploy-manifest.js" -- a block caused by the
+    # probe, not by the project. check-hook-mirror.sh does not need it.
+  }
+
+  dir=$(new_probe g12b-bad)
+  with_scripts "$dir"
+  mkdir -p "$dir/githooks" "$dir/src/npm-package/hooks"
+  printf '#!/bin/bash\necho canonical\n' > "$dir/githooks/pre-commit"
+  printf '#!/bin/bash\necho DIFFERENT\n' > "$dir/src/npm-package/hooks/pre-commit"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 12b)
+  st=$(gate_status "$dir" 12b "$out")
+  PROBE_STATUS="$st"
+  if [ "$st" = "PASS" ]; then
+    echo "    ✗ drifted mirror not reported: got PASS (must not be PASS)"
+    ok=0
+  else
+    echo "    ✓ drifted mirror not passed: $st"
+  fi
+
+  dir=$(new_probe g12b-ok)
+  with_scripts "$dir"
+  mkdir -p "$dir/githooks" "$dir/src/npm-package/hooks"
+  printf '#!/bin/bash\necho canonical\n' > "$dir/githooks/pre-commit"
+  cp "$dir/githooks/pre-commit" "$dir/src/npm-package/hooks/pre-commit"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 12b)
+  st=$(gate_status "$dir" 12b "$out")
+  if [ "$st" = "FAIL" ] || [ "$st" = "BLOCK" ]; then
+    echo "    ✗ identical mirror refused: $st"
+    ok=0
+  else
+    echo "    ✓ identical mirror not refused: $st"
+  fi
+
+  record "any/gate-12b" "$ok" "drifted mirror -> $PROBE_STATUS"
+}
+
+
+probe_python_gate6() {
+  if ! command -v lint-imports >/dev/null 2>&1; then
+    skip_case "python/gate-6" "import-linter not installed (pip install import-linter)"
+    return
+  fi
+  local ok=1 st dir violated clean
+
+  # import-linter reads INI, not YAML, and needs a real root_package -- "."
+  # is rejected with "no package specified for '.'". Measured while writing this:
+  # a YAML config produced "File contains no section headers" and a "." root
+  # produced the package error, and BOTH exit non-zero. Gate 6 blocks on any
+  # non-zero exit, so a misconfigured fixture reads as an architecture violation.
+  local ini='[importlinter]
+root_package = g6probe
+
+[importlinter:contract:1]
+name = domain must not import infra
+type = forbidden
+source_modules =
+    g6probe.domain
+forbidden_modules =
+    g6probe.infra
+'
+  # The textbook violation the contract exists to catch.
+  violated='from g6probe.infra.db import save
+
+
+def create():
+    return save({"x": 1})
+'
+  clean='def create():
+    return {"x": 1}
+'
+  local db='def save(row):
+    return row
+'
+
+  dir=$(new_probe g6-bad)
+  printf '%s' "$ini" > "$dir/.importlinter"
+  mkdir -p "$dir/g6probe/domain" "$dir/g6probe/infra"
+  : > "$dir/g6probe/__init__.py"
+  : > "$dir/g6probe/domain/__init__.py"
+  : > "$dir/g6probe/infra/__init__.py"
+  printf '%s' "$violated" > "$dir/g6probe/domain/entity.py"
+  printf '%s' "$db" > "$dir/g6probe/infra/db.py"
+  printf '%s' "$ini" > "$dir/.importlinter"
+  # A real arch config, so the probe measures the CONTRACT check rather than the
+  # "architecture config missing" block, which fires first and would pass this
+  # test for the wrong reason.
+  printf 'rules:\n  cyclic_dependency:\n    severity: high\n' > "$dir/.archlint.yaml"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 6)
+  st=$(gate_status "$dir" 6 "$out")
+  PROBE_STATUS="$st"
+  if [ "$st" = "PASS" ]; then
+    echo "    ✗ broken contract not reported: got PASS (must not be PASS)"
+    ok=0
+  else
+    echo "    ✓ broken contract not passed: $st"
+  fi
+
+  dir=$(new_probe g6-ok)
+  printf '%s' "$ini" > "$dir/.importlinter"
+  mkdir -p "$dir/g6probe/domain" "$dir/g6probe/infra"
+  : > "$dir/g6probe/__init__.py"
+  : > "$dir/g6probe/domain/__init__.py"
+  : > "$dir/g6probe/infra/__init__.py"
+  printf '%s' "$clean" > "$dir/g6probe/domain/entity.py"
+  printf '%s' "$db" > "$dir/g6probe/infra/db.py"
+  printf '%s' "$ini" > "$dir/.importlinter"
+  printf 'rules:\n  cyclic_dependency:\n    severity: high\n' > "$dir/.archlint.yaml"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_gate "$dir" 6)
+  st=$(gate_status "$dir" 6 "$out")
+  # A clean project reports WARN (the Boy Scout half has nothing to say), and WARN
+  # is an honest verdict here -- "not FAIL" is the contract, not "PASS".
+  if [ "$st" = "FAIL" ] || [ "$st" = "BLOCK" ]; then
+    echo "    ✗ clean contract refused: $st"
+    ok=0
+  else
+    echo "    ✓ clean contract not refused: $st"
+  fi
+
+  record "python/gate-6" "$ok" "broken contract -> $PROBE_STATUS"
+}
+
+
+probe_gate0_version_drift() {
+  local ok=1 dir out st good bad
+  # Gate 0 checks version consistency ONLY on a protected branch, and refuses
+  # XP_GATE_ONLY_GATE there -- so this probe has to run the full chain.
+  #
+  # The drift is one line: VERSION says 2.0.0 while package.json still says 1.0.0,
+  # which is the exact situation the gate is named after.
+  good='{"name":"p0","version":"2.0.0"}
+'
+  bad='{"name":"p0","version":"1.0.0"}
+'
+
+  dir=$(new_protected_probe g0-drift)
+  printf '%s' "$bad" > "$dir/package.json"
+  printf '2.0.0\n' > "$dir/VERSION"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_full_chain "$dir")
+  st=$(gate_status "$dir" 0 "$out")
+  PROBE_STATUS="$st"
+  if [ "$st" = "PASS" ]; then
+    echo "    ✗ drifted VERSION not reported: got PASS (must not be PASS)"
+    ok=0
+  else
+    echo "    ✓ drifted VERSION not passed: $st"
+  fi
+
+  dir=$(new_protected_probe g0-ok)
+  printf '%s' "$good" > "$dir/package.json"
+  printf '2.0.0\n' > "$dir/VERSION"
+  ( cd "$dir" && git add -A >/dev/null 2>&1 )
+  out=$(run_full_chain "$dir")
+  # The clean arm must get PAST gate 0; later gates refusing for unrelated reasons
+  # is not this probe's business, so only gate 0's own verdict is asserted.
+  st=$(gate_status "$dir" 0 "$out")
+  if [ "$st" = "BLOCK" ] || [ "$st" = "FAIL" ]; then
+    echo "    ✗ consistent VERSION refused by gate 0: $st"
+    ok=0
+  else
+    echo "    ✓ consistent VERSION not refused: $st"
+  fi
+
+  record "any/gate-0" "$ok" "drifted VERSION -> $PROBE_STATUS"
+}
+
+
 probe_python_gate5() {
   if ! command -v python >/dev/null 2>&1; then skip_case "python/gate-5" "python not installed"; return; fi
   if ! python -c "import pytest_cov" >/dev/null 2>&1; then skip_case "python/gate-5" "pytest-cov not installed"; return; fi
@@ -810,7 +1143,7 @@ TF
 ALL_CASES=(
   python_gate1 go_gate1 java_gate1 csharp_gate1 php_gate1
   ts_gate3 gate4_principles gate2_duplicates gate10_sast
-  secret_gate8 iac_gate7 ts_gate13 java_gate13 gate12_hygiene ts_gate9 python_gate5
+  secret_gate8 iac_gate7 ts_gate13 java_gate13 gate12_hygiene ts_gate9 python_gate5 gate0_drift python_gate6 gate12b_mirror gate11_sprint gate12c_npx
 )
 
 show_list() {
@@ -837,6 +1170,11 @@ dispatch() {
     gate12_hygiene)   say "  ▸ any / gate-12";       probe_gate12_hygiene ;;
     ts_gate9)         say "  ▸ typescript / gate-9";  probe_ts_gate9 ;;
     python_gate5)     say "  ▸ python / gate-5";      probe_python_gate5 ;;
+    gate0_drift)      say "  ▸ any / gate-0";         probe_gate0_version_drift ;;
+    python_gate6)     say "  ▸ python / gate-6";      probe_python_gate6 ;;
+    gate12b_mirror)   say "  ▸ any / gate-12b";        probe_gate12b_mirror ;;
+    gate11_sprint)    say "  ▸ any / gate-11";        probe_gate11_sprint ;;
+    gate12c_npx)      say "  ▸ any / gate-12c";        probe_gate12c_npxprobe ;;
     *) say "  ? unknown case: $c"; return 1 ;;
   esac
 }
