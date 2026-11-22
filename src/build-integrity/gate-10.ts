@@ -5,6 +5,7 @@ import * as fsNative from 'fs';
 import path from 'path';
 import { maskTextQuotes } from './quote-masker';
 import { fileURLToPath } from 'url';
+import { readManifest, unreachableEntryPointsMessage } from './entry-points.js';
 import type {
   CheckResult,
   Gate10Options,
@@ -589,6 +590,38 @@ function inspectPackedFiles(
 }
 
 /**
+ * Declared entry points that will not be present after `npm install`.
+ *
+ * WHY THIS EXISTS
+ *
+ * npm pack answers "which files would publish", not "can the package be used".
+ * Measured 2026-11-22 on a project whose package.json said
+ *
+ *     { "main": "dist/nonexistent.js", "files": ["dist"] }
+ *
+ * with a dist/ holding only tsconfig.tsbuildinfo. npm pack shipped
+ * `dist/tsconfig.tsbuildinfo` and `package.json`, inspectPackedFiles saw one
+ * non-manifest file, and the gate reported Overall: PASS. The published tarball
+ * had no JavaScript in it at all, so every `require()` of that package would have
+ * thrown MODULE_NOT_FOUND — and the build-integrity gate called it healthy.
+ *
+ * The pack check was not wrong; it was answering a narrower question than the one
+ * its PASS implies. A manifest that points at files the package does not contain
+ * is the exact failure mode this gate is named for.
+ *
+ * WHAT IS CHECKED, AND WHAT IS DELIBERATELY NOT
+ *
+ * Only `main` / `module` / `types` (the flat fields) and the string leaves of
+ * `exports`. Bare specifiers are skipped: `"main": "some-dependency"` is legal npm
+ * and resolves inside node_modules, so treating it as a project path would be a
+ * false block. Conditional exports objects are walked for their string leaves
+ * because that is where the real entry points live in modern packages.
+ *
+ * Returns the list of declared-but-absent paths. Empty means nothing to report.
+ */
+
+
+/**
  * npm pack is only meaningful when package.json declares a `files` allowlist —
  * without one, npm ships everything and the "which files would publish" check
  * has no answer to give. Returns the reason to SKIP, or null to proceed.
@@ -678,6 +711,46 @@ const packFailureResult = (error: unknown, timeoutMs: number): CheckResult => {
   return { status: 'fail', message: `npm pack failed: ${detail}`, durationMs };
 };
 
+/**
+ * The operator-facing message when a manifest names files the tarball lacks, or
+ * null when every declared entry is really shipped.
+ *
+ * Split out of runPackCheck to keep that function under the complexity ratchet,
+ * and because it carries its own justification: "npm pack shipped something" is
+ * not "the package works". Measured 2026-11-22 -- a package whose only shipped
+ * file was dist/tsconfig.tsbuildinfo, declaring "main": "dist/nonexistent.js",
+ * passed the pack check and produced a tarball no require() could load. A manifest
+ * that disagrees with its own contents is the defect this gate exists to catch.
+ */
+async function unreachableEntryPoints(
+  projectRoot: string,
+  files: Array<{ path: string }>
+): Promise<string | null> {
+  const manifest = await readManifest(projectRoot);
+  if (!manifest) return null;
+  return unreachableEntryPointsMessage(manifest, files);
+}
+
+/**
+ * The verdict for a successful `npm pack --dry-run`, or the reason it is not one.
+ *
+ * Split from runPackCheck so that function stays under the complexity ratchet: the
+ * ratchet counts decisions, and "did npm ship anything" plus "does the manifest
+ * agree with what it shipped" are two independent decisions that were previously
+ * inline. Each one already had its own justification comment; now each is a unit.
+ */
+async function packVerdict(
+  projectRoot: string,
+  stdout: string
+): Promise<{ ok: true; count: number } | { ok: false; message: string }> {
+  const packages = JSON.parse(stdout) as Array<{ files?: Array<{ path: string }> }>;
+  const shipped = inspectPackedFiles(packages);
+  if (!shipped.ok) return shipped;
+  const missingEntry = await unreachableEntryPoints(projectRoot, packages[0].files || []);
+  if (missingEntry) return { ok: false, message: missingEntry };
+  return { ok: true, count: shipped.count };
+}
+
 export async function runPackCheck(
   projectRoot: string,
   timeoutMs: number
@@ -696,8 +769,7 @@ export async function runPackCheck(
       shell: true,
       maxBuffer: 10 * 1024 * 1024,
     });
-
-    const verdict = inspectPackedFiles(JSON.parse(stdout) as Array<{ files?: Array<{ path: string }> }>);
+    const verdict = await packVerdict(projectRoot, stdout);
     if (!verdict.ok) {
       return { status: 'fail', message: verdict.message, durationMs: Date.now() - startTime };
     }

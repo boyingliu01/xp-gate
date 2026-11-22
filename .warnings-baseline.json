@@ -50,5 +50,9 @@
   "src/npm-package/lib/__tests__/doctor.test.js": {
     "totalWarnings": 40,
     "lastAnalyzed": "2026-11-20T14:42:46.813Z"
+  },
+  "src/build-integrity/gate-10.ts": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-11-22T16:04:06.807Z"
   }
 }

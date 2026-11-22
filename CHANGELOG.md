@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.38.98.0] - 2026-11-22
+
+**Gate 9：一个安装后根本无法加载的包，构建完整性判 PASS。**
+
+### 缺陷
+
+探针仓库里 `package.json` 写：
+
+```json
+{ "main": "dist/nonexistent.js", "files": ["dist"] }
+```
+
+`dist/` 里只有一个 `tsconfig.tsbuildinfo`。Gate 9 的输出：
+
+```
+tsc:     PASS
+pack:    PASS  npm pack: 2 file(s) included
+imports: PASS
+Overall: PASS
+```
+
+**这个 tarball 里一个 `.js` 文件都没有。** 发布后任何 `require()`
+都会抛 `MODULE_NOT_FOUND`，而构建完整性说它健康。
+
+### 根因：问的问题比 PASS 暗示的窄
+
+`npm pack --dry-run` 回答的是「会发布哪些文件」，
+`inspectPackedFiles` 只检查「至少有一个非 package.json 的文件」。
+`dist/tsconfig.tsbuildinfo` 满足了这个条件。
+
+**打包检查没有错，它只是回答了一个比 PASS 所暗示的更窄的问题。**
+而「清单指向包里不存在的文件」正是这个门禁名字里那个词要抓的缺陷。
+
+### 修复
+
+新增 `missingEntryPoints(manifest, presentPaths)`，在打包检查通过后
+验证 `main` / `module` / `types` 以及 `exports` 的字符串叶子**确实在打包列表里**。
+
+修复后：
+
+```
+Overall: BLOCK
+  - pack: package.json declares 1 entry point(s) the package does not contain: dist/nonexistent.js
+```
+
+### 三处刻意的边界
+
+1. **裸包名跳过**：`"main": "some-dependency"` 是合法 npm（在 `node_modules` 里解析），
+   当成项目路径会造成**误拦**
+2. **无扩展名会尝试 `.js` / `.mjs` / `.cjs` / `.d.ts` / `index.js`**：
+   npm 自己就这么解析，否则误拦常规清单
+3. **`exports` 条件对象递归取字符串叶子**：现代包的真实入口在这里
+
+### 一次"改了却没用"的自我纠正
+
+第一次实现后重跑，**仍然 PASS**。原因是函数开头要求路径以 `./` 开头，
+而 `main` 的**标准写法就是不带 `./`** 的 `dist/index.js` ——
+于是每一个真实清单都被 `continue` 跳过了。
+
+单测通过、类型检查通过、集成没报错，因为**它恰好什么都没检查**。
+这正是本轮反复出现的缺陷家族，只不过这次是我自己犯的。
+
+### 测试
+
+`gate-9-entry-point-exists.test.bats`（7 条）：缺陷检出、正常的放行、
+无扩展名解析、裸包名放行、`exports` 叶子、多个缺失全部点名、无入口字段时静默。
+
+`src/build-integrity/__tests__/` 原有 **161 个测试全部通过**，无回归。
+
 ## [0.38.97.0] - 2026-11-22
 
 **Gate 12 文件卫生：探针验证通过（WARN 是正确判定）。**
