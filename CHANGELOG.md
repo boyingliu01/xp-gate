@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.38.96.0] - 2026-11-22
+
+**Java 的类型错误，之前没有任何门禁能发现。**
+
+### 缺陷是"两个门禁互相以为对方管"
+
+| 门禁 | 实际行为 |
+|---|---|
+| Gate 1 | 跑 checkstyle / pmd / spotbugs / lizard —— **都不做类型检查** |
+| Gate 9 | Java 有改动但**没有 Maven/Gradle 构建文件** → SKIP |
+
+`githooks/adapters/java.sh` 第 938 行写着类型检查已移交 Gate 9，
+而 Gate 9 在没有构建系统时诚实地退出了。
+
+实测（2026-11-22）：一个 `return "x";` 出现在 `int` 方法里的类，
+**通过了所有门禁**。`javac` 一句话就能发现它。
+
+### 修复
+
+给 Java 适配器补 `compiler_check_command`，用 `javac` 直接编译：
+
+```
+out=$(mktemp -d); javac -nowarn -d "$out" $(find src -name "*.java") 2>&1
+rc=$?; rm -rf "$out"; [ $rc -eq 0 ] || exit $rc
+```
+
+三个约束来自实际契约（`gate-13-compiler-strictness.sh:1226` 是
+「在项目根 eval 这条命令，不带参数」）：
+
+1. **命令自己找源码** —— 契约不传文件参数
+2. **一次编译全部** —— `javac` 只有在同时拿到多个文件时才能解析跨文件引用
+3. **`-d` 到临时目录** —— 门禁不得在工作区留下 `.class`，
+   否则它改变了正在判定的那个变更集
+
+`javac` 不存在时返回空，让门禁记 SKIP 而不是 PASS。
+
+### 一个容易误判的细节
+
+Gate 13 **本来就会打印**：
+
+```
+✅ PASSED - Java compiler strictness (javac -Xlint:all,-processing)
+```
+
+看起来像已经在检查了。实际上它编译的是一个**合成的探针文件**，
+验证的是"javac 能不能跑"，**不是"项目代码有没有类型错误"**。
+两者都叫 "Java compiler strictness"，但覆盖的东西完全不同。
+
+这个内置检查是有用的（工具链可用性），只是不能替代对真实源码的类型检查。
+
+### 实测对比
+
+```
+修复前：Gate 13 (PASS)  ← 类型错误通过
+修复后：Gate 13 (BLOCK) ← javac 报"不兼容的类型"
+干净：  Gate 13 (PASS)
+```
+
+### 探针
+
+新增 `java_gate13`，**13/13 全绿**。
+
+### 一个已确认"不是缺陷"的判断
+
+Python 适配器也没有 `compiler_check_command`，但**这是对的**：
+它的 `run_static_analysis` 里已经跑了 mypy，类型检查在 Gate 1 就完成了。
+只在 Gate 13 补一份会造成重复执行——本轮刚修完 flutter/typescript 的双跑问题。
+
+（附带确认：mypy 对**完全没有类型标注**的代码会报 "Success"，
+因为未标注的返回类型被推断为 `Any`，而 `Any` 可赋给任何类型。
+这是 Python 类型系统的性质，不是配置问题。）
+
 ## [0.38.95.0] - 2026-11-22
 
 **Gate 13 对 TypeScript 什么都不检查。**

@@ -937,6 +937,36 @@ run_whalecloud_check() {
 # GATE 1 entry (#507 S1). wc-java-lint first; legacy chain only on discovery
 # miss. The old direct mvn/gradle compile here moved to Build Integrity (S5).
 # ---------------------------------------------------------------------------
+# Declare javac as the type checker, so gate 13 checks Java types.
+#
+# Measured 2026-11-22: a Java class returning a String from an int method was
+# invisible to every gate. Gate 1 runs checkstyle/pmd/spotbugs/lizard, none of
+# which do type checking (the adapter says so at line 938 -- that moved to gate 9),
+# and gate 9 SKIPs a repo with no Maven/Gradle build file. So the one gate that
+# does compile Java declined, and no other gate could.
+#
+# javac needs no build system for this: it compiles a single source file with a
+# package declaration directly. Verified: javac -d <tmp> B.java exits 0 for a
+# correct class and 1 with "incompatible types" for a broken one.
+#
+# -d "$(mktemp -d)" keeps class files out of the work tree. A gate must not leave
+# build output behind; that would change the change set it is judging.
+#
+# Empty when javac is absent, so the gate records SKIP rather than PASS.
+compiler_check_command() {
+  if ! command -v javac >/dev/null 2>&1; then
+    return 0
+  fi
+  # The contract (gate-13-compiler-strictness.sh:1226) is "eval the command in the
+  # project root, no arguments". So the command finds its own sources: every .java
+  # under the conventional source roots, compiled together (javac resolves
+  # cross-file references only when given all of them at once).
+  # -d into a temp dir keeps .class files out of the work tree -- a gate that leaves
+  # build output behind changes the change set it is judging.
+  # shellcheck disable=SC2016  # the $ is for eval at gate-13 time, not for this shell
+  printf "%s" 'out=$(mktemp -d); javac -nowarn -d "$out" $(find src -name "*.java" 2>/dev/null) 2>&1; rc=$?; rm -rf "$out"; [ $rc -eq 0 ] || exit $rc'
+}
+
 run_static_analysis() {
   local rc=0
   # `|| rc=$?` (not a bare call): under a set -e consumer a non-zero verdict

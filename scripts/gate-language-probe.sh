@@ -555,6 +555,31 @@ probe_secret_gate8() {
   record "any/gate-8" "$ok" "PAT -> $st"
 }
 
+probe_java_gate13() {
+  if ! command -v javac >/dev/null 2>&1; then skip_case "java/gate-13" "javac not installed"; return; fi
+  local ok=1 st
+  # A type error, which is gate 13's job and no other gate's: gate 1 runs
+  # checkstyle/pmd/spotbugs/lizard (none do type checking), and gate 9 SKIPs a repo
+  # with no Maven/Gradle build file. Measured 2026-11-22 -- before the adapter
+  # declared javac, this defect passed every gate.
+  probe_defect java-g13-bad 13 src/main/java/probe/OrderCalculator.java 'package probe;
+
+public class OrderCalculator {
+  public static int total() {
+    return "not an int";
+  }
+}
+' "incompatible return type" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean java-g13-ok 13 src/main/java/probe/OrderCalculator.java 'package probe;
+
+public class OrderCalculator {
+  public static int total() { return 1; }
+}
+' || ok=0
+  record "java/gate-13" "$ok" "type error -> $st"
+}
+
 probe_ts_gate13() {
   if ! command -v node >/dev/null 2>&1; then skip_case "typescript/gate-13" "node not installed"; return; fi
   local ok=1 st tsconf
@@ -613,7 +638,7 @@ TF
 ALL_CASES=(
   python_gate1 go_gate1 java_gate1 csharp_gate1 php_gate1
   ts_gate3 gate4_principles gate2_duplicates gate10_sast
-  secret_gate8 iac_gate7 ts_gate13
+  secret_gate8 iac_gate7 ts_gate13 java_gate13
 )
 
 show_list() {
@@ -636,6 +661,7 @@ dispatch() {
     secret_gate8)     say "  ▸ any / gate-8";        probe_secret_gate8 ;;
     iac_gate7)        say "  ▸ iac / gate-7";        probe_iac_gate7 ;;
     ts_gate13)        say "  ▸ typescript / gate-13"; probe_ts_gate13 ;;
+    java_gate13)      say "  ▸ java / gate-13";      probe_java_gate13 ;;
     *) say "  ? unknown case: $c"; return 1 ;;
   esac
 }
