@@ -98,6 +98,43 @@
 # carries it deliberately, so its mtime is not an objection.
 #
 # Returns 0 when the report may be read, non-zero when it must be ignored.
+# Does this project contain ANY test source for the given language?
+#
+# Returns 0 (ASSUME TESTS EXIST) in every case it cannot prove otherwise. That
+# asymmetry is deliberate: guessing "no tests" wrongly would SKIP the coverage
+# floor for a repository that does have tests, which is a silent pass --
+# the exact failure this gate exists to prevent. Guessing "tests exist" wrongly
+# only costs the fail-closed BLOCK that already happened before this helper.
+#
+# Only a language with a KNOWN test-file convention may answer "no". For a
+# language this table does not cover, the answer is "assume yes", so an unknown
+# toolchain keeps the old fail-closed behaviour rather than gaining a new skip.
+_gate5_language_has_tests() {
+  local lang="$1"
+  local pattern
+  case "$lang" in
+    csharp)               pattern='*.Tests.csproj' ;;
+    java)                 pattern='*Test.java' ;;
+    kotlin)               pattern='*Test.kt' ;;
+    go)                   pattern='*_test.go' ;;
+    python)               pattern='test_*.py' ;;
+    php)                  pattern='*Test.php' ;;
+    cpp|c)                pattern='test_*.cpp' ;;
+    dart|flutter)         pattern='*_test.dart' ;;
+    ruby)                 pattern='*_spec.rb' ;;
+    rust)                 pattern='*.rs' ;;
+    *)                    return 0 ;;
+  esac
+  # A language with a known convention: report "no tests" only on positive proof
+  # that the find completed AND matched nothing. `find` failing to run is not
+  # evidence of absence.
+  local found
+  found=$(find . -name "$pattern" \
+            -not -path './node_modules/*' -not -path './.git/*' \
+            -print -quit 2>/dev/null) || return 0
+  [ -n "$found" ]
+}
+
 _gate5_coverage_usable() {
   if [ "${GATE_5_COVERAGE_EVIDENCE:-false}" = "true" ]; then
     return 0
@@ -1856,6 +1893,29 @@ else
       ;;
     *)
       # Default: attempt to parse coverage from common formats regardless of language
+      #
+      # "There are nothing to measure" is a different state from "coverage was
+      # expected and is missing", and collapsing them caused a false BLOCK.
+      # Measured 2026-11-23 on the csharp probe fixture: a single A.cs with no
+      # test project at all produced
+      #     gate 5 = BLOCK  coverage_not_determined: no standard report file for csharp
+      # -- refusing a commit because a repository that has never had tests did not
+      # emit coverage data. The PowerShell branch already draws this distinction
+      # (#806 G5a, see above): no tests to run is SKIP with a reason, while
+      # "tests ran but the report is missing" stays fail-closed (#570). This
+      # branch honoured only the second half of that rule.
+      #
+      # Detection is the same shape as the PowerShell branch: ask whether the
+      # project contains ANY test source for this language. A repo that acquires
+      # tests gets enforcement back automatically.
+      if ! _gate5_language_has_tests "$CURRENT_LANG"; then
+        echo "⏭️  SKIPPED - ${CURRENT_LANG} coverage: no test sources in this project."
+        echo "    Nothing can produce a coverage report here, so the floor is not applicable."
+        echo "    This is NOT a pass: add tests and coverage is enforced again."
+        GATE_5_STATUS="SKIP"
+        GATE_5_DETAIL="${CURRENT_LANG}: no test sources (coverage not applicable)"
+        COVERAGE_ENFORCED=false
+      else
       COVERAGE_ENFORCED=true
       COVERAGE_PERCENT=""
       if [ -f "coverage/coverage-summary.json" ] && _gate5_coverage_usable; then
@@ -1991,6 +2051,7 @@ else
           GATE_5_DETAIL="coverage_not_determined: no standard report file for ${CURRENT_LANG}"
           return 1
         fi
+      fi
       fi
       ;;
   esac
