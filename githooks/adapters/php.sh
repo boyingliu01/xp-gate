@@ -146,7 +146,23 @@ _php_composer_bin() {
 # ---------------------------------------------------------------------------
 run_static_analysis() {
   local root php phpstan level out rc rows
-  root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
+  # return 3 (WARN), NOT 0. The contract above says 0 = clean, 2 = could not
+  # run, 3 = warn. Returning 0 reported a repo with no composer.json as if the
+  # analyzer had read the code and found nothing.
+  #
+  # MEASURED 2026-11-22 on a probe repo holding a .php file with a real parse
+  # error: console said "not a PHP project", gate 1 said PASS.
+  #
+  # 3 and not 2: 2 is BLOCK, which is right for "the tool is not installed and
+  # the user can install it" but wrong here -- a single-file PHP script is a
+  # legitimate project, and the manifest is simply absent. Blocking every such
+  # repo forever would make the gate unliveable, so this is a WARN that names
+  # the gap. What it must not be is a silent 0.
+  root=$(_php_detect_root) || {
+    echo "No composer.json / phpunit.xml found -- PHP static/lint analysis NOT run"
+    echo "XP_G1_REASON: php_no_manifest"
+    return 3
+  }
   php=$(_php_bin) || {
     echo "php is not installed -- static analysis not measurable"
     echo "XP_G1_REASON: php_missing"
@@ -210,7 +226,23 @@ run_static_analysis() {
 # ---------------------------------------------------------------------------
 run_lint() {
   local root php phpcs standard out rc
-  root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
+  # return 2, NOT 0. The contract at the top of this file says 2 means
+  # "could not run", and 0 means "clean" -- so returning 0 here reported a repo
+  # with no composer.json as if phpstan/phpcs had been given the code and found
+  # nothing. MEASURED 2026-11-22 on a probe repo holding a .php file with a real
+  # parse error:
+  #
+  #     console  "No composer.json / phpunit.xml found -- not a PHP project"
+  #     gate 1   PASS
+  #
+  # A single-file PHP project is a legitimate project. The absence of a manifest
+  # says nothing about whether the changed file has a syntax error, and it must
+  # not be the difference between "checked" and "passed".
+  root=$(_php_detect_root) || {
+    echo "No composer.json / phpunit.xml found -- PHP lint NOT run"
+    echo "XP_G1_REASON: php_no_manifest"
+    return 3
+  }
   php=$(_php_bin) || {
     echo "php is not installed -- lint not measurable"
     echo "XP_G1_REASON: php_missing"
@@ -283,7 +315,23 @@ run_lint() {
 # ---------------------------------------------------------------------------
 run_tests() {
   local root php phpunit out rc
-  root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
+  # return 2, NOT 0. The contract at the top of this file says 2 means
+  # "could not run", and 0 means "clean" -- so returning 0 here reported a repo
+  # with no composer.json as if phpstan/phpcs had been given the code and found
+  # nothing. MEASURED 2026-11-22 on a probe repo holding a .php file with a real
+  # parse error:
+  #
+  #     console  "No composer.json / phpunit.xml found -- not a PHP project"
+  #     gate 1   PASS
+  #
+  # A single-file PHP project is a legitimate project. The absence of a manifest
+  # says nothing about whether the changed file has a syntax error, and it must
+  # not be the difference between "checked" and "passed".
+  root=$(_php_detect_root) || {
+    echo "No composer.json / phpunit.xml found -- PHP lint NOT run"
+    echo "XP_G1_REASON: php_no_manifest"
+    return 3
+  }
   php=$(_php_bin) || {
     echo "php is not installed -- tests not measurable"
     echo "XP_G1_REASON: php_missing"
@@ -329,7 +377,23 @@ coverage_runs_tests() { return 0; }
 
 run_coverage() {
   local root php phpunit out rc report
-  root=$(_php_detect_root) || { echo "No composer.json / phpunit.xml found -- not a PHP project"; return 0; }
+  # return 2, NOT 0. The contract at the top of this file says 2 means
+  # "could not run", and 0 means "clean" -- so returning 0 here reported a repo
+  # with no composer.json as if phpstan/phpcs had been given the code and found
+  # nothing. MEASURED 2026-11-22 on a probe repo holding a .php file with a real
+  # parse error:
+  #
+  #     console  "No composer.json / phpunit.xml found -- not a PHP project"
+  #     gate 1   PASS
+  #
+  # A single-file PHP project is a legitimate project. The absence of a manifest
+  # says nothing about whether the changed file has a syntax error, and it must
+  # not be the difference between "checked" and "passed".
+  root=$(_php_detect_root) || {
+    echo "No composer.json / phpunit.xml found -- PHP lint NOT run"
+    echo "XP_G1_REASON: php_no_manifest"
+    return 3
+  }
   php=$(_php_bin) || {
     echo "php is not installed -- coverage not measurable"
     echo "XP_G1_REASON: php_missing"
@@ -350,6 +414,7 @@ run_coverage() {
   # still exits 0, which reads as full coverage to anything checking only the
   # exit status. Detect it up front so the reason is explicit.
   local drivers
+  # shellcheck disable=SC2016  # PHP source, not shell text: $d is a PHP closure parameter
   drivers=$("$php" -r 'echo implode(",", array_filter(["pcov","xdebug"], fn($d)=>extension_loaded($d)));' 2>/dev/null)
   if [ -z "$drivers" ]; then
     echo "No PHP coverage driver installed (pcov or xdebug required) -- coverage not measurable"

@@ -4,63 +4,85 @@
 #
 # WHY THIS EXISTS
 #   "The gate has a branch for language X" and "the gate blocks a defect in
-#   language X" are different claims, and only the second one is worth anything.
-#   Two files in this repo already test the first kind: a registry row exists, a
-#   case arm mentions the extension, a function is defined. All of those stay
-#   green when the adapter is a stub, when the tool is invoked with the wrong
-#   path, or when the parser reads a format the tool no longer emits.
+#   language X" are different claims, and only the second is worth anything.
+#   Structural tests -- a registry row exists, an arm mentions the extension, a
+#   function is defined -- stay green when an adapter is a stub, invokes a tool on
+#   the wrong path, or parses a format the tool no longer emits.
 #
-#   Measured this session, one instance of each shape:
+#   Measured in this repository, one instance of each shape:
 #     - Gate 13 loaded a 1458-line copy while the maintained 1770-line copy sat
 #       unused, so the declared-check arm did not exist. Every structural test
 #       passed.
 #     - Gate 12 resolved its scanner one directory too high, so the awk file was
 #       never found. All three content checks silently reported nothing. PASS.
-#     - Gate 4's "not analysed" line never reached the report. The console was
-#       honest; the record said PASS.
+#     - Gate 4 printed "NOT ANALYSED: python" while the report recorded PASS with
+#       an empty reason.
+#     - Gate 8 refused a commit over a leaked token and recorded SKIP.
 #
 #   A probe is the only thing that catches these: put a defect in front of the
 #   gate and require it to refuse.
 #
-# HOW IT WORKS
-#   Each case creates a throwaway git repo, writes a minimal project in one
-#   language, stages a KNOWN DEFECT, and runs ONE gate against it with
-#   XP_GATE_ONLY_GATE. The contract per case is two-sided:
+# THE CONTRACT, PER CASE
+#   defective input -> must NOT be PASS   (the gate really looks)
+#   clean input     -> must NOT be FAIL   (the gate is not a constant)
 #
-#     defective input  -> must NOT be PASS   (the gate really looks)
-#     clean input      -> must NOT be BLOCK  (the gate is not a constant)
+#   Requiring only the first half passes a gate that always blocks; only the
+#   second passes one that never does.
 #
-#   Requiring only the first half would pass a gate that blocks everything.
-#   Requiring only the second would pass one that blocks nothing.
+# "NOT PASSED" IS THE CONTRACT, NOT "BLOCKED"
+#   SKIP and WARN are acceptable outcomes for the defective arm, because the
+#   principle is that "not checked" must never be recorded as "passed". What is
+#   never acceptable is PASS. A gate that honestly warns it could not analyse PHP
+#   without a manifest is working; one that says PASS is not.
+#
+# EACH ARM GETS ITS OWN REPO
+#   The gate writes into .xp-gate/ and .quality-history.jsonl. Reusing one repo
+#   means the second arm's change set is entirely gate output, so the gate
+#   concludes "no changed code files" and skips. Measured twice before the cause
+#   was found, on python then on php.
 #
 # USAGE
-#   bash scripts/gate-language-probe.sh            # every case
-#   bash scripts/gate-language-probe.sh python go  # named cases only
-#   bash scripts/gate-language-probe.sh --list     # what is available
+#   bash scripts/gate-language-probe.sh             # every case
+#   bash scripts/gate-language-probe.sh python_gate1 go_gate1
+#   bash scripts/gate-language-probe.sh --list      # what is available
+#   KEEP_PROBE=1 PROBE_WORK_ROOT=/tmp/x bash scripts/gate-language-probe.sh
 # ============================================================================
 set -uo pipefail
 
-# The repo root, resolved without `..` -- Git for Windows `-f` does not traverse it.
 _SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$_SCRIPT_DIR/.." && pwd)
 GATE_HOME="$REPO_ROOT/githooks"
 WORK_ROOT=${PROBE_WORK_ROOT:-$(mktemp -d)}
 
+# Separator for the optional second-file argument. One character, so a probe can
+# pass "Bad.csproj<TAB><project/>" and have the helper split it.
+TAB=$(printf '\t')
+
 PASSED=0
 FAILED=0
 SKIPPED=0
-declare -a RESULTS=()
+RESULTS=()
 
-cleanup() {
-  [ "${KEEP_PROBE:-0}" = "1" ] || rm -rf "$WORK_ROOT"
-}
+# Filled by probe_defect so the caller can report the status it observed.
+PROBE_STATUS=""
+
+cleanup() { [ "${KEEP_PROBE:-0}" = "1" ] || rm -rf "$WORK_ROOT"; }
 trap cleanup EXIT
 
 say() { printf '%s\n' "$*"; }
 hr()  { printf '%s\n' "────────────────────────────────────────────────────────────"; }
 
-# A fresh probe repo. Protected-branch refusal is what forces this: XP_GATE_ONLY_GATE
-# is rejected on main/master, so the branch name has to be something else.
+# ---------------------------------------------------------------------------
+# Probe repo and gate invocation
+# ---------------------------------------------------------------------------
+
+# A fresh probe repo, printed on stdout.
+#
+# The branch name matters: XP_GATE_ONLY_GATE is refused on main/master, so it has
+# to be something else. The .nohooks directory has to EXIST and contain nothing:
+# git rejects a hooksPath that is not a directory, the base commit then fails, and
+# because this function silences its own output the failure surfaced much later as
+# an empty change set.
 new_probe() {
   local name="$1"
   local dir="$WORK_ROOT/$name"
@@ -71,58 +93,51 @@ new_probe() {
     && git config user.email probe@example.com \
     && git config user.name probe \
     && git config core.hooksPath "$GATE_HOME" ) >/dev/null 2>&1
-  # A BASE COMMIT, made with the hooks detached. gitleaks (gate 8) scans
-  # `git --staged` and reports "0 commits scanned" in a repo with no history, so
-  # without this the secret probe measured nothing and read it as a clean scan.
-  # Hooks are pointed at an empty dir rather than using --no-verify, which this
-  # repository forbids.
-  # The base commit must contain a FILE: gitleaks reports "0 commits scanned" for
-  # an empty commit, so the secret probe would read its own empty history as a
-  # clean scan and report a Gate 8 hole that is not there. Measured: --allow-empty
-  # gave "0 commits scanned"; a one-line file did not.
-  ( cd "$dir" && printf "probe base" > .probe-base
-    git add .probe-base
-    git -c core.hooksPath="$WORK_ROOT/.nohooks" commit -qm base
-  ) >/dev/null 2>&1
+  # A base commit WITH A FILE. gitleaks (gate 8) reports "0 commits scanned" for a
+  # repository with no history, and for an empty commit, so it would read its own
+  # empty history as a clean scan. Hooks are detached through an empty directory
+  # rather than --no-verify, which this repository forbids.
+  ( cd "$dir" \
+    && printf 'probe base' > .probe-base \
+    && git add .probe-base \
+    && git -c core.hooksPath="$WORK_ROOT/.nohooks" commit -qm base ) >/dev/null 2>&1
   printf '%s' "$dir"
 }
 
-# Run one gate in a probe repo and echo the gate's status word.
-# The hook exits non-zero on BLOCK, so the exit status is NOT the verdict -- the
-# verdict has to come from the report or the console text.
+# Run one gate in a probe repo; stdout+stderr are the gate's console output.
+# The hook exits non-zero on a refusal, so the exit status is NOT the verdict --
+# the verdict has to be read from the report or from the gate's own banner.
 run_gate() {
   local dir="$1" gate="$2"
-  ( cd "$dir" \
-    && XP_GATE_ONLY_GATE="$gate" timeout 300 git commit -m "probe" ) 2>&1
+  ( cd "$dir" && XP_GATE_ONLY_GATE="$gate" timeout 300 git commit -m "probe" ) 2>&1
 }
 
-# Extract the status for a gate from the newest report, falling back to console text.
+# The status word for a gate, from the newest report, falling back to the banner.
 gate_status() {
   local dir="$1" gate="$2" out="$3"
-  local f
-  # shellcheck disable=SC2012  # Report filenames are timestamped by the gate and never contain spaces.
+  local f st
+  # shellcheck disable=SC2012  # report names are timestamps this gate wrote
   f=$(ls -t "$dir"/.xp-gate/reports/pre-commit/*.json 2>/dev/null | head -1)
   if [ -n "$f" ]; then
-    local st
     st=$(REPORT="$f" GATE="$gate" node -e '
-      const fs=require("fs");
+      const fs = require("fs");
       try {
-        const r=JSON.parse(fs.readFileSync(process.env.REPORT,"utf8"));
-        const want="gate"+process.env.GATE;
+        const r = JSON.parse(fs.readFileSync(process.env.REPORT, "utf8"));
+        const want = "gate" + process.env.GATE;
         // Report keys are "gate1_static_analysis" / "gate13_compiler_strictness".
-        // The earlier match appended "_" to the number, so gate1 matched nothing
-        // and every python probe fell through to the console fallback.
-        const k=Object.keys(r.gates||{}).find(k=>{
-          const l=k.toLowerCase();
-          return l===want || l.startsWith(want+"_");
+        // Matching on want + "_" (with a trailing separator) finds nothing for
+        // gate1, which silently pushed every python probe onto the console path.
+        const k = Object.keys(r.gates || {}).find((key) => {
+          const l = key.toLowerCase();
+          return l === want || l.startsWith(want + "_");
         });
         if (k && r.gates[k] && r.gates[k].status) { console.log(r.gates[k].status); process.exit(0); }
-      } catch (e) {}
+      } catch (e) { /* fall through to the banner */ }
       console.log("");
     ' 2>/dev/null)
     if [ -n "$st" ]; then printf '%s' "$st"; return; fi
   fi
-  # The gate's OWN banner is the only reliable console line: "  Gate 4: Principles   PASS".
+  # The gate's OWN banner is the only reliable console line: "  Gate 4: Principles  PASS".
   # An earlier version matched any line containing the gate number and therefore
   # read the driver's "Gates not named are recorded as SKIP/not_selected" banner,
   # reporting SKIP for a gate that had just blocked.
@@ -130,7 +145,7 @@ gate_status() {
   banner=$(printf '%s' "$out" | grep -E "^[[:space:]]*Gate ${gate}:" | tail -1)
   if [ -n "$banner" ]; then
     case "$banner" in
-      *BLOCK*|*FAIL*) printf 'FAIL' ;;
+      *FAIL*|*BLOCK*) printf 'FAIL' ;;
       *WARN*)         printf 'WARN' ;;
       *SKIP*)         printf 'SKIP' ;;
       *PASS*)         printf 'PASS' ;;
@@ -142,7 +157,10 @@ gate_status() {
   else printf 'UNKNOWN'; fi
 }
 
-# Assert one half of a probe. $1 label, $2 actual, $3 what it must not be.
+# ---------------------------------------------------------------------------
+# Assertions and bookkeeping
+# ---------------------------------------------------------------------------
+
 expect_not() {
   local label="$1" actual="$2" forbidden="$3"
   if [ "$actual" = "$forbidden" ]; then
@@ -171,145 +189,71 @@ skip_case() {
   say "  ⏭  $name — $why"
 }
 
-# ---------------------------------------------------------------------------
-# CASES. Each one: stage a defect, require the gate not to PASS; then stage the
-# same project CLEAN, require it not to BLOCK. A case that cannot run because its
-# toolchain is absent says so rather than passing quietly.
-# ---------------------------------------------------------------------------
-
-# shellcheck disable=SC2329  # Invoked from main() via a case arm; shellcheck resolves direct calls only.
-probe_python_gate1() {
-  local d ok=1
-  d=$(new_probe py-g1)
-  printf 'def f(:\n    return 1\n' > broken.py
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  local out st
-  out=$(run_gate "$d" 1); st=$(gate_status "$d" 1 "$out")
-  expect_not "syntax error not passed" "$st" "PASS" || ok=0
-
-  printf 'def f() -> int:\n    return 1\n' > "$d/broken.py"
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  out=$(run_gate "$d" 1); st=$(gate_status "$d" 1 "$out")
-  expect_not "clean file not blocked" "$st" "BLOCK" || ok=0
-  record "python/gate-1" "$ok" "syntax error -> $st"
+# Write one file into a probe repo, creating parents.
+#
+# mkdir -p first: a probe file may live at src/main/java/com/example/interfaces/
+# rest/. Redirection alone does not create parents, so the write failed, nothing
+# was staged, and four probes reported "gate did not block" against an empty
+# change set.
+write_probe_file() {
+  local dir="$1" path="$2" content="$3"
+  mkdir -p "$(dirname "$dir/$path")"
+  printf '%s' "$content" > "$dir/$path"
 }
 
-# shellcheck disable=SC2329  # Invoked from main() via a case arm.
-probe_go_gate1() {
-  if ! command -v go >/dev/null 2>&1; then skip_case "go/gate-1" "go not installed"; return; fi
-  local d ok=1
-  d=$(new_probe go-g1)
-  printf 'module p\n\ngo 1.20\n' > "$d/go.mod"
-  printf 'package p\n\nfunc F() {\n\tundefinedThing()\n}\n' > "$d/a.go"
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  local out st
-  out=$(run_gate "$d" 1); st=$(gate_status "$d" 1 "$out")
-  expect_not "undefined call not passed" "$st" "PASS" || ok=0
-
-  printf 'package p\n\nfunc F() int { return 1 }\n' > "$d/a.go"
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  out=$(run_gate "$d" 1); st=$(gate_status "$d" 1 "$out")
-  expect_not "clean file not blocked" "$st" "BLOCK" || ok=0
-  record "go/gate-1" "$ok" "undefined call -> $st"
+# Stage ONLY the file(s) under test.
+#
+# A bare `git add -A` also stages the gate's own output (.xp-gate/,
+# .quality-history.jsonl); on a second run the change set is then entirely gate
+# artefacts and the gate concludes "no changed code files".
+stage_probe_files() {
+  local dir="$1"; shift
+  ( cd "$dir" && git add -- "$@" ) >/dev/null 2>&1
 }
 
-# shellcheck disable=SC2329  # Invoked from main() via a case arm.
-probe_ts_gate3() {
-  if ! command -v node >/dev/null 2>&1; then skip_case "typescript/gate-3" "node not installed"; return; fi
-  local d ok=1
-  d=$(new_probe ts-g3)
-  cat > "$d/complex.ts" <<'TS'
-export function tangled(a: number, b: number): number {
-  if (a > 0) { if (b > 0) { if (a > b) { if (b > 1) { if (a > 2) {
-    return 1;
-  } } } } }
-  if (a < 0) { if (b < 0) { return 2; } }
-  if (a === b) { return 3; }
-  if (a !== b) { return 4; }
-  switch (a) { case 1: return 5; case 2: return 6; case 3: return 7; default: return 8; }
-}
-TS
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  local out st
-  out=$(run_gate "$d" 3); st=$(gate_status "$d" 3 "$out")
-  expect_not "deep nesting not passed" "$st" "PASS" || ok=0
-  record "typescript/gate-3" "$ok" "ccn>8 -> $st"
-}
-
-probe_secret_gate8() {
-  local ok=1 st tok
-  # A GitHub PAT has to look REAL: gitleaks matches on entropy, so a token made of
-  # one repeated character is correctly ignored. Measured: "ghp_" + 36 identical
-  # characters scans clean, while a mixed-case-and-digit token fires github-pat.
-  # The first version of this probe used the low-entropy one and read the result as
-  # a Gate 8 defect; the gate was right and the probe was wrong.
-  #
-  # ASSEMBLED AT RUN TIME, not written as a literal. Staged as a literal it made
-  # gate 8 block THIS repository's own commits -- twice -- which is the gate doing
-  # its job on the file that tests it. Splitting the prefix from the body keeps the
-  # scanner (and anyone reading the diff) from seeing one contiguous token.
-  tok="ghp_$(printf %s "aB3dEfGh1JkLmN0pQrStUvWxYz234567890a")"
-  probe_defect secret-g8-bad 8 creds.py "GITHUB_TOKEN = \"$tok\"
-" "GitHub PAT" || ok=0
-  st="$PROBE_STATUS"
-  record "any/gate-8" "$ok" "PAT -> $st"
-}
-
-# shellcheck disable=SC2329  # Invoked from main() via a case arm.
-probe_iac_gate7() {
-  if ! command -v terraform >/dev/null 2>&1 && ! command -v tflint >/dev/null 2>&1; then
-    skip_case "iac/gate-7" "no IaC scanner installed"; return
-  fi
-  local d ok=1
-  d=$(new_probe iac-g7)
-  cat > "$d/main.tf" <<'TF'
-resource "aws_s3_bucket" "b" {
-  bucket = "probe-bucket"
-  acl    = "public-read"
-}
-TF
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  local out st
-  out=$(run_gate "$d" 7); st=$(gate_status "$d" 7 "$out")
-  # The defect is a public ACL: either it blocks or it skips WITH A REASON.
-  # A PASS here is the failure being tested for.
-  expect_not "public bucket not passed" "$st" "PASS" || ok=0
-  record "iac/gate-7" "$ok" "public-read ACL -> $st"
-}
-
-# Every case runs the SAME project twice, in TWO SEPARATE repos: once with a
-# defect staged, once clean. One repo is not enough -- the gate writes its own
-# report into .xp-gate/, a later `git add -A` stages that report, and the second
-# commit then carries gate output instead of source. Measured: the clean arm
-# committed only .xp-gate/*.json, gate 1 saw no source file, and the defect arm
-# had already been overwritten before it could be observed.
-
-PROBE_STATUS=""
-
-# Stage a defect and require the gate not to PASS.
+# probe_defect <suffix> <gate> <file> <content> <label> [<extra-file>]
+#   extra-file is "path<TAB>content" — C# needs a .csproj beside the .cs.
 probe_defect() {
-  local suffix="$1" gate="$2" file="$3" content="$4" label="$5"
-  local d
-  d=$(new_probe "$suffix")
-  printf '%s' "$content" > "$d/$file"
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  local out st
-  out=$(run_gate "$d" "$gate"); st=$(gate_status "$d" "$gate" "$out")
+  local suffix="$1" gate="$2" file="$3" content="$4" label="$5" extra="${6:-}"
+  local dir out st xpath xcontent
+  dir=$(new_probe "$suffix")
+  write_probe_file "$dir" "$file" "$content"
+  if [ -n "$extra" ]; then
+    IFS=$TAB read -r xpath xcontent <<< "$extra"
+    write_probe_file "$dir" "$xpath" "$xcontent"
+  fi
+  stage_probe_files "$dir" "$file"
+  out=$(run_gate "$dir" "$gate")
+  st=$(gate_status "$dir" "$gate" "$out")
   PROBE_STATUS="$st"
   expect_not "$label not passed" "$st" "PASS"
 }
 
-# Write the same project CLEAN and require the gate not to BLOCK.
+# probe_clean <suffix> <gate> <file> <content> [<extra-file>]
+#   The same project, written clean: the gate must not refuse it.
 probe_clean() {
-  local suffix="$1" gate="$2" file="$3" content="$4"
-  local d
-  d=$(new_probe "$suffix")
-  printf '%s' "$content" > "$d/$file"
-  ( cd "$d" && git add -A ) >/dev/null 2>&1
-  local out st
-  out=$(run_gate "$d" "$gate"); st=$(gate_status "$d" "$gate" "$out")
-  expect_not "clean input not blocked" "$st" "BLOCK"
+  local suffix="$1" gate="$2" file="$3" content="$4" extra="${5:-}"
+  local dir out st xpath xcontent
+  dir=$(new_probe "$suffix")
+  write_probe_file "$dir" "$file" "$content"
+  if [ -n "$extra" ]; then
+    IFS=$TAB read -r xpath xcontent <<< "$extra"
+    write_probe_file "$dir" "$xpath" "$xcontent"
+  fi
+  stage_probe_files "$dir" "$file"
+  out=$(run_gate "$dir" "$gate")
+  st=$(gate_status "$dir" "$gate" "$out")
+  expect_not "clean input not refused" "$st" "FAIL"
 }
+
+# ---------------------------------------------------------------------------
+# CASES
+#
+# Each case documents why its defect is the right one. Several were rewritten
+# after the first version fired a false alarm against the gate: a probe that says
+# "the gate is blind" is wrong often enough that the defect has to be one the
+# tool provably reports.
+# ---------------------------------------------------------------------------
 
 probe_python_gate1() {
   local ok=1 st
@@ -340,10 +284,83 @@ func F() int { return 1 }
   record "go/gate-1" "$ok" "undefined call -> $st"
 }
 
+probe_java_gate1() {
+  if ! command -v javac >/dev/null 2>&1; then skip_case "java/gate-1" "javac not installed"; return; fi
+  local ok=1 st
+  # A PACKAGE DECLARATION and a non-utility class shape are part of "clean" here.
+  # PMD's quickstart ruleset fires NoPackage and UseUtilityClass on a bare
+  # "public class X { static ... }", so the first clean sample was refused by
+  # gate 1 for reasons that had nothing to do with the defect being probed --
+  # a false accusation against the gate, of exactly the kind the comment at the
+  # top of this file warns about. Measured 2026-11-22.
+  # A LINT defect, not a type error. Type checking is gate 9's job: the adapter
+  # says so at line 938 ("The old direct mvn/gradle compile here moved to Build
+  # Integrity"). Probing a type error against gate 1 produced a false accusation
+  # for two rounds -- javac caught it, checkstyle/pmd/lizard correctly did not.
+  probe_defect java-g1-bad 1 src/main/java/probe/OrderCalculator.java 'package probe;
+
+public class OrderCalculator {
+  public int total() {
+    int x = 1;
+    return x;
+  }
+}
+' "unnecessary local before return" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean java-g1-ok 1 src/main/java/probe/OrderCalculator.java 'package probe;
+
+public class OrderCalculator {
+  public int total() { return 1; }
+}
+' || ok=0
+  record "java/gate-1" "$ok" "pmd lint -> $st"
+}
+
+probe_csharp_gate1() {
+  if ! command -v dotnet >/dev/null 2>&1; then skip_case "csharp/gate-1" "dotnet not installed"; return; fi
+  local ok=1 st proj
+  # A .csproj is REQUIRED. Without one `dotnet build` refuses with MSB1003 ("no
+  # project or solution file in the current directory"), which is a PROBE defect
+  # and not a gate defect; the first version shipped only the .cs and read the
+  # resulting PASS as a hole in gate 1.
+  proj='<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+'
+  probe_defect cs-g1-bad 1 Bad.cs 'public class Bad {
+  public static int F() { return "not an int"; }
+}
+' "type error" "Bad.csproj${TAB}${proj}" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean cs-g1-ok 1 Bad.cs 'public class Bad {
+  public static int F() { return 1; }
+}
+' "Bad.csproj${TAB}${proj}" || ok=0
+  record "csharp/gate-1" "$ok" "type error -> $st"
+}
+
+probe_php_gate1() {
+  if ! command -v php >/dev/null 2>&1; then skip_case "php/gate-1" "php not installed"; return; fi
+  local ok=1 st
+  probe_defect php-g1-bad 1 bad.php '<?php
+function f( {
+    return 1;
+}
+' "syntax error" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean php-g1-ok 1 bad.php '<?php
+function f(): int {
+    return 1;
+}
+' || ok=0
+  record "php/gate-1" "$ok" "syntax error -> $st"
+}
+
 probe_ts_gate3() {
   if ! command -v node >/dev/null 2>&1; then skip_case "typescript/gate-3" "node not installed"; return; fi
-  local ok=1 st
-  local deep simple
+  local ok=1 st deep simple
   deep=$(cat <<'TS'
 export function tangled(a: number, b: number): number {
   if (a > 0) { if (b > 0) { if (a > b) { if (b > 1) { if (a > 2) {
@@ -368,6 +385,166 @@ TS
   record "typescript/gate-3" "$ok" "ccn -> $st"
 }
 
+probe_gate4_principles() {
+  if ! command -v node >/dev/null 2>&1; then skip_case "java/gate-4" "node not installed"; return; fi
+  local ok=1 st bad good
+  # A rule that is `error` BY DEFAULT. Every clean-code rule ships as warning or
+  # info, so the first version of this probe -- a deep-nesting pyramid -- measured
+  # nothing: gate 4 correctly printed "2 warnings" and correctly PASSED, and that
+  # PASS was read as a gate hole. Same mistake as the low-entropy token in gate 8:
+  # the probe was wrong and the gate was right.
+  # `arch.controller` is error by default: a class in interfaces/rest must end in
+  # "Controller".
+  bad=$(cat <<'JAVA'
+package com.example.interfaces.rest;
+
+public class OrderEndpoint {
+    public String get() {
+        return "ok";
+    }
+}
+JAVA
+)
+  good=$(cat <<'JAVA'
+package com.example.interfaces.rest;
+
+public class OrderController {
+    public String get() {
+        return "ok";
+    }
+}
+JAVA
+)
+  probe_defect g4-bad 4 src/main/java/com/example/interfaces/rest/OrderEndpoint.java "$bad" "misnamed controller" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean g4-ok 4 src/main/java/com/example/interfaces/rest/OrderEndpoint.java "$good" || ok=0
+  record "java/gate-4" "$ok" "arch.controller naming -> $st"
+}
+
+probe_gate2_duplicates() {
+  local ok=1 d out
+  # Gate 2 DOES NOT BLOCK ON DUPLICATES. gate-2-entry.sh line 93 says so in as many
+  # words: "jscpd found duplicated code (warning, not blocking by default)", and the
+  # 48.72% figure in the comment there is this exact fixture. So a PASS over a
+  # duplicate is the designed verdict, not a defect -- an earlier version of this
+  # probe read it as a hole and was wrong.
+  #
+  # What is still worth proving is that jscpd REALLY RAN and really found the
+  # clone. Otherwise "not blocking" is indistinguishable from "never looked", which
+  # is the defect this file exists to catch. So this case asserts on the console
+  # report instead of on the status word -- and it is the only case here that does,
+  # for the documented reason above.
+  local dup
+  dup=$(cat <<'JS'
+export function alpha(rows) {
+  let total = 0;
+  let count = 0;
+  let sumSquares = 0;
+  for (const row of rows) {
+    if (row.amount > 0) {
+      total += row.amount;
+      count += 1;
+      sumSquares += row.amount * row.amount;
+    } else if (row.amount < 0) {
+      total -= row.amount;
+      count += 1;
+      sumSquares += row.amount * row.amount;
+    }
+  }
+  const mean = count === 0 ? 0 : total / count;
+  const variance = count === 0 ? 0 : sumSquares / count - mean * mean;
+  return { total, count, mean, variance };
+}
+
+export function beta(rows) {
+  let total = 0;
+  let count = 0;
+  let sumSquares = 0;
+  for (const row of rows) {
+    if (row.amount > 0) {
+      total += row.amount;
+      count += 1;
+      sumSquares += row.amount * row.amount;
+    } else if (row.amount < 0) {
+      total -= row.amount;
+      count += 1;
+      sumSquares += row.amount * row.amount;
+    }
+  }
+  const mean = count === 0 ? 0 : total / count;
+  const variance = count === 0 ? 0 : sumSquares / count - mean * mean;
+  return { total, count, mean, variance };
+}
+JS
+)
+  d=$(new_probe g2-dup)
+  write_probe_file "$d" dup.js "$dup"
+  stage_probe_files "$d" dup.js
+  out=$(run_gate "$d" 2)
+  if printf '%s' "$out" | grep -q "Clone found"; then
+    say "    ✓ jscpd reported the clone"
+  else
+    say "    ✗ jscpd did not report the clone (it may not have analysed the file)"
+    ok=0
+  fi
+  # And the gate must not have called it a failure either: duplicates are a
+  # warning by design.
+  local st
+  st=$(gate_status "$d" 2 "$out")
+  if [ "$st" = "FAIL" ]; then
+    say "    ✗ duplicates were treated as blocking; the documented contract says warning"
+    ok=0
+  else
+    say "    ✓ duplicates are a warning, status $st"
+  fi
+  record "javascript/gate-2" "$ok" "clone detected, non-blocking -> $st"
+}
+
+probe_gate10_sast() {
+  if ! command -v semgrep >/dev/null 2>&1; then skip_case "python/gate-10" "semgrep not installed"; return; fi
+  local ok=1 st bad good
+  # eval / shell=True on request data: the canonical SAST finding.
+  bad=$(cat <<'PY'
+import subprocess
+
+
+def run(cmd):
+    subprocess.call(cmd, shell=True)
+    return eval(cmd)
+PY
+)
+  good=$(cat <<'PY'
+import subprocess
+
+
+def run(argv):
+    return subprocess.call(argv, shell=False)
+PY
+)
+  probe_defect g10-bad 10 danger.py "$bad" "shell=True + eval" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean g10-ok 10 danger.py "$good" || ok=0
+  record "python/gate-10" "$ok" "eval/shell=True -> $st"
+}
+
+probe_secret_gate8() {
+  local ok=1 st tok
+  # A GitHub PAT has to look REAL: gitleaks matches on entropy, so a token of one
+  # repeated character is correctly ignored. Measured: "ghp_" plus 36 identical
+  # characters scans clean, while a mixed-case-and-digit token fires github-pat.
+  # The first version used the low-entropy one, read the clean scan as a Gate 8
+  # hole, and was wrong.
+  #
+  # ASSEMBLED AT RUN TIME, not written as a literal: staged as a literal it made
+  # gate 8 block THIS repository's own commits -- twice -- which is the gate doing
+  # its job on the file that tests it.
+  tok="ghp_$(printf %s 'aB3dEfGh1JkLmN0pQrStUvWxYz234567890a')"
+  probe_defect secret-g8-bad 8 creds.py "GITHUB_TOKEN = \"$tok\"
+" "GitHub PAT" || ok=0
+  st="$PROBE_STATUS"
+  record "any/gate-8" "$ok" "PAT -> $st"
+}
+
 probe_iac_gate7() {
   if ! command -v terraform >/dev/null 2>&1 && ! command -v tflint >/dev/null 2>&1; then
     skip_case "iac/gate-7" "no IaC scanner installed"; return
@@ -387,15 +564,38 @@ TF
 
 # ---------------------------------------------------------------------------
 
-ALL_CASES=(python_gate1 go_gate1 ts_gate3 secret_gate8 iac_gate7)
+ALL_CASES=(
+  python_gate1 go_gate1 java_gate1 csharp_gate1 php_gate1
+  ts_gate3 gate4_principles gate2_duplicates gate10_sast
+  secret_gate8 iac_gate7
+)
 
 show_list() {
   say "Available probes:"
   for c in "${ALL_CASES[@]}"; do say "  ${c}"; done
 }
 
+dispatch() {
+  local c="$1"
+  case "$c" in
+    python_gate1)     say "  ▸ python / gate-1";     probe_python_gate1 ;;
+    go_gate1)         say "  ▸ go / gate-1";         probe_go_gate1 ;;
+    java_gate1)       say "  ▸ java / gate-1";       probe_java_gate1 ;;
+    csharp_gate1)     say "  ▸ csharp / gate-1";     probe_csharp_gate1 ;;
+    php_gate1)        say "  ▸ php / gate-1";        probe_php_gate1 ;;
+    ts_gate3)         say "  ▸ typescript / gate-3"; probe_ts_gate3 ;;
+    gate4_principles) say "  ▸ java / gate-4";       probe_gate4_principles ;;
+    gate2_duplicates) say "  ▸ javascript / gate-2"; probe_gate2_duplicates ;;
+    gate10_sast)      say "  ▸ python / gate-10";    probe_gate10_sast ;;
+    secret_gate8)     say "  ▸ any / gate-8";        probe_secret_gate8 ;;
+    iac_gate7)        say "  ▸ iac / gate-7";        probe_iac_gate7 ;;
+    *) say "  ? unknown case: $c"; return 1 ;;
+  esac
+}
+
 main() {
   local -a want=()
+  local a c
   for a in "$@"; do
     case "$a" in
       --list) show_list; exit 0 ;;
@@ -404,6 +604,8 @@ main() {
   done
   [ ${#want[@]} -eq 0 ] && want=("${ALL_CASES[@]}")
 
+  mkdir -p "$WORK_ROOT/.nohooks"
+
   hr
   say "GATE × LANGUAGE PROBE — a gate is only valid if it refuses a real defect"
   say "repo: $REPO_ROOT"
@@ -411,14 +613,7 @@ main() {
   hr
 
   for c in "${want[@]}"; do
-    case "$c" in
-      python_gate1) say "  ▸ python / gate-1";   probe_python_gate1 ;;
-      go_gate1)     say "  ▸ go / gate-1";       probe_go_gate1 ;;
-      ts_gate3)     say "  ▸ typescript / gate-3"; probe_ts_gate3 ;;
-      secret_gate8) say "  ▸ any / gate-8";      probe_secret_gate8 ;;
-      iac_gate7)    say "  ▸ iac / gate-7";      probe_iac_gate7 ;;
-      *) say "  ? unknown case: $c" ;;
-    esac
+    dispatch "$c" || true
   done
 
   hr

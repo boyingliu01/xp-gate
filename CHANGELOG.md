@@ -1,5 +1,88 @@
 # Changelog
 
+## [0.38.92.0] - 2026-11-22
+
+**新增端到端探针：把"门禁有这个分支"变成"门禁真的拦得住"。**
+
+### 为什么需要它
+
+仓库里已有的矩阵测试全是**结构性的**——检查注册表有行、分支提到扩展名、函数已定义。
+这些在本轮实测中全部保持绿色，而真实缺陷同时存在：
+
+| 门禁 | 结构性测试 | 实际情况 |
+|---|---|---|
+| Gate 13 | 绿 | 加载了 1458 行的旧拷贝，维护中的 1770 行版本没被使用 |
+| Gate 12 | 绿 | 扫描器路径多退了一级目录，三项检查静默地什么都没做 |
+| Gate 4 | 绿 | 控制台打印 `NOT ANALYSED: python`，报告记录 `PASS` + 空 reason |
+| Gate 8 | 绿 | 拒绝了含密钥的提交，报告记录 `SKIP` |
+
+`scripts/gate-language-probe.sh` 换一种问法：**把一个真实缺陷摆在门禁面前，要求它拒绝。**
+
+### 契约是双向的
+
+```
+缺陷输入 → 不得 PASS     （门禁真的在看）
+干净输入 → 不得 FAIL     （门禁不是个常量）
+```
+
+只要一半，就会放过"永远拦截"或"永远放行"的门禁。
+
+### 49 处 err 里最值得记的一条
+
+**"不得 PASS" 是契约，"必须 BLOCK" 不是。**
+SKIP / WARN 对缺陷态是**合法结果**——核心不变量是"没检查"不得被记成"通过"。
+一个诚实地说"没有 composer.json，PHP 静态分析未运行"的门禁是在工作；
+一个说 PASS 的才不是。
+
+### 覆盖（11 例，全绿）
+
+```
+python/gate-1   语法错误      -> FAIL
+go/gate-1       未定义调用    -> FAIL
+java/gate-1     PMD lint      -> FAIL
+csharp/gate-1   类型错误      -> BLOCK
+php/gate-1      语法错误      -> WARN（如实报告无 manifest）
+typescript/gate-3  CCN 超标   -> BLOCK
+java/gate-4     arch.controller 命名 -> FAIL
+javascript/gate-2  克隆检出   -> PASS（设计上不阻断）
+python/gate-10  eval/shell=True -> FAIL
+any/gate-8      GitHub PAT    -> FAIL
+iac/gate-7      public ACL    -> FAIL
+```
+
+### 顺带修复的真实缺陷
+
+**`githooks/adapters/php.sh` 在没有 manifest 时返回 0。**
+
+函数头注释写着 `Returns 0 (clean) / 1 (findings) / 2 (could not run) / 3 (warn)`，
+而"没找到 composer.json"这条走了 `return 0`——等于报告"分析器读过了，没发现问题"。
+
+实测：一个含真实语法错误的 `.php` 文件，控制台说"not a PHP project"，Gate 1 判 PASS。
+
+改为 `return 3` + `XP_G1_REASON: php_no_manifest`：
+- 不用 2（BLOCK）——单文件 PHP 脚本是合法项目，永久堵死不可接受
+- 不用 0——那正是缺陷
+
+### 五次假警报，全部是我探针的错
+
+按"探针说门禁瞎了，先怀疑探针"逐条查证：
+
+| 我以为是门禁的问题 | 实际原因 |
+|---|---|
+| Gate 8 漏报 GitHub PAT | 我用了 36 个重复字符，**熵太低**，gitleaks 正确忽略 |
+| Gate 4 不拦深度嵌套 | 所有 clean-code 规则默认 warning，`arch.controller` 才是 error |
+| Gate 1 不拦 C# 类型错误 | 缺 `.csproj`，`dotnet build` 报 MSB1003 |
+| Gate 1 不拦 Java 类型错误 | 类型检查是 **Gate 9** 的职责（适配器第 938 行写明） |
+| Gate 2 检出克隆却 PASS | `gate-2-entry.sh` 第 93 行：重复代码**设计上就是 warning** |
+
+每一条都记在对应 case 的注释里，避免下一个人重犯。
+
+### 测试
+
+`gate-language-probe.test.bats`（7 条）守住探针本身不退化：
+双向契约存在、禁止 PASS 而非禁止非 FAIL、报告 key 按前缀匹配、
+密钥运行时拼接不落字面量、**没有函数被重复定义**（最后一轮调试就栽在这）。
+
 ## [0.38.91.0] - 2026-11-22
 
 **Gate 8 拦下了提交，却在报告里记成"跳过"。**
