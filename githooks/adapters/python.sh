@@ -30,7 +30,10 @@ unset _ac_candidate
 # scope declaration may name a single .py file.
 _mypy_target_usable() {
   [ -e "$1" ] || return 1
-  [ -n "$(find "$1" -name '*.py' -print 2>/dev/null | grep .)" ]
+  # SC2143: the exit status IS the answer, so `grep -q` -- it also stops at the
+  # first hit instead of buffering every match in a large target. No `-print`
+  # needed either: grep only needs to know that a line exists.
+  find "$1" -name '*.py' 2>/dev/null | grep -q .
 }
 
 run_static_analysis() {
@@ -232,6 +235,29 @@ run_tests() {
 
   return $PYTEST_EXIT
 }
+
+# run_coverage() below executes and judges every test: `pytest ... --cov=src`
+# runs the suite, sets PYTEST_EXIT, and returns 1 on any of the three non-verdict
+# arms it already inspects. So the separate run_tests() pass adds no verdict,
+# only a second full pytest start.
+#
+# MEASURED 2026-11-20 on this machine, a probe repo holding ONE test:
+#
+#     run_tests    7016 / 10669 / 15237 ms      (pytest -n auto, no --cov)
+#     run_coverage 16660 / 11221 / 14485 ms     (pytest -n auto --cov=src)
+#     both         23676 / 21890 / 29722 ms
+#
+# The suite is ONE test. Half of that wall clock was the same two-second test
+# being started twice, and the proportion only grows on a repo whose tests are
+# fast: what dominates is pytest start-up plus, on Windows, xdist spawning one
+# worker per core (a single test went from 3935 ms serial to 10604 ms under
+# `-n auto`, so the parallelism is itself a cost at small test counts).
+#
+# Which is why the declaration matters most HERE: python's tests are commonly the
+# cheapest per commit, so the doubled start-up is the largest share of its cost.
+#
+# Undeclared adapters keep the safe double-run default -- see adapter-common.sh.
+coverage_runs_tests() { return 0; }
 
 run_coverage() {
   require_tool pytest "pytest" || return 1
