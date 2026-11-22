@@ -1,6 +1,6 @@
 {
   "name": "@boyingliu01/opencode-plugin",
-  "version": "0.38.94",
+  "version": "0.38.95",
   "type": "module",
   "main": "index.ts",
   "description": "XP-Gate quality gates + AI workflow skills for OpenCode",

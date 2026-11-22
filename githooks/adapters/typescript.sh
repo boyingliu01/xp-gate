@@ -62,6 +62,38 @@ _run_local_tool() {
   run_without_git_context "$bin" "$@"
 }
 
+# Declare the type checker, so Gate 13 checks types instead of skipping.
+#
+# Without this the gate reported "no compiler/type-checker declared for this
+# language -- compiler errors not checked" and SKIPPED on every TypeScript
+# project, including ones that ship a tsconfig.json. Measured 2026-11-22 in a
+# fixture with `"strict": true` and an implicit-any parameter: tsc reported
+# TS7006, and the gate recorded SKIP without ever invoking it.
+#
+# EMPTY OUTPUT WHEN THERE IS NO tsconfig.json, deliberately. tsc without a
+# config applies its own defaults, which are not this project's strictness
+# setting -- running it would report on a configuration nobody chose. The
+# contract at gate-13 line 1132 is "a command, or nothing", and nothing makes
+# the gate record SKIP with a reason. Inventing a command here would be the
+# exact defect this file exists to prevent: a verdict the gate did not compute.
+#
+# Uses tsc directly (not `npx tsc`) because a gate must never install what it
+# was asked to detect.
+compiler_check_command() {
+  [ -f tsconfig.json ] || return 0
+  if [ -x node_modules/.bin/tsc ]; then
+    printf "%s" "node_modules/.bin/tsc --noEmit"
+    return 0
+  fi
+  if command -v tsc >/dev/null 2>&1; then
+    printf "%s" "tsc --noEmit"
+    return 0
+  fi
+  # A tsconfig with no tsc anywhere: say nothing, so the gate reports SKIP
+  # rather than PASS. "Could not check" must never read as "checked".
+  return 0
+}
+
 run_static_analysis() {
   # The type-check decision is shared with pre-commit's Gate 1 (#436): a project's
   # own checker (typecheck script, or GATE_TS_TYPECHECK_CMD) is used when declared,

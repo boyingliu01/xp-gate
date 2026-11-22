@@ -1,5 +1,78 @@
 # Changelog
 
+## [0.38.95.0] - 2026-11-22
+
+**Gate 13 对 TypeScript 什么都不检查。**
+
+### 缺陷
+
+TypeScript 适配器**没有声明 `compiler_check_command`**，所以每个 `.ts` 变更上：
+
+```
+i  No compile-time checker declared by this project's language adapter.
+Gate 13 (SKIP) completed in 0s
+```
+
+实测（2026-11-22）：一个带 `"strict": true` 的 tsconfig + 一个无类型参数，
+`tsc --noEmit` 报 `TS7006`，而门禁记录 **SKIP，从未调用过它**。
+
+TypeScript 是本仓库自己的语言。**定义这些门禁的代码，其类型错误不受门禁保护。**
+
+### 修复
+
+给适配器补上声明。这是**声明**，不是特例分支——契约在
+`gate-13-compiler-strictness.sh:1132`：适配器可以声明一条命令，或者什么都不声明。
+
+```
+compiler_check_command() {
+  [ -f tsconfig.json ] || return 0
+  if [ -x node_modules/.bin/tsc ]; then printf "%s" "node_modules/.bin/tsc --noEmit"; return 0; fi
+  if command -v tsc >/dev/null 2>&1; then printf "%s" "tsc --noEmit"; return 0; fi
+  return 0
+}
+```
+
+三处刻意的设计：
+
+1. **没有 tsconfig.json 时返回空**。`tsc` 在没有配置时会套用自己的默认值，
+   那**不是这个项目选定的严格度**——跑了就是在报告一个没人选择过的配置。
+   空输出让门禁如实记 SKIP 加原因。
+2. **不用 `npx`**。门禁不得在现场安装它要检测的东西。
+3. 顶层找不到 `tsc` 时也返回空 —— "无法检查"绝不能读成"检查通过"。
+
+### 修复后实测
+
+```
+缺陷：tsc --noEmit → TS7006 → Gate 13 (BLOCK)
+干净：tsc --noEmit → 通过   → Gate 13 (PASS)
+```
+
+### 顺带修掉一个探针缺陷
+
+新探针第一次跑，干净输入也被 BLOCK：
+
+```
+tsconfig.json(1,2): error TS1005: '}' expected.
+```
+
+文件里**只有一个 `{`**。原因是辅助函数用 `IFS=$TAB read -r` 拆分第二文件参数，
+而 **`read` 只读一行**——多行文件被截断成首行。
+
+改用参数展开：`xpath=${extra%%"$TAB"*}` / `xcontent=${extra#*"$TAB"}`。
+
+这个缺陷一直在，只是之前 C# 的 `.csproj` 恰好是单行才没暴露。
+**又是一次"探针说门禁坏了，先怀疑探针"的实例。**
+
+### 当前探针覆盖
+
+12 例全绿：gate-1 × 5 语言、gate-2、gate-3、gate-4、gate-7、gate-8、gate-10、**gate-13**。
+
+### 测试
+
+`gate-13-typescript-type-checker.test.bats`（5 条）。最关键的是第 3 条：
+**没有 tsconfig 时必须静默**——防止有人"顺手"把默认命令塞进去，
+那会重新制造"判定不是门禁自己算出来的"这个老毛病。
+
 ## [0.38.94.0] - 2026-11-22
 
 **耗时基线：仓库里第一次有可复现的门禁耗时数据。**

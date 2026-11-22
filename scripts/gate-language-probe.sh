@@ -219,7 +219,12 @@ probe_defect() {
   dir=$(new_probe "$suffix")
   write_probe_file "$dir" "$file" "$content"
   if [ -n "$extra" ]; then
-    IFS=$TAB read -r xpath xcontent <<< "$extra"
+    # Parameter expansion, NOT `read`: read consumes one line, so a multi-line
+    # second file (a tsconfig.json, a .csproj) was truncated to its first line.
+    # Measured 2026-11-22: a tsconfig became a bare "{" and tsc reported
+    # TS1005 on it, which the probe then read as the gate refusing clean code.
+    xpath=${extra%%"$TAB"*}
+    xcontent=${extra#*"$TAB"}
     write_probe_file "$dir" "$xpath" "$xcontent"
   fi
   stage_probe_files "$dir" "$file"
@@ -237,7 +242,12 @@ probe_clean() {
   dir=$(new_probe "$suffix")
   write_probe_file "$dir" "$file" "$content"
   if [ -n "$extra" ]; then
-    IFS=$TAB read -r xpath xcontent <<< "$extra"
+    # Parameter expansion, NOT `read`: read consumes one line, so a multi-line
+    # second file (a tsconfig.json, a .csproj) was truncated to its first line.
+    # Measured 2026-11-22: a tsconfig became a bare "{" and tsc reported
+    # TS1005 on it, which the probe then read as the gate refusing clean code.
+    xpath=${extra%%"$TAB"*}
+    xcontent=${extra#*"$TAB"}
     write_probe_file "$dir" "$xpath" "$xcontent"
   fi
   stage_probe_files "$dir" "$file"
@@ -545,6 +555,42 @@ probe_secret_gate8() {
   record "any/gate-8" "$ok" "PAT -> $st"
 }
 
+probe_ts_gate13() {
+  if ! command -v node >/dev/null 2>&1; then skip_case "typescript/gate-13" "node not installed"; return; fi
+  local ok=1 st tsconf
+  # A tsconfig that IS strict, so "clean" and "defective" differ only in the code.
+  # Gate 13 reads the project's declared strictness through compiler_check_command;
+  # a configuration nobody chose would make the probe measure tsc's defaults.
+  tsconf=$(cat <<'JSON'
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2020",
+    "module": "commonjs",
+    "noEmit": true
+  }
+}
+JSON
+)
+  # Implicit any: the canonical strict-mode failure. Verified by hand 2026-11-22 --
+  # tsc reports TS7006 for this file and nothing for the fixed one, so the probe is
+  # measuring the type checker rather than guessing at it.
+  #
+  # THIS CASE ALSO CAUGHT A REAL GATE DEFECT: before the fix the TypeScript adapter
+  # declared no compiler_check_command, so Gate 13 printed "no compiler/type-checker
+  # declared for this language" and SKIPPED -- on a project that ships a tsconfig.
+  probe_defect ts-g13-bad 13 bad.ts 'export function f(x) {
+  return x + 1;
+}
+' "implicit any" "tsconfig.json${TAB}${tsconf}" || ok=0
+  st="$PROBE_STATUS"
+  probe_clean ts-g13-ok 13 bad.ts 'export function f(x: number): number {
+  return x + 1;
+}
+' "tsconfig.json${TAB}${tsconf}" || ok=0
+  record "typescript/gate-13" "$ok" "implicit any -> $st"
+}
+
 probe_iac_gate7() {
   if ! command -v terraform >/dev/null 2>&1 && ! command -v tflint >/dev/null 2>&1; then
     skip_case "iac/gate-7" "no IaC scanner installed"; return
@@ -567,7 +613,7 @@ TF
 ALL_CASES=(
   python_gate1 go_gate1 java_gate1 csharp_gate1 php_gate1
   ts_gate3 gate4_principles gate2_duplicates gate10_sast
-  secret_gate8 iac_gate7
+  secret_gate8 iac_gate7 ts_gate13
 )
 
 show_list() {
@@ -589,6 +635,7 @@ dispatch() {
     gate10_sast)      say "  ▸ python / gate-10";    probe_gate10_sast ;;
     secret_gate8)     say "  ▸ any / gate-8";        probe_secret_gate8 ;;
     iac_gate7)        say "  ▸ iac / gate-7";        probe_iac_gate7 ;;
+    ts_gate13)        say "  ▸ typescript / gate-13"; probe_ts_gate13 ;;
     *) say "  ? unknown case: $c"; return 1 ;;
   esac
 }
