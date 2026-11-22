@@ -92,3 +92,50 @@ setup() {
   run bash -c 'grep -cE "record_gate_audit \"gate-12\".*GATE_12_DETAIL" "$1"' _ "$REPO_ROOT/githooks/gate-12-file-hygiene.sh"
   [ "$output" -ge 2 ]
 }
+
+# @covers the whole set, not a sample: every journal call in every gate
+@test "EVERY record_gate_audit call site passes a detail argument" {
+  # This is the invariant, checked by parsing the call rather than by grepping for
+  # a variable name. Three earlier greps in this very session were wrong -- they
+  # missed "$(gate_start_ms)", then counted the ':' in ${X:-0}', then matched a
+  # comment -- and each wrong grep looked like a clean bill of health.
+  #
+  # MEASURED 2026-11-22 before the fix: 35 call sites across 16 gates, of which
+  # gate-0 (2/4), gate-6 (1/2), gate-7 (2/2), gate-8 (1/1), gate-9 (1/2),
+  # gate-11 (3/4) and gate-12 (1/4) were missing it.
+  run node -e '
+    const fs = require("fs"), path = require("path");
+    const gates = ["0","1","2","3","4","5","6","7","8","9","10","11","12","12b","12c","13"];
+    function walk(dir, out = []) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== "adapters") walk(p, out); }
+        else if (e.name.endsWith(".sh") || !e.name.includes(".")) out.push(p);
+      }
+      return out;
+    }
+    const files = walk(process.argv[1] + "/githooks");
+    const bad = [];
+    for (const g of gates) {
+      const needle = `record_gate_audit "gate-${g}"`;
+      const f = files.find(p => fs.readFileSync(p, "utf8").includes(needle));
+      if (!f) continue;
+      const lines = fs.readFileSync(f, "utf8").split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].includes(needle)) continue;
+        let args = 0, depth = 0, inQ = false;
+        const start = lines[i].indexOf("record_gate_audit") + 17;
+        for (let k = start; k < lines[i].length; k++) {
+          const c = lines[i][k];
+          if (inQ) { if (c === "\"") inQ = false; continue; }
+          if (c === "\"") { if (depth === 0) args++; inQ = true; continue; }
+          if (c === "$" && lines[i][k+1] === "(") { depth++; k++; continue; }
+          if (c === ")" && depth > 0) { depth--; continue; }
+        }
+        if (args < 6) bad.push(`gate-${g}:${i + 1}`);
+      }
+    }
+    if (bad.length) { console.log(bad.join(" ")); process.exit(1); }
+  ' "$REPO_ROOT"
+  [ "$status" -eq 0 ]
+}

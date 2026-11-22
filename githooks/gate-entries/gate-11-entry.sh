@@ -33,7 +33,7 @@ if ! gate_enabled 11; then
   echo "⏭️  SKIPPED - Gate 11: Sprint flow (not selected by XP_GATE_ONLY_GATE)"
   GATE_11_STATUS="SKIP"
   GATE_11_DETAIL="not_selected"
-  record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$(gate_start_ms)"
+  record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "0" "$(gate_start_ms)" "${GATE_11_DETAIL:-}"
   return 0
 fi
 
@@ -72,7 +72,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
     GATE_11_STATUS="BLOCK"
     echo "❌ BLOCKED - Gate 11: Sprint Flow (${SPRINT_GATE_DETAIL:-sprint gate denied})"
     printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
-    record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
+    record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START" "${GATE_11_DETAIL:-}"
     # Sprint gate failure is a hard block — exit immediately
     return 1
   fi
@@ -122,7 +122,7 @@ if [ -n "$SPRINT_GATE_SCRIPT" ]; then
       echo "   sprint-gate.sh reported decision=deny but exited 0; blocking because a"
       echo "   deny that contradicts its exit status cannot be treated as consent."
       printf '%s\n' "$SPRINT_GATE_OUTPUT" | sed 's/^/     /'
-      record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START"
+      record_gate_audit "gate-11" "sprint-flow" "$GATE_11_STATUS" "1" "$GATE_11_START" "${GATE_11_DETAIL:-}"
       return 1
       ;;
     *)

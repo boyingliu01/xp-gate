@@ -443,4 +443,4 @@ else
   fi
 fi
 
-record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START"
+record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "0" "$GATE_8_START" "${GATE_8_REASON:-}"

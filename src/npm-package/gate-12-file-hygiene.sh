@@ -33,7 +33,7 @@ if [ -z "$STAGED_FILES" ]; then
   echo "     ℹ️  No staged files — skipping"
   echo "     ✅ PASSED - File Hygiene (no files to check)"
   GATE_12_STATUS="SKIP"
-  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START"
+  record_gate_audit "gate-12" "file-hygiene" "$GATE_12_STATUS" "0" "$GATE_12_START" "${GATE_12_DETAIL:-}"
   # shellcheck disable=SC2317  # the gate body is SOURCED, never run to completion here:
   # the driver calls gate_12_run and treats a returned rc as the verdict, so the
   # lines after this return ARE reachable in production (see pre-commit).

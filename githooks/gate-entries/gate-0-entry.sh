@@ -524,7 +524,7 @@ because pre-commit runs before git builds the message):
 Staged files: $(echo "$STAGED_FILES" | tr '\n' ', ' | sed 's/,$//')
 "
       GATE_0_STATUS="BLOCK"
-      record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "1" "$GATE_0_START"
+      record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "1" "$GATE_0_START" "${GATE_0_DETAIL:-}"
       return 1
     fi
   fi
@@ -533,7 +533,7 @@ else
   echo "✅ PASSED - Gate 0: Version Consistency Check (non-protected branch: $CURRENT_BRANCH)"
 fi
 
-record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "0" "$GATE_0_START"
+record_gate_audit "gate-0" "version-consistency" "$GATE_0_STATUS" "0" "$GATE_0_START" "${GATE_0_DETAIL:-}"
 
 echo ""
 
@@ -608,6 +608,7 @@ CHANGED_FILES=$(printf '%s\n' "$RAW_CHANGED_FILES" \
 # is still a secret.
 DOCS_ONLY_COMMIT=false
 if printf '%s\n' "$CHANGED_FILES" | detect_docs_only_commit | grep -q '^true$'; then
+  # shellcheck disable=SC2034  # DOCS_ONLY_COMMIT is consumed by the gate driver after it sources this file.
   DOCS_ONLY_COMMIT=true
 fi
 
@@ -622,6 +623,7 @@ fi
 # "No test files found" and Gate 5 reports a failing test run -- a commit that
 # touched nothing but a byte-identical mirror cannot land. Map each mirror path
 # to the canonical twin it copies, drop what has no twin, collapse duplicates.
+# shellcheck disable=SC2329  # Called from gate-5-entry.sh; shellcheck analyses one file at a time.
 select_root_suite_targets() {
   # Deliberately not `s|...|...|`: the alternation below contains `|`, which sed
   # would read as the end of its pattern ("unknown option to `s'").
@@ -632,6 +634,7 @@ select_root_suite_targets() {
     | sort -u
 }
 
+# shellcheck disable=SC2329  # Called from gate-1-entry.sh and adapter-common.sh.
 any_changed_files_match() {
   local pattern
 
@@ -1098,6 +1101,7 @@ CHANGEDFILELIST
 fi  # close language override if/else
 
 # Helper: check if a language is in PROJECT_LANGS
+# shellcheck disable=SC2329  # Called from gate-5-entry.sh and gate-6-entry.sh.
 has_project_lang() {
   for lang in $PROJECT_LANGS; do
     if [ "$lang" = "$1" ]; then return 0; fi
@@ -1118,9 +1122,11 @@ ORIGINAL_DIR=""
 IN_PROJECT_SUBDIR=0
 _lang_count=$(echo "$PROJECT_LANGS" | wc -w)
 if [ -n "$PROJECT_SUBDIR" ] && [ "$PROJECT_SUBDIR" != "." ] && [ "$PROJECT_LANG" != "documentation-only" ] && [ "$_lang_count" -le 1 ]; then
+  # shellcheck disable=SC2034  # ORIGINAL_DIR is consumed by the caller after this file returns.
   ORIGINAL_DIR=$(pwd)
   # #392-#10: guard cd so a missing subdir cannot run gates in the wrong cwd.
   if cd "$PROJECT_SUBDIR" 2>/dev/null; then
+    # shellcheck disable=SC2034  # IN_PROJECT_SUBDIR is consumed by the caller after this file returns.
     IN_PROJECT_SUBDIR=1
     echo "Working in: $PROJECT_SUBDIR/"
     echo ""
