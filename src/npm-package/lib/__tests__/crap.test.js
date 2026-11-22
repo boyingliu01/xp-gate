@@ -319,3 +319,176 @@ describe('#858 discoverCoverageFile', () => {
     expect(discoverCoverageFile('/tmp/explicit.json')).toBe('/tmp/explicit.json');
   });
 });
+
+/**
+ * @test REQ-CRAP-858-B join a coverage summary that only names basenames
+ * @intent 0.38.79.0 taught readFileCoverage to parse Node's
+ *         coverage-summary.json, and the user's real project still reported
+ *         "measured 0 functions". The parse was fine; the JOIN was impossible.
+ *
+ *         Node writes the key as the BASENAME only:
+ *
+ *           coverage/coverage-summary.json keys : agents.mjs
+ *           lizard --csv path                   : scripts\lib\agents.mjs
+ *
+ *         No path-based match can ever hit that, and lizard's backslashes break
+ *         even a name that did carry a directory. So the file was measured,
+ *         the coverage was read, and every function still came out unmeasured.
+ *
+ *         Two rules the fallback must obey, both learned from the issue:
+ *           1. exact normalised path first -- basename is only a fallback;
+ *           2. a basename that maps to MORE THAN ONE file is ambiguous, and an
+ *              ambiguous match must be recorded as unmeasured, never guessed.
+ *              Guessing would attribute A's coverage to B and silently produce a
+ *              wrong CRAP ranking, which is worse than saying "not measured".
+ * @covers AC-858-07 basename keys join to nested paths
+ * @covers AC-858-08 backslash paths normalise on both sides
+ * @covers AC-858-09 an ambiguous basename is not guessed
+ * @covers AC-858-10 all-unmeasured output is NOT_CHECKED, never a green tick
+ */
+describe('#858 a basename-only summary still joins, and ambiguity is not guessed', () => {
+  const { readFileCoverage, joinCoverage } = require('../crap.js');
+
+  const lizard = (file, ccn = 8) => ({ file, name: 'f', ccn, line: 1 });
+
+  function summaryFile(obj) {
+    const p = path.join(os.tmpdir(), `cov858b-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    fs.writeFileSync(p, JSON.stringify(obj));
+    return p;
+  }
+
+  it('AC-858-07: a basename key joins to a nested lizard path', () => {
+    // The exact shape the issue measured.
+    const file = summaryFile({
+      total: { lines: { total: 1, covered: 1, pct: 100 } },
+      'agents.mjs': { functions: { total: 4, covered: 1, pct: 25 } },
+    });
+    const joined = joinCoverage(
+      [lizard('scripts\\lib\\agents.mjs')],
+      readFileCoverage(file),
+    );
+    expect(joined[0].cov).toBeCloseTo(0.25, 5);
+  });
+
+  it('AC-858-08: absolute and relative spellings normalise to the same key', () => {
+    const file = summaryFile({
+      total: { lines: { total: 1, covered: 1, pct: 100 } },
+      'C:/repo/src/lib/x.mjs': { functions: { total: 2, covered: 2, pct: 100 } },
+    });
+    const joined = joinCoverage([lizard('C:\\repo\\src\\lib\\x.mjs')], readFileCoverage(file));
+    expect(joined[0].cov).toBeCloseTo(1, 5);
+  });
+
+  it('AC-858-09: an ambiguous basename is left unmeasured, not guessed', () => {
+    // Two distinct files called util.mjs, but the summary names only one.
+    // Attributing that coverage to the other would silently mis-rank it.
+    const file = summaryFile({
+      total: { lines: { total: 1, covered: 1, pct: 100 } },
+      'util.mjs': { functions: { total: 2, covered: 0, pct: 0 } },
+    });
+    const joined = joinCoverage(
+      [lizard('src/a/util.mjs'), lizard('src/b/util.mjs')],
+      readFileCoverage(file),
+    );
+    for (const row of joined) {
+      expect(row.cov, `${row.file} must stay unmeasured`).toBeNull();
+    }
+  });
+
+  it('AC-858-09b: an exact path match still wins over an ambiguous basename', () => {
+    // src/a/util.mjs is named in full, so it IS measured even though the bare
+    // basename is ambiguous. Precision beats the fallback.
+    const file = summaryFile({
+      total: { lines: { total: 1, covered: 1, pct: 100 } },
+      'src/a/util.mjs': { functions: { total: 2, covered: 1, pct: 50 } },
+    });
+    const joined = joinCoverage(
+      [lizard('src/a/util.mjs'), lizard('src/b/util.mjs')],
+      readFileCoverage(file),
+    );
+    expect(joined[0].cov).toBeCloseTo(0.5, 5);
+    expect(joined[1].cov).toBeNull();
+  });
+});
+
+/**
+ * @test REQ-CRAP-858-C an all-unmeasured run is not a pass
+ * @intent The last item in the issue's acceptance table, and the one it called
+ *         "the thing most worth fixing": when no function has coverage, the
+ *         report printed
+ *
+ *           measured 0 functions, 1 unmeasured
+ *           ✅ Nothing at or above CRAP 6.
+ *
+ *         A green tick over a ranking that never happened. The reader is told the
+ *         code is fine when the truth is that nothing was measured -- the same
+ *         "not checked rendered as passed" defect as #732, in the one place the
+ *         issue says matters most.
+ * @covers AC-858-10 all-unmeasured renders NOT_CHECKED with a reason
+ */
+describe('#858 an all-unmeasured ranking is NOT_CHECKED, not a green tick', () => {
+  const { render } = require('../crap-cli.js');
+
+  const opts = { paths: ['src'], threshold: 6, top: 20 };
+
+  it('AC-858-10: measured 0 renders NOT_CHECKED and no success tick', () => {
+    const text = render({ measured: 0, unmeasured: 3, threshold: 6, hotspots: [] }, opts);
+    expect(text).toContain('NOT_CHECKED');
+    // The tick is the actual defect; asserting its absence is the point.
+    expect(text).not.toContain('✅');
+    expect(text).not.toContain('Nothing at or above');
+  });
+
+  it('AC-858-10b: a real measurement with no hotspots still says so plainly', () => {
+    // Anti-vacuity: measured work that found nothing must remain a clean result,
+    // otherwise the fix just replaces one wrong message with another.
+    const text = render({ measured: 2, unmeasured: 0, threshold: 6, hotspots: [] }, opts);
+    expect(text).toContain('Nothing at or above CRAP 6');
+    expect(text).not.toContain('NOT_CHECKED');
+  });
+});
+
+/**
+ * @test REQ-CRAP-858-D the scan target is discovered, not assumed to be src
+ * @intent `--paths` defaulted to `src`. On a project whose code lives in
+ *         `scripts/` -- the reporter's own repo, and every Node ESM package laid
+ *         out that way -- that produced
+ *
+ *           No functions found. Check that lizard is installed and --paths
+ *           points at real code: lizard --csv -C 99999 src
+ *
+ *         for a repository full of analysable code. The message made the user
+ *         guess what to type next; the tool could have looked.
+ * @covers AC-858-11 conventional roots are discovered, and explicit --paths wins
+ */
+describe('#858 discoverSourcePaths', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { discoverSourcePaths } = require('../crap-cli.js');
+
+  let dir;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crap858d-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('AC-858-11: finds scripts/ when there is no src/', () => {
+    fs.mkdirSync(path.join(dir, 'scripts'));
+    expect(discoverSourcePaths(dir)).toEqual(['scripts']);
+  });
+
+  it('AC-858-11b: finds several conventional roots at once', () => {
+    fs.mkdirSync(path.join(dir, 'src'));
+    fs.mkdirSync(path.join(dir, 'lib'));
+    expect(discoverSourcePaths(dir)).toEqual(['src', 'lib']);
+  });
+
+  it('AC-858-11c: falls back to the working directory, never to an empty list', () => {
+    // An empty list would make lizard scan nothing while the report claimed there
+    // was no code -- indistinguishable from a project that legitimately has none.
+    expect(discoverSourcePaths(dir)).toEqual(['.']);
+  });
+});

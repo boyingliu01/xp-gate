@@ -27,10 +27,6 @@
     "totalWarnings": 3,
     "lastAnalyzed": "2026-11-05T10:35:00.000Z"
   },
-  "src/npm-package/mutation/__tests__/pitest-runner.test.ts": {
-    "totalWarnings": 3,
-    "lastAnalyzed": "2026-11-05T10:35:00.000Z"
-  },
   "src/npm-package/mutation/runners/pitest-runner.ts": {
     "totalWarnings": 3,
     "lastAnalyzed": "2026-11-05T10:35:00.000Z"
@@ -54,13 +50,5 @@
   "src/npm-package/lib/__tests__/doctor.test.js": {
     "totalWarnings": 40,
     "lastAnalyzed": "2026-11-20T14:42:46.813Z"
-  },
-  "src/gates/__tests__/pbt-detect.test.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-11-21T15:45:59.517Z"
-  },
-  "src/gates/pbt-detect.ts": {
-    "totalWarnings": 2,
-    "lastAnalyzed": "2026-11-21T15:45:59.519Z"
   }
 }

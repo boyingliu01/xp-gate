@@ -1,5 +1,109 @@
 # Changelog
 
+## [0.38.83.0] - 2026-11-21
+
+**0.38.79.0 的 #732 和 #858 都只修了最外层的一层，用户实测后重新打开。**
+
+这两条我修完都"验证通过"了，但验证的是**我自己构造的 fixture**，而不是用户真实项目的形态。
+用户的复测评论把每一层都指了出来——照做即可。
+
+### #732 的真正根因：扩展名清单有三层，我只修了第一层
+
+"Gate 4 能不能看见一个文件"在**三个独立的地方**被回答：
+
+| 层 | 位置 | 0.38.79.0 的状态 |
+|---|---|---|
+| 1 | `githooks/lib/file-classifier.sh`（挡在门禁外`grep -E`） | ✅ 已修 |
+| 2 | `principles/analyzer.ts` 的 `adapterMap`（选 adapter） | ❌ 缺 mjs/cjs/mts/cts |
+| 3 | `principles/adapters/base.ts` 的 `languageMap`（判语言） | ❌ 缺 mjs/cjs/mts/cts |
+| 4 | `analyzer.ts` 的 `detectLanguage() === 'unknown'` 丢弃 | （第 3 层缺失的后果） |
+
+实测（真实文件）：
+
+```text
+tool.js   -> javascript
+tool.ts   -> typescript
+tool.mjs  -> NULL        ← 到这里就被丢了
+tool.cjs  -> NULL
+tool.mts  -> NULL
+tool.cts  -> NULL
+```
+
+文件通过了第 1 层，在第 2 层被丢弃，Gate 4 于是对着它从未读过的代码输出
+`✅ PASSED / Files checked: 0` —— 和 #732 开头要消灭的是同一个缺陷，
+只是换了一层。**第 2、3 层必须同时修**：只修 adapterMap，文件仍会死在
+`detectLanguage()` 那道闸；只修 languageMap，根本走不到它。
+
+修的过程中又发现**第 5 层**：`src/npm-package/lib/principles.js` 的
+`collectSourceFiles` 用的 `SOURCE_EXTENSIONS` 与 `adapterMap` 不同步，
+缺 `.mts`/`.cts`，也缺 #731 遗留的 `.php`/`.phtml`——
+有 PhpAdapter 却从来没被喂过一个 PHP 文件。`AC-758-02` 正是比对这两个清单的测试，
+它当场把我新增的扩展名和那个旧缺口一起抓了出来。
+
+还有一层**纯粹是我自己的错**：CLI 读的是
+`src/npm-package/principles/`（镜像），我改的是 `src/principles/`（上游），
+没同步镜像 → CLI 端 `Files checked` 依然是 0。这正是 `src/npm-package/AGENTS.md`
+第一条规则说的事，我自己踩了一遍。
+
+端到端（真实文件，修复后）：
+
+```text
+tool.js -> Files checked: 1    tool.mjs -> 1    tool.mts -> 1
+tool.ts -> Files checked: 1    tool.cjs -> 1    tool.cts -> 1
+```
+
+### #858 的真正根因：Node 的 summary 只有 basename
+
+我上一版做了路径盘符规范化，但**根本没测过 Node 的真实输出形态**：
+
+```text
+coverage-summary.json 的键 : agents.mjs
+lizard 给的路径            : scripts\libgents.mjs
+```
+
+顶层键只有 basename，没有任何目录部分；lizard 侧还带反斜杠。
+任何按完整路径的匹配都不可能命中——**覆盖率读进来了，仍然报全部未测量**。
+
+现在按 issue 建议的两级匹配：
+
+1. 先按归一化完整路径精确匹配；
+2. 未命中再按 basename 兜底，**且 basename 对应多个文件时放弃**（记为未测量并计数）。
+
+第 2 条的冲突检测是必须的：随便挑一个会把 A 文件的覆盖率算到 B 头上，
+静默产出一个错误的 CRAP 排名，比诚实地"未测量"更糟。
+
+另外两件按评论要求一并做了：
+
+- **`--paths` 默认值改为自动发现**（`src` → `lib` → `scripts` → `app` → `packages` →
+  `source`，都没有才回落到 `.`）。原来写死 `src`，用户仓库代码在 `scripts/`
+  就只得一句 "No functions found...--paths points at real code"，让人自己猜。
+- **全部未测量时输出 `❌ NOT_CHECKED`**，不再是 `✅ Nothing at or above CRAP 6`。
+  后者是对一个从未发生的排名给出的结论，而且带对勾。这是评论里说"最该修"的一条。
+
+端到端（用户的目录布局，`scripts/lib/agents.mjs` + Node summary）：
+
+```text
+measured 1 functions, 0 unmeasured
+    42.0  CCN 6  cov 0%  scripts/lib/agents.mjs  complexRank
+```
+
+修复前：`measured 0 functions, 1 unmeasured` + `✅ Nothing at or above CRAP 6`。
+
+### 顺带清理
+
+`.warnings-baseline.json` 里三条残留预算（`pbt-detect.ts`、`pbt-detect.test.ts`
+清零后未删，`src/npm-package/mutation/**` 指向已不存在的镜像文件）已删除——
+`AC-452-15` 的判词是"未使用的预算就是以后可以新增警告的许可"。
+
+### 验证
+
+`src/principles` + `src/npm-package/lib` **2288 通过**，仅剩 1 个既有 C# 失败。
+新增测试：`issue-732-module-variants.test.ts`（3 个，覆盖两层映射 + 等价性断言）、
+crap 的 basename/冲突/NOT_CHECKED/路径发现（共 10 个）。
+
+**这轮教训**：上一版我的"验证"只覆盖了我自己想象的项目形态。
+两条 issue 的复测评论之所以能一次指出根因，是因为它们在真实仓库上跑过。
+
 ## [0.38.82.0] - 2026-11-21
 
 **#732 的重构让三条 C# 测试从「检查行为」退化成「检查字面量」，而我把字面量搬走了。**

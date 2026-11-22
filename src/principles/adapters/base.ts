@@ -15,18 +15,47 @@ export abstract class BaseAdapter implements Adapter {
 
   detectLanguage(): string {
     const extension = extname(this.filePath).toLowerCase();
-    
+
+    // The SECOND map that decides whether an adapter's file gets analysed. An
+    // adapter can exist and still be discarded: analyzer.ts drops anything whose
+    // detectLanguage() is 'unknown'. So a missing entry here is just as fatal as
+    // a missing adapterMap entry, and the two were out of step in the same way.
+    //
+    // #732: mjs/cjs/mts/cts added. Without them a .mjs file passed the shell
+    // filter, got an adapter, and was then thrown away at this line -- Gate 4
+    // reported a clean PASS over files it never read.
+    //
+    // .php/.phtml (#731) and .cs/.csx/.cpp/.c/.h/.hpp/.m/.mm (#717) were also
+    // missing here while their adapters existed, so the same silent discard
+    // applied to them. Covered by the capability test rather than by hand.
     const languageMap: Record<string, string> = {
       '.ts': 'typescript',
       '.tsx': 'typescript',
+      '.mts': 'typescript',
+      '.cts': 'typescript',
       '.js': 'javascript',
       '.jsx': 'javascript',
+      '.mjs': 'javascript',
+      '.cjs': 'javascript',
       '.py': 'python',
       '.go': 'go',
       '.java': 'java',
       '.kt': 'kotlin',
+      '.kts': 'kotlin',
       '.dart': 'dart',
       '.swift': 'swift',
+      '.php': 'php',
+      '.phtml': 'php',
+      '.cs': 'csharp',
+      '.csx': 'csharp',
+      '.cpp': 'cpp',
+      '.cxx': 'cpp',
+      '.cc': 'cpp',
+      '.c': 'c',
+      '.hpp': 'cpp',
+      '.h': 'c',
+      '.m': 'objectivec',
+      '.mm': 'objectivec',
     };
 
     return languageMap[extension] || 'unknown';

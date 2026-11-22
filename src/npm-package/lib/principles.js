@@ -217,9 +217,19 @@ function findPrinciplesEntry() {
 // `.cs`/`.csx` were the gap: analyzer.ts registered CSharpAdapter, this walk
 // never offered the files, so `xp-gate principles <csharp-dir>` reported
 // "Files checked: 0" — indistinguishable from "no violations".
+//
+// #732: the walk must list EXACTLY the extensions `adapterMap` registers, or the
+// two disagree and the disagreement is invisible — the engine advertises a
+// language it can analyse while the walk never hands it a file. `.mts`/`.cts`
+// were missing here for that reason; AC-758-02 pins the two lists together.
 const SOURCE_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  '.ts', '.tsx', '.mts', '.cts',
+  '.js', '.jsx', '.mjs', '.cjs',
   '.py', '.go', '.java', '.kt', '.kts',
+  // #731 shipped PhpAdapter and this walk kept dropping .php/.phtml, so the two
+  // lists disagreed in exactly the way #717 was about -- an adapter that existed
+  // and never received a file. AC-758-02 compares them, which is how it surfaced.
+  '.php', '.phtml',
   '.cs', '.csx',
   '.dart', '.swift', '.cpp', '.cc', '.cxx', '.c', '.h', '.hpp',
   '.m', '.mm',

@@ -72,6 +72,15 @@ export function getAdapterForFile(filePath: string): Adapter | null {
     '.tsx': TypeScriptAdapter,
     '.js': TypeScriptAdapter,
     '.jsx': TypeScriptAdapter,
+    // #732: the four module variants. This is the SECOND of the two inner maps
+    // that decide whether a file reaching Gate 4 is actually analysed -- the
+    // shell filter (githooks/lib/file-classifier.sh) only decides what reaches
+    // the gate. Fixing that one and not this one left Gate 4 reporting
+    // "✅ PASSED / Files checked: 0" over a project with 36 .mjs files.
+    '.mjs': TypeScriptAdapter,
+    '.cjs': TypeScriptAdapter,
+    '.mts': TypeScriptAdapter,
+    '.cts': TypeScriptAdapter,
     '.py': PythonAdapter,
     '.go': GoAdapter,
     '.java': JavaAdapter,

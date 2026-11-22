@@ -65,14 +65,42 @@ function discoverCoverageFile(explicit, cwd) {
   return path.join(coverageDir, candidates[0]);
 }
 
+/**
+ * Pick the source roots to scan when --paths was not given (#858).
+ *
+ * Hardcoding `src` made the command useless on any project whose code lives
+ * elsewhere -- the user's own repo keeps it in `scripts/`, and the report then
+ * said "No functions found ... --paths points at real code", leaving them to
+ * guess. The conventions below cover the layouts that actually occur:
+ *
+ *   src, lib, scripts, app, packages, source   (a directory)
+ *   a single top-level entry file              (bin/xp-gate.js style)
+ *
+ * Falls back to the working directory itself, which is what a caller who passed
+ * no flags most plausibly meant. Returning ['.'] rather than [] matters: an empty
+ * list makes lizard scan nothing and the report claim there is no code.
+ */
+function discoverSourcePaths(cwd) {
+  const root = cwd || process.cwd();
+  const candidates = ['src', 'lib', 'scripts', 'app', 'packages', 'source'];
+  const found = candidates.filter(name => {
+    try {
+      return fs.statSync(path.join(root, name)).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+  return found.length ? found : ['.'];
+}
+
 function parseArgs(argv) {
   const opts = {
     top: 20,
     threshold: 6,
     json: false,
-    // #858: discovered after parsing, not fixed here. `--coverage` still wins.
+    // #858: both discovered after parsing. `--coverage` and `--paths` still win.
     coverage: null,
-    paths: ['src'],
+    paths: null,
     includeMirrors: false,
     help: false,
   };
@@ -156,6 +184,17 @@ function render(report, opts) {
 
   if (!report.hotspots.length) {
     lines.push('');
+    // #858: with nothing measured, "Nothing at or above CRAP 6" is a statement
+    // about a ranking that never happened, and the tick made it read as approval.
+    // Unmeasured functions are counted, not scored -- so an all-unmeasured run
+    // has no verdict to give, and must say that instead of implying a clean one.
+    if (!report.measured) {
+      lines.push('❌ NOT_CHECKED — no function had coverage, so nothing was ranked.');
+      lines.push('  This is not a clean result: every function above is unmeasured.');
+      lines.push('  A coverage summary was found, but no entry matched a scanned file.');
+      lines.push('  Check --paths and that the coverage file names the files you scanned.');
+      return lines.join('\n');
+    }
     lines.push(`✅ Nothing at or above CRAP ${report.threshold}.`);
     return lines.join('\n');
   }
@@ -180,13 +219,18 @@ async function handleCrap(argv) {
     return 0;
   }
 
+  // Both discoveries must run BEFORE lizard is invoked: the scan target is an
+  // input to it. (Placed after, `--paths` discovery had no effect at all and the
+  // command still scanned the literal default.)
+  opts.coverage = discoverCoverageFile(opts.coverage);
+
+  if (!opts.paths || !opts.paths.length) opts.paths = discoverSourcePaths();
+
   const csv = runLizard(opts.paths);
   if (csv === null) {
     console.error('✗ Could not run lizard. Install it with: pip install --user lizard');
     return 1;
   }
-
-  opts.coverage = discoverCoverageFile(opts.coverage);
 
   if (!fs.existsSync(opts.coverage)) {
     // #858: name the artifact that WOULD have been accepted. A user on Node's own
@@ -223,4 +267,6 @@ async function handleCrap(argv) {
   return 0;
 }
 
-module.exports = { handleCrap, parseArgs, render, runLizard, discoverCoverageFile };
+module.exports = {
+  handleCrap, parseArgs, render, runLizard, discoverCoverageFile, discoverSourcePaths,
+};

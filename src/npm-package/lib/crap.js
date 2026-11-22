@@ -101,9 +101,55 @@ function relativiseArtifactPath(absPath, root) {
  * @returns {Array<object>} each with `cov` and `crap` (either may be null)
  */
 function joinCoverage(functions, coverage) {
+  const map = coverage instanceof Map ? coverage : new Map();
+
+  // #858: build the basename index once, and record how many DISTINCT keys share
+  // each basename. A count above one means the summary cannot disambiguate, and
+  // guessing there would attribute one file's coverage to another -- a wrong
+  // ranking, which is worse than an honest "unmeasured".
+  const byBasename = new Map();
+  const ambiguous = new Set();
+
+  // The map side: two distinct coverage keys sharing one basename are ambiguous.
+  for (const key of map.keys()) {
+    const base = path.basename(String(key).split('\\').join('/'));
+    const seen = byBasename.get(base);
+    if (seen !== undefined && seen !== key) {
+      ambiguous.add(base);
+      continue;
+    }
+    byBasename.set(base, key);
+  }
+
+  // The function side matters just as much, and is the case the issue measured:
+  // the summary names `util.mjs` once, but the code has src/a/util.mjs AND
+  // src/b/util.mjs. Handing that one ratio to either is a coin flip, so the name
+  // is ambiguous even though the summary is internally consistent.
+  const namesOnFunctions = new Map();
+  for (const fn of functions) {
+    const base = path.basename(toRepoRelative(fn.file));
+    namesOnFunctions.set(base, (namesOnFunctions.get(base) ?? 0) + 1);
+  }
+  for (const [base, count] of namesOnFunctions) {
+    if (count > 1) ambiguous.add(base);
+  }
+
   return functions.map((fn) => {
     const key = toRepoRelative(fn.file);
-    const cov = coverage instanceof Map ? coverage.get(key) : undefined;
+
+    // 1. exact normalised path
+    let cov = map.get(key);
+
+    // 2. basename fallback, only when the path did not match and the name is
+    //    unambiguous. Node's own summary carries basenames only, so without this
+    //    step a measured file is indistinguishable from an unmeasured one.
+    if (cov === undefined) {
+      const base = path.basename(key);
+      if (!ambiguous.has(base) && byBasename.has(base)) {
+        cov = map.get(byBasename.get(base));
+      }
+    }
+
     const known = cov === undefined ? null : cov;
     return { ...fn, file: key, cov: known, crap: computeCrap(fn.ccn, known) };
   });
