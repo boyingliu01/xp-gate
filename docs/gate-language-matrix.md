@@ -133,3 +133,46 @@ node scripts/analyze-gate-matrix.cjs <raw.log>
 
 **测量工具的缺陷和产品缺陷长得一模一样。** 上面六处全部是先被当成产品缺陷
 排查、最后才发现是探针的问题。
+
+## 七、端到端证伪进度（2026-11-22）
+
+`scripts/gate-language-probe.sh` 用真实项目、真实缺陷、真实 `git commit`
+逐条证明门禁**确实会失败**。「没通过」才算数——`SKIP` 和 `WARN` 也是诚实的结论。
+
+| # | 门禁 | 语言 | 注入的缺陷 | 判定 |
+|---|---|---|---|---|
+| 1 | Gate 1 | python | 语法错误 | FAIL |
+| 2 | Gate 1 | go | 未定义调用 | FAIL |
+| 3 | Gate 1 | java | PMD lint | FAIL |
+| 4 | Gate 1 | csharp | 类型错误 | BLOCK |
+| 5 | Gate 1 | php | 语法错误 | WARN |
+| 6 | Gate 2 | javascript | 克隆代码 | PASS（设计：仅警告） |
+| 7 | Gate 3 | typescript | 圈复杂度超标 | BLOCK |
+| 8 | Gate 4 | java | `arch.controller` 命名 | FAIL |
+| 9 | Gate 5 | python | 覆盖率低于门槛 | BLOCK |
+| 10 | Gate 7 | iac | public-read ACL | FAIL |
+| 11 | Gate 8 | any | PAT 令牌 | FAIL |
+| 12 | Gate 9 | typescript | `main` 指向不存在的文件 | BLOCK |
+| 13 | Gate 10 | python | `eval` / `shell=True` | FAIL |
+| 14 | Gate 12 | any | 行尾空格 | WARN |
+| 15 | Gate 13 | typescript | 隐式 any | BLOCK |
+| 16 | Gate 13 | java | 类型错误 | BLOCK |
+
+**16/16 通过，覆盖 11 个门禁**（1、2、3、4、5、7、8、9、10、12、13）。
+
+尚未端到端证伪的：Gate 0（版本一致性）、6（架构）、11（Sprint 流程）、
+12b（vendor 排除）、12c。它们的检查对象与语言无关或已被其它路径覆盖，
+**但仍缺一个证明它们会失败的探针**——这是已知缺口，不是"已通过"。
+
+## 八、这一轮发现并修复的产品缺陷
+
+| 门禁 | 缺陷 | 后果 |
+|---|---|---|
+| Gate 9 | 打包检查只问「发布了文件吗」，不问「入口点存在吗」 | 一个装了无法 `require()` 的包判 PASS |
+| Gate 5 | 六个语言分支「低于门槛」时 `return 1` 却不记状态 | 拦了提交，却记成 SKIP |
+| 探针 | Gate 9 的检查器解析落在 `~/.config/xp-gate` 旧副本 | 探针测的是已发布版本，不是工作区 |
+| 探针 | `stage_probe_files` 只暂存主文件 | 额外文件不进变更集，全量运行退化成子集 |
+| 同步 | `syncHooks` 不复制 `gate-entries/` | Gate 12b 给出的修复办法无法满足 Gate 12b |
+
+最后两条尤其值得记住：**探测工具的缺陷会伪装成产品缺陷**，
+而且会让人朝完全错误的方向修。
