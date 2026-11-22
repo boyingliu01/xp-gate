@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.38.91.0] - 2026-11-22
+
+**Gate 8 拦下了提交，却在报告里记成"跳过"。**
+
+### 缺陷
+
+Gate 8 发现密钥时 `exit 1` 直接退出，**驱动永远走不到 entry 的 journal 行**。
+而这条分支没有设置 `GATE_8_STATUS`，于是它保持文件顶部的初始值 `PASS`，
+又被 `gate_key_status` 还原成 `SKIP`。
+
+实测（探针仓库，暂存一个真实的 GitHub PAT）：
+
+```
+控制台  ❌ BLOCKED - Secrets detected in staged files.
+退出码  1                          ← 提交确实被拒绝
+报告    {"name":"Secret Scanning","status":"SKIP","reason":"","tool":"gitleaks"}
+总览    {"gatesRan":0,"gatesSkipped":13,"verdict":"SKIP-ALL"}
+```
+
+**门禁阻止了提交，却告诉记录"我跳过了"。** 两个通道里，后人查阅的那个是错的——
+这是本仓库最古老的缺陷形态，出现在**安全门禁**上。
+
+### 为什么难找：有两处一模一样的提示文字
+
+`gate-8.sh` 里 **`"Secrets detected in staged files"` 出现两次**：
+
+1. 第一处属于 gitleaks **退出码 0 但有发现**的分支——真实泄漏时根本不走这里
+2. 第二处在文件更下面，才是 **exit 1 真正触发的**分支
+
+我第一版补丁改的是第一处。改完控制台输出、退出码、报告**三者完全不变**，
+因为改的分支从来没执行过。这正是需要端到端探针而不是源码断言的理由：
+源码断言无论查文件哪个位置都会"通过"。
+
+### 修复
+
+在**真正触发的那条**分支里：
+
+- `GATE_8_STATUS="FAIL"`
+- `GATE_8_REASON="secrets_detected_in_staged_files"`
+- 补一次 `record_gate_audit`（因为 exit 跳过了常规那一次）
+
+修复后：
+
+```
+gate8: {"name":"Secret Scanning","status":"FAIL","reason":"secrets_detected_in_staged_files","tool":"gitleaks"}
+```
+
+### 测试
+
+`gate-8-leak-block-recorded.test.bats`（5 条），全部用 `awk` **从提示文字往下找**，
+而不是在文件任意位置断言——上一版失败的原因就是断言范围错了。
+
+**已证伪**：撤销修复后第 1/2/3 条立刻变红，恢复后全绿。
+
+### 顺带纠正一个假警报
+
+探针最初用 `ghp_aaaa...a`（36 个重复 a）当测试密钥，gitleaks **正确地忽略**了它
+（熵太低）。我一度以为 Gate 8 漏报，实际是**探针不真实**。
+换成 `ghp_aB3dEfGh1JkLmN0pQrStUvWxYz234567890a` 后才复现。
+
+这条记下来：**探针报"门禁漏了"时，先怀疑探针。**
+
 ## [0.38.90.0] - 2026-11-22
 
 **收尾：把 gate-7 / gate-8 / gate-12 的三处修改同步到另一份拷贝。**

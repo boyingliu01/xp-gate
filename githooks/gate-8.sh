@@ -273,6 +273,25 @@ elif [ "$GITLEAKS_EXIT" -eq 1 ]; then
   echo "  3. Use git secret or vault for sensitive data"
   echo ""
   echo "See: https://github.com/gitleaks/gitleaks"
+  # STATE BEFORE EXIT, AND RECORD IT HERE. This arm exits 1 without the driver
+  # ever reaching gate-8-entry.sh's journal line, and it used to leave
+  # GATE_8_STATUS at the value initialised above (SKIP). MEASURED 2026-11-22 on a
+  # probe repo holding a live-looking PAT:
+  #
+  #     console  ❌ BLOCKED - Secrets detected in staged files.
+  #     report   {"status":"SKIP","reason":"","tool":"gitleaks"}
+  #
+  # The commit WAS refused -- the exit code was right -- and the record said the
+  # gate had skipped. A reader of the journal would conclude secret scanning had
+  # nothing to say about a commit it had just blocked, which is this codebase's
+  # oldest failure in its purest form.
+  #
+  # The journal call is repeated here because the exit skips the normal one.
+  # shellcheck disable=SC2034
+  GATE_8_STATUS="FAIL"
+  # shellcheck disable=SC2034
+  GATE_8_REASON="secrets_detected_in_staged_files"
+  record_gate_audit "gate-8" "secret-scanning" "$GATE_8_STATUS" "${GITLEAKS_FINDINGS:-0}" "$GATE_8_START" "${GATE_8_REASON:-}"
   exit 1
 else
   # fail-closed (#499): a non-0/1 exit (config error, crash) used to SKIP, which
