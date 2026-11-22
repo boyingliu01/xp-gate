@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.38.84.0] - 2026-11-22
+
+**Gate 4 对"没分析的语言"报 PASS，而且报告里 reason 为空——控制台说了，记录里没说。**
+
+### 缺陷
+
+Gate 4（principles）只能分析有 clean-code 规则支持的语言。15 个语言适配器中，
+**只有 TypeScript 声明了 `declaresRuleCoverage = true`**，其余 14 个继承
+`BaseAdapter` 的 `false`。
+
+检查器一直是诚实的——**在控制台上**：
+
+```
+⚠️  NOT ANALYSED: python — an adapter exists (the language is detected and
+   counted below) but no clean-code rule can read it. These files were not
+   checked; their absence from the list above is not a pass.
+```
+
+JSON 里也一直有 `summary.unanalysedLanguages: ["python"]`。
+
+**但 Gate 4 两个都没读。** 2026-11-22 实测（探针仓库，唯一暂存文件是 `.py`）：
+
+| 位置 | 内容 |
+|---|---|
+| 控制台 | `⚠️ NOT ANALYSED: python` |
+| 报告 | `{"name":"Clean Code + SOLID","status":"PASS","reason":"","warnings":0}` |
+
+于是审计日志记录的是**一个没有理由的 PASS**，和一个 TypeScript 真被审过的提交
+**完全无法区分**。
+
+这正是这一系列缺陷的形状——"没检查"被记成"通过"——只是它比通常深一层：
+**判定在人眼看得见的地方是诚实的，在后人查阅的那份记录里不是。**
+
+### 修复
+
+把 `unanalysedLanguages` 读出来，写进 `GATE_4_REASON`（报告与审计日志都读这个字段）。
+
+**状态保持 PASS，不改 SKIP**：确实有一些文件被分析了，因为同批次另一个文件的语言
+没有规则就把整个审查降级成 SKIP，是用一个错误记录换另一个错误记录。
+必须活下来的是**理由**。
+
+### 两个自己踩的坑
+
+1. **`JSON.stringify(out, null, 2)` 会把数组拆成三行**：
+
+   ```
+   "unanalysedLanguages": [
+     "python"
+   ]
+   ```
+
+   单行 `sed` 范围**什么也匹配不到**，于是"修好了"但记录里还是空的——
+   正是这次要消灭的那种失败。必须先 `tr -d '\n'` 压平再提取。
+
+2. **多个语言时 `"python", "go"` 带逗号**，直接 `${// /,}` 会得到 `python,,go`。
+   先 `tr ',' ' '` 再转换。
+
+第 1 个坑是测试 4 抓出来的（用真实的多行 JSON 形状），第 2 个是测试 6 抓出来的。
+
+### 测试
+
+`gate-4-unanalysed-recorded.test.bats`（7 条）：
+
+1. 上游 `analyzer.ts` 确实暴露 `unanalysedLanguages`
+2. Gate 4 确实读这个字段
+3. `GATE_4_REASON="unanalysed:` 有且只有一处赋值
+4. **多行数组**能被正确提取（钉住压平步骤）
+5. 空列表**不**伪造未分析语言
+6. 多个语言全部记录
+7. 报告写入器确实消费 `GATE_4_REASON`
+
+### 附带发现：Gate 3 / Gate 10 是健康的
+
+同方法验证：两者的 PASS/SKIP 路径都在 reason 里写了内容
+（`no_functions_in_input`、`no_code_files_changed`），不是同类缺陷。
+
 ## [0.38.83.0] - 2026-11-21
 
 **0.38.79.0 的 #732 和 #858 都只修了最外层的一层，用户实测后重新打开。**

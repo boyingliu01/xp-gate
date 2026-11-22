@@ -219,6 +219,50 @@ else
           ERROR_COUNT=${ERROR_COUNT:-0}
           WARNING_COUNT=$(grep -cE '"severity"[[:space:]]*:[[:space:]]*"warning"' "$PRINCIPLES_JSON" 2>/dev/null || true)
           WARNING_COUNT=${WARNING_COUNT:-0}
+
+          # Languages the checker COULD NOT read. The reporter has always printed
+          # this to the console ("⚠️ NOT ANALYSED: python — an adapter exists but no
+          # clean-code rule can read it"), and the JSON has always carried it in
+          # summary.unanalysedLanguages. The gate read neither, so a commit whose
+          # only changed file was a .py went out as
+          #
+          #     {"name":"Clean Code + SOLID","status":"PASS","reason":"","warnings":0}
+          #
+          # MEASURED 2026-11-22 on a probe repo holding one .py file: the commit
+          # console showed NOT ANALYSED, the report recorded PASS with an empty
+          # reason, and nothing in the journal distinguished that from a commit
+          # whose TypeScript was genuinely reviewed.
+          #
+          # This is the family's exact shape -- "not checked" recorded as "passed"
+          # -- one level down from the verdict: the verdict is honest on the console
+          # and dishonest in the record a later reader actually consults.
+          #
+          # The status stays PASS rather than SKIP: some files WERE analysed, and
+          # demoting a real review to SKIP because a sibling file's language has no
+          # rules would trade one wrong record for another. What must survive is the
+          # REASON, which is what this assignment adds.
+          # The reporter pretty-prints with `JSON.stringify(out, null, 2)`, so the
+          # array arrives SPLIT ACROSS LINES:
+          #
+          #     "unanalysedLanguages": [
+          #       "python"
+          #     ]
+          #
+          # A single-line `sed` range silently matches nothing and the bug would
+          # look fixed while recording nothing -- the exact failure this change
+          # exists to remove. Flatten first, then extract; both steps are needed.
+          _PJ_FLAT=$(tr -d "
+" < "$PRINCIPLES_JSON" 2>/dev/null | tr -s " ")
+          UNANALYSED_LANGS=$(printf '%s' "$_PJ_FLAT" \
+            | sed -n 's/.*"unanalysedLanguages"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' \
+            | tr -d '"' | tr ',' ' ' | tr -s ' ' | sed 's/^ *//; s/ *$//')
+          unset _PJ_FLAT
+          if [ -n "$UNANALYSED_LANGS" ]; then
+            echo "⚠️  Not analysed: ${UNANALYSED_LANGS} — an adapter exists but no clean-code rule reads it."
+            echo "     Those files were NOT checked; this PASS covers only the rest."
+            GATE_4_REASON="unanalysed:${UNANALYSED_LANGS// /,}"
+          fi
+
           rm -f "$PRINCIPLES_JSON"
           
           if [ "$ERROR_COUNT" -gt 0 ]; then
