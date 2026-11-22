@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.38.93.0] - 2026-11-22
+
+**门禁×语言矩阵：从代码生成，不写进文档。**
+
+### 为什么是脚本
+
+这个关于"Gate 4 覆盖多少语言"的问题，曾经**三个来源同时给出不同答案**：
+`gate-list` 里的硬编码字符串说 9，`src/principles/adapters/` 里是 14，文档说 14。
+三者只能维护一个，其余都是债。
+
+`scripts/gate-matrix.cjs` 读代码、打印结果，数字不可能与实现漂移。
+
+### 当前矩阵（15 个语言适配器 / 17 个 principles 适配器）
+
+```
+LANGUAGE    GATE1   GATE4   G4 SCOPE   COVERAGE  SUBSUMES
+cpp         yes     yes     undeclared yes       n/a
+csharp      yes     yes     declared   yes       yes
+dart        yes     yes     undeclared yes       yes
+flutter     yes     no      -          yes       yes
+go          yes     yes     undeclared yes       yes
+iac         yes     no      -          yes       n/a
+java        yes     yes     declared   yes       yes
+kotlin      yes     yes     undeclared yes       yes
+objectivec  yes     yes     undeclared yes       n/a
+php         yes     yes     undeclared yes       yes
+powershell  yes     no      -          yes       n/a
+python      yes     yes     undeclared yes       yes
+shell       yes     no      -          yes       n/a
+swift       yes     yes     undeclared yes       n/a
+typescript  yes     yes     declared   yes       yes
+```
+
+### 三个真实缺口
+
+1. **Gate 4 对 flutter / iac / powershell / shell 没有 principles 适配器**
+2. **8 个适配器不声明规则范围**：cpp, dart, go, kotlin, objectivec, php, python, swift
+   —— `base.ts` 默认 `declaresRuleCoverage = false`，所以沉默意味着**"未知"**，
+   不是"完整"。这些语言上一条绿色 Gate 4 是**部分结论**，必须按部分结论读。
+3. 覆盖率步骤跑测试却未声明（重复执行风险）：**（无）** —— 本轮已全部修完
+
+### 一次自我纠正
+
+第一版把 cpp、iac、objectivec、powershell、shell 标成 `SUBSUMES=no`，
+读起来像"这五个语言会重复跑测试"。实测它们的 `run_coverage` **根本不启动测试运行器**，
+声明与否无关。改成 `n/a` 并加了一行说明——否则矩阵自己在制造一个不存在的问题。
+
+### 矩阵不声称的事
+
+> **这个矩阵说的是"有分支存在"，不是"分支管用"。**
+
+第二条断言属于 `gate-language-probe.sh`：把真实缺陷摆在门禁面前，要求它拒绝。
+两者都打印出来，让这个区别一直可见。
+
+### 测试
+
+`gate-matrix.test.bats`（6 条）：脚本能跑、**语言数量取自目录而非字面量**
+（有人写死数字就会变红）、明确声明不证明拦截、不跑测试的覆盖步骤不算双跑、
+缺适配器的语言要点名、未声明的规则范围要显式说明含义。
+
 ## [0.38.92.0] - 2026-11-22
 
 **新增端到端探针：把"门禁有这个分支"变成"门禁真的拦得住"。**
