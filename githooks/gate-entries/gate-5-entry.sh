@@ -1841,10 +1841,27 @@ else
         echo "⏭️  SKIPPED - PowerShell coverage: no Pester tests in this project (*.Tests.ps1)"
         echo "    Nothing can produce coverage.xml here, so the floor is not applicable."
         echo "    This is NOT a pass: add Pester tests and coverage is enforced again."
-        if [ -n "$(printf '%s' "${GATE_5_STATUS:-}")" ] && [ "$GATE_5_STATUS" = "PASS" ]; then
+        # A language with nothing to measure must not speak for the ones that
+        # DID measure something. Gate 5 walks PROJECT_LANGS in config order
+        # (typescript, shell, powershell, iac), and this branch used to demote a
+        # PASS that a previous language had genuinely produced:
+        #
+        #     if [ "$GATE_5_STATUS" = "PASS" ]; then GATE_5_STATUS="SKIP"; fi
+        #
+        # Measured 2026-11-24 across 343 audit records: gate-5 has 0 PASS and 21
+        # SKIP, all 13 explained skips reading "powershell: no Pester tests", in
+        # a repo carrying thousands of TypeScript tests. The gate never enforced
+        # anything -- because the last language to have nothing to do overwrote
+        # the verdict of the one that did.
+        #
+        # The downgrade is therefore removed. When powershell is the ONLY
+        # language that reported (nothing ran before it), the status is still
+        # set below, so the "nothing to measure" state keeps its own verdict and
+        # its own reason -- it simply may no longer erase someone else's.
+        if [ -z "${GATE_5_STATUS:-}" ]; then
           GATE_5_STATUS="SKIP"
         fi
-        GATE_5_DETAIL="powershell: no Pester tests (coverage not applicable)"
+        GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }powershell: no Pester tests (coverage not applicable)"
         COVERAGE_ENFORCED=false
       elif [ -f "coverage.xml" ]; then
         # The threshold is passed INTO node: the verdict used to be computed
