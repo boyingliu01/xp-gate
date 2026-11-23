@@ -75,7 +75,10 @@ setup() {
 
   printf 'def f() -> int:\n    return 2\n' > a.py
   git add a.py >/dev/null 2>&1
-  timeout 600 git commit -m probe >/dev/null 2>&1 || true
+  # The hook chain must RUN here: this test asserts the report it writes.
+  # core.hooksPath was pinned to "$REPO/githooks" above, so this never reaches
+  # the HOST chain -- that pin, not --no-verify, is what FC-04 recognises.
+  timeout 600 git -c core.hooksPath="$REPO/githooks" commit -m probe >/dev/null 2>&1 || true
 
   local rep
   rep=$(ls .xp-gate/reports/pre-commit/*.json 2>/dev/null | sort | tail -1)
