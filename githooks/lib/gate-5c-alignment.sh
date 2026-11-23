@@ -105,12 +105,21 @@ gate_5c_alignment() {
 
   echo "  → Checking @test REQ-XXX annotations..."
   local annotation_errors=0 tf req_id found
+  # Resolve the REQ-ID list ONCE, before the loop. This call used to sit INSIDE
+  # the inner loop, so every annotation in every staged test file re-executed jq
+  # against the same file -- an N+1 query whose cost scales with (files x
+  # annotations). Measured 2026-11-23 on a real commit: Gate 5c cost 4413 ms of a
+  # 15347 ms gate, and this repository has 1097 test files. The reverse check at
+  # the bottom of this function already hoisted its own call; this loop was the
+  # one that did not.
+  local known_reqs
+  known_reqs=$(gate_5c_req_ids "$req_ids_file")
   while read -r tf; do
     [ -n "$tf" ] || continue
     [ -f "$tf" ] || continue
     while read -r req_id; do
       [ -n "$req_id" ] || continue
-      found=$(gate_5c_req_ids "$req_ids_file" | grep -qxF "$req_id" && echo yes || true)
+      found=$(printf '%s\n' "$known_reqs" | grep -qxF "$req_id" && echo yes || true)
       if [ -z "$found" ]; then
         echo "❌ Gate 5c: $tf — @test $req_id: REQ ID not found in specification.yaml"
         annotation_errors=$((annotation_errors + 1))
@@ -149,6 +158,11 @@ gate_5c_alignment() {
   fi
 
   echo "  ✅ @test annotation check complete."
+  # Consumed by the sourcing parent (gate-5-entry.sh reads GATE_5C_STATUS after
+  # gate_5c_alignment returns); shellcheck analyses this file alone and cannot
+  # see that reader. Warning surfaced only after the N+1 hoist above changed the
+  # control-flow shape it infers -- the assignment itself is not new.
+  # shellcheck disable=SC2034
   GATE_5C_STATUS="PASS"
   return 0
 }
