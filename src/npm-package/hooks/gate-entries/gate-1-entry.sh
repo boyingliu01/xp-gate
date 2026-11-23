@@ -51,6 +51,17 @@ _shell_changed_files() {
 # Gate body. `return` is used instead of `exit` so the driver decides to
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
+# Shared verdict rules: a gate that walks several languages carries the
+# STRONGEST verdict any of them produced, never the last one written.
+# Measured 2026-11-24: gate-1 recorded 0 PASS and 19 WARN, every warning being
+# "PSSA module not installed" -- so an eslint pass could never be the verdict.
+_GATE_STATUS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/gate-status.sh"
+if [ -r "$_GATE_STATUS_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$_GATE_STATUS_LIB"
+fi
+unset _GATE_STATUS_LIB
+
 gate_1_run() {
  2>&1 echo ""
  2>&1 echo "→ Gate 1: Code Quality (static analysis + linting)..."
@@ -299,7 +310,7 @@ else
         # `── Checking python ──`, while the run reported success. Record the
         # skip and let the loop continue.
         GATE_1_STATUS="SKIP"
-        GATE_1_DETAIL="typescript: biome not installed"
+        xp_gate_detail_append GATE_1_DETAIL "typescript: biome not installed"
         continue
       fi
       if [ "$BIOME_STATUS" -ne 0 ]; then
@@ -392,7 +403,7 @@ else
     # journal recorded "passed" for a check that never ran. The Java branch ten
     # lines away sets WARN for the same situation; this is the same decision.
     GATE_1_STATUS="SKIP"
-    GATE_1_DETAIL="python: ruff not installed"
+    xp_gate_detail_append GATE_1_DETAIL "python: ruff not installed"
   else
     # Run Ruff (includes syntax check, linting)
     echo "Running Ruff linting (syntax + lint)..."
@@ -567,7 +578,7 @@ else
     # driving gate_1_run with golangci-lint absent: the skip printed and
     # GATE_1_STATUS stayed "PASS" with an empty DETAIL.
     GATE_1_STATUS="SKIP"
-    GATE_1_DETAIL="go: golangci-lint not installed"
+    xp_gate_detail_append GATE_1_DETAIL "go: golangci-lint not installed"
   else
     # #534: run golangci-lint over ONLY the staged .go files (incremental),
     # not the whole repo. `golangci-lint run` with no args scans every package
@@ -702,8 +713,8 @@ else
   ADAPTER_FILE=$(resolve_adapter_path "$CURRENT_LANG")
   if [ -z "$ADAPTER_FILE" ] || ! source "$ADAPTER_FILE" 2>/dev/null; then
     echo "⚠️  WARN - Java adapter not found (code quality NOT verified)"
-    GATE_1_STATUS="WARN"
-    GATE_1_DETAIL="java: adapter missing"
+    xp_gate_status_escalate GATE_1_STATUS "WARN"
+    xp_gate_detail_append GATE_1_DETAIL "java: adapter missing"
   else
     JAVA_G1_EXIT=0
     # `|| JAVA_G1_EXIT=$?` (not a bare assignment): under a set -e consumer a
@@ -736,13 +747,13 @@ else
         ;;
       3)
         echo "⚠️  WARN - Java code quality NOT verified (engine unavailable or downgraded)"
-        GATE_1_STATUS="WARN"
-        GATE_1_DETAIL="java: ${JAVA_G1_REASON:-unavailable (warn)}"
+        xp_gate_status_escalate GATE_1_STATUS "WARN"
+        xp_gate_detail_append GATE_1_DETAIL "java: ${JAVA_G1_REASON:-unavailable (warn)}"
         ;;
       *)
         echo "⚠️  WARN - Java code quality NOT verified (unexpected verdict $JAVA_G1_EXIT)"
-        GATE_1_STATUS="WARN"
-        GATE_1_DETAIL="java: unexpected verdict $JAVA_G1_EXIT"
+        xp_gate_status_escalate GATE_1_STATUS "WARN"
+        xp_gate_detail_append GATE_1_DETAIL "java: unexpected verdict $JAVA_G1_EXIT"
         ;;
     esac
   fi
@@ -758,8 +769,8 @@ else
       POWERSHELL_ADAPTER=$(resolve_adapter_path "powershell")
       if [ -z "$POWERSHELL_ADAPTER" ]; then
         echo "⚠️  WARN - PowerShell adapter not found (code quality NOT verified)"
-        GATE_1_STATUS="WARN"
-        GATE_1_DETAIL="powershell: adapter missing"
+        xp_gate_status_escalate GATE_1_STATUS "WARN"
+        xp_gate_detail_append GATE_1_DETAIL "powershell: adapter missing"
       else
         PS_G1_EXIT=0
         # Subshell: reasons cross as `XP_G1_REASON: ...` stdout lines, exactly
@@ -789,24 +800,24 @@ else
               echo "   Rules: $PS_RULES"
             fi
             GATE_1_STATUS="BLOCK"
-            GATE_1_DETAIL="powershell: PSScriptAnalyzer findings${PS_RULES:+ ($PS_RULES)}"
+            xp_gate_detail_append GATE_1_DETAIL "powershell: PSScriptAnalyzer findings${PS_RULES:+ ($PS_RULES)}"
             return 1
             ;;
           2)
             echo "❌ BLOCKED - PowerShell static analysis unusable (fail-closed): ${PS_G1_REASON:-unknown}"
             GATE_1_STATUS="BLOCK"
-            GATE_1_DETAIL="powershell: ${PS_G1_REASON:-unusable}"
+            xp_gate_detail_append GATE_1_DETAIL "powershell: ${PS_G1_REASON:-unusable}"
             return 1
             ;;
           3)
             echo "⚠️  WARN - PowerShell code quality NOT verified: ${PS_G1_REASON:-engine unavailable}"
-            GATE_1_STATUS="WARN"
-            GATE_1_DETAIL="powershell: ${PS_G1_REASON:-engine unavailable}"
+            xp_gate_status_escalate GATE_1_STATUS "WARN"
+            xp_gate_detail_append GATE_1_DETAIL "powershell: ${PS_G1_REASON:-engine unavailable}"
             ;;
           *)
             echo "⚠️  WARN - PowerShell code quality NOT verified (unexpected verdict $PS_G1_EXIT)"
-            GATE_1_STATUS="WARN"
-            GATE_1_DETAIL="powershell: unexpected verdict $PS_G1_EXIT"
+            xp_gate_status_escalate GATE_1_STATUS "WARN"
+            xp_gate_detail_append GATE_1_DETAIL "powershell: unexpected verdict $PS_G1_EXIT"
             ;;
         esac
       fi
@@ -934,7 +945,7 @@ else
           1)
             echo "❌ BLOCKED - ${CURRENT_LANG} code quality violations (fix or add suppressions)"
             GATE_1_STATUS="BLOCK"
-            GATE_1_DETAIL="${CURRENT_LANG}: analyzer findings"
+            xp_gate_detail_append GATE_1_DETAIL "${CURRENT_LANG}: analyzer findings"
             return 1
             ;;
           2)
@@ -947,18 +958,18 @@ else
             echo "   A tool that could not run is not a clean tree. Install the toolchain,"
             echo "   or set the adapter's documented escape valve if you accept the risk."
             GATE_1_STATUS="BLOCK"
-            GATE_1_DETAIL="${CURRENT_LANG}: ${G1A_REASON:-unusable}"
+            xp_gate_detail_append GATE_1_DETAIL "${CURRENT_LANG}: ${G1A_REASON:-unusable}"
             return 1
             ;;
           3)
             echo "⚠️  WARN - ${CURRENT_LANG} code quality NOT verified: ${G1A_REASON:-adapter reported a non-blocking skip}"
-            GATE_1_STATUS="WARN"
-            GATE_1_DETAIL="${CURRENT_LANG}: ${G1A_REASON:-unavailable (warn)}"
+            xp_gate_status_escalate GATE_1_STATUS "WARN"
+            xp_gate_detail_append GATE_1_DETAIL "${CURRENT_LANG}: ${G1A_REASON:-unavailable (warn)}"
             ;;
           *)
             echo "⚠️  WARN - ${CURRENT_LANG} code quality NOT verified (unexpected verdict $G1_VERDICT)"
-            GATE_1_STATUS="WARN"
-            GATE_1_DETAIL="${CURRENT_LANG}: unexpected verdict $G1_VERDICT"
+            xp_gate_status_escalate GATE_1_STATUS "WARN"
+            xp_gate_detail_append GATE_1_DETAIL "${CURRENT_LANG}: unexpected verdict $G1_VERDICT"
             ;;
         esac
       else
@@ -969,7 +980,7 @@ else
         # journal. This is the arm that covers every language xp-gate has no
         # adapter for, so it was the single widest inherited-PASS hole in Gate 1.
         GATE_1_STATUS="SKIP"
-        GATE_1_DETAIL="${CURRENT_LANG}: no adapter"
+        xp_gate_detail_append GATE_1_DETAIL "${CURRENT_LANG}: no adapter"
       fi
       ;;
     esac

@@ -24,6 +24,14 @@
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_6_run() {
+# Shared verdict rules: strongest verdict wins, details append.
+_GATE_STATUS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/gate-status.sh"
+if [ -r "$_GATE_STATUS_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$_GATE_STATUS_LIB"
+fi
+unset _GATE_STATUS_LIB
+
 if ! gate_enabled 6; then
   # Recorded, not merely printed: this arm set the status and returned with no
   # journal line, so wherever XP_GATE_ONLY_GATE selects a subset, "deselected on
@@ -575,12 +583,13 @@ CSARCHPROJ
         ;;
       *)
         echo "     ⏭️  SKIPPED - Architecture validation (not configured for $CURRENT_LANG)"
-        GATE_6_DETAIL="architecture_skipped: not configured for ${CURRENT_LANG}"
-        # #537: archlint ships no detector for this language. Say so in a way
-        # the quality report can read, instead of leaving the dimension silent.
-        if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
-          GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="no_archlint_detector"
-        fi
+        # Append rather than overwrite: languages are walked in config order, so
+        # the LAST language with no architecture detector used to replace the
+        # reason of a language that HAD one. Measured 2026-11-24: all 14 gate-6
+        # records in this repo said "not configured for iac", including runs where
+        # archlint genuinely executed for TypeScript -- the iac arm simply ran
+        # after it.
+        xp_gate_detail_append GATE_6_DETAIL "architecture_skipped: not configured for ${CURRENT_LANG}"
         ;;
     esac
     done  # end for CURRENT_LANG (architecture)

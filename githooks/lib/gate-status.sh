@@ -1,0 +1,109 @@
+#!/bin/bash
+# Gate status severity: one rule for every gate that walks several languages.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# A gate that iterates `PROJECT_LANGS` collects one verdict per language. Two
+# defects followed from letting each iteration write the gate's status directly:
+#
+#   1. LAST WRITER WINS. Languages are walked in config order
+#      (typescript, shell, powershell, iac). A language that had nothing to
+#      measure ran AFTER one that did, and overwrote its verdict.
+#
+#      Measured 2026-11-24 over 343 audit records:
+#        gate-5  0 PASS / 21 SKIP -- all skips "powershell: no Pester tests",
+#                in a repo carrying thousands of TypeScript tests.
+#        gate-6  0 PASS / 14 SKIP -- all "not configured for iac", including
+#                runs where archlint genuinely executed for TypeScript.
+#        gate-1  0 PASS / 19 WARN -- all "PSSA module not installed", so a real
+#                eslint pass could never be the gate's verdict.
+#
+#   2. DOWNGRADE. A branch could LOWER an existing verdict, turning "checked and
+#      clean" into "not checked". That is the fail-open direction: it makes the
+#      gate quieter without making it correct.
+#
+# THE RULE
+# --------
+# Carry the strongest verdict any language produced.
+#
+#   BLOCK > WARN > SKIP > PASS
+#
+# A gate reports the worst thing that happened to it, never the last. `PASS` is
+# "checked and clean", so ANY other state outranks it: an incomplete check must
+# never be presented as a clean one.
+#
+# `SKIP` outranks `PASS` but is outranked by `WARN`, because:
+#   - SKIP says nothing was verified, and a neighbour that DID verify something
+#     successfully must not mask that with a PASS;
+#   - WARN says something was verified and came back imperfect, which is more
+#     informative than "nothing happened" and must not be buried by a later
+#     SKIP.
+#
+# Sourced, not executed. Callers keep their own GATE_N_* variables; this file
+# only provides the comparison so the rule lives in one place.
+#
+# ASCII only: this file is sourced by hooks that run under many locales.
+
+# Numeric rank for a gate status. Unknown/empty ranks as the weakest value so a
+# typo can never silently outrank a real verdict.
+xp_gate_status_rank() {
+  case "${1:-}" in
+    BLOCK) printf '4' ;;
+    WARN)  printf '3' ;;
+    SKIP)  printf '2' ;;
+    PASS)  printf '1' ;;
+    *)     printf '0' ;;
+  esac
+}
+
+# Escalate a gate status variable to at least `candidate`.
+#
+# Usage:
+#   xp_gate_status_escalate GATE_5_STATUS "WARN"
+#
+# Sets the named variable through indirect assignment, so callers do not have to
+# restructure their existing code. An empty current value is treated as unset.
+xp_gate_status_escalate() {
+  local _var="${1:?variable name required}"
+  local _candidate="${2:?candidate status required}"
+  local _current="${!_var:-}"
+  local _cur_rank _new_rank
+  _cur_rank=$(xp_gate_status_rank "$_current")
+  _new_rank=$(xp_gate_status_rank "$_candidate")
+  # An unrecognised candidate would rank 0 and could never win; refuse it
+  # loudly rather than producing a gate whose status silently never moves.
+  if [ "$_new_rank" = "0" ]; then
+    printf 'xp_gate_status_escalate: unknown status %q (expected PASS|SKIP|WARN|BLOCK)\n' \
+      "$_candidate" >&2
+    return 2
+  fi
+  if [ "$_new_rank" -gt "$_cur_rank" ]; then
+    printf -v "$_var" '%s' "$_candidate"
+  fi
+  return 0
+}
+
+# Append a detail fragment without clobbering an earlier one.
+#
+# Detail is a DESCRIPTION, not a verdict: several languages may each have
+# something to say, and replacing the earlier text is what made a skip reason
+# unexplainable. Duplicates are suppressed so a language that reports twice in
+# one run does not repeat itself.
+#
+# Usage:
+#   xp_gate_detail_append GATE_6_DETAIL "powershell: PSSA module not installed"
+xp_gate_detail_append() {
+  local _var="${1:?variable name required}"
+  local _fragment="${2:-}"
+  [ -n "$_fragment" ] || return 0
+  local _current="${!_var:-}"
+  if [ -z "$_current" ]; then
+    printf -v "$_var" '%s' "$_fragment"
+    return 0
+  fi
+  case "$_current" in
+    *"$_fragment"*) return 0 ;;
+  esac
+  printf -v "$_var" '%s; %s' "$_current" "$_fragment"
+  return 0
+}

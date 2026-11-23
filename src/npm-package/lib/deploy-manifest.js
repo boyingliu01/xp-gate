@@ -134,6 +134,7 @@ const MODULE_FILES = Object.freeze([
   'lib/file-classifier.sh',
   'lib/gate-12-blob-scan.awk',
   'lib/gate-5c-alignment.sh',
+  'lib/gate-status.sh',
   'lib/java-test-selection.sh',
   'lib/jscpd-run.sh',
   'lib/layer-baseline.cjs',

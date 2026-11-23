@@ -36,7 +36,11 @@ setup() {
 @test "GATE_1_DETAIL for the PowerShell block carries the rule names" {
   # A constant detail is what made the journal uninformative. The detail must
   # interpolate the parsed list.
-  run grep -c 'GATE_1_DETAIL="powershell: PSScriptAnalyzer findings\${PS_RULES:+' "$GATE1"
+  #
+  # The assignment is now an APPEND (xp_gate_detail_append): a gate that walks
+  # several languages must not let the last one replace the reason of an earlier
+  # one. The property under test is unchanged -- the fragment carries PS_RULES.
+  run grep -cE '(GATE_1_DETAIL="powershell: PSScriptAnalyzer findings|xp_gate_detail_append GATE_1_DETAIL "powershell: PSScriptAnalyzer findings)\$\{PS_RULES:\+' "$GATE1"
   [ "$output" = "1" ]
 }
 
