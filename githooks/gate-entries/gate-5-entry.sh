@@ -217,6 +217,27 @@ else
   # commit's minutes go double-counts the overlap, and the overlap is attributed
   # to whichever gate happens to be recorded second.
   GATE_5_FOCUS_START=$(gate_start_ms)
+
+  # Segmented clock. Gate 5's SKIP rows were measured at a 20.7 s median while an
+  # isolated call to gate_5_run takes 4.6 s, and no amount of guessing located the
+  # gap (see docs/gate-timing-baseline.md sec 6). Guessing twice was worse than
+  # spending one field: these marks go into the AUDIT DETAIL, so every future
+  # commit records where its own gate-5 seconds went without anyone re-running a
+  # probe. A stderr probe was tried first and produced nothing -- the hook's output
+  # is captured in some paths, so a diagnostic that is not persisted disappears.
+  _g5t_focus=0
+  _g5t_a=0
+  _g5t_b=0
+  _g5t_mark() {
+    local _now
+    _now=$(gate_start_ms)
+    case "$1" in
+      focus) _g5t_focus=$(( _now - GATE_5_START )) ;;
+      a)     _g5t_a=$(( _now - GATE_5_START )) ;;
+      b)     _g5t_b=$(( _now - GATE_5_START )) ;;
+    esac
+  }
+  _g5t_mark focus
   GATE_5_FOCUS_BLOCKED=0
   GATE_5_SKIP_COUNT=0
   GATE_5_DELETED_TESTS=""
@@ -395,6 +416,8 @@ else
     record_gate_audit "gate-5-focus" "test-focus" "FAIL" "$GATE_5_FOCUS_BLOCKED" "$GATE_5_FOCUS_START" "blocked=1"
     return 1
   fi
+
+  _g5t_mark a
 
   # ========================================================================
   # Gate 5a: Test-Source File Pairing Check
@@ -667,6 +690,8 @@ else
       echo "   To suppress for specific files, add '// @no-test-required: <reason>' at the top."
     fi
   fi
+
+  _g5t_mark b
 
   # ========================================================================
   # Gate 5b: Mock Density ADVISORY Scan (pure bash — no npx tsx overhead)
@@ -2212,6 +2237,16 @@ if [ -n "${GATE_5C_STATUS:-}" ] && [ -z "${GATE_5_DETAIL:-}" ]; then
     PASS) GATE_5_DETAIL="alignment_clean" ;;
   esac
 fi
+
+  # Persist the segment breakdown into the detail so the NEXT commit's timing
+  # question is already answered by data. Only appended when the clocks actually
+  # ran (the early-exit arms never set them), and only when the gate ran long
+  # enough for the split to mean anything -- below 3 s the segments are
+  # dominated by process-startup noise and would just add bytes.
+  _g5_elapsed=$(( $(gate_start_ms) - GATE_5_START ))
+  if [ "${_g5t_a:-0}" != "0" ] && [ "$_g5_elapsed" -ge 3000 ]; then
+    GATE_5_DETAIL="${GATE_5_DETAIL:-} seg=pre:${_g5t_focus}ms,5a:${_g5t_a}ms,5b:${_g5t_b}ms,total:${_g5_elapsed}ms"
+  fi
 
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
   return 0
