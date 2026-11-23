@@ -32,6 +32,51 @@ Gate 5 的 `CODE_EXTENSIONS` 漏了 `rs`，于是"只有 Rust 变更"被判成"�
 
 ### Fixed
 
+- **Shell 测试臂：每个 `.bats` 套件单独一次 `bats --abort --tap`，TAP 落文件，
+  四种结果分开报**（`githooks/lib/bats-runner.sh`）。旧实现在一次调用里收集全部套件
+  输出到一个 shell 变量、再用 `printf ... | grep -q` 判定，由此有三个缺陷：
+  ① Gate 5 只打印前 50 行，失败时读到的只有一句 "Tests FAILED"、不点名套件；
+  ② 在钩子的 `pipefail` 下，大输入上的 `printf | grep -q` 以 141（SIGPIPE）退出，
+  真实失败被误判；③ 变量装不住 NUL 字节，含 NUL 的输出被静默截断。现在逐套件运行，
+  判定从文件里读：**FAILED / 超时被杀 / 启动了但无判定（runner 故障）/ 一个测试都没启动**
+  四者措辞不同，第一个不绿的套件即停并点名；单测超时由 `BATS_TEST_TIMEOUT` 兜底
+  （默认 300s，可经 `XP_GATE_BATS_TEST_TIMEOUT` 覆盖，非法值回落默认而不是传给 bats），
+  另有 `XP_GATE_BATS_SUITE_WALL_LIMIT_S` 给整套件设钟。报告保持 50 行内，
+  完整 TAP 留在 Gate 5 交给它的日志目录里。
+- **`set -e`/`pipefail` 下"报告还没读出就整段退出"**：失败的 `$(run_tests)` 位于
+  函数返回位时，钩子会在读完报告前终止，失败因此没有消息（这使旧的适配器用例
+  "只断言退出码"能通过）。现在每个失败位都显式取状态（`|| RC=$?`、`BATS_SUITES_RC`、
+  `return "$BATS_SUITES_RC"`），并单列一次 `. "$runner"`，不再写成 `if ... && .` 的尾命令。
+- **Shell 测试 runner 缺失时 fail-closed**：`run_tests` 找不到 `lib/bats-runner.sh`
+  时报 `❌ Shell test runner missing` 并返回非 0；旧行为是把"没有 runner"记作通过。
+- **Gate 5 的测试日志目录**：每次运行 `mktemp -d` 后只在失败时保留（路径要能在被拒
+  的提交后打开），绿灯运行即时删除；注释此前声称"会被清理"但没有删除逻辑，
+  等于每个提交都在临时目录留下一个空壳。新增
+  `gate-5-log-dir-lifecycle.test.bats` 钉住两条语义（绿灯零目录、红灯保留且打印的
+  路径可打开到点名的失败），并注入 `XP_GATE_TEST_LOG_ROOT` 以便断言只针对本次提交
+  的目录。**顺带修掉夹具自身的一个假绿**：该套件的夹具仓库没有 `githooks/`，
+  `ADAPTER_DIR` 于是落到 global 层（`~/.config/xp-gate/adapters`），跑的是**已安装
+  的旧适配器**——旧版 header 没有 per-test cap、也没有成功行，断言描述的是宿主安装
+  而不是本次改动。夹具现在自己拥有 project 层（复制 `adapter-common.sh`、`adapters/`、
+  `lib/`），该层在 `HOOK_ADAPTER_DIR_TIERS` 里优先级最高。
+- **全跳过的套件曾被当成绿灯放行**：bats 对"整份计划都跳过"（`1..0 # SKIP`）退出 **0**，
+  于是 runner 在分类之前就从绿灯分支返回，一个把每个 `@test` 都写成 `skip` 的套件
+  可以为门禁提供零验证。现在绿灯分支先查整份计划是否被声明跳过，命中即 BLOCK，
+  并说明"这个套件什么都没验证"，而不是让读者去找一个不存在的失败
+  （`AC-BATS-RUNNER-10`，可证伪：去掉该判断后用例在 `[ "$status" -ne 0 ]` 处失败）。
+- **红灯但没有任何证据的日志目录**：上一版"失败即保留"把"缺 bats / 缺 runner /
+  安装损坏"这类从未到达 runner 的红灯也算成保留，目录是空的、报告里也没有路径可指，
+  等于每次这样的提交都漏一个空目录。现在红灯下先看目录里有没有东西，没有就删除
+  （`AC-GATE5-LOG-DIR-03`，可证伪：把清理条件改成恒假后用例在 `[ "$n" -eq 0 ]` 处失败）。
+- **Gate 5 复读判决行仍走 `printf | grep -q`**：这道门自己的注释写着"141 会吞掉真实
+  失败"，复读那几行却是同一形状——`grep -q` 命中即退，写端吃 SIGPIPE，`pipefail`
+  让整条管道返回 141，`if` 于是把"需要复读"读成"不需要"。改为 here-string，
+  不再经过管道；`head -50`/`head -10` 同理。
+- **只有空白的 TAP 日志被报成"崩溃"**：`[ -s ]` 把一个换行当作有输出，`crashed`
+  分支于是打印去重后的空白行当解释。改为"含非空白字符才算输出"，空白日志落到
+  "一个测试都没启动"（`AC-BATS-RUNNER-11`）。
+- **"N of M 套件已到达"不说明其余有没有跑**：提前停止时补一行"N 个套件之后未运行"，
+  避免把未运行的套件读成通过。
 - **Gate 5 的两条 fail-open 出口改 BLOCK**："adapter 存在但 source 不起来"与
   "找不到 adapter"都曾打印 `✅ PASSED - ... assuming none to run`。装坏一份适配器
   就能让测试环节整段消失而门禁全绿。现在两条都 `BLOCKED` 并给出修复命令，
@@ -52,11 +97,10 @@ Gate 5 的 `CODE_EXTENSIONS` 漏了 `rs`，于是"只有 Rust 变更"被判成"�
   把这份**配置文件**检出成 CRLF，ShellCheck 把首行之后的所有指令判为无效，规则集
   静默回退到默认——在干净的工作树上报了 482 条（实测）。`.shellcheckrc` 内容本身
   与 HEAD 一致，缺的只是"检出形状"的约束。
-- **Shell 适配器在失败处停下**：`run_tests()` 一次把全部 `*.bats` 套件交给 bats，
-  没有 `--abort`。Windows 上没有 GNU parallel，`--jobs` 用不了，只剩串行；本仓库
-  263 个套件在 Windows 上实测约 1 秒/套件，一次红色提交也要把后面全部套件跑完
-  才知道结论。改为 `bats --abort`（不用 `--filter-status`：它依赖上一次运行的记录，
-  缺失时静默只跑子集或什么都不跑）。实测预提交从"数小时"降到按首个失败点截断。
+- **Shell 适配器在失败处停下**：`bats --abort`（不用 `--filter-status`：它依赖上一次
+  运行的记录，缺失时静默只跑子集或什么都不跑）。Windows 上没有 GNU parallel，
+  `--jobs` 用不了，只剩串行；`--abort` 加上逐套件判定，实测预提交从"数小时"降到按
+  首个失败点截断。
 - **bats 每个用例都有超时上限（默认 300s，`XP_GATE_BATS_TEST_TIMEOUT` 可覆盖）**：
   `--abort` 只解决"失败后还要跑完剩余套件"，解决不了"单个用例永远不返回"——bats
   本身**没有默认超时**，一个继承来的服务器 fd、对已关闭 stdin 的 `read`、或 git
@@ -92,6 +136,17 @@ Gate 5 的 `CODE_EXTENSIONS` 漏了 `rs`，于是"只有 Rust 变更"被判成"�
 
 ### 验证
 
+- `githooks/__tests__/bats-runner.test.bats`（9 例）：用桩 `bats` 打真 runner，覆盖
+  通过时的尾部输出、`FAILED` 点名套件与用例、无结论/空日志两种 `DID NOT RUN`、
+  超时上限的默认与回退、截断计划不算测试失败、200 行输出下报告仍 ≤50 行（Gate 5
+  的 `head -50` 截断口径）、无日志目录时不指向不存在路径、首个失败即停且不冤枉
+  后面的套件。桩脚本用 `cat <payload>` 而不是 here-doc：本轮实测 TAP 夹具里出现
+  终结词时，两个 here-doc 会把 `exit` 行一起吞掉，桩永远不失败，"必须失败"的用例
+  全部假绿。
+- `githooks/__tests__/adapter-shell-tests.test.bats`（11 例）：新增“失败结论能在
+  `head -50` 内看见且完整日志落盘”“runner 库缺失 fail-closed”两条；原“无结论”
+  用例从断言 `INCOMPLETE` 改成断言 `DID NOT RUN` 与 bats 原话可见——只断言退出码
+  非零时，一个"退出码对、消息全丢"的实现照样通过（本轮就是这样假绿的）。
 - `githooks/__tests__/fixture-writes-stay-in-fixture.test.bats`（4 例）：
   - AC-01 全目录扫描无裸写入，扫描器崩溃按"有发现"计。
   - AC-02 在 `$HELPER_DIR` 里生成一份探针 `.bats`，钉住七个发现（`a.py`、`after.go`、

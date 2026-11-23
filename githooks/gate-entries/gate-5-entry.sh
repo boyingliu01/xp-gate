@@ -829,14 +829,58 @@ else
           echo "ℹ️  ${CURRENT_LANG}: coverage run includes the tests — deferring test execution to a single pass."
           TESTS_DEFERRED=true
         else
+          # The adapter may keep each suite's full log in this directory and
+          # name it in its report. Gate 5 prints only `head -50` of the output
+          # captured here, so a runner that printed a whole failing suite had
+          # its verdict cut off -- the "blocked with no visible cause" incident.
+          # The directory is gate-owned and kept on failure only: the paths the
+          # runner printed must still open after the commit is refused, while a
+          # green run would otherwise leave one directory per commit behind
+          # forever (nothing else ever removes it).
+          # `-p` names the parent the suite can inspect afterwards; without it
+          # the only way to prove cleanup works would be to scan TMPDIR.
+          GATE5_TEST_LOG_DIR="$(mktemp -d "${XP_GATE_TEST_LOG_ROOT:-${TMPDIR:-/tmp}}/xp-gate-gate5.XXXXXX" 2>/dev/null || true)"
+          if [ -n "$GATE5_TEST_LOG_DIR" ]; then
+            export XP_GATE_BATS_LOG_DIR="$GATE5_TEST_LOG_DIR"
+          fi
           TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
           TESTS_EXIT_CODE=$?
-          echo "$TESTS_OUTPUT" | head -50
+          if [ -n "$GATE5_TEST_LOG_DIR" ]; then
+            unset XP_GATE_BATS_LOG_DIR
+          fi
+          if [ "$TESTS_EXIT_CODE" -eq 0 ] && [ -n "$GATE5_TEST_LOG_DIR" ]; then
+            rm -rf "$GATE5_TEST_LOG_DIR" 2>/dev/null || true
+          elif [ -n "$GATE5_TEST_LOG_DIR" ] && [ -z "$(find "$GATE5_TEST_LOG_DIR" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+            # A red run keeps the directory so the paths in the report still
+            # open. A red that never reached the runner (missing bats, missing
+            # runner, install defect) wrote nothing and printed no path, so
+            # keeping an empty directory is only leak -- the same defect this
+            # batch exists to remove.
+            rm -rf "$GATE5_TEST_LOG_DIR" 2>/dev/null || true
+          fi
+          # Here-strings, not `printf | grep`: under pipefail, a `grep -q` that
+          # exits on its first match can SIGPIPE the writer, the pipeline then
+          # reports 141, and the `if` sees a failure -- the verdict re-print
+          # would be skipped exactly when it is needed.
+          head -50 <<<"$TESTS_OUTPUT"
           if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
+            # A report that names the failing suite must not be truncated away:
+            # the runner writes that line last.
+            if grep -qE '^(❌|⚠️) ' <<<"$TESTS_OUTPUT"; then
+              head -10 <<<"$(grep -E '^(❌|⚠️|   Log: |   [0-9]+ of [0-9]+ )' <<<"$TESTS_OUTPUT")"
+            fi
             if [ "$CURRENT_LANG" = "typescript" ]; then
               # vitest output, so the same three non-failure exits are judged
               # here as in the branches above (#454, #473, #498).
               handle_test_failure "$TESTS_OUTPUT" "typescript adapter (no package.json)" || return 1
+            elif grep -qE '^❌ .* (FAILED|DID NOT RUN|was killed)' <<<"$TESTS_OUTPUT"; then
+              # A runner that names the suite and the outcome has already said
+              # more than "Tests FAILED" can: keep its verdict instead of
+              # printing a message that sends the reader looking elsewhere
+              # (#454's lesson, applied to the non-vitest arm).
+              echo ""
+              echo "❌ BLOCKED - Shell test suite failed (details above)"
+              return 1
             else
               # Genuinely non-vitest runners (pytest/go/jest/...): their output
               # shape is not vitest's, so the guard could excuse a real failure.

@@ -141,6 +141,7 @@ const MODULE_FILES = Object.freeze([
   'lib/python-incremental-typecheck.sh',
   'lib/python-test-selection.sh',
   'lib/sprint-gate-report.sh',
+  'lib/bats-runner.sh',
   'lib/test-failure.sh',
   'lib/toolchain-path.sh',
   'lib/typecheck.sh',
