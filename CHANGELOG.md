@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.38.120.0] - 2026-11-23
+
+**Gate 6 的架构检查在本仓库从未执行过一次——因为仓库里有一个 `.ps1` 文件。**
+
+### 发现
+
+上一轮修好 detail 之后，端到端验证显示 gate-6 记录的是：
+
+```
+SKIP  detail="architecture_skipped: no PowerShell architecture tooling"
+```
+
+本项目是 TypeScript 项目，为什么走 PowerShell 分支？查下去：
+
+1. `PROJECT_LANGS` 里**确实有** `powershell`——`githooks/lib/Measure-PowerShellComplexity.ps1`
+   等 27 个 `.ps1` 文件是真实存在的，检测没错
+2. gate-6 的架构检查是一条 `elif` 链，第二条分支是「powershell 没有架构工具 → SKIP」
+3. **作为 elif 它优先于 else 分支**——而 else 分支才是真正为 TypeScript 跑 archlint 的那个
+
+查一周的审计记录：
+
+```
+gate-6：154 SKIP，55 无状态，0 PASS
+```
+
+**这个仓库的架构验证一次都没有跑过。** TypeScript 那一半——本项目自己是用它写的，
+还配了 5.4 KB 的 `.archlint.yaml`——在每一次提交上都被跳过，
+只因为代码树里某个地方有一个 PowerShell 文件。
+
+### 为什么这条特别隐蔽
+
+**每一行记录单独看都是诚实的**：「没有 PowerShell 架构工具」是真的。
+
+**但聚合起来是假的**：它读起来像「架构检查考虑过了，不适用」，
+而实际上六十多个门禁周期里，TypeScript 代码从没被看过一眼。
+
+这是"没检查被记成跳过"的多语言变体：不是单条记录撒谎，是一堆诚实记录
+组成了一个错误结论。本项目的规则一直是"**没检查**不得与**通过**或**跳过**混淆"，
+这里它是以语言维度混淆的。
+
+### 修复
+
+「语言 X 没有工具」这条分支，**只在没有其它可检查语言时才允许触发**。
+否则一个检查不了的语言会静默地把整个仓库的门禁关掉。
+
+### 验证
+
+修复后 `xp-gate arch` 真正跑了 archlint：
+
+```
+💎 Runtime code found in 644 files (skipped 7 type-only)
+✅ arch: no new high+ architecture findings (baseline ratchet)
+```
+
+修复前它打印的是 `SKIPPED - no tool for PowerShell`。
+
+### 测试
+
+`githooks/__tests__/issue-g6-multilang.test.bats` 3 个用例：
+
+1. PowerShell 分支排除了 typescript/python/go 等有检查器的语言
+2. **排除项必须在同一条 elif 条件里**——别处出现一个 `has_project_lang "typescript"`
+   也能过用例 1，却什么都没改
+3. **反向约束**：纯 PowerShell 项目仍然跳过，不能把静默跳过变成误拦
+
 ## [0.38.119.0] - 2026-11-23
 
 **上一轮的 gate-6 修复修错了分支：本项目自己的提交根本走不到那里。**

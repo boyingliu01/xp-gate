@@ -52,7 +52,13 @@ GATE_6_START=$(gate_start_ms)
 if [ "$PROJECT_LANG" = "documentation-only" ]; then
   echo "     ✅ Skipped (documentation project)."
 
-elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershell" ]; then
+elif { has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershell" ]; } \
+     && ! has_project_lang "typescript" 2>/dev/null \
+     && ! has_project_lang "python" 2>/dev/null \
+     && ! has_project_lang "go" 2>/dev/null \
+     && ! has_project_lang "java" 2>/dev/null \
+     && ! has_project_lang "kotlin" 2>/dev/null \
+     && ! has_project_lang "csharp" 2>/dev/null; then
   echo "     ℹ️  No PowerShell architecture tooling available"
      echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
   GATE_6_DETAIL="architecture_skipped: no PowerShell architecture tooling"
