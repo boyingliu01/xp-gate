@@ -276,6 +276,27 @@ resolve_tool_path() {
     fi
   done
 
+  # The user install directory (#843).
+  #
+  # `pip install --user`, `cargo install`, and most "download the release binary
+  # and put it somewhere" recipes land in ~/.local/bin. Whether it happens to be
+  # in PATH depends on the shell that started the hook, NOT on whether the tool
+  # is installed -- and the two diverge precisely in the environments that matter
+  # most: a git GUI, an IDE-spawned terminal, or a WSL session launched from
+  # Windows (measured: PATH=/usr/bin:/bin resolves none of gitleaks / lizard /
+  # semgrep, while all three are present and working in ~/.local/bin).
+  #
+  # Trusting PATH alone therefore reports an installed scanner as missing, and
+  # the reader's natural response -- install it again, or give up on the check --
+  # is wrong in both directions. #841 is the mirror image: a Windows shim can be
+  # FOUND through PATH while being unable to run.
+  for _d in "${HOME:-}/.local/bin/$_tool" "${HOME:-}/bin/$_tool"; do
+    if [ -n "${HOME:-}" ] && [ -x "$_d" ]; then
+      printf '%s\n' "$_d"
+      return 0
+    fi
+  done
+
   return 1
 }
 

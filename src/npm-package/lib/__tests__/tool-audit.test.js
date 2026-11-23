@@ -391,3 +391,38 @@ describe('tool-audit: async probing keeps the event loop free', () => {
     expect(ticked).toBe(true);
   });
 });
+
+describe('tool-audit: resolves tools the way the gates do (#843)', () => {
+  /**
+   * @test REQ-TOOLS-018
+   * @intent doctor/check-tools 与门禁必须共用同一套工具解析。PATH 里没有
+   *         ~/.local/bin（git GUI、IDE 终端、从 Windows 拉起的 WSL 都是这种），
+   *         但 pip --user / cargo / 手工放置的二进制就在那里。只信 PATH 会把
+   *         装好的扫描器报成缺失，读者的自然反应（重装、或放弃检查）两个方向都错。
+   *         #841 是同一件事的镜像：Windows shim 能被 PATH 找到却跑不动。
+   * @covers AC-TOOLS-018-01
+   */
+  it('finds a tool that lives in ~/.local/bin while PATH omits it', () => {
+    const { resolveToolViaShell } = require('../tool-audit.js');
+    // The resolver delegates to githooks/lib/toolchain-path.sh, which owns the
+    // tier order. This asserts the wiring exists and is honoured, not that a
+    // particular binary is installed on the test machine.
+    const resolved = resolveToolViaShell('sh', {
+      runShell: () => ({ status: 0, stdout: '/home/u/.local/bin/gitleaks\n', stderr: '' }),
+    });
+    expect(resolved).toBe('/home/u/.local/bin/gitleaks');
+  });
+
+  /**
+   * @test REQ-TOOLS-018
+   * @intent 解析失败必须返回 null，由调用方回落到普通探测，而不是判成缺失
+   * @covers AC-TOOLS-018-02
+   */
+  it('returns null when the shared resolver cannot find anything', () => {
+    const { resolveToolViaShell } = require('../tool-audit.js');
+    const resolved = resolveToolViaShell('sh', {
+      runShell: () => ({ status: 1, stdout: '', stderr: '' }),
+    });
+    expect(resolved).toBeNull();
+  });
+});

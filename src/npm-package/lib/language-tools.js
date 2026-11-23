@@ -17,6 +17,7 @@ const {
   auditAllTools,
   summarizeAudit,
   resolveLatestVersion,
+  resolveToolViaShell,
 } = require('./tool-audit.js');
 // Reuse doctor's own cross-language list so the two commands cannot disagree
 // about what "the gate CLI tools" are.
@@ -1211,7 +1212,13 @@ async function handleCheckTools(args, options = {}) {
   }).filter((t) => includeCrossLanguage || (t.languages && t.languages.length > 0));
 
   const audit = options.audit || ((list, deps) => auditAllTools(list, deps));
-  const rows = audit(tools, { resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)) });
+  // Resolve tools through the SAME helper the gates use (#843): a binary in
+  // ~/.local/bin is installed even when the hook's PATH omits it, and reporting
+  // it missing sends the reader off to install what is already there.
+  const rows = audit(tools, {
+    resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)),
+    resolveTool: options.resolveTool || ((name) => resolveToolViaShell(name)),
+  });
   const summary = summarizeAudit(rows);
 
   if (jsonOutput) {

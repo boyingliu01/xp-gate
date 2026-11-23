@@ -144,6 +144,53 @@ function defaultRunProbe(checkCmd) {
 }
 
 /**
+ * Resolve a tool through the SAME helper the gates use (#843).
+ *
+ * `check-tools` and `doctor` used to answer "is this installed" from PATH alone,
+ * while the gates additionally consulted `githooks/lib/toolchain-path.sh` --
+ * which knows about `~/.local/bin`, the `.exe` suffix and project-local
+ * `node_modules/.bin`. The two could contradict each other on one machine, and
+ * the contradiction runs both ways:
+ *
+ *   - a tool installed in `~/.local/bin` but absent from PATH reads as MISSING
+ *     to the report while the gates happily use it (#843);
+ *   - a Windows shim reachable through PATH can be FOUND while failing to exec,
+ *     so it reads as present to the report while every real scan fails (#841).
+ *
+ * Delegating to the shell helper keeps one tier order instead of two.
+ *
+ * @param {string} tool command name
+ * @param {{runShell?: (cmd: string, args: string[]) => {status: number, stdout: string, stderr?: string}}} [deps]
+ * @returns {string|null} absolute path, or null when the resolver finds none
+ */
+function resolveToolViaShell(tool, deps = {}) {
+  if (!tool) return null;
+  const runShell = deps.runShell || ((cmd, args) => {
+    const isWindows = process.platform === 'win32';
+    try {
+      const stdout = execFileSync(isWindows ? 'cmd.exe' : '/bin/sh',
+        [isWindows ? '/c' : '-c', `${cmd} ${args.join(' ')}`],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: PROBE_TIMEOUT_MS });
+      return { status: 0, stdout: String(stdout || ''), stderr: '' };
+    } catch (err) {
+      return { status: typeof err.status === 'number' ? err.status : 1, stdout: '', stderr: '' };
+    }
+  });
+  // The helper lives beside the hooks, not inside this package: resolve it from
+  // the project root, falling back to the installed hook tree.
+  const helper = deps.helperPath || 'githooks/lib/toolchain-path.sh';
+  const script = [
+    `[ -r "${helper}" ] || exit 3`,
+    `. "${helper}"`,
+    `resolve_tool_path "${tool}"`,
+  ].join('; ');
+  const result = runShell('sh', ['-c', `"${script.replace(/"/g, '\"')}"`]);
+  if (!result || result.status !== 0) return null;
+  const resolved = String(result.stdout || '').trim().split('\n')[0];
+  return resolved || null;
+}
+
+/**
  * Default locator: every PATH hit for a command, in resolution order.
  *
  * Duplicates are a PATH fact, so the audit must look at the WHOLE PATH rather
@@ -245,11 +292,35 @@ function interpretProbe(probe, thrown) {
   return { available, reason, output: combined };
 }
 
-function probeValidity(checkCmd, runProbe) {
+/**
+ * Rewrite a check command to use an explicitly resolved binary.
+ *
+ * `command -v` inside the probe shell answers "is it on PATH", which is not the
+ * question: a tool in ~/.local/bin is installed and usable while absent from
+ * PATH (#843). When the shared resolver found it, run THAT path.
+ *
+ * The first token is the tool name in every registry entry this module sees
+ * (`gitleaks version`, `eslint --version`, `npx --no-install ...`). Rewriting
+ * only that token keeps the rest of the command -- and its arguments -- intact.
+ */
+function withResolvedBinary(checkCmd, resolvedPath) {
+  if (!resolvedPath) return checkCmd;
+  const trimmed = String(checkCmd || '').trim();
+  const spaceAt = trimmed.search(/\s/);
+  if (spaceAt < 0) return `"${resolvedPath}"`;
+  return `"${resolvedPath}"${trimmed.slice(spaceAt)}`;
+}
+
+function probeValidity(checkCmd, runProbe, resolveFn) {
   let probe;
   let thrown = '';
   try {
-    probe = runProbe(checkCmd);
+    // Resolve FIRST, so an installed-but-off-PATH tool is not reported missing.
+    // A resolver that finds nothing leaves the command untouched: the probe then
+    // reports honestly what the shell can see, instead of guessing.
+    const toolName = String(checkCmd || '').trim().split(/\s/)[0];
+    const resolved = resolveFn ? resolveFn(toolName) : null;
+    probe = runProbe(withResolvedBinary(checkCmd, resolved));
   } catch (err) {
     // Keep the thrown message: "probe exited 1" alone cannot distinguish a
     // timeout from a missing interpreter, and both need different fixes.
@@ -359,7 +430,7 @@ function auditTool(toolDef, deps = {}) {
   // Duplicates are a PATH fact: look at every hit, never just the first.
   const paths = locate(toolDef.name);
   const distinctRealPaths = [...new Set(paths.map(realpath))];
-  const validity = probeValidity(toolDef.checkCmd, deps.runProbe || defaultRunProbe);
+  const validity = probeValidity(toolDef.checkCmd, deps.runProbe || defaultRunProbe, deps.resolveTool);
 
   return buildRow(toolDef, {
     paths,
@@ -617,6 +688,7 @@ function summarizeAudit(entries = []) {
 
 module.exports = {
   auditTool,
+  resolveToolViaShell,
   registryFor,
   resolveLatestVersion,
   LATEST_TABLE,
@@ -624,6 +696,7 @@ module.exports = {
   auditAllTools,
   auditAllToolsAsync,
   defaultRunProbeAsync,
+  withResolvedBinary,
   collectGateTools,
   summarizeAudit,
   describeDuplicates,
