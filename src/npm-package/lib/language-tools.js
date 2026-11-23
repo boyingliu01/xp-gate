@@ -10,6 +10,17 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+// The audit lives in its own module: check-tools and doctor both need the same
+// completeness/validity/uniqueness rules, and a rule kept in two files drifts.
+const {
+  collectGateTools,
+  auditAllTools,
+  summarizeAudit,
+  resolveLatestVersion,
+} = require('./tool-audit.js');
+// Reuse doctor's own cross-language list so the two commands cannot disagree
+// about what "the gate CLI tools" are.
+const { GATE_CLI_TOOLS } = require('./detect-deps.js');
 
 /**
  * Tool definition for quality gate language tools.
@@ -1014,6 +1025,7 @@ module.exports = {
   handleDetectLanguages,
   handleCheckTools,
   handleInstallTools,
+  planToolRepairs,
   getArchitectureTools,
   detectBuildFileDependency,
 };
@@ -1093,143 +1105,434 @@ async function handleDetectLanguages(args) {
  * @param {string[]} args - Command arguments
  * @returns {Promise<number>} Exit code
  */
-async function handleCheckTools(args) {
-  const projectRoot = process.cwd();
+/**
+ * Render one audit row as the status the CLI contract uses.
+ *
+ * A row is unusable for two different reasons and they must not be merged:
+ * the probe failed (missing/broken), or the probe could not be interpreted.
+ * Both are "not usable", but only the first is "not installed".
+ */
+function statusOfRow(row) {
+  return row.available ? 'available' : 'missing';
+}
+
+/** Icon for a row: present, present-but-flagged, or absent. */
+function iconOfRow(row) {
+  if (!row.available) return '✗';
+  if (row.duplicated || row.outdated) return '⚠';
+  return '✓';
+}
+
+/** Extra qualifiers appended to a human line, e.g. "duplicate ×2, 2.14.0 → 2.15.1". */
+function qualifiersOfRow(row) {
+  const parts = [];
+  if (row.duplicated) parts.push(`DUPLICATE ×${row.distinctRealPaths.length}`);
+  if (row.outdated && row.installedVersion && row.latestVersion) {
+    parts.push(`${row.installedVersion} → ${row.latestVersion} available`);
+  } else if (row.currency === 'unknown') {
+    parts.push('version currency unknown');
+  }
+  if (!row.available && row.validityReason) parts.push(row.validityReason);
+  return parts.join('; ');
+}
+
+/**
+ * Print the audit as a human-readable list.
+ *
+ * One list, not one section per language: the question "is my toolchain
+ * complete" is about the whole set. Language attribution is kept as a column so
+ * nothing is lost.
+ */
+function printAuditReport(rows, summary) {
+  console.log('Quality Gate Tool Audit\n');
+  const width = Math.max(...rows.map((r) => r.name.length), 10);
+  for (const row of rows) {
+    const opt = row.optional ? ' (optional)' : '';
+    const version = row.installedVersion || 'N/A';
+    const shown = row.npxInvoked ? `${version} (via npx)` : version;
+    const q = qualifiersOfRow(row);
+    console.log(`  ${iconOfRow(row)} ${row.name.padEnd(width)}${opt} — ${shown}${q ? ` [${q}]` : ''}`);
+  }
+  console.log('');
+  console.log(
+    `Summary: ${summary.total} tools — ${summary.missing} missing, ${summary.duplicated} duplicated, `
+      + `${summary.outdated} outdated, ${summary.unknown} unknown`,
+  );
+  if (!summary.complete) {
+    console.log('Run `xp-gate install-tools` to install, upgrade and de-duplicate.');
+  }
+}
+
+/**
+ * Handle check-tools CLI command.
+ *
+ * Reports completeness, validity, uniqueness and currency in ONE list. The
+ * audit is injectable so tests drive every branch without touching the network
+ * or the real toolchain.
+ *
+ * @param {string[]} args - Command arguments
+ * @param {{
+ *   projectRoot?: string,
+ *   languages?: string[]|null,
+ *   audit?: (tools: Array, deps: object) => Array,
+ *   resolveLatest?: (name: string) => string|null,
+ * }} [options]
+ * @returns {Promise<number>} Exit code
+ */
+async function handleCheckTools(args, options = {}) {
+  const projectRoot = options.projectRoot || process.cwd();
   const jsonOutput = args.includes('--json');
-  let languages = parseLanguageFlag(args);
+  let languages = options.languages !== undefined ? options.languages : parseLanguageFlag(args);
 
   // Auto-detect if no languages specified
-  if (!languages) {
+  if (languages === undefined || languages === null) {
     const detected = detectProjectLanguages(projectRoot);
     languages = detected.detected;
   }
 
-  if (languages.length === 0) {
-    console.log('No languages detected or specified. Use --languages=<langs> to specify.');
-    return 1;
-  }
+  // The cross-language CLI tools are part of the answer even when no detected
+  // language mentions them: they are what the gate SCRIPTS call directly.
+  // The cross-language CLI tools belong to the answer when we are describing the
+  // whole toolchain (auto-detected or --all). When the caller names languages
+  // explicitly, they asked "what does THIS language need" and a cross-language
+  // section would answer a different question.
+  const explicitSelection = parseLanguageFlag(args);
+  // An EMPTY selection is "nothing was asked for", not "ask for nothing": the
+  // auto-detect path and `options.languages = []` must still describe the whole
+  // toolchain, or the report silently becomes empty and reads as complete.
+  const includeCrossLanguage = !explicitSelection || explicitSelection.length === 0
+    || args.includes('--all');
 
-  const toolStatus = getToolsForLanguages(languages);
+  const tools = collectGateTools({
+    registry: LANGUAGE_REGISTRY,
+    cliTools: GATE_CLI_TOOLS,
+    // `--all` asks about every registered tool, not just this project's.
+    languages: args.includes('--all') ? null : (languages.length ? languages : null),
+  }).filter((t) => includeCrossLanguage || (t.languages && t.languages.length > 0));
+
+  const audit = options.audit || ((list, deps) => auditAllTools(list, deps));
+  const rows = audit(tools, { resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)) });
+  const summary = summarizeAudit(rows);
 
   if (jsonOutput) {
-    const result = {};
-    for (const [lang, tools] of Object.entries(toolStatus)) {
-      result[lang] = tools.map(t => ({
-        name: t.tool.name,
-        status: t.status,
-        optional: t.tool.optional,
-        version: t.version,
-        gates: t.tool.gates,
-      }));
-    }
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    console.log('Quality Gate Tool Status:\n');
-    let totalAvailable = 0;
-    let totalMissing = 0;
-
-    for (const [lang, tools] of Object.entries(toolStatus)) {
-      const langDef = LANGUAGE_REGISTRY[lang];
-      console.log(`${langDef?.name || lang}:`);
-      
-      for (const t of tools) {
-        const statusIcon = t.status === 'available' ? '✓' : '✗';
-        const optMark = t.tool.optional ? ' (optional)' : '';
-        const version = t.version || 'N/A';
-        console.log(`  ${statusIcon} ${t.tool.name}${optMark} — ${version}`);
-        if (t.status === 'available') {
-          totalAvailable++;
-        } else {
-          totalMissing++;
-        }
+    // CONTRACT, preserved from #468: the top level is keyed by language name and
+    // each value is that language's tool list. Callers parse it that way, and a
+    // shape change here silently broke them once already. The audit's new facts
+    // (duplicates, currency, cross-language tools) therefore ride alongside in
+    // `summary` and `crossLanguage` rather than replacing the old shape.
+    const byLanguage = {};
+    for (const row of rows) {
+      for (const lang of (row.languages && row.languages.length ? row.languages : ['(cross-language)'])) {
+        if (!byLanguage[lang]) byLanguage[lang] = [];
+        byLanguage[lang].push({
+          name: row.name,
+          status: statusOfRow(row),
+          optional: row.optional,
+          version: row.version,
+          gates: row.gates,
+          duplicated: row.duplicated,
+          paths: row.paths,
+          outdated: row.outdated,
+          latestVersion: row.latestVersion,
+          currency: row.currency,
+          reason: row.validityReason || undefined,
+        });
       }
-      console.log('');
     }
+    // Tools the gate scripts call directly; reported once, not per language.
+    // Only emitted when such tools exist: an always-present empty group would
+    // add a key to a contract callers compare exactly (#468).
+    const crossLanguage = rows
+      .filter((r) => !r.languages || r.languages.length === 0)
+      .map((r) => ({
+        name: r.name,
+        status: statusOfRow(r),
+        optional: r.optional,
+        version: r.version,
+        gates: r.gates,
+        duplicated: r.duplicated,
+        paths: r.paths,
+        outdated: r.outdated,
+        latestVersion: r.latestVersion,
+        currency: r.currency,
+        npxInvoked: r.npxInvoked,
+        reason: r.validityReason || undefined,
+      }));
+    if (crossLanguage.length > 0) byLanguage['(cross-language)'] = crossLanguage;
 
-    console.log(`Summary: ${totalAvailable} available, ${totalMissing} missing`);
-    if (totalMissing > 0) {
-      console.log('Run `xp-gate install-tools` to install missing tools.');
-    }
+    // `summary` and the flat view are additive: they appear only when asked
+    // for, so the historical shape ({ <language>: [...] }) stays byte-identical
+    // for callers that parse it exactly (#468).
+    const wantsAuditFields = args.includes('--audit') || args.includes('--flat');
+    // The flat view uses the SAME field names as the grouped view (`status`,
+    // `version`), so a consumer can switch between them without remapping.
+    const flatView = rows.map((r) => ({
+      name: r.name,
+      status: statusOfRow(r),
+      optional: r.optional,
+      version: r.version,
+      installedVersion: r.installedVersion,
+      gates: r.gates,
+      languages: r.languages,
+      duplicated: r.duplicated,
+      paths: r.paths,
+      distinctRealPaths: r.distinctRealPaths,
+      outdated: r.outdated,
+      latestVersion: r.latestVersion,
+      currency: r.currency,
+      npxInvoked: r.npxInvoked,
+      reason: r.validityReason || undefined,
+    }));
+    console.log(JSON.stringify({
+      ...byLanguage,
+      ...(wantsAuditFields ? { summary } : {}),
+      ...(args.includes('--flat') ? { tools: flatView } : {}),
+    }, null, 2));
+  } else {
+    printAuditReport(rows, summary);
   }
 
   return 0;
 }
 
 /**
- * Handle install-tools CLI command.
- * @param {string[]} args - Command arguments
- * @returns {Promise<number>} Exit code
+ * Paths owned by the distribution. A copy here is the SYSTEM's copy, not a
+ * duplicate install: removing it can take unrelated software with it, and the
+ * user asked explicitly for distro packages to be left alone (2026-11-23).
  */
-async function handleInstallTools(args) {
-  const projectRoot = process.cwd();
-  const dryRun = args.includes('--dry-run');
-  const autoYes = args.includes('--yes') || args.includes('-y');
-  let languages = parseLanguageFlag(args);
+const { SYSTEM_PATH_PREFIXES } = require('./tool-audit.js');
 
-  // Auto-detect if no languages specified
-  if (!languages) {
-    const detected = detectProjectLanguages(projectRoot);
-    languages = detected.detected;
-  }
+/**
+ * Build a repair plan from audit rows. Pure: no IO, no execution.
+ *
+ * Rules, in the order they are applied per tool:
+ *   1. npx-invoked tools have no PATH entity — nothing to remove.
+ *   2. A distro-owned copy is never removed; it is reported as kept.
+ *   3. Duplicates: keep the FIRST path (what gates execute today) and remove the
+ *      rest, so repairing does not change which binary the gates run.
+ *   4. Missing REQUIRED tool -> install. Missing optional -> skipped and named.
+ *   5. Outdated required tool -> upgrade.
+ *
+ * @param {Array} rows audit rows
+ * @param {{definitions?: Array, systemPrefixes?: string[], platform?: string}} [options]
+ * @returns {{actions: Array, clean: boolean}}
+ */
+function planToolRepairs(rows, options = {}) {
+  const definitions = options.definitions || [];
+  const platform = options.platform || process.platform;
+  const systemPrefixes = options.systemPrefixes || SYSTEM_PATH_PREFIXES;
+  const defByName = new Map(definitions.map((d) => [d.name, d]));
+  const isSystemOwned = (p) => systemPrefixes.some((pre) => String(p).startsWith(pre));
 
-  if (languages.length === 0) {
-    console.log('No languages detected or specified.');
-    return 1;
-  }
+  const actions = [];
+  for (const row of rows || []) {
+    if (row.npxInvoked) continue;
 
-  console.log('Checking tools for languages:', languages.join(', '));
-  console.log('');
+    const def = defByName.get(row.name);
+    const installCmd = def && def.install
+      ? (def.install[platform] || def.install.linux || def.install.npm || null)
+      : null;
 
-  const toolStatus = getToolsForLanguages(languages);
-  const missingTools = [];
-
-  for (const [lang, tools] of Object.entries(toolStatus)) {
-    for (const t of tools) {
-      if (t.status === 'missing' && !t.tool.optional) {
-        missingTools.push({ lang, tool: t.tool });
+    // Only USER-owned duplicates are a repair. A distro copy plus a user copy is
+    // coexistence (jq from apt vs a newer ~/.local/bin/jq), and removing either
+    // is not a fix: the distro one can drag dependencies with it, the user one is
+    // what the reader installed on purpose.
+    const userCopies = (row.userCopies || row.distinctRealPaths.filter((p) => !isSystemOwned(p)));
+    if (row.duplicated && userCopies.length > 1) {
+      const [keep, ...rest] = userCopies;
+      actions.push({ kind: 'keep', tool: row.name, path: keep });
+      for (const dup of rest) {
+        actions.push({ kind: 'remove-duplicate', tool: row.name, path: dup, keepPath: keep });
       }
+      // A tool that is duplicated but otherwise current needs no install step.
+      if (row.available && !row.outdated) continue;
+    }
+
+    if (!row.available) {
+      if (row.optional) {
+        actions.push({ kind: 'skip-optional', tool: row.name, reason: 'optional tool not installed' });
+      } else {
+        actions.push({ kind: 'install', tool: row.name, command: installCmd });
+      }
+      continue;
+    }
+
+    if (row.outdated === true) {
+      // MEASURED DEFECT (2026-11-23): hadolint was duplicated AND outdated. The
+      // plan removed ~/.local/bin/hadolint, then ran an installer whose command
+      // writes to that exact path — so the duplicate came straight back and the
+      // repair silently achieved nothing. Detect it and say so loudly instead of
+      // reporting a success that is not one.
+      const removedHere = actions
+        .filter((a) => a.kind === 'remove-duplicate' && a.tool === row.name)
+        .map((a) => a.path);
+      const writesToRemovedPath = Boolean(installCmd)
+        && removedHere.some((removedPath) => String(installCmd).includes(removedPath));
+      actions.push({
+        kind: 'upgrade',
+        tool: row.name,
+        command: installCmd,
+        from: row.installedVersion,
+        to: row.latestVersion,
+        writesToRemovedPath,
+        conflictsWith: writesToRemovedPath ? removedHere : undefined,
+      });
     }
   }
 
-  if (missingTools.length === 0) {
-    console.log('All required tools are available!');
+  return { actions, clean: actions.length === 0 };
+}
+
+/** Human line for one planned action. */
+function describeAction(action) {
+  switch (action.kind) {
+    case 'remove-duplicate':
+      return `remove duplicate  ${action.tool}: ${action.path} (keeping ${action.keepPath})`;
+    case 'keep':
+      return `keep              ${action.tool}: ${action.path}`;
+    case 'keep-system':
+      return `keep (system)     ${action.tool}: ${action.path}`;
+    case 'skip-optional':
+      return `skip (optional)   ${action.tool}`;
+    case 'install':
+      return `install           ${action.tool}  ← ${action.command || 'no installer known'}`;
+    case 'upgrade':
+      return `upgrade           ${action.tool}  ${action.from} → ${action.to}  ← ${action.command || 'no installer known'}`;
+    default:
+      return `${action.kind} ${action.tool}`;
+  }
+}
+
+/** Default command runner: returns {status}. Injectable so tests never execute. */
+function defaultRunCommand(command) {
+  if (!command) return { status: 1, error: 'no installer command' };
+  try {
+    execSync(command, { stdio: 'inherit', timeout: 600000, shell: true });
+    return { status: 0 };
+  } catch (err) {
+    return { status: typeof err.status === 'number' ? err.status : 1, error: String(err.message || err) };
+  }
+}
+
+/** Default file remover, used only for duplicate cleanup. */
+function defaultRemoveFile(target) {
+  try {
+    fs.rmSync(target, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Handle install-tools CLI command.
+ *
+ * Installs missing required tools, upgrades outdated ones and removes duplicate
+ * copies so each tool ends up as one current, working entity.
+ *
+ * Without `--yes` nothing is executed: the plan is printed and the command says
+ * plainly that it changed nothing. Silence there would be indistinguishable
+ * from "the repair ran and needed no work".
+ *
+ * @param {string[]} args - Command arguments
+ * @param {{
+ *   projectRoot?: string,
+ *   languages?: string[],
+ *   audit?: (tools: Array, deps: object) => Array,
+ *   definitions?: Array,
+ *   run?: (cmd: string) => {status: number},
+ *   removeFile?: (p: string) => boolean,
+ * }} [options]
+ * @returns {Promise<number>} Exit code
+ */
+async function handleInstallTools(args, options = {}) {
+  const projectRoot = options.projectRoot || process.cwd();
+  const autoYes = args.includes('--yes') || args.includes('-y');
+  const run = options.run || defaultRunCommand;
+  const removeFile = options.removeFile || defaultRemoveFile;
+
+  let languages = options.languages !== undefined ? options.languages : parseLanguageFlag(args);
+  if (languages === undefined || languages === null) {
+    languages = detectProjectLanguages(projectRoot).detected;
+  }
+
+  const tools = collectGateTools({
+    registry: LANGUAGE_REGISTRY,
+    cliTools: GATE_CLI_TOOLS,
+    languages: args.includes('--all') || !languages.length ? null : languages,
+  });
+
+  const audit = options.audit || ((list, deps) => auditAllTools(list, deps));
+  const rows = audit(tools, { resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)) });
+
+  // Installer commands come from the registry entry (language) or the CLI entry.
+  const definitions = options.definitions
+    || [
+      ...tools,
+      ...GATE_CLI_TOOLS.map((c) => ({ name: c.tool, install: c.install, optional: false })),
+    ];
+
+  const plan = planToolRepairs(rows, { definitions });
+  if (plan.clean) {
+    console.log('Toolchain is already up to date: nothing to install, upgrade or remove.');
     return 0;
   }
 
-  console.log(`Found ${missingTools.length} missing required tool(s):\n`);
-  for (const { lang, tool } of missingTools) {
-    const installCmd = tool.install[process.platform] || tool.install.linux || 'N/A';
-    console.log(`  • ${tool.name} (${lang})`);
-    console.log(`    Install: ${installCmd}`);
-  }
+  console.log('Planned toolchain changes:\n');
+  for (const action of plan.actions) console.log(`  • ${describeAction(action)}`);
   console.log('');
 
-  if (dryRun) {
-    console.log('Dry run — no tools installed.');
+  // A repair whose parts undo each other is not a repair. Refuse to run it and
+  // say which action conflicts, so the operator can fix the installer instead of
+  // watching a duplicate survive a "successful" run.
+  const conflicting = plan.actions.filter((a) => a.kind === 'upgrade' && a.writesToRemovedPath);
+  if (conflicting.length) {
+    for (const a of conflicting) {
+      console.log(`CONFLICT ${a.tool}: its installer writes to ${(a.conflictsWith || []).join(', ')},`);
+      console.log('         which this same plan removes — the duplicate would come back.');
+    }
+    console.log('Refusing to apply a self-cancelling plan. Fix the installer command first.');
+    return 1;
+  }
+
+  const mutating = plan.actions.filter((a) =>
+    a.kind === 'install' || a.kind === 'upgrade' || a.kind === 'remove-duplicate');
+  if (!mutating.length) {
+    console.log('No changes needed for the required tools.');
     return 0;
   }
 
   if (!autoYes) {
-    console.log('Run with --yes to install missing tools.');
+    console.log(`${mutating.length} change(s) planned. No changes were made — re-run with --yes to apply them.`);
     return 0;
   }
 
-  console.log('Installing missing tools...\n');
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const { lang, tool } of missingTools) {
-    console.log(`Installing ${tool.name} for ${lang}...`);
-    const result = installTool(tool);
-    if (result.success) {
-      console.log(`  ✓ ${result.message}\n`);
-      successCount++;
-    } else {
-      console.log(`  ✗ ${result.message}\n`);
-      failCount++;
+  let failed = 0;
+  for (const action of mutating) {
+    if (action.kind === 'remove-duplicate') {
+      const ok = removeFile(action.path);
+      if (!ok) failed += 1;
+      console.log(`${ok ? 'removed' : 'FAILED to remove'} ${action.path}`);
+      continue;
+    }
+    if (!action.command) {
+      failed += 1;
+      console.log(`FAILED ${action.tool}: no installer command for this platform`);
+      continue;
+    }
+    console.log(`> ${action.command}`);
+    const result = run(action.command) || { status: 1 };
+    if (result.status !== 0) {
+      failed += 1;
+      console.log(`FAILED ${action.tool} (exit ${result.status})`);
     }
   }
 
-  console.log(`Installation complete: ${successCount} succeeded, ${failCount} failed.`);
-  return failCount > 0 ? 1 : 0;
+  console.log('');
+  if (failed > 0) {
+    console.log(`${failed} of ${mutating.length} change(s) failed.`);
+    return 1;
+  }
+  console.log(`Applied ${mutating.length} change(s) successfully.`);
+  return 0;
 }

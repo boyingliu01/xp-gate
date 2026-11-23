@@ -22,6 +22,9 @@ const GLOBAL_HOOKS_DIR = () => sharedPaths.GLOBAL_HOOKS_DIR;
 const GLOBAL_ADAPTERS_DIR = () => sharedPaths.GLOBAL_ADAPTERS_DIR;
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash, detectInstalledPlatforms, getSkillsDirs } = require('./detect-deps.js');
+// Doctor's tool section is built from the shared audit, so the validity /
+// uniqueness / currency rules live in exactly one place (2026-11-23).
+const { mapAuditRowsToDoctorChecks, auditGateCliTools } = require('./doctor-tool-checks.js');
 // #505: the single source of truth for module resolution order. The hook reads a
 // generated shell projection of this same module.
 const {
@@ -2300,54 +2303,20 @@ async function diagnosePathStaleness(checks, options = {}) {
  * @returns {Promise<number>} issue count
  */
 async function diagnoseCliToolsAsync(checks, options = {}) {
+  // DELEGATED (2026-11-23): this used to probe each tool itself, in parallel,
+  // with an exit-code-only verdict. That made doctor disagree with check-tools
+  // in three ways: an empty-output probe read as "available"
+  // (psscriptanalyzer), duplicate installs were invisible (two identical
+  // hadolint binaries), and versions were printed but never compared.
+  // The rule now lives once, in tool-audit; this function only adapts its rows
+  // to doctor's report contract.
+  const rows = options.rows || (await auditGateCliTools(options));
+  const mapped = mapAuditRowsToDoctorChecks(rows);
   let issues = 0;
-  const platform = process.platform;
-  const isWindows = platform === 'win32';
-
-  const bash = checkBash();
-  const bashPath = bash.ok ? bash.path : null;
-
-  let probeEnv;
-  if (options.refreshEnv && isWindows) {
-    const registry = await readRegistryPath();
-    if (!registry.error) {
-      probeEnv = { ...process.env, PATH: buildRefreshedPath(process.env.PATH || '', registry) };
-    }
+  for (const check of mapped) {
+    checks.push(check);
+    if (check.status === 'WARN') issues += 1;
   }
-
-  // Build parallel checks for each tool
-  const toolChecks = GATE_CLI_TOOLS.map(async (entry) => {
-    const toolName = entry.tool;
-    const result = await detectCliToolAsync(toolName, isWindows, { bashPath, env: probeEnv });
-    return { entry, toolName, result };
-  });
-
-  // Run ALL tool checks in parallel
-  const results = await Promise.allSettled(toolChecks);
-
-  // Collect results (maintain original order)
-  for (const settled of results) {
-    if (settled.status === 'rejected') continue;
-    const { entry, result } = settled.value;
-    const gateLabels = entry.gates.join(', ');
-
-    if (result.available) {
-      checks.push({
-        name: `CLI tool: ${entry.tool} (${gateLabels})`,
-        status: 'PASS',
-        detail: result.version || 'available',
-      });
-    } else {
-      const installCmd = getToolInstallCmd(entry, platform);
-      checks.push({
-        name: `CLI tool: ${entry.tool} (${gateLabels})`,
-        status: 'WARN',
-        detail: `Not found — install with: ${installCmd}`,
-      });
-      issues++;
-    }
-  }
-
   return issues;
 }
 
