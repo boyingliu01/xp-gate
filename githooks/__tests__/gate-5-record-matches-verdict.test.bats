@@ -44,7 +44,8 @@ setup() {
     return 1
   }
 
-  printf '%s\n' "$window" | grep -q 'GATE_5_DETAIL=' || {
+  # The assignment may be an append: see githooks/lib/gate-status.sh.
+  printf '%s\n' "$window" | grep -qE '(GATE_5_DETAIL=|xp_gate_detail_append GATE_5_DETAIL)' || {
     echo "The BLOCKED coverage branch assigns no GATE_5_DETAIL."
     echo "The persisted report will carry an empty reason."
     return 1

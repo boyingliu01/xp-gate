@@ -165,6 +165,16 @@ _gate5_coverage_usable() {
 # stop: see scripts/wrap-gate-entries.cjs for why the two are equivalent
 # here, and why sub-shell exits are deliberately left as `exit`.
 gate_5_run() {
+# Shared verdict rules: strongest verdict wins, details append.
+# Loaded here because gate-5 walks PROJECT_LANGS and used to let the last
+# language replace the reason of an earlier one (see githooks/lib/gate-status.sh).
+_GATE_STATUS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/gate-status.sh"
+if [ -r "$_GATE_STATUS_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$_GATE_STATUS_LIB"
+fi
+unset _GATE_STATUS_LIB
+
 # GATE 5: Tests & Coverage Combined (Combines Old Gates 3 - Tests and 4 - Coverage)
 # Uses adapter system to run tests + coverage for language
 # 
@@ -189,12 +199,12 @@ GATE_5_STATUS=""
 if ! gate_enabled 5; then
   echo "⏭️  SKIPPED - Gate 5: Tests & coverage (not selected by XP_GATE_ONLY_GATE)"
   GATE_5_STATUS="SKIP"
-  GATE_5_DETAIL="not_selected"
+  xp_gate_detail_append GATE_5_DETAIL "not_selected"
 
 elif [ "$PROJECT_LANG" = "documentation-only" ] || [ "$DOCS_ONLY_COMMIT" = true ]; then
   echo "⏭️  SKIPPED - Tests & coverage (documentation-only commit — no code changed to test)."
   GATE_5_STATUS="SKIP"
-  GATE_5_DETAIL="docs_only_change"
+  xp_gate_detail_append GATE_5_DETAIL "docs_only_change"
 
 else
   # ========================================================================
@@ -817,7 +827,7 @@ else
     TESTS_EXIT_CODE=0
     TESTS_SKIPPED=true
     GATE_5_STATUS="SKIP"
-    GATE_5_DETAIL="no_code_files_changed"
+    xp_gate_detail_append GATE_5_DETAIL "no_code_files_changed"
     GATE_5_END=$(gate_start_ms)
     GATE_5_ELAPSED=$((GATE_5_END - GATE_5_START))
     echo "   ⏱️  Gate 5: ${GATE_5_ELAPSED}ms (skipped — no code changes)"
@@ -1055,7 +1065,7 @@ else
           _delegated_to="$(adapter_test_delegation_target)"
           echo "ℹ️  ${CURRENT_LANG}: tests run in ${_delegated_to}, not at commit time."
           echo "   Not checked by this gate -- verified on push/PR instead."
-          GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests delegated to ${_delegated_to}"
+          xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests delegated to ${_delegated_to}"
           DELEGATED_LANGS="${DELEGATED_LANGS:+${DELEGATED_LANGS} }${CURRENT_LANG}"
         elif adapter_declares_coverage_runs_tests; then
           echo "ℹ️  ${CURRENT_LANG}: coverage run includes the tests — deferring test execution to a single pass."
@@ -1075,7 +1085,7 @@ else
           # Deliberately NOT appended to DELEGATED_LANGS: that variable is reported
           # further down as "tests delegated to CI", and a coverage-run deferral is
           # not a CI delegation. Reusing it would relabel this case as the other.
-          GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests deferred to the coverage run"
+          xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests deferred to the coverage run"
         else
           TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
           TESTS_EXIT_CODE=$?
@@ -1475,7 +1485,7 @@ else
               # empty -- and an empty status renders as SKIP, so the summary line
               # one inch below reported a skip for a commit that was blocked.
               GATE_5_STATUS="BLOCK"
-              GATE_5_DETAIL="coverage_below_floor: typescript coverage under the 80% floor"
+              xp_gate_detail_append GATE_5_DETAIL "coverage_below_floor: typescript coverage under the 80% floor"
               echo "❌ BLOCKED - TypeScript coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1620,7 +1630,7 @@ else
       # gate's status variable, so the assignment belongs here, at the call site.
       if ! enforce_python_coverage; then
         GATE_5_STATUS="BLOCK"
-        GATE_5_DETAIL="coverage_below_floor: python coverage under the 80% floor"
+        xp_gate_detail_append GATE_5_DETAIL "coverage_below_floor: python coverage under the 80% floor"
         return 1
       fi
       ;;
@@ -1707,7 +1717,7 @@ else
               # empty -- and an empty status renders as SKIP, so the summary line
               # one inch below reported a skip for a commit that was blocked.
               GATE_5_STATUS="BLOCK"
-              GATE_5_DETAIL="coverage_below_floor: java coverage under the 80% floor"
+              xp_gate_detail_append GATE_5_DETAIL "coverage_below_floor: java coverage under the 80% floor"
               echo "❌ BLOCKED - Java coverage ${COVERAGE_ROUNDED}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1792,7 +1802,7 @@ else
               # Record the verdict as well as printing it -- see the typescript branch
               # above for the measurement. An unassigned status renders as SKIP.
               GATE_5_STATUS="BLOCK"
-              GATE_5_DETAIL="coverage_below_floor: flutter/dart coverage under the 80% floor"
+              xp_gate_detail_append GATE_5_DETAIL "coverage_below_floor: flutter/dart coverage under the 80% floor"
               echo "❌ BLOCKED - Flutter/Dart coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1861,7 +1871,7 @@ else
         if [ -z "${GATE_5_STATUS:-}" ]; then
           GATE_5_STATUS="SKIP"
         fi
-        GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }powershell: no Pester tests (coverage not applicable)"
+        xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }powershell: no Pester tests (coverage not applicable)"
         COVERAGE_ENFORCED=false
       elif [ -f "coverage.xml" ]; then
         # The threshold is passed INTO node: the verdict used to be computed
@@ -1905,7 +1915,7 @@ else
               # Record the verdict as well as printing it -- see the typescript branch
               # above for the measurement. An unassigned status renders as SKIP.
               GATE_5_STATUS="BLOCK"
-              GATE_5_DETAIL="coverage_below_floor: powershell coverage under the 80% floor"
+              xp_gate_detail_append GATE_5_DETAIL "coverage_below_floor: powershell coverage under the 80% floor"
               echo "❌ BLOCKED - PowerShell coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
               return 1
             fi
@@ -1959,7 +1969,7 @@ else
         echo "    Nothing can produce a coverage report here, so the floor is not applicable."
         echo "    This is NOT a pass: add tests and coverage is enforced again."
         GATE_5_STATUS="SKIP"
-        GATE_5_DETAIL="${CURRENT_LANG}: no test sources (coverage not applicable)"
+        xp_gate_detail_append GATE_5_DETAIL "${CURRENT_LANG}: no test sources (coverage not applicable)"
         COVERAGE_ENFORCED=false
       else
       COVERAGE_ENFORCED=true
@@ -2065,7 +2075,7 @@ else
             # verdict that only reaches the console is a verdict the journal
             # contradicts.
             GATE_5_STATUS="BLOCK"
-            GATE_5_DETAIL="coverage_below_floor: ${CURRENT_LANG} ${COVERAGE_PERCENT}% < ${COVERAGE_THRESHOLD:-80}%"
+            xp_gate_detail_append GATE_5_DETAIL "coverage_below_floor: ${CURRENT_LANG} ${COVERAGE_PERCENT}% < ${COVERAGE_THRESHOLD:-80}%"
             echo "❌ BLOCKED - ${CURRENT_LANG} coverage ${COVERAGE_PERCENT}% below ${COVERAGE_THRESHOLD:-80}% threshold"
             return 1
           fi
@@ -2094,7 +2104,7 @@ else
           # return. A verdict that only reaches the console is a verdict the journal
           # contradicts.
           GATE_5_STATUS="BLOCK"
-          GATE_5_DETAIL="coverage_not_determined: no standard report file for ${CURRENT_LANG}"
+          xp_gate_detail_append GATE_5_DETAIL "coverage_not_determined: no standard report file for ${CURRENT_LANG}"
           return 1
         fi
       fi
@@ -2210,7 +2220,7 @@ else
   # summary is what a reader keeps and what the journal records.
   if [ -n "${DELEGATED_LANGS:-}" ]; then
     GATE_5_STATUS="SKIP"
-    GATE_5_DETAIL="${GATE_5_DETAIL:+${GATE_5_DETAIL}; }tests delegated to CI for: ${DELEGATED_LANGS}"
+    xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }tests delegated to CI for: ${DELEGATED_LANGS}"
   elif [ -z "$GATE_5_STATUS" ]; then
     GATE_5_STATUS="PASS"
   fi
@@ -2232,7 +2242,7 @@ if [ "${PARTIAL_TEST_RUN:-false}" = "true" ]; then
   # Never overwrite a reason the branch itself recorded (docs_only_change,
   # no_code_files_changed, ...) -- those explain a different verdict.
   if [ -z "${GATE_5_DETAIL:-}" ] && [ "$GATE_5_STATUS" = "PASS" ]; then
-    GATE_5_DETAIL="partial_test_run_coverage_not_applicable"
+    xp_gate_detail_append GATE_5_DETAIL "partial_test_run_coverage_not_applicable"
   fi
 else
   GATE_5_COVERAGE_APPLIES_TO="project"
@@ -2266,7 +2276,7 @@ fi
   # dominated by process-startup noise and would just add bytes.
   _g5_elapsed=$(( $(gate_start_ms) - GATE_5_START ))
   if [ "${_g5t_a:-0}" != "0" ] && [ "$_g5_elapsed" -ge 3000 ]; then
-    GATE_5_DETAIL="${GATE_5_DETAIL:-} seg=pre:${_g5t_focus}ms,5a:${_g5t_a}ms,5b:${_g5t_b}ms,5c:${_g5t_c}ms,total:${_g5_elapsed}ms"
+    xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:-} seg=pre:${_g5t_focus}ms,5a:${_g5t_a}ms,5b:${_g5t_b}ms,5c:${_g5t_c}ms,total:${_g5_elapsed}ms"
   fi
 
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
@@ -2362,7 +2372,7 @@ _gate5_go_coverage_arm() {
     # Record the verdict as well as printing it -- see the typescript branch
     # above for the measurement. An unassigned status renders as SKIP.
     GATE_5_STATUS="BLOCK"
-    GATE_5_DETAIL="coverage_below_floor: go coverage under the 80% floor"
+    xp_gate_detail_append GATE_5_DETAIL "coverage_below_floor: go coverage under the 80% floor"
     echo "❌ BLOCKED - Go coverage ${total}% below ${COVERAGE_THRESHOLD:-80}% threshold"
     COV_EXIT=$((COV_EXIT || 1))
     return 1
