@@ -51,11 +51,13 @@
     ① `suite_out="$(...)"` 把整份套件输出先捕获，再 `printf | grep -q`（NUL 截断 + pipefail/SIGPIPE）；
     ② 「非零且无 `not ok` 就继续」把 bats 自身崩溃/被信号杀掉也降级成 INCOMPLETE，掩盖真实原因；
     ③ GIT_* 变量清单在 `adapter-common.sh`×2 与 `pre-commit` fallback 里三处手抄。
-  - technical = 无结论（0 字节）、feasibility = 停滞超 25 分钟仍无输出；
-    两席都不是 APPROVED，按 skill 规则**不构成 3/3 共识**。
-- [ ] 先核对一处口径：**这个 Windows 工作区里有 `.bats` 文件**（`githooks/__tests__/` 下 200+ 个），
-  而 feasibility 席看到的机器上 `find . -name '*.bats'` 为 0 —— 两者不是同一目录，
-  结论要按本工作区重测，别照抄。
+  - technical 席被后台拆分的一个子进程抢跑、输出文件互相删除而失败；feasibility 席先后两次
+    因网关无响应（>4 分钟）与 `OPENCODE_WHALECLOUD_API_KEY` 未导出而退出。
+    **两席都不是 APPROVED，按 skill 规则不构成 3/3 共识。**
+  - 部分席位给出的具体观察（如"仓库里 0 个 .bats"）与本工作区不符，属它读取了别处的检出版本；
+    采纳前必须在本工作区复核。
+- [ ] 先核对一处口径：**这个 Windows 工作区里有 `.bats` 文件**（`githooks/__tests__/` 下 200+ 个）。
+  别照抄席位里"仓库里 0 个 .bats"的观察，那来自它读到的另一份检出版本。
 - [ ] 生成证据（Round 1 全票 APPROVED 后）：`.code-walkthrough-result.json` 绑定 HEAD、`expires` = `timestamp` + 1h、
   三席 `requested_model` 与全局 `.delphi-config.json` 的席位逐字一致、`channel: external`、consensus ≥ 0.90。
   校验器：`~/.config/xp-gate/hooks/lib/validate-code-walkthrough.cjs`。
