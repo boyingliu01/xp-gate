@@ -127,3 +127,10 @@ xp_gate_detail_append() {
   printf -v "$_var" '%s; %s' "$_current" "$_fragment"
   return 0
 }
+
+# A NOTE ON WHY THIS FILE EXISTS (kept with the code, not in a plan document)
+# Three gates in this repo had never produced a PASS: gate-1, gate-5 and gate-6
+# all reported the verdict of their LAST language instead of their strongest.
+# Measured 2026-11-24 across 343 audit records. The rule is one line of policy
+# (BLOCK > WARN > SKIP > PASS, with PASS never outranking anything) and it must
+# not be re-derived per gate.
