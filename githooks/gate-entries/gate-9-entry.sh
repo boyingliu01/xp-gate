@@ -437,6 +437,15 @@ fi
 if [ "$GATE_9_TS_STATUS" = "BLOCK" ] || [ "$GATE_9_JAVA_STATUS" = "BLOCK" ]; then
   GATE_9_STATUS="BLOCK"
 fi
+# A SKIP must carry a reason. Measured 2026-11-23: all 19 gate-9 SKIP records in
+# .xp-gate/audit.jsonl had an empty reason, which makes the row indistinguishable
+# from "this gate decided nothing was needed" and from "the gate is broken".
+# The reason is only empty because this gate's two halves are TypeScript and Java:
+# a change set carrying neither has nothing for it to build, and that is the
+# honest answer. Recording it turns a blank into a statement.
+if [ "$GATE_9_STATUS" = "SKIP" ] && [ -z "${GATE_9_UNVERIFIED:-}" ]; then
+  GATE_9_UNVERIFIED="no_change_needing_build_integrity"
+fi
 # A PASS that leaves part of the change set unverified is still a PASS -- the
 # unverified language is backlog, not a defect in this commit -- but it must SAY
 # so. This is the same rule as everywhere else in this hook: never let the
