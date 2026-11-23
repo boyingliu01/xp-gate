@@ -228,6 +228,7 @@ else
   _g5t_focus=0
   _g5t_a=0
   _g5t_b=0
+  _g5t_c=0
   _g5t_mark() {
     local _now
     _now=$(gate_start_ms)
@@ -235,6 +236,7 @@ else
       focus) _g5t_focus=$(( _now - GATE_5_START )) ;;
       a)     _g5t_a=$(( _now - GATE_5_START )) ;;
       b)     _g5t_b=$(( _now - GATE_5_START )) ;;
+      c)     _g5t_c=$(( _now - GATE_5_START )) ;;
     esac
   }
   _g5t_mark focus
@@ -768,6 +770,8 @@ else
 
   # ============================================================================
   # ============================================================================
+  _g5t_mark c
+
   # Gate 5c: Semantic Annotation Check (#585)
   #
   # The check itself lives in lib/gate-5c-alignment.sh so its contract is
@@ -2245,7 +2249,7 @@ fi
   # dominated by process-startup noise and would just add bytes.
   _g5_elapsed=$(( $(gate_start_ms) - GATE_5_START ))
   if [ "${_g5t_a:-0}" != "0" ] && [ "$_g5_elapsed" -ge 3000 ]; then
-    GATE_5_DETAIL="${GATE_5_DETAIL:-} seg=pre:${_g5t_focus}ms,5a:${_g5t_a}ms,5b:${_g5t_b}ms,total:${_g5_elapsed}ms"
+    GATE_5_DETAIL="${GATE_5_DETAIL:-} seg=pre:${_g5t_focus}ms,5a:${_g5t_a}ms,5b:${_g5t_b}ms,5c:${_g5t_c}ms,total:${_g5_elapsed}ms"
   fi
 
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
