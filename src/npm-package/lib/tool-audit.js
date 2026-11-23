@@ -179,6 +179,16 @@ function resolveToolViaShell(tool, deps = {}) {
   // The helper lives beside the hooks, not inside this package: resolve it from
   // the project root, falling back to the installed hook tree.
   const helper = deps.helperPath || 'githooks/lib/toolchain-path.sh';
+  // `tool_is_available` (not just `resolve_tool_path`) because PRESENCE IS NOT
+  // EXECUTABILITY (#596/#841): a POSIX shim whose shebang names an interpreter
+  // that is not resolvable is `-x` and `command -v`-visible, answers
+  // `--version` on some paths, and dies at exec with 127 on every real scan. On
+  // WSL that shim is usually a `/mnt/c` Windows program, whose `--version`
+  // succeeds while a real file argument fails.
+  //
+  // Requiring executable proof keeps both directions honest: a tool that cannot
+  // run is reported missing (fail-closed, not fail-open), and a working Linux
+  // binary sitting off PATH is still found.
   const script = [
     `[ -r "${helper}" ] || exit 3`,
     `. "${helper}"`,
@@ -313,6 +323,7 @@ function withResolvedBinary(checkCmd, resolvedPath) {
 
 function probeValidity(checkCmd, runProbe, resolveFn) {
   let probe;
+  let resolvedPath = null;
   let thrown = '';
   try {
     // Resolve FIRST, so an installed-but-off-PATH tool is not reported missing.
@@ -320,6 +331,7 @@ function probeValidity(checkCmd, runProbe, resolveFn) {
     // reports honestly what the shell can see, instead of guessing.
     const toolName = String(checkCmd || '').trim().split(/\s/)[0];
     const resolved = resolveFn ? resolveFn(toolName) : null;
+    resolvedPath = resolved;
     probe = runProbe(withResolvedBinary(checkCmd, resolved));
   } catch (err) {
     // Keep the thrown message: "probe exited 1" alone cannot distinguish a
@@ -327,7 +339,7 @@ function probeValidity(checkCmd, runProbe, resolveFn) {
     thrown = String(err && err.message ? err.message : err);
     probe = { status: 1, stdout: '', stderr: thrown };
   }
-  return interpretProbe(probe, thrown);
+  return { ...interpretProbe(probe, thrown), resolvedPath };
 }
 
 /**
@@ -386,6 +398,13 @@ function buildRow(toolDef, { paths, distinctRealPaths, validity, latestVersion }
   const { currency, outdated } = classifyCurrency(available, installedVersion, latestVersion);
   const copies = classifyCopies(distinctRealPaths);
 
+  // WHERE the binary was found decides what the reader should do (#843): a tool
+  // found off PATH is installed but invisible to anything else that shells out,
+  // so the report must say so instead of implying a broken install.
+  const resolvedPath = validity.resolvedPath || null;
+  const onPath = resolvedPath ? distinctRealPaths.includes(resolvedPath) : true;
+  const resolution = !resolvedPath ? 'path' : (onPath ? 'path' : 'fallback');
+
   return {
     name: toolDef.name,
     available,
@@ -398,6 +417,8 @@ function buildRow(toolDef, { paths, distinctRealPaths, validity, latestVersion }
     distinctRealPaths,
     duplicated: copies.duplicated,
     coexistingCopies: copies.coexistingCopies,
+    resolvedPath,
+    resolution,
     systemCopies: copies.systemCopies,
     userCopies: copies.userCopies,
     // `version` is the banner line as reported; `installedVersion` is the parsed

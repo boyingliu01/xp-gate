@@ -1133,6 +1133,12 @@ function qualifiersOfRow(row) {
   } else if (row.currency === 'unknown') {
     parts.push('version currency unknown');
   }
+  // #843: say WHERE the binary was found. "Installed but not on PATH" and
+  // "not installed" look identical in a pass/fail column and call for opposite
+  // actions -- add it to PATH (or symlink it), versus install it.
+  if (row.available && row.resolution === 'fallback' && row.resolvedPath) {
+    parts.push(`found at ${row.resolvedPath} (not on PATH)`);
+  }
   if (!row.available && row.validityReason) parts.push(row.validityReason);
   return parts.join('; ');
 }

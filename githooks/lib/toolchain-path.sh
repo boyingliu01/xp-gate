@@ -150,6 +150,23 @@ tool_is_available() {
     # run.
     _hit=$(find_tool_in_original_path "$_tool")
   fi
+  if [ -z "$_hit" ]; then
+    # #843: the same user-bin tier `resolve_tool_path` searches.
+    #
+    # These two functions must agree on WHERE a tool may live, or the platform
+    # contradicts itself: `resolve_tool_path` finds ~/.local/bin/gitleaks and
+    # returns it, then `tool_is_available` fails to see the same file and the
+    # caller is told the tool is unusable. Measured 2026-11-24 with
+    # PATH=/usr/bin:/bin: gitleaks and lizard were resolved and then rejected.
+    local _user_bin
+    for _user_bin in "${HOME:-}/.local/bin" "${HOME:-}/bin"; do
+      [ -n "${HOME:-}" ] || continue
+      if [ -x "$_user_bin/$_tool" ]; then
+        _hit="$_user_bin/$_tool"
+        break
+      fi
+    done
+  fi
   [ -n "$_hit" ] || return 1
 
   # Found — now prove it is not a shim pointing at an unreachable interpreter.
