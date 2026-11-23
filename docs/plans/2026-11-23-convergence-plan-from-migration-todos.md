@@ -119,13 +119,22 @@ archlint 升级。拆开会有中间态测试红。
 | functions | 84 | 84.47 | — |
 | branches | 81 | 81.86 | 80（已达标，守住） |
 
-> ⚠️ **本机尚未拿到实测值**：vitest v8 provider 在**存在失败测试时不会写出覆盖率报告**
-> （试过 `--coverage.enabled`、改 `reportsDirectory`、关阈值，`coverage/` 里只留下 `.tmp`）。
-> 因此上表"迁移前实测"沿用 Windows 侧记录，**不要直接当作本机基线**。
-> 拿到本机数字有两条路：
-> (a) 先修掉 9 个既有失败，或
-> (b) 用 `--exclude` 排除失败的测试文件后单独跑一次。
-> **在拿到本机实测之前，不要动门槛**——那等于用另一个环境的数据做决定。
+> ✅ **本机实测已取得（2026-11-23）**：
+>
+> | 指标 | 门槛 | 本机实测 | Windows 侧记录 | 目标 |
+> |---|---|---|---|---|
+> | lines | 78 | **79.98%** | 78.78% | **90** |
+> | statements | 78 | **79.98%** | 78.78% | 跟随 lines |
+> | functions | 84 | **85.80%** | 84.47% | — |
+> | branches | 81 | **82.16%** | 81.86% | 80（已达标，守住） |
+>
+> 取得方式：vitest 的 v8 provider **在存在任何失败测试时不写报告**（`coverage/` 里只剩
+> `.tmp`；`--coverage.enabled`、改 `reportsDirectory`、关阈值都试过，无效）。用一份临时
+> 配置排除 5 个已知失败套件后测得，369 个文件全通过、4063 个测试通过。
+> 那份临时配置已删除——**它不是策略变更**。
+>
+> 通往 90 的起点比 Windows 记录高 1.2 个百分点，但差距仍是约 **10 个百分点**
+> （≈ 4900 行未覆盖）。分 85 → 88 → 90 三步仍然成立。
 
 分三步：**85 → 88 → 90**，每步单独提交。
 
@@ -164,37 +173,45 @@ archlint 升级。拆开会有中间态测试红。
 94 个 open issue 逐个修必然修不完（45 天开 181 关 85）。建 C1–C8 标签后**只做 C1 簇**。
 C8（设计/索引单）标 `needs-decision` 冻结，不让它稀释信号。
 
-### P3｜清理与收尾
+### P3｜清理与收尾 —— **大部分已完成（2026-11-23）**
 
-- `gate-7.sh` canonical 与 adapters 副本漂移（115 vs 106 行，注释差异）——
-  这是 `adapters-gate-mirror-parity` 红的直接原因
-- `fixture-hygiene` 的 4 处 bats 裸 `git commit`
-- `ac-reference-guard` 的 56 处超基线 AC 引用
-- BATS 分片权重（300/346 套件按 3000 ms 估价）
+- ✅ **`gate-7.sh` 副本顺序反了**（提交 `dadafab6`）。
+  不是注释差异：adapters 副本先探全局再探项目，而正本已经是项目优先。
+  这意味着 `~/.config/xp-gate/adapters/` 会遮蔽项目内适配器——AGENTS.md 警告的
+  "stale adapter overrides fresh"，且它改变的是**判定结果**而非仅版本。
+- ✅ **`fixture-hygiene` 的 4 处 bats 裸 `git commit`**（提交 `4a202cf4`）。
+  其中 `report-persisted-fields.bats` 的修复有讲究：它**必须**让钩子链跑
+  （断言的正是钩子写出的报告），所以不能加 `--no-verify`——那会让测试因错误原因通过。
+  改为在提交行上显式 pin `-c core.hooksPath="$REPO/githooks"`。
+- ✅ **`ac-reference-guard`**（提交 `170f32ec`）。
+  我的 58 个 `AC-TOOLS-*` 按决定登记进 `specification.yaml`（17 REQ）；
+  另有 56 处既有债务属于 8 个**规范里根本没有 REQ** 的系列（ANT/732/NR/PH/PF/ADR/
+  CCNRPT/858），替它们编需求等于伪造历史，故冻结进基线。
+- ✅ 环境修复（`/mnt/c` 污染、semgrep、DSH 插件、PATH 包装脚本）——见环境报告。
+- ⏳ BATS 分片权重（300/346 套件按 3000 ms 估价）
 
 ---
 
-## 4. 已知失败：9 个文件，全是既有缺陷
+## 4. 已知失败：**5 个文件**（原 9 个，本轮修掉 4 个）
 
-**在 `b6249b01` 的干净 worktree 上逐个复现确认**，不属于任何本轮改动。
+**每个都在 `b6249b01` 的干净 worktree 上复现确认过**，不属于任何本轮改动。
 
-| 测试 | 根因类别 |
+| 测试 | 根因 |
 |---|---|
-| `ac-reference-guard` | 56 处 AC 引用超冻结基线 |
-| `adapters-gate-mirror-parity` | `gate-7.sh` 副本漂移 |
+| `language-capability` | csharp 有 2 处未接线（2/2 稳定复现，非 flaky） |
+| `gate-10.test.ts` | 待定位 |
+| `warnings-baseline-budgets` | 待定位 |
 | `execution-surface-contract` | push-only 门禁清单不完整 |
-| `fixture-hygiene` | 4 处 bats 裸 `git commit` |
-| `hook-mirror-parity` | — |
 | `pre-push-resolution` | 期望 12 实得 13 |
-| `gate-10.test.ts` | — |
-| `language-capability` | csharp 2 处未接线（2/2 稳定复现） |
-| `warnings-baseline-budgets` | — |
 
-> **别把它们当成本机环境的回归**。它们在你迁移之前就红着。
-> 但也别永久容忍：其中 3 个（gate-7 漂移、fixture-hygiene、AC 引用）属于 P3，
-> 修完能让失败数降到 6。
+**本轮已修掉**：`ac-reference-guard`、`adapters-gate-mirror-parity`、`fixture-hygiene`、
+`hook-mirror-parity`（后者随 gate-7 修复自动转绿）。
 
----
+> **别把这 5 个当成本机环境的回归**——它们在你迁移之前就红着。
+> 但它们也**阻塞覆盖率测量**：vitest 的 v8 provider 在存在失败测试时不写任何报告。
+> 想把覆盖率棘轮做下去，这 5 个必须先清零，或长期维护一份排除配置（后者会让
+> 门槛在不知不觉中只对"能过的测试"生效，不建议）。
+
 
 ## 5. 三条如果违反就会白干的纪律
 
