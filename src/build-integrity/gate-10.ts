@@ -139,6 +139,38 @@ function compileFailureMessage(err: ExecFailure): string {
 }
 
 /** Reasons tsc cannot run at all; null means it is usable. */
+/**
+ * The placeholder `npx tsc` runs when TypeScript is installed nowhere. Measured
+ * 2026-11-23: it prints this banner and **exits 0**, so an exit-code-only probe
+ * calls it a working tsc. The probe succeeds while its evidence says the
+ * opposite -- this repo's recurring defect shape.
+ */
+const NPX_TSC_STUB_MARKER = 'This is not the tsc command you are looking for';
+
+/** Did the npx fallback run npm's placeholder? Only it can, so a resolved tsc
+ * script is never rejected for printing the phrase by coincidence. */
+function isNpxTscPlaceholder(resolvedTsc: string | null, result: { stdout?: unknown; stderr?: unknown }): boolean {
+  if (resolvedTsc !== null) return false;
+  return `${String(result.stdout || '')}\n${String(result.stderr || '')}`.includes(NPX_TSC_STUB_MARKER);
+}
+
+/** Probe whether tsc works: a skip REASON, or null when usable. Split out of
+ * `tscSkipReason` because inline it measured CCN 3 -> 5 against the baseline of
+ * 3 -- the ratchet was right that this is two jobs. */
+async function probeTscUsability(projectRoot: string, resolvedTsc: string | null): Promise<string | null> {
+  let result: { stdout?: unknown; stderr?: unknown };
+  try {
+    const probe = tscProbeInvocation(projectRoot, resolvedTsc);
+    result = await execFileAsync(probe.cmd, probe.args, probe.opts);
+  } catch {
+    return 'tsc is not available on PATH';
+  }
+  if (isNpxTscPlaceholder(resolvedTsc, result)) {
+    return 'tsc is not installed (npx resolved to its placeholder)';
+  }
+  return null;
+}
+
 const tscSkipReason = async (projectRoot: string): Promise<string | null> => {
   const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
   try {
@@ -146,14 +178,7 @@ const tscSkipReason = async (projectRoot: string): Promise<string | null> => {
   } catch {
     return 'No tsconfig.json found in project root';
   }
-  const resolvedTsc = findTscBinary(projectRoot);
-  try {
-    const probe = tscProbeInvocation(projectRoot, resolvedTsc);
-    await execFileAsync(probe.cmd, probe.args, probe.opts);
-  } catch {
-    return 'tsc is not available on PATH';
-  }
-  return null;
+  return probeTscUsability(projectRoot, findTscBinary(projectRoot));
 };
 
 /** Run the compile itself and map its failure modes onto gate statuses. */
