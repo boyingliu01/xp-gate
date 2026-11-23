@@ -55,6 +55,7 @@ if [ "$PROJECT_LANG" = "documentation-only" ]; then
 elif has_project_lang "powershell" 2>/dev/null || [ "$PROJECT_LANG" = "powershell" ]; then
   echo "     ℹ️  No PowerShell architecture tooling available"
      echo "     ⏭️  SKIPPED - Architecture validation (no tool for PowerShell)"
+  GATE_6_DETAIL="architecture_skipped: no PowerShell architecture tooling"
 
 else
   run_archlint() (
@@ -265,6 +266,14 @@ else
           # from docs/config-only commits without weakening the check at all.
           if ! printf '%s\n' "${XP_STAGED_ACM:-}" | grep -qE '\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|kts|rs|cpp|cc|cxx|c|h|hpp|swift|dart|cs|csx|fs|vb)$'; then
             echo "     ⏭️  SKIPPED - Architecture validation (no source files changed)"
+            GATE_6_DETAIL="architecture_skipped: no source files changed"
+            # Why this arm matters most: it is the one a docs/config commit
+            # actually takes. Measured 2026-11-23 -- three consecutive commits to
+            # THIS repo (touching .md/.sh/.cjs but never a .ts source) each spent
+            # 5.5 s here and wrote a gate-6 SKIP row with NO detail, making it the
+            # most expensive silent SKIP in a typical commit. The boy-scout arms
+            # fixed above are reached LATER than this one, so fixing those never
+            # helped this repository's own commits at all.
             ARCHLINT_OUTPUT=""
             ARCHLINT_EXIT=0
           elif [ -f "$PROJECT_ROOT/.architecture-baseline.json" ]; then
@@ -485,6 +494,7 @@ JAVAARCHROOTS
         else
           echo "     ℹ️  No *Architecture* test sources found under */src/test/java - skipping"
           echo "     ⏭️  SKIPPED - Architecture validation (no tests)"
+          GATE_6_DETAIL="architecture_skipped: no architecture tests in this project"
           # #537: no test files means Java architecture was NOT measured.
           if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
             GATE_6_REASON_BY_LANG["$CURRENT_LANG"]="architecture_not_configured"
@@ -559,6 +569,7 @@ CSARCHPROJ
         ;;
       *)
         echo "     ⏭️  SKIPPED - Architecture validation (not configured for $CURRENT_LANG)"
+        GATE_6_DETAIL="architecture_skipped: not configured for ${CURRENT_LANG}"
         # #537: archlint ships no detector for this language. Say so in a way
         # the quality report can read, instead of leaving the dimension silent.
         if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
@@ -643,6 +654,7 @@ CSARCHPROJ
     if [ -f "$PROJECT_ROOT/.architecture-skip" ]; then
       echo "     ⚠️  Architecture config missing but .architecture-skip present — allowed to skip"
       echo "     ⏭️  SKIPPED - Architecture validation (.architecture-skip exemption)"
+      GATE_6_DETAIL="architecture_skipped: .architecture-skip exemption present"
       # #537: an explicit exemption is "not applicable", not "tool missing".
       GATE_6_REASON="architecture_skip_exemption"
     else

@@ -76,3 +76,64 @@ setup() {
     return 1
   }
 }
+
+# ---------------------------------------------------------------------------
+# Second round, same file, different arms.
+#
+# The two cases above fixed the BOY SCOUT arms. Re-measuring afterwards showed
+# gate-6 still writing blank-detail SKIPs -- three consecutive commits to this
+# repo, 5.5 s each, no detail. Cause: those commits touch .md/.sh/.cjs and never
+# a .ts SOURCE file, so they take the "no source files changed" arm at line ~267,
+# which is reached EARLIER than the boy-scout arms. Fixing the boy-scout arms
+# could never have helped this repository's own commits.
+#
+# That is the lesson worth pinning: "I fixed the SKIP reason in gate-X" is not a
+# property of the gate, it is a property of the ARM. Each arm needs its own.
+# ---------------------------------------------------------------------------
+
+# AC-G6-SKIP-REASON-05
+@test "AC-G6-SKIP-REASON-05: the no-source-files arm records its reason" {
+  grep -q 'GATE_6_DETAIL="architecture_skipped: no source files changed"' "$GATE6" || {
+    echo "the 'no source files changed' arm still records nothing"
+    echo "-> this is the arm a docs/config commit actually takes"
+    return 1
+  }
+}
+
+# AC-G6-SKIP-REASON-06
+@test "AC-G6-SKIP-REASON-06: the no-powershell-tooling arm records its reason" {
+  grep -q 'GATE_6_DETAIL="architecture_skipped: no PowerShell architecture tooling"' "$GATE6" || {
+    echo "the 'no PowerShell tooling' arm still records nothing"
+    return 1
+  }
+}
+
+# AC-G6-SKIP-REASON-07: the general rule for the whole file. Every SKIP arm that
+# can actually reach the journal must set GATE_6_DETAIL within the few lines that
+# follow its echo. Arms inside the run_archlint subshell are excluded because a
+# variable set in a subshell cannot travel back out.
+@test "AC-G6-SKIP-REASON-07: no SKIP arm outside the subshell is left reasonless" {
+  local start end
+  start=$(grep -n 'run_archlint() (' "$GATE6" | head -1 | cut -d: -f1)
+  end=$(awk -v s="$start" 'NR>s && /^[[:space:]]*\)[[:space:]]*$/ {print NR; exit}' "$GATE6")
+  [ -n "$start" ] && [ -n "$end" ] || {
+    echo "could not locate the run_archlint subshell bounds"; return 1; }
+
+  local total bad=""
+  total=$(wc -l < "$GATE6")
+  local n
+  for n in $(grep -n 'SKIPPED - Architecture' "$GATE6" | cut -d: -f1); do
+    if [ "$n" -ge "$start" ] && [ "$n" -le "$end" ]; then continue; fi
+    # Look at the arm's own body: the next 4 lines must set a detail.
+    local last=$((n + 4)); [ "$last" -gt "$total" ] && last=$total
+    if ! sed -n "${n},${last}p" "$GATE6" | grep -q 'GATE_6_DETAIL='; then
+      bad="$bad $n"
+    fi
+  done
+
+  [ -z "$bad" ] || {
+    echo "SKIP arms with no GATE_6_DETAIL nearby:$bad"
+    echo "(prose alone never reaches the journal)"
+    return 1
+  }
+}
