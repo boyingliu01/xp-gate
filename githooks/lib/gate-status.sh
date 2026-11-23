@@ -101,9 +101,29 @@ xp_gate_detail_append() {
     printf -v "$_var" '%s' "$_fragment"
     return 0
   fi
-  case "$_current" in
-    *"$_fragment"*) return 0 ;;
-  esac
+  # De-duplicate on WHOLE `; `-separated segments, not on a substring of the
+  # concatenation.
+  #
+  # A substring test looks correct and is not: gate-5 walks its languages in
+  # three separate stages, so the same fragment arrives several times, and a
+  # fragment that is itself a PREFIX of an existing one ("shell: delegated" vs
+  # "shell: delegated (CI)") would be wrongly treated as already present. Split,
+  # compare, and rebuild.
+  local _segment _found=0
+  local _rest="$_current"
+  while [ -n "$_rest" ]; do
+    case "$_rest" in
+      *"; "*) _segment="${_rest%%; *}"; _rest="${_rest#*; }" ;;
+      *)      _segment="$_rest"; _rest="" ;;
+    esac
+    if [ "$_segment" = "$_fragment" ]; then
+      _found=1
+      break
+    fi
+  done
+  if [ "$_found" -eq 1 ]; then
+    return 0
+  fi
   printf -v "$_var" '%s; %s' "$_current" "$_fragment"
   return 0
 }
