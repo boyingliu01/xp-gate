@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.38.116.0] - 2026-11-23
+
+**Gate 6 的 150 次 SKIP：原因打印出来了，没有记下来。**
+
+### 发现
+
+`.xp-gate/audit.jsonl` 里 gate-6 有 **150 条 SKIP，没有一条带 `detail` 字段**——
+是键根本不存在，不是空值。于是记录无法区分：
+
+- 这个项目里没有 boy-scout 脚本
+- 脚本在，但 node/tsx 没装
+- 门禁根本没跑
+
+**而这个门禁其实算出了区别**，它打印了：
+
+```
+SKIPPED - Boy Scout Rule (not available in project)
+SKIPPED - Boy Scout Rule (Node.js/tsx not available)
+```
+
+然后把 `GATE_6_STATUS="SKIP"` 一设就走了，**没设 `GATE_6_DETAIL`**。
+散文传给了正在看提交的人，只有记录能传给事后追问的人。
+
+### 为什么 gate-6 这条尤其值得修
+
+一次 SKIP 花掉 5.5 秒。只有 SKIP 的记录无法回答那 5.5 秒该不该花：
+
+- **项目里没有这个脚本** → 那 5.5 秒永远买不到东西，可以不动
+- **工具链缺失** → 装上就能用，值得处理
+
+同一行 SKIP，两种完全相反的运维动作，而记录里它们一模一样。
+
+### 修复
+
+两条 SKIP 分支各自记录：
+`boy_scout_skipped: script not present in this project` /
+`boy_scout_skipped: node/tsx toolchain not available`。
+
+### 测试
+
+`githooks/__tests__/issue-g6-skip-reason.test.bats` 4 个用例，其中用例 3
+**要求两条原因必须是不同的字符串**——用一条共享原因能过前两个用例，
+但那就把整件事的意义抵消了。
+
+**证伪**：把两条原因改成同一字符串，用例 2 和 3 同时失败、用例 1 和 4 仍通过。
+
+### 附：这一轮我自己的一处判断错误
+
+我最初扫描这个缺陷时用的是 `reason` 字段，报出"**每个门禁 100% 的 SKIP 都无原因，
+共 1406 条**"，并据此判断这是 `record_gate_audit` 的**系统性缺陷**。
+
+**那是错的。** `gate-audit.ts` 的 schema 里根本没有 `reason` 字段，正确的字段是
+`detail`。用正确字段重扫：**1473 条 SKIP 里 917 条（62%）本来就带 detail**，
+真正缺的是 gate-6(150)、gate-10(125)、gate-4(92)、gate-7(83)、gate-11(69)、
+gate-9(19)、gate-12(9)、gate-0(8)。
+
+一个不存在的字段让我的扫描对**所有**门禁都返回"全缺"——包括那些根本没用在
+检查的东西。数字看起来很整齐（清一色 100%），而这本来该是第一个警报。
+把它写在这里，因为下一个用 grep 找"缺字段"的人会踩同一个坑。
+
 ## [0.38.115.0] - 2026-11-23
 
 **门禁×语言可用性矩阵刷新到当前版本，含一项 `衡量修复是否过头` 的对照。**

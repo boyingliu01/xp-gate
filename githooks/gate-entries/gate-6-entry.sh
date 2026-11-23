@@ -785,11 +785,18 @@ else
       else
         echo "     ℹ️  npx/tsx not available - skipping Boy Scout Rule"
         echo "     ⏭️  SKIPPED - Boy Scout Rule (Node.js/tsx not available)"
+        # The reason was printed and never recorded. Measured 2026-11-23: all 150
+        # gate-6 SKIP rows in .xp-gate/audit.jsonl had NO detail field at all, so
+        # the journal could not say whether the boy-scout script was absent, or the
+        # toolchain was, or the gate never ran. Prose reaches the person watching
+        # the commit; only the record reaches anyone asking later.
+        GATE_6_DETAIL="boy_scout_skipped: node/tsx toolchain not available"
       fi
     fi
   else
     echo "     ℹ️  Boy scout rule not available in project - skipping"
     echo "     ⏭️  SKIPPED - Boy Scout Rule (not available in project)"
+    GATE_6_DETAIL="boy_scout_skipped: script not present in this project"
   fi
 fi
 # A PASS here must mean 'the checks ran and found nothing'. The two
