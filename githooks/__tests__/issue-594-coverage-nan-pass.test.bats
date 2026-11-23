@@ -201,7 +201,7 @@ EOF
 @test "AC-601-01: a NaN coverage percentage is never reported as a pass" {
   # istanbul's real "Unknown" shape, not a hand-made NaN literal: this is the
   # input that produced the bug in the field.
-  stage_bad_coverage '"Unknown"'
+  stage_bad_coverage || return 1
 
   run_full_suite_hook
   local out="$output"
@@ -219,7 +219,7 @@ EOF
 }
 
 @test "AC-601-02: an unmeasurable percentage blocks instead of passing" {
-  stage_bad_coverage '"Unknown"'
+  stage_bad_coverage || return 1
 
   run_full_suite_hook
   local out="$output"
@@ -239,7 +239,7 @@ EOF
 @test "AC-601-03: a genuinely low percentage is still blocked, not mistaken for NaN" {
   # The control: a real number below the floor must reach the threshold branch and
   # BLOCK. Without this, "block on NaN" could be satisfied by blocking everything.
-  stage_bad_coverage '42'
+  stage_bad_coverage || return 1
 
   run_full_suite_hook
   local out="$output"
@@ -258,7 +258,7 @@ EOF
 @test "AC-601-03: a genuinely high percentage still passes" {
   # The other control: 95% must report a pass with the real threshold. If the fix
   # made the arm always block, this goes red.
-  stage_bad_coverage '95'
+  stage_bad_coverage || return 1
 
   run_full_suite_hook
   local out="$output"
@@ -315,7 +315,7 @@ EOF
   # working tree also carried another workstream's uncommitted source. A gate
   # that answers "how well is this commit tested" may not answer with a
   # measurement of whatever happens to be lying around.
-  leave_unstaged_coverage '42'
+  leave_unstaged_coverage || return 1
 
   run_full_suite_hook
   local out="$output"
@@ -338,7 +338,7 @@ EOF
   # The control guarding #601: the artefact being staged is exactly the case that
   # issue set out to honour ("a staged 42% never reached the threshold"). Scoping
   # evidence to the commit must not weaken that.
-  stage_bad_coverage '42'
+  stage_bad_coverage || return 1
 
   run_full_suite_hook
   local out="$output"

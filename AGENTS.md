@@ -125,7 +125,7 @@ XP-Gate — deterministic git quality gates + AI-driven multi-expert review (Del
 | 2 | Duplicate Code | jscpd (`jscpd.conf.json`) | >5% similarity |
 | 3 | Cyclomatic Complexity | lizard (CCN) | >5 warn, >10 block |
 | 4 | Principles | `src/principles/index.ts` (14 rules × 9 langs) | Any error/warning per .principlesrc |
-| 5 | Tests + Coverage | Adapter `test` + coverage | Test fail, coverage <80%. Gate 5a: new .ts/.tsx files BLOCK if no test. An adapter that cannot be sourced or located BLOCKS (it used to PASS as "nothing to run") |
+| 5 | Tests + Coverage | Adapter `test` + coverage | Test fail, coverage <80%. Gate 5a: new .ts/.tsx files BLOCK if no test. An adapter that cannot be sourced or located BLOCKS (it used to PASS as "nothing to run"). Shell suites run one at a time with `--abort` under a per-test `BATS_TEST_TIMEOUT` (default 300s, `XP_GATE_BATS_TEST_TIMEOUT` overrides) because bats has no default cap |
 | 6 | Architecture + Boy Scout | `.archlint.yaml` + `boy-scout.ts` | New warnings on modified files |
 | 7 | IaC Security | checkov / hadolint / kube-score / tflint | High-severity finding |
 | 8 | Secret Scanning | gitleaks (`.gitleaks.toml`) | Any leaked secret |

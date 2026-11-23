@@ -207,7 +207,7 @@ EOF
 EOF
 
   # #593: stage a real .java file so Gate 1 routes to the Java adapter.
-  add_java_source
+  add_java_source || return 1
   git add .
 
   run ./pre-commit
@@ -271,7 +271,7 @@ EOF
 </project>
 EOF
 
-  add_java_source
+  add_java_source || return 1
   git add .
 
   run ./pre-commit

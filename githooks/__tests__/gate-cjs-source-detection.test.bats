@@ -178,7 +178,7 @@ teardown() {
 
 @test "push containing only .mjs is NOT classified as documentation-only" {
   setup_push_fixture
-  run_pre_push_with_files "src/entry.mjs"
+  run_pre_push_with_files "src/tool.mjs"
 
   [[ ! "$output" =~ "Documentation-only push" ]]
   [[ "$output" =~ "GATE MW: CODE WALKTHROUGH VERIFIED" ]]

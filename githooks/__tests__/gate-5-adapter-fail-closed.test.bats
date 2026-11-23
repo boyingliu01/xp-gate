@@ -81,6 +81,7 @@ teardown() {
 # check first, and the assertion would then be about 5a rather than the adapter
 # arm under test.
 stage_modified_source() {
+  cd "$TEST_DIR" || return 1
   echo 'export const x = 2;' > src/foo.ts
   git add src/foo.ts
 }

@@ -28,7 +28,9 @@ teardown() {
 }
 
 create_ts_project() {
-  cd "$TEST_DIR"
+  # `|| return 1` is load-bearing: without it a failed cd to the fixture leaves
+  # `git init` and the project files in the repository being committed.
+  cd "$TEST_DIR" || return 1
   mkdir -p src
   echo '{"name":"test","version":"1.0.0"}' > package.json
   echo '{"compilerOptions":{"strict":true}}' > tsconfig.json

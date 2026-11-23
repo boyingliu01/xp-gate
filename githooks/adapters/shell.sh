@@ -183,17 +183,67 @@ run_tests() {
   # suite's timing can be printed. A single call was measured at ~1s per suite on
   # Windows with no GNU parallel (so no --jobs), i.e. a quarter of an hour with
   # nothing on stdout -- indistinguishable from a hung git commit.
-  local suite t0 elapsed suite_start=$SECONDS
+  #
+  # Per-test timeout: bats has NO default, so one wedged test (an inherited
+  # server fd, a `read` on a closed stdin, a git prompt) hangs the whole
+  # pre-commit forever. The cap turns that into a named failing test. 300s is
+  # far above this repo's slowest observed test (~112s, gate-0-protected-branch)
+  # and far below the wall time it protects. BATS_TEST_TIMEOUT only applies to
+  # test bodies, so a wrapped shellcheck/mypy still gets its own time.
+  #
+  # The suite ENVIRONMENT must not leak in, either. git exports GIT_DIR /
+  # GIT_WORK_TREE / GIT_INDEX_FILE to hooks and they override `git -C <dir>`
+  # and `cd`, so every suite that builds a fixture repo commits to the CALLER's
+  # repository instead (measured: the last-resort `git commit -m seed` in the
+  # fixtures landed on the project branch four times, and the fixture's own base
+  # commit vanished, failing "there is a base commit"). run_without_git_context
+  # is the same isolation pre-commit uses for every child it spawns.
+  local test_timeout="${XP_GATE_BATS_TEST_TIMEOUT:-300}"
+  # TAP suites print one line per test, so the tail is the verdict, not a sample.
+  local suite_tail_lines="${XP_GATE_BATS_TAIL_LINES:-15}"
+  local suite suite_rc suite_out t0 elapsed suite_start=$SECONDS exited_early=0
   for suite in $suites; do
     t0=$SECONDS
-    bats --abort "$suite" || {
-      elapsed=$((SECONDS - t0))
-      echo "❌ ${suite} failed after ${elapsed}s"
-      return 1
-    }
+    suite_out="$(run_without_git_context env BATS_TEST_TIMEOUT="$test_timeout" bats --abort "$suite" 2>&1)"
+    suite_rc=$?
+    # A failing suite is printed IN FULL: that is the only copy anyone gets
+    # (run_tests runs inside a command substitution), and the host's `head -50`
+    # would otherwise cut the verdict off -- measured: Gate 5 blocked with the
+    # failing suite ~4000 lines above its own "head -50". A passing suite only
+    # gets its tail: the TAP plan, the "Executed N instead of expected M"
+    # warning and the per-test timeout line are all at the end, and 273 full
+    # logs would bury the verdict just as effectively.
+    if [ -n "$suite_out" ]; then
+      if [ "$suite_rc" -eq 0 ]; then
+        printf '%s\n' "$suite_out" | tail -"$suite_tail_lines"
+      else
+        printf '%s\n' "$suite_out"
+      fi
+    fi
     elapsed=$((SECONDS - t0))
-    [ "$elapsed" -ge 5 ] && echo "   ✓ ${suite} (${elapsed}s)"
+    if [ "$suite_rc" -eq 0 ]; then
+      [ "$elapsed" -ge 5 ] && echo "   ✓ ${suite} (${elapsed}s)"
+      continue
+    fi
+    # "not ok" is the suite's verdict: stop here, as --abort intends. A
+    # non-zero exit WITHOUT one is bats reporting its own plan as truncated
+    # ("Executed N instead of expected M tests") rather than a failing test --
+    # measured with --abort: the next suite is entered, then exits 1 with no
+    # verdict. Not a verdict about THIS suite, so the loop goes on; otherwise
+    # one red suite would be reported as every later suite failing too.
+    if printf '%s\n' "$suite_out" | grep -q '^not ok '; then
+      echo "❌ ${suite} failed after ${elapsed}s (per-test cap ${test_timeout}s)"
+      return 1
+    fi
+    exited_early=1
+    echo "   ⚠️  ${suite} exited ${suite_rc} without a verdict (not \"not ok\"), continuing"
   done
+  if [ "$exited_early" -eq 1 ]; then
+    # Never claim a clean run over suites that never reached a verdict: the
+    # question "did the tests pass" has no answer for them.
+    echo "⚠️  Shell tests INCOMPLETE: some suite(s) exited without a verdict (see above)."
+    return 1
+  fi
   echo "✅ Shell tests passed (${count} suite(s), $((SECONDS - suite_start))s)"
   return 0
 }

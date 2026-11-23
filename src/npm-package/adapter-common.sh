@@ -30,13 +30,21 @@ detect_os_env() {
 # Git exports repository-local variables to hooks. Child test processes must
 # not inherit them, or nested git repositories modify the caller's repository.
 run_without_git_context() (
-  unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS
-  unset GIT_CONFIG_COUNT GIT_OBJECT_DIRECTORY GIT_DIR GIT_WORK_TREE
-  unset GIT_IMPLICIT_WORK_TREE GIT_GRAFT_FILE GIT_INDEX_FILE
-  unset GIT_NO_REPLACE_OBJECTS GIT_REPLACE_REF_BASE GIT_PREFIX
-  unset GIT_SHALLOW_FILE GIT_COMMON_DIR
+  # One list, also used by the bats fixtures (githooks/__tests__/helpers/).
+  # Enumerated by hand, `GIT_NAMESPACE` / `GIT_DEFAULT_HASH` were missing.
+  # shellcheck disable=SC2046  # word-splitting is the point: one name per word
+  unset $(git_hook_context_vars)
   "$@"
 )
+
+git_hook_context_vars() {
+  printf '%s\n' \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_CONFIG GIT_CONFIG_COUNT \
+    GIT_CONFIG_PARAMETERS GIT_DEFAULT_HASH GIT_DIR GIT_GRAFT_FILE \
+    GIT_IMPLICIT_WORK_TREE GIT_INDEX_FILE GIT_NAMESPACE GIT_NO_REPLACE_OBJECTS \
+    GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_REPLACE_REF_BASE GIT_SHALLOW_FILE \
+    GIT_WORK_TREE
+}
 
 # ---------------------------------------------------------------------------
 # C# / .NET manifests (#717)

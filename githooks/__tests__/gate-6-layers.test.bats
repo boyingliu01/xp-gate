@@ -21,7 +21,7 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   GATE="$REPO_ROOT/githooks/gate-6-layers.sh"
   WORK="$(mktemp -d)"
-  cd "$WORK"
+  cd "$WORK" || return 1
   # No git init: the gate takes the find() fallback for bare directories, which
   # is the path a user's freshly-created project hits before its first commit.
   export XP_GATE_LAYER_CONFIG="$WORK/architecture.yaml"
@@ -29,7 +29,7 @@ setup() {
 }
 
 teardown() {
-  cd /
+  cd "$BATS_TEST_DIRNAME" || return 1
   rm -rf "$WORK"
 }
 
@@ -51,6 +51,7 @@ YAML
 
 # A perfectly ordinary project: infra depends on domain, which is allowed.
 seed_clean_tree() {
+  cd "$WORK" || return 1
   mkdir -p src/domain src/infrastructure
   printf 'export class Entity {}\n' > src/domain/entity.ts
   printf 'import { Entity } from "../domain/entity";\nexport const x = Entity;\n' \

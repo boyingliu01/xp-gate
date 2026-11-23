@@ -23,6 +23,10 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   ADAPTER="$REPO_ROOT/githooks/adapters/shell.sh"
+  # The adapter now isolates each suite via run_without_git_context, which
+  # lives in adapter-common.sh (loaded by pre-commit before any adapter). A
+  # suite that sources shell.sh alone therefore fails for the wrong reason.
+  ADAPTER_COMMON="$REPO_ROOT/githooks/adapter-common.sh"
 }
 
 @test "AC-GATE-SHELL-TESTS-01: run_tests discovers .bats suites" {
@@ -60,6 +64,7 @@ STUB
     PATH='$work/bin:$ORIGPATH'
     export PATH
     # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
     . '$ADAPTER'
     run_tests 2>&1
   "
@@ -97,6 +102,7 @@ STUB
     PATH='$work/bin:$ORIGPATH'
     export PATH
     # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
     . '$ADAPTER'
     run_tests 2>&1
   "
@@ -138,6 +144,7 @@ STUB
     PATH='$work/bin:$ORIGPATH'
     export PATH
     # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
     . '$ADAPTER'
     run_tests 2>&1
   "
@@ -180,6 +187,7 @@ STUB
     PATH='$work/bin:$ORIGPATH'
     export PATH
     # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
     . '$ADAPTER'
     run_tests 2>&1
   "
@@ -187,6 +195,162 @@ STUB
   [[ "$output" == *"BATS_RAN:first.test.bats"* ]]
   [[ "$output" == *"BATS_RAN:second.test.bats"* ]]
   [[ "$output" == *"BATS_RAN:third.test.bats"* ]]
+}
+
+@test "AC-GATE-SHELL-TESTS-04: a wedged test is capped by BATS_TEST_TIMEOUT, not left to hang" {
+  # Observed on this repo's own pre-commit: bats has no default test timeout, so
+  # a test that blocks forever (inherited fd, `read` on closed stdin) held the
+  # commit open indefinitely. The adapter must pass a finite cap through.
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$work/bin" "$work/githooks/__tests__"
+
+  # Never run by the stub below; a literal long sleep here once leaked into the
+  # hook's own run as an orphaned `sleep 300` (its bats runner was killed).
+  cat > "$work/githooks/__tests__/hangs.test.bats" <<'SUITE'
+#!/usr/bin/env bats
+@test "wedged" {
+  sleep 120
+}
+SUITE
+
+  # Fake bats that only passes when it was handed a timeout.
+  cat > "$work/bin/bats" <<'STUB'
+#!/usr/bin/env bash
+if [ -n "${BATS_TEST_TIMEOUT:-}" ]; then
+  echo "TIMEOUT_SEEN:$BATS_TEST_TIMEOUT"
+fi
+exit 0
+STUB
+  chmod +x "$work/bin/bats"
+  printf 'node_modules/\n' > "$work/.gitignore"
+  git -C "$work" init -q -b test-branch 2>/dev/null
+  git -C "$work" add -A 2>/dev/null
+
+  ORIGPATH="$PATH"
+  run bash -c "
+    cd '$work' || exit 9
+    PATH='$work/bin:$ORIGPATH'
+    export PATH
+    # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
+    . '$ADAPTER'
+    run_tests 2>&1
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"TIMEOUT_SEEN:300"* ]]
+}
+
+@test "AC-GATE-SHELL-TESTS-04: the per-test cap is overridable for slower runners" {
+  # A CI runner slower than local must be able to raise the cap without editing
+  # the adapter; the override is read from the environment only.
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$work/bin" "$work/githooks/__tests__"
+
+  cat > "$work/githooks/__tests__/sample.test.bats" <<'SUITE'
+#!/usr/bin/env bats
+@test "trivially passing" {
+  [ 1 -eq 1 ]
+}
+SUITE
+
+  cat > "$work/bin/bats" <<'STUB'
+#!/usr/bin/env bash
+echo "TIMEOUT_SEEN:${BATS_TEST_TIMEOUT:-unset}"
+exit 0
+STUB
+  chmod +x "$work/bin/bats"
+  printf 'node_modules/\n' > "$work/.gitignore"
+  git -C "$work" init -q -b test-branch 2>/dev/null
+  git -C "$work" add -A 2>/dev/null
+
+  ORIGPATH="$PATH"
+  run bash -c "
+    cd '$work' || exit 9
+    PATH='$work/bin:$ORIGPATH'
+    export PATH
+    XP_GATE_BATS_TEST_TIMEOUT=900
+    export XP_GATE_BATS_TEST_TIMEOUT
+    # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
+    . '$ADAPTER'
+    run_tests 2>&1
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"TIMEOUT_SEEN:900"* ]]
+}
+
+@test "AC-GATE-SHELL-TESTS-05: a failing suite's output is not cut to a tail (Gate 5 prints head -50)" {
+  # Measured on this repo: Gate 5 blocked and printed "head -50" of a 4000-line
+  # log, so the failing suite's "not ok" never reached the terminal. A terminal
+  # that keeps only the last N lines of a FAILING suite repeats that defect.
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$work/bin" "$work/githooks/__tests__"
+  printf '#!/usr/bin/env bats\n@test "t" { true; }\n' > "$work/githooks/__tests__/a.test.bats"
+
+  # 40 passing lines then one failure: with a 15-line tail the failure is the
+  # only part that survives, so the marker must be a line the tail CANNOT keep.
+  cat > "$work/bin/bats" <<'STUB'
+#!/usr/bin/env bash
+echo "FAILURE_SENTINEL_MARKER"
+for i in $(seq 1 40); do echo "ok $i"; done
+echo "not ok 41 trivially failing"
+exit 1
+STUB
+  chmod +x "$work/bin/bats"
+  printf 'node_modules/\n' > "$work/.gitignore"
+  git -C "$work" init -q -b test-branch 2>/dev/null
+  git -C "$work" add -A 2>/dev/null
+
+  ORIGPATH="$PATH"
+  run bash -c "
+    cd '$work' || exit 9
+    PATH='$work/bin:$ORIGPATH'
+    export PATH
+    # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
+    . '$ADAPTER'
+    run_tests 2>&1
+  "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAILURE_SENTINEL_MARKER"* ]]
+  [[ "$output" == *"not ok 41"* ]]
+}
+
+@test "AC-GATE-SHELL-TESTS-05: a source-able adapter that exits without a verdict is not a pass" {
+  # Exit 1 with no "not ok" is bats reporting a truncated plan, not a verdict.
+  # If run_tests treated it as clean, a broken bats install would turn Gate 5
+  # green; treating it as a failure of THIS suite would misreport the blame.
+  # It is neither: the run is INCOMPLETE and the gate must not pass.
+  local work
+  work="$(mktemp -d)"
+  mkdir -p "$work/bin" "$work/githooks/__tests__"
+  printf '#!/usr/bin/env bats\n@test "t" { true; }\n' > "$work/githooks/__tests__/a.test.bats"
+  cat > "$work/bin/bats" <<'STUB'
+#!/usr/bin/env bash
+echo "bats warning: Executed 1 instead of expected 8 tests"
+exit 1
+STUB
+  chmod +x "$work/bin/bats"
+  printf 'node_modules/\n' > "$work/.gitignore"
+  git -C "$work" init -q -b test-branch 2>/dev/null
+  git -C "$work" add -A 2>/dev/null
+
+  ORIGPATH="$PATH"
+  run bash -c "
+    cd '$work' || exit 9
+    PATH='$work/bin:$ORIGPATH'
+    export PATH
+    # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
+    . '$ADAPTER'
+    run_tests 2>&1
+  "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"INCOMPLETE"* ]]
+  [[ "$output" != *"✅ Shell tests passed"* ]]
 }
 
 @test "AC-GATE-SHELL-TESTS-02: the shunit2 branch is no longer a silent no-op" {
@@ -211,6 +375,7 @@ STUB
   run bash -c "
     cd '$work' || exit 9
     # shellcheck source=/dev/null
+    . '$ADAPTER_COMMON'
     . '$ADAPTER'
     run_tests 2>&1
   "

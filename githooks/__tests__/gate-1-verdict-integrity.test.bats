@@ -87,6 +87,9 @@ HARNESS
 @test "AC-806-G1a: Go with golangci-lint missing records SKIP, not PASS" {
   # The defect, reproduced verbatim before the fix: the skip message printed and
   # GATE_1_STATUS stayed at its initial PASS.
+  # `|| return 1` everywhere a test leaves the repo root: a bare `cd` that fails
+  # leaves the fixture files in the repository this hook is committing.
+  cd "$FIXTURE" || return 1
   printf 'package main\n\nfunc main() {}\n' > main.go
   printf 'module demo\n\ngo 1.21\n' > go.mod
   run_gate_1 "go" "main.go" \
@@ -98,6 +101,7 @@ HARNESS
 }
 
 @test "AC-806-G1a: Python with ruff missing records SKIP, not PASS" {
+  cd "$FIXTURE" || return 1
   printf 'def f():\n    return 1\n' > a.py
   run_gate_1 "python" "a.py" \
     'command() { if [ "$1" = "-v" ] && [ "$2" = "ruff" ]; then return 1; fi; builtin command "$@"; }'
@@ -110,6 +114,7 @@ HARNESS
 @test "AC-806-G1a: a language with no adapter records SKIP, not PASS" {
   # The generic `*)` fallthrough: resolve_adapter_path returns nothing (stubbed
   # above), so the gate announces "no specific checks" and must say so.
+  cd "$FIXTURE" || return 1
   printf 'x\n' > a.rb
   run_gate_1 "ruby" "a.rb"
 
@@ -120,6 +125,7 @@ HARNESS
 
 @test "AC-806-G1a anti-vacuity: a passing check still records PASS" {
   # Guards the lazy fix "always set SKIP", which would make the gate useless.
+  cd "$FIXTURE" || return 1
   printf 'def f():\n    return 1\n' > a.py
   run_gate_1 "python" "a.py" \
     'command() { if [ "$1" = "-v" ] && [ "$2" = "ruff" ]; then return 1; fi; builtin command "$@"; }'
@@ -224,15 +230,19 @@ HARNESS
 
   # The analysis ran (anti-vacuity): its findings must be present.
   [[ "$GATE1_LOG" == *"MagicNumber"* ]] || [[ "$GATE1_LOG" == *"ktlint"* ]] || [[ "$GATE1_LOG" == *"detekt"* ]]
-  # ...and the gate must SAY the two entry points collapsed into one run.
+  # ...and the gate must SAY the two entry points collapsed into one run. That
+  # notice is printed only on the reuse branch, so a second run of the analysis
+  # cannot produce it.
   [[ "$GATE1_LOG" == *"are the same check for kotlin"* ]]
-  # The load-bearing assertion: the analysis RESULT block appears once. Asserting
-  # on the "Running lint check for kotlin" label instead was wrong -- that label
-  # is printed unconditionally before the decision, so it is present on both the
-  # fixed and the broken code and proves nothing. What must not be duplicated is
-  # the work: detekt prints one "Analysis failed with N weighted issues." line per
-  # invocation, so a double run produces it twice.
-  local findings
-  findings=$(printf '%s' "$GATE1_LOG" | grep -c "weighted issues" || true)
-  [ "$findings" -eq 1 ]
+  # The load-bearing assertion: exactly ONE analysis result block. Asserting on
+  # the "Running lint check for kotlin" label instead was wrong -- that label is
+  # printed unconditionally before the decision, so it is present on both the
+  # fixed and the broken code and proves nothing. Counting detekt's "N weighted
+  # issues" line is not portable: on a host without ktlint/detekt the adapter
+  # prints "No Kotlin lint tools" and no such line exists, which failed on a
+  # machine holding only the JDK. Both shapes print one header per analysis, so
+  # that header is what must not double.
+  local analyses
+  analyses=$(printf '%s' "$GATE1_LOG" | grep -c "Running static analysis for kotlin" || true)
+  [ "$analyses" -eq 1 ]
 }

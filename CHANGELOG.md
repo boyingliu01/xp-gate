@@ -57,9 +57,73 @@ Gate 5 的 `CODE_EXTENSIONS` 漏了 `rs`，于是"只有 Rust 变更"被判成"�
   263 个套件在 Windows 上实测约 1 秒/套件，一次红色提交也要把后面全部套件跑完
   才知道结论。改为 `bats --abort`（不用 `--filter-status`：它依赖上一次运行的记录，
   缺失时静默只跑子集或什么都不跑）。实测预提交从"数小时"降到按首个失败点截断。
+- **bats 每个用例都有超时上限（默认 300s，`XP_GATE_BATS_TEST_TIMEOUT` 可覆盖）**：
+  `--abort` 只解决"失败后还要跑完剩余套件"，解决不了"单个用例永远不返回"——bats
+  本身**没有默认超时**，一个继承来的服务器 fd、对已关闭 stdin 的 `read`、或 git
+  凭据提示就能把整次提交挂死，且没有任何输出。适配器现在以
+  `BATS_TEST_TIMEOUT=<cap>` 调用每个套件（它是子进程环境变量，故亦覆盖套件内
+  `@test` 之外的 bomb，例如直接 `sleep` 的 bomb 在 5s 上限下实测 11s 内 `not ok
+  ... # timeout after 5s` 且无残留进程）。300s 高于本仓库实测最慢用例（约 112s，
+  `gate-0-protected-branch-and-staging`），只为把"挂死"变成"点名失败"。
+- **bats 夹具不再能写进被提交的仓库根**：真 hook 提交时实测仓库根冒出 `a.py`（三份
+  同内容）、`a.rb`、`main.go`、`go.mod`——内容与本目录几个套件的夹具逐字相同，只是
+  那些写入没有先 `cd` 进夹具目录。一次 `setup` 里的 `cd` 失败就足以让夹具写进
+  **正在被提交的树**，而夹具里随后的 `git add -A` 会把它们塞进别人的提交。
+  新增 `githooks/__tests__/fixture-writes-stay-in-fixture.test.bats` 作为门禁：
+  逐文件扫描每个 `setup()`/`@test`/helper 方法体里的源文件写入，判定只有一条——**这块
+  有没有进过目录**。一次 `cd` 移动 shell 并对本块后续语句一直有效，`mkdir` 只覆盖它
+  名下路径；helper 里 `git init` 只移动 helper 自己（`make_repo() { cd "$WORK" || return 1;
+  git init -q .; }` 之后用例体的裸写入仍在根上），`run`/`bash -c` 这类子进程也不移动
+  调用方。一条线内的状态按书写顺序推进（`cd A && cd B` 落在 B），`( ... )` 组内的 `cd`
+  在 `)` 处作废，但组写的当行仍按它自己的 `cd` 判定。helper 整体判定"它给调用方留下
+  什么"，所以 `helper || return 1` 这种守卫调用的隔离算数（`cd` 失败会结束用例，之后
+  不会再有写入），而 helper 内部自身的裸写入不算发现。bats 1.13 会把源码里的
+  `@test name {` 改写成 `bats_test_function ...`，扫描器按改写后的形状识别（这条规则
+  正是在本文件里踩出来的：只认 `@test` 时本文件的 `setup()` 被算成从不闭合，整个文件
+  只剩一个块）。`for`/`if`/`case` 这类复合命令的体**不扫**：那里是循环变量在跑，
+  不是夹具在写（`for f in *.go; do > "$f".bak; done` 曾被读成裸写入 `*.go.bak`）。
+  扫描器解析失败、找不到真实 python3（Windows 上 `python3` 是退出 49 的商店别名）、
+  或一个 `.bats` 都没扫到时一律判失败，不当作"干净"。
+  按此契约修正了 6 个套件的真实缺陷：`gate-6-layers`、`gate-1-verdict-integrity`、
+  `gate-activation`、`gate-cjs-source-detection` 的写入前 `cd`，
+  `gate-5-adapter-fail-closed` 的 `stage_modified_source`，以及
+  `gate9-architecture` 的 `main.cpp` 与 `.skip-architecture-cpp`（改为写在夹具子目录
+  `src/cpp/`，语义不变——图省事写在夹具根的那几行正是本门禁要抓的形态）。
 
 ### 验证
 
+- `githooks/__tests__/fixture-writes-stay-in-fixture.test.bats`（4 例）：
+  - AC-01 全目录扫描无裸写入，扫描器崩溃按"有发现"计。
+  - AC-02 在 `$HELPER_DIR` 里生成一份探针 `.bats`，钉住七个发现（`a.py`、`after.go`、
+    `after.heredoc.go`、`early.go`、`guarded.go`、`payload.go`、`root.rs`）和五个不报
+    （`$WORK/main.go`、`chained.go`、`gen/b.rb`、`gen.rb`、`src/X/A.java`）。后几条源于
+    同一串解析缺陷：`git init` 曾被当成"进入目录"；`return 1` 曾把状态重置回根；
+    `<<'EOF'` 的引号在去引号后丢失、`<version>` 被读成 here-doc 开头，于是 payload 之后
+    的行全被吞；`if [ -f x ]` 这类不配对的 `(` 曾让 `events()` 丢词；`cd "$VAR"` 的
+    目标在去引号后消失，整行一度被当成"只读的 cd"而跳过其写入。
+  - AC-03 AC-01 对本文件有豁免（本文件要写着探针样本），而豁免必须**只**藏住样本那一行：
+    本文件的裸写入必须恰好 1 条且命中标记。往本文件里再塞一个裸写入用例时实测变红
+    （2026-11-18 复测：`not ok 3 ... wc -l = 1`）。
+  - AC-04 就是那个标记用例（`printf 'x' > ESCAPE.py`）。它必须排在扫描器 heredoc 之后：
+    bats 自己把 setup() 里的 `<<'SCAN'` 当成待终结的 here-doc，文件里**第一处** `SCAN`
+    行就把它结束了，写在它前面的 `@test` 对 bats 是未终结的块——**不报错，而是不按所写
+    运行**（本轮实测：它被算进上一个用例，却仍打印 `ok`）。标记不带前置 `cd`（除了
+    回到 `$BATS_TEST_DIRNAME` 的那一句），并且写完立刻删掉，套件跑完不在树里留文件；
+    AC-03 要证明的正是"根上的裸写入会被看见"，前置一个沙箱 `cd` 就把它变成了
+    "扫描器怎么读 cd"的测试。
+  - 反证（2026-11-18 复测）：在 `gate-activation.test.bats` 的用例体里注入
+    `printf ... > leak.go`，AC-01 点名 `gate-activation.test.bats:48:leak.go`；
+    在本文件里注入第二个 `printf 'x' > extra.py` 用例，AC-03 变红。把 AC-03 的标记改成
+    非源扩展名（`ESCAPE.web`）时 AC-03 变红而 AC-01/AC-02 仍绿。更早的反证：删掉
+    `gate-6-layers.seed_clean_tree` 的 `cd "$WORK" || return 1` 或删掉
+    `java-gate.add_java_source` 的 `mkdir -p`，各自让 AC-01 点名该文件。
+
+- **测试夹具在真实钩子里读错仓库（2026-11-17 提交时实测）**：git 把 `GIT_DIR`/
+  `GIT_WORK_TREE` 导出给钩子启动的每个进程，二者**优先于** `git -C <fixture>` 和
+  `cd`，于是 `git init` 在临时目录里只警告 `re-init`，后续 git 命令全部落在项目仓库上。
+  修前在钩子环境（`GIT_DIR=…/worktrees/<name>`）下实测：`adapter-shell-scope` 3 红、
+  `gate-0-version-consistency` 8 红、`rust-language-support` 3 红；修后三套全绿，
+  且把隔离去掉后各自重新变红（falsified）。
 - `githooks/__tests__/rust-language-support.test.bats`（新增 13 例）：Gate 0 识别、
   Gate 3 纳入分级、Gate 5 不再跳过、Gate 10 追加规则集、cargo 缺失时的
   fail-closed 语义。
@@ -68,6 +132,9 @@ Gate 5 的 `CODE_EXTENSIONS` 漏了 `rs`，于是"只有 Rust 变更"被判成"�
 - `githooks/__tests__/adapter-shell-tests.test.bats`（+2 例）：`run_tests` 必须把
   `--abort` 传给 bats；逐个套件调用时**每个被发现的套件都要真的执行**。两条都做过
   反证：去掉 `--abort`、或在首套件后 `return 0`，对应用例各自变红（已实测）。
+  再加 2 例（`AC-GATE-SHELL-TESTS-04`）：传给 bats 的 `BATS_TEST_TIMEOUT` 必须是
+  有限值且默认为 300；环境变量可覆盖为 900。两条同样反证过——把调用改回裸
+  `bats --abort` 后一起变红。
 - `githooks/__tests__/gate-3.test.bats`（+2 例）：Rust 文件被分级；人口过滤按路径列
   命中（用一份路径在该行的基线喂进去，断言不再整批丢弃）。
 - `githooks/__tests__/gate-13-compiler-strictness.test.bats`（34 例）：新增

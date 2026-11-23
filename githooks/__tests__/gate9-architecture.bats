@@ -99,6 +99,8 @@ EOF
   
   cd "$TEST_DIR"
   git init --quiet
+  # `.skip-architecture-cpp` is created by the case that needs it, in a
+  # directory of its own: see "C++ project passes with .skip-architecture-cpp".
   git config user.email "test@test.com"
   git config user.name "Test User"
   # #592: move off the default branch. `git init` creates master/main, both of
@@ -346,7 +348,8 @@ JACOCO
 }
 
 @test "C++ project blocked without skip marker" {
-  cat > main.cpp << 'EOF'
+  mkdir -p src/cpp
+  cat > src/cpp/main.cpp << 'EOF'
 int main() {
     return 0;
 }
@@ -360,14 +363,14 @@ EOF
 }
 
 @test "C++ project passes with .skip-architecture-cpp marker" {
-  cat > main.cpp << 'EOF'
+  mkdir -p src/cpp
+  cat > src/cpp/main.cpp << 'EOF'
 int main() {
     return 0;
 }
 EOF
+  : > src/cpp/.skip-architecture-cpp
 
-  touch .skip-architecture-cpp
-  
   git add .
   
   run ./pre-commit

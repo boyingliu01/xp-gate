@@ -20,6 +20,17 @@
 # packages[""]), and 0.38.5 in src/npm-package/package.json plus the four plugin
 # manifests. All consistent -- but nothing asserted it, which is the defect.
 
+# Under a real hook git exports GIT_DIR/GIT_WORK_TREE, and they win over a `cd`
+# into a fixture: git commands in the cases below then act on the project repo
+# instead (measured while committing through the hook). Dropped for the file,
+# using the same list the adapters isolate with.
+setup_file() {
+  # shellcheck source=/dev/null
+  source "$BATS_TEST_DIRNAME/../adapter-common.sh"
+  # shellcheck disable=SC2046  # one name per word, by design
+  unset $(git_hook_context_vars)
+}
+
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   GATE_0_ENTRY="$REPO_ROOT/githooks/gate-entries/gate-0-entry.sh"
