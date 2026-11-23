@@ -56,14 +56,24 @@ const GENERATOR = path.join(REPO_ROOT, 'src', 'npm-package', 'scripts', 'generat
 // canonical listing as soon as this file started checking githooks/lib. That made
 // REQ-E1-05 fail for a correct generator: the right answer is "not copied", and the
 // test was asserting "copied".
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode', '__pycache__', '__tests__']);
+//
+// `reinstall-xp-gate` is excluded for a packaging reason, not a tooling one: the
+// skill uninstalls and reinstalls xp-gate, so a copy inside the package would
+// delete itself mid-run. No mirror is expected to carry it.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.opencode', '__pycache__', '__tests__', 'reinstall-xp-gate']);
 const SKIP_FILES = new Set(['package-lock.json']);
 
 /** Every file under `dir` that the generator is expected to copy, relative, sorted. */
 function listFiles(dir) {
   const out = [];
   const walk = (current) => {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (err) {
+      throw new Error(`cannot read ${current}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) walk(full);
@@ -225,8 +235,15 @@ it('REQ-E1-04: generating never writes the canonical tree', () => {
     const map = new Map();
     for (const relative of listFiles(CANONICAL)) {
       const full = path.join(CANONICAL, relative);
-      const stat = fs.statSync(full);
-      map.set(relative, `${stat.size}:${stat.mtimeMs}:${fs.readFileSync(full).toString('base64')}`);
+      let stat;
+      let body;
+      try {
+        stat = fs.statSync(full);
+        body = fs.readFileSync(full);
+      } catch (err) {
+        throw new Error(`cannot read ${full}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      map.set(relative, `${stat.size}:${stat.mtimeMs}:${body.toString('base64')}`);
     }
     return map;
   };

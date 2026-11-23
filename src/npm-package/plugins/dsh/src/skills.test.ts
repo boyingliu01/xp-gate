@@ -12,6 +12,14 @@ const SKILLS_DIR = join(PLUGIN_ROOT, "skills")
 const REPO_SKILLS_DIR = resolve(PLUGIN_ROOT, "..", "..", "skills")
 
 /**
+ * Skills that deliberately never ship with the package, so a mirror is correct
+ * to omit them. `reinstall-xp-gate` uninstalls and reinstalls xp-gate; a copy
+ * inside the package would delete itself mid-run, so it is distributed to agent
+ * skill roots by its own installer instead.
+ */
+const NOT_SHIPPED = new Set(["reinstall-xp-gate"])
+
+/**
  * The expected set is the REPO's skill directories, discovered rather than
  * hardcoded. A hardcoded list silently drifts: it previously named 12 skills and
  * omitted one that prepack shipped, breaking parity (#448).
@@ -30,6 +38,7 @@ function repoSkills(): string[] {
   return entries
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
+    .filter((name) => !NOT_SHIPPED.has(name))
     .filter((name) => existsSync(join(REPO_SKILLS_DIR, name, "SKILL.md")))
     .sort()
 }

@@ -504,7 +504,12 @@ for mirror_tree in src/npm-package/build-integrity src/npm-package/skills; do
   [ -n "$canonical_tree" ] || continue
   [ -d "$mirror_tree" ] || continue
 
-  tree_diff=$(diff -rq -x '__tests__' "$canonical_tree" "$mirror_tree" 2>&1 || true)
+  # `reinstall-xp-gate` is deliberately NOT shipped in the npm package: it is the
+  # skill that uninstalls and reinstalls xp-gate, so a version living inside the
+  # package would delete itself mid-run. It is distributed to agent skill roots
+  # by its own installer and mirrored there, not here. Excluding it by name (not
+  # by glob) keeps the check honest about every other skill.
+  tree_diff=$(diff -rq -x '__tests__' -x 'reinstall-xp-gate' "$canonical_tree" "$mirror_tree" 2>&1 || true)
   [ -z "$tree_diff" ] || fail "mirror tree drift ($canonical_tree vs $mirror_tree):
 $tree_diff
 Fix: node src/npm-package/scripts/sync-package-content.js --fix"
