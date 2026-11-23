@@ -202,3 +202,74 @@ node scripts/analyze-gate-matrix.cjs <raw.log>
 
 最后两条尤其值得记住：**探测工具的缺陷会伪装成产品缺陷**，
 而且会让人朝完全错误的方向修。
+
+
+---
+
+## 九、2026-11-23 复测（0.38.114.0）—— 当前状态
+
+> 上面两张表是 2026-11-20 / 0.38.55.0 的历史记录，**保留不动**——
+> 它们是"当时测量结果"的证据，不是需要维护的当前状态。本节是当前状态。
+
+**版本**：0.38.114.0　**测量时间**：2026-11-23
+**方法**：`scripts/probe-gate-matrix.sh <lang>` 逐语言运行（整批运行时会在某些
+语言上长时间不返回，改成逐语言串行后有稳定输出），
+汇总用项目自带的分析器 `node scripts/analyze-gate-matrix.cjs <raw.log>`。
+
+### 9.1 矩阵
+
+| 语言 | 模式 | G0 | G1 | G2 | G3 | G8 | G10 | G7 | G5 | G6 | G4 | G9 | G11 | G12 | G13 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| typescript | clean | P | P | S | S | P | P | S | P | S | P | P | S | P | P |
+| typescript | dirty | P | N | N | N | N | N | N | N | N | N | N | S | W | B |
+| java | clean | P | P | P | P | P | P | S | S | N | N | P | S | P | W |
+| java | dirty | P | N | N | N | N | N | N | N | N | N | N | S | P | B |
+| go | clean | P | P | P | P | P | P | S | B | N | N | S | S | P | P |
+| go | dirty | P | N | N | N | N | N | N | N | N | N | N | S | P | B |
+| dart | clean | P | P | P | P | P | S | S | S | N | N | S | S | P | P |
+| dart | dirty | P | N | N | N | N | N | N | N | N | N | N | S | P | B |
+
+### 9.2 这一轮相对 0.38.55.0 的变化
+
+**G0 从"无记录"变为有一列判定（全 `P`）。**
+
+这是本轮修的缺陷：gate-0（版本一致性）在 `XP_GATE_ORDER` 排第一、能 BLOCK
+（审计里 58 次），却**完全不在质量报告里**——报告模板是手写的 gate1..gate13
+列表。gate-12b/12c 同样缺席。三者已补齐，并加了通用测试
+`issue-report-completeness.test.bats` 钉住"报告必须覆盖链上每个门禁"。
+
+矩阵里的 `G0` 列以前无法填写，现在能填了——**这一列本身就是那条修复的证据**。
+
+### 9.3 怎么读这张表
+
+**`N`（NOT_REACHED）不是缺陷。** dirty 行里几乎整行是 `N`，因为 G13
+（编译器严格性）在最前面就把提交拦下了。项目对此有明确规则：
+链停在哪，后面的门禁记 `NOT_REACHED` 而不是 `SKIP`——"没走到"和
+"走到了但跳过"必须可区分（`gate-report-not-reached.test.bats`）。
+
+所以 dirty 行的正确读法是：**缺陷被第一个能看见它的门禁抓住了**。
+真正要问的是「干净行有没有误拦」和「脏行有没有被抓住」。
+
+**干净行**：只有 `go` 被 G5 拦（覆盖率低于 80%），其余全部 PASS/SKIP，无误报。
+
+`go` 这条**是正确行为**，值得单独说明：go fixture 里有 `*_test.go` 但没有达到 80%
+覆盖率，G5 如实拦截。它与 csharp 形成对照——本轮修的正是那个区别：
+
+- csharp 有 `A.cs` 而**没有任何测试项目** → `SKIP | no test sources`（本轮修复）
+- go 有测试但**覆盖率不够** → `BLOCK | coverage_below_floor`（正确，保持）
+
+如果修复做成了"宽松处理缺失覆盖率"，go 这一行也会变成 SKIP，
+**那才是把真实缺陷放过去**。对照行是这次修复没有做过头的最好证据。
+
+### 9.4 覆盖缺口（诚实记录）
+
+本轮只跑通了 **4 种语言**（typescript / java / go / dart）。cpp 之后逐语言运行时
+长时间不返回，kotlin 和 python 同样。**这几个格子是空的，不是通过的。**
+
+不把它们填成"预期值"，因为"没测量"和"测量通过"必须可区分——
+这正是本项目最根本的规则，也是这份文档存在的理由。补测方式：
+
+```bash
+bash scripts/probe-gate-matrix.sh <lang>     # 单语言，看到输出即为完成
+node scripts/analyze-gate-matrix.cjs <raw>   # 汇总
+```
