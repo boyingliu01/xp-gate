@@ -671,9 +671,33 @@ function handleAuditStats(auditPath) {
     }
     printStatsTable(stats);
     printAnomalies(evalGateAuditModule('m.computeAnomalies()'));
+    printSkipReasons(evalGateAuditModule('m.computeSkipReasons()'));
   } catch (err) {
     console.error('Error computing stats:', err.message);
     process.exit(1);
+  }
+}
+
+/**
+ * Print WHY gates skipped, grouped by reason.
+ *
+ * The per-gate table above shows an execution rate; it cannot show whether a
+ * gate that never ran was healthy ("nothing to check"), misconfigured
+ * ("checker_missing") or broken. Those call for different actions and used to
+ * look identical. Reasons come from the `detail` field the gates already write.
+ */
+function printSkipReasons(buckets) {
+  console.log('');
+  if (!buckets || buckets.length === 0) {
+    console.log('Skip reasons       : none recorded (no SKIP rows)');
+    return;
+  }
+  const total = buckets.reduce((n, b) => n + b.count, 0);
+  console.log(`Skip reasons (${total} SKIP row(s)):`);
+  for (const b of buckets) {
+    const gates = b.gates.map((g) => `${g.gate_id}×${g.count}`).join(', ');
+    console.log(`  ${String(b.count).padStart(4)}  ${b.reason}`);
+    if (gates) console.log(`        ${gates}`);
   }
 }
 
