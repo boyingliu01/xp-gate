@@ -1065,7 +1065,7 @@ else
           _delegated_to="$(adapter_test_delegation_target)"
           echo "ℹ️  ${CURRENT_LANG}: tests run in ${_delegated_to}, not at commit time."
           echo "   Not checked by this gate -- verified on push/PR instead."
-          xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests delegated to ${_delegated_to}"
+          xp_gate_detail_append GATE_5_DETAIL "${CURRENT_LANG}: tests delegated to ${_delegated_to}"
           DELEGATED_LANGS="${DELEGATED_LANGS:+${DELEGATED_LANGS} }${CURRENT_LANG}"
         elif adapter_declares_coverage_runs_tests; then
           echo "ℹ️  ${CURRENT_LANG}: coverage run includes the tests — deferring test execution to a single pass."
@@ -1085,7 +1085,7 @@ else
           # Deliberately NOT appended to DELEGATED_LANGS: that variable is reported
           # further down as "tests delegated to CI", and a coverage-run deferral is
           # not a CI delegation. Reusing it would relabel this case as the other.
-          xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }${CURRENT_LANG}: tests deferred to the coverage run"
+          xp_gate_detail_append GATE_5_DETAIL "${CURRENT_LANG}: tests deferred to the coverage run"
         else
           TESTS_OUTPUT=$(run_without_git_context run_tests 2>&1)
           TESTS_EXIT_CODE=$?
@@ -1871,7 +1871,7 @@ else
         if [ -z "${GATE_5_STATUS:-}" ]; then
           GATE_5_STATUS="SKIP"
         fi
-        xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }powershell: no Pester tests (coverage not applicable)"
+        xp_gate_detail_append GATE_5_DETAIL "powershell: no Pester tests (coverage not applicable)"
         COVERAGE_ENFORCED=false
       elif [ -f "coverage.xml" ]; then
         # The threshold is passed INTO node: the verdict used to be computed
@@ -2220,7 +2220,16 @@ else
   # summary is what a reader keeps and what the journal records.
   if [ -n "${DELEGATED_LANGS:-}" ]; then
     GATE_5_STATUS="SKIP"
-    xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:+${GATE_5_DETAIL}; }tests delegated to CI for: ${DELEGATED_LANGS}"
+    # Pass ONLY the new fragment. This used to re-prepend the existing detail
+    # (`${GATE_5_DETAIL:+${GATE_5_DETAIL}; }...`), so every earlier segment was
+    # duplicated inside the fragment itself -- and since the append de-duplicates
+    # whole segments, a fragment that ALREADY CONTAINS them is never equal to any
+    # one of them and slips through. Measured: the persisted reason read
+    #
+    #   shell: tests delegated ...; shell: tests delegated ...; powershell: ...
+    #
+    #   -- the same sentence four times, unreadable.
+    xp_gate_detail_append GATE_5_DETAIL "tests delegated to CI for: ${DELEGATED_LANGS}"
   elif [ -z "$GATE_5_STATUS" ]; then
     GATE_5_STATUS="PASS"
   fi
@@ -2276,7 +2285,7 @@ fi
   # dominated by process-startup noise and would just add bytes.
   _g5_elapsed=$(( $(gate_start_ms) - GATE_5_START ))
   if [ "${_g5t_a:-0}" != "0" ] && [ "$_g5_elapsed" -ge 3000 ]; then
-    xp_gate_detail_append GATE_5_DETAIL "${GATE_5_DETAIL:-} seg=pre:${_g5t_focus}ms,5a:${_g5t_a}ms,5b:${_g5t_b}ms,5c:${_g5t_c}ms,total:${_g5_elapsed}ms"
+    xp_gate_detail_append GATE_5_DETAIL " seg=pre:${_g5t_focus}ms,5a:${_g5t_a}ms,5b:${_g5t_b}ms,5c:${_g5t_c}ms,total:${_g5_elapsed}ms"
   fi
 
 record_gate_audit "gate-5" "tests-coverage" "$GATE_5_STATUS" "0" "$GATE_5_START" "${GATE_5_DETAIL:-}"
