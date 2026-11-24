@@ -355,6 +355,17 @@ export function computeStats(
 export interface SkipReasonBucket {
   /** The reason as recorded (from `detail`, or `(no reason)` when absent). */
   reason: string;
+  /**
+   * True when the row records a SKIP without a usable reason.
+   *
+   * `skip_reason=UNRECORDED` is what gate-3 writes when it skipped and had no
+   * GATE_3_REASON -- a deliberate marker, not an explanation. Round-1 review
+   * (expert A) pointed out that without this flag a downstream counter treats it
+   * as just another reason string, so "26 skips explained" and "26 skips, 3 of
+   * them unexplained" read the same. An unexplained skip is a defect in the
+   * gate, and the aggregate has to be able to say so.
+   */
+  unexplained: boolean;
   /** How many SKIP records carried it. */
   count: number;
   /** Which gates skipped for this reason, most frequent first. */
@@ -379,6 +390,15 @@ export interface SkipReasonBucket {
  * @param repoRoot project root containing .xp-gate/audit.jsonl
  * @returns buckets sorted by count desc, then reason
  */
+/**
+ * The marker gate-3 writes when it skipped without recording a reason.
+ *
+ * Kept as a constant so the writer (githooks/adapters/gate-3.sh) and this reader
+ * agree on one spelling; a second literal would let them drift and the flag
+ * above would quietly stop matching.
+ */
+const UNEXPLAINED_SKIP_REASON = 'skip_reason=UNRECORDED';
+
 export function computeSkipReasons(repoRoot: string = process.cwd()): SkipReasonBucket[] {
   const logPath = join(repoRoot, AUDIT_DIR, AUDIT_FILE);
   const entries = parseAuditEntries(logPath);
@@ -398,6 +418,10 @@ export function computeSkipReasons(repoRoot: string = process.cwd()): SkipReason
   for (const [reason, b] of Array.from(byReason.entries())) {
     out.push({
       reason,
+      // Substring, not equality: gate-3 records the marker as ONE SEGMENT of a
+      // composite detail ("ccn_threshold=5; skip_reason=UNRECORDED"), so an
+      // equality test would never fire on the exact rows it was written for.
+      unexplained: reason.includes(UNEXPLAINED_SKIP_REASON) || reason === '(no reason)',
       count: b.count,
       gates: Array.from(b.gates.entries())
         .map(([gate_id, count]) => ({ gate_id, count }))

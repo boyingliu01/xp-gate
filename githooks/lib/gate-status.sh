@@ -87,28 +87,40 @@ xp_gate_status_escalate() {
 #
 # Detail is a DESCRIPTION, not a verdict: several languages may each have
 # something to say, and replacing the earlier text is what made a skip reason
-# unexplainable. Duplicates are suppressed so a language that reports twice in
-# one run does not repeat itself.
+# unexplainable.
+#
+# SEPARATOR INJECTION (round-1 review, expert B): the first version joined with
+# `; ` and de-duplicated by splitting on that same string. A fragment that
+# CONTAINS `; ` was therefore split into pieces, never matched any single
+# segment, and got appended every time -- and a later reader could not tell the
+# pieces from separate reasons. Measured: appending "x; y" produced a value that
+# re-appended itself as two segments.
+#
+# The fix is to keep the pieces unmistakable: a fragment's internal separators
+# are neutralised on the way in, so the recorded text never contains the join
+# separator. `; ` stays the human-readable join because every existing consumer
+# parses the field that way.
 #
 # Usage:
 #   xp_gate_detail_append GATE_6_DETAIL "powershell: PSSA module not installed"
 xp_gate_detail_append() {
   local _var="${1:?variable name required}"
   local _fragment="${2:-}"
-  [ -n "$_fragment" ] || return 0
+  # Whitespace-only is "no reason given", not a reason of spaces.
+  case "$_fragment" in
+    *[![:space:]]*) ;;
+    *) return 0 ;;
+  esac
+  # Flatten internal separators so one fragment is always one segment.
+  _fragment="${_fragment//; /, }"
+
   local _current="${!_var:-}"
   if [ -z "$_current" ]; then
     printf -v "$_var" '%s' "$_fragment"
     return 0
   fi
-  # De-duplicate on WHOLE `; `-separated segments, not on a substring of the
-  # concatenation.
-  #
-  # A substring test looks correct and is not: gate-5 walks its languages in
-  # three separate stages, so the same fragment arrives several times, and a
-  # fragment that is itself a PREFIX of an existing one ("shell: delegated" vs
-  # "shell: delegated (CI)") would be wrongly treated as already present. Split,
-  # compare, and rebuild.
+  # Compare whole segments. They cannot contain "; " after the flattening above,
+  # so the split is unambiguous.
   local _segment _found=0
   local _rest="$_current"
   while [ -n "$_rest" ]; do

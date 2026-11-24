@@ -114,3 +114,30 @@ describe('computeSkipReasons', () => {
     }
   });
 });
+
+describe('computeSkipReasons: unexplained skips are named', () => {
+  /**
+   * @test REQ-AUDIT-SKIP-REASON
+   * @intent 未记录原因的 SKIP 必须被单独标记，而不是与有原因的跳过分在一列里。
+   *         门禁写了 `skip_reason=UNRECORDED` 表示"我跳过了但没记原因"——那是
+   *         缺陷，不是解释。汇总若把它当普通字符串，读者无法区分
+   *         "26 条跳过都解释了" 与 "26 条里有 3 条没解释"。
+   * @covers AC-AUDIT-SKIP-REASON-07
+   */
+  it('flags UNRECORDED and reason-less rows as unexplained', () => {
+    const dir = journal([
+      entry('gate-3', 'SKIP', 'ccn_threshold=5; skip_reason=UNRECORDED'),
+      entry('gate-5', 'SKIP', 'no_iac_files_changed'),
+      entry('gate-6', 'SKIP'),
+    ]);
+    try {
+      const buckets = computeSkipReasons(dir);
+      const byReason = Object.fromEntries(buckets.map((b) => [b.reason, b]));
+      expect(byReason['ccn_threshold=5; skip_reason=UNRECORDED'].unexplained).toBe(true);
+      expect(byReason['no_iac_files_changed'].unexplained).toBe(false);
+      expect(byReason['(no reason)'].unexplained).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

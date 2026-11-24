@@ -87,3 +87,41 @@ setup() {
   xp_gate_detail_append GATE_X_DETAIL ""
   [ "$GATE_X_DETAIL" = "powershell: PSSA module not installed; iac: not configured" ]
 }
+
+# --- Round 1 review findings (2026-11-24) -------------------------------
+#
+# Expert B identified separator injection: a fragment that itself contains
+# "; " is split when the concatenation is de-duplicated, so it is never equal
+# to any single segment and always appended -- and a later read cannot tell the
+# parts from separate reasons. Expert A flagged the same boundary set from the
+# coverage side.
+
+@test "AC-GATE-STATUS-SEVERITY-05: a fragment containing the separator is still de-duplicated" {
+  unset GATE_X_DETAIL
+  xp_gate_detail_append GATE_X_DETAIL "a; b"
+  local once="$GATE_X_DETAIL"
+  # The internal separator is flattened on the way in, so this fragment is ONE
+  # segment. That is the property: without it, "a; b" splits into "a" and "b"
+  # and the next append sees neither.
+  case "$once" in
+    *"; "*) echo "fragment still contains the join separator: $once"; return 1 ;;
+  esac
+  # Appending the same fragment again must not duplicate it.
+  xp_gate_detail_append GATE_X_DETAIL "a; b"
+  [ "$GATE_X_DETAIL" = "$once" ]
+}
+
+@test "AC-GATE-STATUS-SEVERITY-06: an empty or whitespace fragment is a no-op" {
+  GATE_X_DETAIL="keep"
+  xp_gate_detail_append GATE_X_DETAIL ""
+  xp_gate_detail_append GATE_X_DETAIL "   "
+  # Neither adds a separator nor replaces the existing value.
+  [ "$GATE_X_DETAIL" = "keep" ]
+}
+
+@test "AC-GATE-STATUS-SEVERITY-07: escalation reports failure for an unknown candidate" {
+  GATE_X_STATUS="PASS"
+  run xp_gate_status_escalate GATE_X_STATUS "UNKNOWN_VALUE"
+  [ "$status" -eq 2 ]
+  [ "$GATE_X_STATUS" = "PASS" ]
+}
