@@ -39,6 +39,22 @@
 #     informative than "nothing happened" and must not be buried by a later
 #     SKIP.
 #
+# CALL CONTRACT (round-3 review, expert B)
+# ----------------------------------------
+# Both helpers modify a variable in the CALLER'S shell through `printf -v`. A
+# call made inside a pipeline (`... | while read x; do xp_gate_detail_append ...`)
+# or a command substitution runs in a SUBSHELL and the update is silently
+# discarded -- same shape as the defect this file exists to fix, and harder to
+# see because the line still runs.
+#
+#   # WRONG: the update is lost
+#   printf '%s\n' "$list" | while read -r _x; do xp_gate_detail_append D "$_x"; done
+#
+#   # RIGHT: keep it in the current shell
+#   while read -r _x; do xp_gate_detail_append D "$_x"; done <<< "$list"
+#
+# Audited 2026-11-24: every call site in githooks/ is in the current shell, and
+# `gate-status-call-site.test.bats` fails if a new one appears inside a pipeline.
 # Sourced, not executed. Callers keep their own GATE_N_* variables; this file
 # only provides the comparison so the rule lives in one place.
 #
