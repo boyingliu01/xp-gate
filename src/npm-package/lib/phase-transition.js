@@ -1,7 +1,7 @@
 /**
  * xp-gate phase-transition — Programmatic sprint phase transition
  *
- * Resolves #338 (dashboard never auto-renders) and #146 (sprint-state enforcement).
+ * Resolves #338 (dashboar auto-renders) and #146 (sprint-state enforcement).
  * 
  * This CLI command is the programmatic entry point for sprint phase transitions.
  * The sprint-flow SKILL.md MUST instruct the orchestrator to call this command
@@ -32,10 +32,47 @@ const { SprintStateManager } = require('./sprint-state-manager');
  * Shared phase name lookup — single source of truth.
  * Used by renderDashboard, sprint-audit, and Layer 1 gate check.
  */
+const PHASE_PREP = 1;
+const PHASE_DESIGN = 2;
+const PHASE_BUILD = 3;
+const PHASE_VERIFY = 4;
+const PHASE_SHIP = 5;
+const PHASE_CLOSE = 6;
+/** How many phases the pipeline has -- the denominator of the progress bar. */
+const PHASE_COUNT = PHASE_CLOSE - PHASE_PREP + 1;
+/** `YYYY-MM-DDTHH:MM` is 16 characters; the seconds are display noise. */
+const DURATION_COLUMN_WIDTH = 8;
+/**
+ * Inner width of the dashboard's ASCII frame.
+ *
+ * Every `+===+` line is 60 characters wide, so the content area is 58 and a row
+ * that starts after `|  ` gets 59. These are one design, not three numbers, and
+ * naming them is what keeps the frame from going ragged.
+ */
+const FRAME_INNER_WIDTH = 58;
+const FRAME_ROW_WIDTH = FRAME_INNER_WIDTH + 1;
+/** `|  ` plus one more space before a wrapped field's text. */
+const OUTPUT_ROW_INDENT = 3;
+const TIMESTAMP_MINUTE_LENGTH = 16;
+
 const PHASE_NAMES = {
-  1: 'PREP', 2: 'DESIGN', 3: 'BUILD',
-  4: 'VERIFY', 5: 'SHIP', 6: 'CLOSE',
+  [PHASE_PREP]: 'PREP',
+  [PHASE_DESIGN]: 'DESIGN',
+  [PHASE_BUILD]: 'BUILD',
+  [PHASE_VERIFY]: 'VERIFY',
+  [PHASE_SHIP]: 'SHIP',
+  [PHASE_CLOSE]: 'CLOSE',
 };
+
+/**
+ * The review is exactly three experts, and consensus is 90% or better.
+ *
+ * Both numbers appear in several places and both are policy, not arithmetic: a
+ * two-expert "Delphi review" is a different process, and a lower threshold makes
+ * the verdict mean something else. Naming them lets the rule be read.
+ */
+const DELPHI_EXPERT_COUNT = 3;
+const DELPHI_CONSENSUS_THRESHOLD = 0.9;
 
 /**
  * Phase-specific evidence file requirements.
@@ -52,7 +89,7 @@ const EVIDENCE_FILES = {
     blockingCheck: (data) => data.verdict === 'APPROVED',
     blockingMessage: 'Requirements review verdict is not APPROVED',
   },
-  4: {
+  [PHASE_VERIFY]: {
     path: '.sprint-state/phase-outputs/test-alignment-report.json',
     requiredFields: ['alignment_status', 'head_commit', 'spec_hash'],
     blockingCheck: (data) => data.alignment_status === 'PASS',
@@ -60,21 +97,6 @@ const EVIDENCE_FILES = {
   },
 };
 
-const GIT_REPOSITORY_ENV_VARS = [
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
-  'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
-  'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
-  'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
-  'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
-];
-
-function createRepositoryGitEnv() {
-  const env = { ...process.env };
-  for (const name of GIT_REPOSITORY_ENV_VARS) {
-    delete env[name];
-  }
-  return env;
-}
 
 /**
  * Get current HEAD commit hash from a project directory.
@@ -97,7 +119,7 @@ function getCurrentHeadCommit(projectDir) {
 
 function validateRequirementsExpertEvidence(data) {
   const validationErrors = [];
-  if (!Array.isArray(data.expert_verdicts) || data.expert_verdicts.length !== 3) {
+  if (!Array.isArray(data.expert_verdicts) || data.expert_verdicts.length !== DELPHI_EXPERT_COUNT) {
     validationErrors.push('expert_verdicts must contain exactly 3 expert results');
     return validationErrors;
   }
@@ -129,7 +151,8 @@ function validateRequirementsExpertEvidence(data) {
     validationErrors.push('requested_model values must be distinct after trimming');
   }
 
-  if (!Number.isFinite(data.consensus_ratio) || data.consensus_ratio < 0.9 || data.consensus_ratio > 1) {
+  if (!Number.isFinite(data.consensus_ratio)
+      || data.consensus_ratio < DELPHI_CONSENSUS_THRESHOLD || data.consensus_ratio > 1) {
     validationErrors.push('consensus_ratio must be a finite number from 0.90 through 1');
   }
   return validationErrors;
@@ -140,8 +163,24 @@ function validateRequirementsExpertEvidence(data) {
  * @param {string} filePath
  * @returns {string} hex digest
  */
+/**
+ * SHA-256 of a file's contents.
+ *
+ * A read failure must not look like a hash mismatch: "the spec changed" and "I
+ * could not read the spec" send the operator to different places. Callers compare
+ * this against a recorded hash, so an exception here surfaces as a crash rather
+ * than as a silent "changed" verdict -- which is the right direction.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
 function computeFileHash(filePath) {
-  const content = fs.readFileSync(filePath, 'utf8');
+  let content;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    throw new Error(`cannot hash ${filePath}: ${err.message}`);
+  }
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
@@ -156,28 +195,38 @@ function parseEvidenceDate(timestamp) {
   return timestamp.slice(0, 10);
 }
 
+/** One message for every way a `context_file_used` path can be unusable. */
+const UNSAFE_CONTEXT_PATH = 'context_file_used must be a safe project-relative regular file path';
+
 function readRequirementsContext(data, projectDir) {
   const contextFile = data.context_file_used;
   if (contextFile === null || contextFile === undefined || contextFile === '') {
     return { content: '' };
   }
   if (typeof contextFile !== 'string' || path.isAbsolute(contextFile)) {
-    return { error: 'context_file_used must be a safe project-relative regular file path' };
+    return { error: UNSAFE_CONTEXT_PATH };
   }
 
-  const projectRoot = fs.realpathSync(projectDir);
-  const candidatePath = path.resolve(projectRoot, contextFile);
-  const relativeCandidate = path.relative(projectRoot, candidatePath);
-  if (relativeCandidate.startsWith('..') || path.isAbsolute(relativeCandidate) || !fs.existsSync(candidatePath)) {
-    return { error: 'context_file_used must be a safe project-relative regular file path' };
-  }
+  // Three stat/read calls can each fail, and every failure means the same thing:
+  // the path is not a usable project-relative file. Reporting them as one error
+  // keeps the traversal guard's verdict uniform rather than leaking a raw EACCES.
+  try {
+    const projectRoot = fs.realpathSync(projectDir);
+    const candidatePath = path.resolve(projectRoot, contextFile);
+    const relativeCandidate = path.relative(projectRoot, candidatePath);
+    if (relativeCandidate.startsWith('..') || path.isAbsolute(relativeCandidate) || !fs.existsSync(candidatePath)) {
+      return { error: UNSAFE_CONTEXT_PATH };
+    }
 
-  const realContextPath = fs.realpathSync(candidatePath);
-  const relativeRealPath = path.relative(projectRoot, realContextPath);
-  if (relativeRealPath.startsWith('..') || path.isAbsolute(relativeRealPath) || !fs.statSync(realContextPath).isFile()) {
-    return { error: 'context_file_used must be a safe project-relative regular file path' };
+    const realContextPath = fs.realpathSync(candidatePath);
+    const relativeRealPath = path.relative(projectRoot, realContextPath);
+    if (relativeRealPath.startsWith('..') || path.isAbsolute(relativeRealPath) || !fs.statSync(realContextPath).isFile()) {
+      return { error: UNSAFE_CONTEXT_PATH };
+    }
+    return { content: fs.readFileSync(realContextPath, 'utf8') };
+  } catch {
+    return { error: UNSAFE_CONTEXT_PATH };
   }
-  return { content: fs.readFileSync(realContextPath, 'utf8') };
 }
 
 function computeRequirementsHash(data, projectDir) {
@@ -371,11 +420,11 @@ function checkPhaseSpecificEvidence(phase, fileName, data, projectDir, errors, w
   // Phase-specific anti-staleness checks. Phase 2's head_commit is checked here
   // too, so the branch below must NOT check it again -- it used to, and a phase-2
   // report with a stale HEAD produced TWO warnings for one problem.
-  if (phase === 2 || phase === 4) {
+  if (phase === PHASE_DESIGN || phase === PHASE_VERIFY) {
     checkHeadCommit(fileName, data, projectDir, errors, warnings, isLegacySprint);
   }
 
-  if (phase === 4) {
+  if (phase === PHASE_VERIFY) {
     // spec_hash check (only if specification.yaml exists)
     const specPath = path.join(projectDir, 'specification.yaml');
     if (fs.existsSync(specPath)) {
@@ -387,7 +436,7 @@ function checkPhaseSpecificEvidence(phase, fileName, data, projectDir, errors, w
     }
   }
 
-  if (phase === 2) {
+  if (phase === PHASE_DESIGN) {
     if (typeof data.requirements_hash !== 'string' || !/^[a-fA-F0-9]{64}$/.test(data.requirements_hash)) {
       const msg = `${fileName}: requirements_hash must be a 64-character hexadecimal SHA-256 digest`;
       recordProblem(msg, errors, warnings, isLegacySprint);
@@ -465,11 +514,16 @@ function validateEvidence(phase, projectDir) {
  * @param {number} phase
  * @param {string} reason
  */
+/**
+ * Record that evidence was skipped, and why.
+ *
+ * This is the audit trail `--skip-evidence` promises: a bypass that leaves no
+ * trace is not an audited bypass. A write failure is reported rather than
+ * swallowed -- silently losing the record would defeat the point of asking for a
+ * reason.
+ */
 function logEvidenceSkip(projectDir, phase, reason) {
   const auditDir = path.join(projectDir, '.xp-gate');
-  if (!fs.existsSync(auditDir)) {
-    fs.mkdirSync(auditDir, { recursive: true });
-  }
   const entry = {
     timestamp: new Date().toISOString(),
     event: 'evidence_skipped',
@@ -477,7 +531,14 @@ function logEvidenceSkip(projectDir, phase, reason) {
     reason,
     commit_hash: getCurrentHeadCommit(projectDir) ?? 'unknown',
   };
-  fs.appendFileSync(path.join(auditDir, 'audit.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+  try {
+    if (!fs.existsSync(auditDir)) {
+      fs.mkdirSync(auditDir, { recursive: true });
+    }
+    fs.appendFileSync(path.join(auditDir, 'audit.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+  } catch (err) {
+    console.warn(`⚠️  Could not record the evidence skip in .xp-gate/audit.jsonl: ${err.message}`);
+  }
 }
 
 /**
@@ -486,92 +547,154 @@ function logEvidenceSkip(projectDir, phase, reason) {
  * @param {object} state - Sprint state object
  * @returns {string} Rendered dashboard
  */
+/**
+ * Append the "outputs" block to the dashboard frame.
+ *
+ * A long value is clipped to the frame's inner width rather than wrapping: the
+ * dashboard is scanned as a table, and a wrapped row breaks the columns for every
+ * line after it.
+ *
+ * @param {string[]} lines mutated in place
+ * @param {object|undefined} outputs
+ */
+function appendOutputsSection(lines, outputs) {
+  if (!outputs || Object.keys(outputs).length === 0) return;
+  /** Three characters of left padding (`|  ` plus a space) sit before content. */
+  const width = FRAME_INNER_WIDTH - OUTPUT_ROW_INDENT;
+  lines.push(`|  输出物: ${' '.repeat(width - 5)}|`);
+  for (const [key, val] of Object.entries(outputs)) {
+    lines.push(`|    ${(`${key}: ${val}`).slice(0, width).padEnd(width)}|`);
+  }
+  lines.push('+============================================================+');
+}
+
+/**
+ * Index phase history by phase number, as strings.
+ *
+ * The keys are strings because they round-trip through JSON; indexing with a
+ * number silently misses.
+ *
+ * @param {Array|undefined} phaseHistory
+ * @returns {Object<string, object>}
+ */
+function buildHistoryLookup(phaseHistory) {
+  const lookup = {};
+  if (!Array.isArray(phaseHistory)) return lookup;
+  for (const entry of phaseHistory) {
+    lookup[String(entry.phase)] = entry;
+  }
+  return lookup;
+}
+
+/**
+ * `[███▓░░░] 42%` -- completed, current, and remaining.
+ *
+ * The current phase gets its own block so "in progress" is visible at a glance;
+ * a bar with only completed blocks cannot distinguish phase 3 running from phase
+ * 3 not started.
+ *
+ * @param {Object<string, object>} lookup
+ * @param {number} currentPhase
+ * @returns {string}
+ */
+function buildProgressBar(lookup, currentPhase) {
+  const completed = Object.values(lookup).filter((h) => h.status === 'completed').length;
+  const pct = Math.round((completed / PHASE_COUNT) * 100);
+  const inProgress = currentPhase <= PHASE_CLOSE ? 1 : 0;
+  const remaining = Math.max(0, PHASE_COUNT - completed - inProgress);
+  return `[${'█'.repeat(completed)}${'▓'.repeat(inProgress)}${'░'.repeat(remaining)}] ${pct}%`;
+}
+
+/** The status glyph for one phase row. */
+function statusIcon(status) {
+  switch (status) {
+    case 'completed': return '✅';
+    case 'in_progress': return '🔄';
+    case 'skipped': return '⏭️';
+    case 'failed': return '❌';
+    case 'paused': return '⏸️';
+    default: return '⏳';
+  }
+}
+
+/**
+ * A duration as the largest sensible unit, or `-`.
+ *
+ * Seconds are the only unit for anything under a minute, so a 59-second phase
+ * reads "59s" rather than "0m". Zero and null are both `-`: a phase with no
+ * recorded duration is not instantaneous.
+ */
+function formatDuration(seconds) {
+  if (seconds == null || seconds === 0) return '-';
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+  return `${Math.floor(hrs / 24)}d ${hrs % 24}h`;
+}
+
+/**
+ * The dashboard's title block: what this sprint is, and where it stands.
+ *
+ * Every field is clipped to its column so a long branch name cannot push the
+ * closing `|` off the right edge and turn the frame into ragged text.
+ *
+ * @param {string[]} lines mutated in place
+ * @param {{sprintId: string, taskDesc: string, branch: string, overallStatus: string, startedAt: string}} f
+ */
+function appendFrameHeader(lines, f) {
+  const rule = `+${'='.repeat(FRAME_INNER_WIDTH + 2)}+`;
+  const blank = `|${' '.repeat(FRAME_INNER_WIDTH + 3)}|`;
+  const field = (label, value) => `|  ${label}: ${value.slice(0, FRAME_INNER_WIDTH - 5).padEnd(FRAME_INNER_WIDTH - 5)}|`;
+
+  lines.push(rule);
+  lines.push(`|  SPRINT PROGRESS                      ${f.sprintId.padEnd(FRAME_INNER_WIDTH - 18)}|`);
+  lines.push(rule);
+  lines.push(field('需求', f.taskDesc));
+  lines.push(field('分支', f.branch));
+  lines.push(`|  状态: ${f.overallStatus.slice(0, 15).padEnd(15)}        启动: ${f.startedAt.slice(0, 19).padEnd(19)}|`);
+  lines.push(rule);
+  lines.push(blank);
+}
+
 function renderDashboard(state) {
   if (!state) return 'No sprint state found';
 
   const PHASE_NAMES_LOCAL = PHASE_NAMES;
 
-  function statusIcon(status) {
-    switch (status) {
-      case 'completed': return '✅';
-      case 'in_progress': return '🔄';
-      case 'skipped': return '⏭️';
-      case 'failed': return '❌';
-      case 'paused': return '⏸️';
-      default: return '⏳';
-    }
-  }
-
-  function formatDuration(seconds) {
-    if (seconds == null || seconds === 0) return '-';
-    if (seconds < 60) return `${seconds}s`;
-    const mins = Math.floor(seconds / 60);
-    if (mins < 60) return `${mins}m`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ${mins % 60}m`;
-    return `${Math.floor(hrs / 24)}d ${hrs % 24}h`;
-  }
-
   const branch = state.isolation?.branch || 'unknown';
   const sprintId = state.id || 'unknown';
   const taskDesc = state.task_description || state.issue_title || '-';
   const overallStatus = state.status || 'running';
-  const startedAt = state.started_at ? state.started_at.slice(0, 16).replace('T', ' ') : '-';
+  const startedAt = state.started_at ? state.started_at.slice(0, TIMESTAMP_MINUTE_LENGTH).replace('T', ' ') : '-';
 
-  // Build phase history lookup
-  const historyLookup = {};
-  if (Array.isArray(state.phase_history)) {
-    for (const ph of state.phase_history) {
-      historyLookup[String(ph.phase)] = ph;
-    }
-  }
+  const historyLookup = buildHistoryLookup(state.phase_history);
 
-  const currentPhase = state.phase || 1;
+  const currentPhase = state.phase || PHASE_PREP;
   const currentPhaseName = PHASE_NAMES_LOCAL[String(currentPhase)] || `Phase ${currentPhase}`;
-
-  // Progress bar
-  const completedCount = Object.values(historyLookup).filter(h => h.status === 'completed').length;
-  const pct = Math.round((completedCount / 6) * 100);
-  const filled = '█'.repeat(completedCount);
-  const current = currentPhase <= 6 ? '▓' : '';
-  const empty = '░'.repeat(Math.max(0, 6 - completedCount - (current ? 1 : 0)));
-  const progressBar = `[${filled}${current}${empty}] ${pct}%`;
+  const progressBar = buildProgressBar(historyLookup, currentPhase);
 
   // Build lines
   const lines = [];
-  lines.push('+============================================================+');
-  lines.push(`|  SPRINT PROGRESS                      ${sprintId.padEnd(20)}|`);
-  lines.push('+============================================================+');
-  lines.push(`|  需求: ${(taskDesc).slice(0, 54).padEnd(54)}|`);
-  lines.push(`|  分支: ${(branch).slice(0, 54).padEnd(54)}|`);
-  lines.push(`|  状态: ${(overallStatus).slice(0, 15).padEnd(15)}        启动: ${startedAt.slice(0, 19).padEnd(19)}|`);
-  lines.push('+============================================================+');
-  lines.push('|                                                             |');
+  appendFrameHeader(lines, { sprintId, taskDesc, branch, overallStatus, startedAt });
 
-  for (let i = 1; i <= 6; i++) {
+  for (let i = PHASE_PREP; i <= PHASE_CLOSE; i++) {
     const entry = historyLookup[String(i)];
     const icon = statusIcon(entry?.status || (i < currentPhase ? 'completed' : i === currentPhase ? 'in_progress' : 'pending'));
     const name = (PHASE_NAMES_LOCAL[String(i)] || `Phase ${i}`).padEnd(10);
-    const dur = formatDuration(entry?.duration_seconds).padEnd(8);
+    const dur = formatDuration(entry?.duration_seconds).padEnd(DURATION_COLUMN_WIDTH);
     lines.push(`|  ${icon} Phase ${i}/6  ${name} ${dur}          |`);
   }
 
   lines.push('|                                                             |');
-  lines.push(`|  ${progressBar.padEnd(58)}|`);
+  lines.push(`|  ${progressBar.padEnd(FRAME_INNER_WIDTH)}|`);
   lines.push('+============================================================+');
-  lines.push(`|  > 当前: Phase ${currentPhase}/6 ${currentPhaseName}`.padEnd(59) + '|');
-  lines.push(`|    状态: ${(entry_status(currentPhase, historyLookup)).padEnd(50)}|`);
+  lines.push(`|  > 当前: Phase ${currentPhase}/${PHASE_CLOSE} ${currentPhaseName}`.padEnd(FRAME_ROW_WIDTH) + '|');
+  lines.push(`|    状态: ${(entry_status(currentPhase, historyLookup)).padEnd(FRAME_INNER_WIDTH - 8)}|`);
   lines.push('+============================================================+');
 
-  // Outputs section
-  if (state.outputs && Object.keys(state.outputs).length > 0) {
-    lines.push('|  输出物:                                                     |');
-    for (const [key, val] of Object.entries(state.outputs)) {
-      lines.push(`|    ${(`${key}: ${val}`).slice(0, 55).padEnd(55)}|`);
-    }
-    lines.push('+============================================================+');
-  }
-
+  appendOutputsSection(lines, state.outputs);
   return lines.join('\n');
 
   function entry_status(phaseNum, lookup) {
@@ -580,11 +703,6 @@ function renderDashboard(state) {
   }
 }
 
-/**
- * CLI entry point for phase-transition command.
- * @param {string[]} args - CLI arguments
- * @returns {Promise<number>} Exit code
- */
 /**
  * Parse phase-transition arguments.
  *
@@ -651,7 +769,7 @@ function parseTransitionArgs(args) {
  * @returns {boolean} true when the transition may proceed
  */
 function passesSequenceGuard(manager, phase, status, forceTransition) {
-  if (status !== 'completed' || phase < 2) return true;
+  if (status !== 'completed' || phase < PHASE_DESIGN) return true;
   const seqState = manager.read();
   if (!seqState || !Array.isArray(seqState.phase_history)) return true;
 
@@ -721,7 +839,7 @@ function printTransitionUsage() {
  * @param {string} status
  */
 function warnOnUnfinishedPredecessor(manager, phase, status) {
-  if (status !== 'in_progress' || phase < 2) return;
+  if (status !== 'in_progress' || phase < PHASE_DESIGN) return;
 
   const preState = manager.read();
   if (!preState || !Array.isArray(preState.phase_history)) return;
@@ -792,7 +910,7 @@ const VALID_TRANSITION_STATUSES = ['in_progress', 'completed', 'skipped', 'faile
  * @returns {boolean}
  */
 function validateTransitionInput(phase, status) {
-  if (!Number.isInteger(phase) || phase < 1 || phase > 6) {
+  if (!Number.isInteger(phase) || phase < PHASE_PREP || phase > PHASE_CLOSE) {
     console.error(`Error: Phase must be 1-6, got ${phase}`);
     return false;
   }
@@ -801,6 +919,76 @@ function validateTransitionInput(phase, status) {
     return false;
   }
   return true;
+}
+
+/**
+ * Apply the transition and echo what changed.
+ *
+ * The #507 failure mode was "the command either never ran or ran without effect"
+ * -- both look identical in a terminal that only prints a success line. Printing
+ * the observed state on both sides is what makes the two distinguishable in the
+ * output itself, without needing to open the state file.
+ *
+ * @param {object} manager SprintStateManager
+ * @param {number} phase
+ * @param {string} status
+ * @param {object} outputs
+ * @returns {object} the new state
+ */
+function applyTransition(manager, phase, status, outputs) {
+    // Capture the before-image for the echo below (#519). Read once here so a
+    // concurrent writer cannot make before/after disagree about their baseline.
+    const beforeSnapshot = (() => {
+      try {
+        const s = manager.read();
+        if (!s) return { phase: undefined, status: undefined, entryStatus: undefined };
+        const e = Array.isArray(s.phase_history) ? s.phase_history.find(x => x.phase === phase) : undefined;
+        return { phase: s.phase, status: s.status, entryStatus: e ? e.status : undefined };
+      } catch {
+        return { phase: undefined, status: undefined, entryStatus: undefined };
+      }
+    })();
+
+    const newState = manager.transitionPhase(phase, status, { outputs });
+
+    // #519: before/after echo. The #507 failure mode was "the command either
+    // never ran or ran without effect" — both look identical in a terminal that
+    // prints only a success line. Printing the observed state on both sides
+    // makes those two cases distinguishable in the output itself.
+    const afterEntry = Array.isArray(newState.phase_history)
+      ? newState.phase_history.find(e => e.phase === phase)
+      : undefined;
+    const oldTop = `${beforeSnapshot.phase ?? '-'}/${beforeSnapshot.status ?? '-'}`;
+    const newTop = `${newState.phase ?? '-'}/${newState.status ?? '-'}`;
+    const oldEntry = beforeSnapshot.entryStatus ?? '(none)';
+    const newEntryStatus = afterEntry ? afterEntry.status : '(none)';
+    console.log(`✅ Phase ${phase} transitioned to '${status}'`);
+    console.log(`   before→after  phase/status: ${oldTop} → ${newTop}  |  phase ${phase} entry: ${oldEntry} → ${newEntryStatus}`);
+}
+
+/**
+ * What to print after a successful transition: the closing reminder and the
+ * optional dashboard.
+ *
+ * Layer 1.5 of the #519 guard: completing CLOSE means the sprint is over, and
+ * that is the moment a final audit is worth running -- so the reminder fires
+ * there rather than needing to be remembered.
+ *
+ * @param {number} phase
+ * @param {string} status
+ * @param {boolean} renderFlag
+ * @param {object} newState
+ */
+function printTransitionFollowUps(phase, status, renderFlag, newState) {
+  if (phase === PHASE_CLOSE && status === 'completed') {
+    console.log('');
+    console.log('📋 [sprint-audit] Sprint complete — run final coverage audit:');
+    console.log('   npx xp-gate sprint-audit');
+  }
+  if (renderFlag) {
+    console.log('');
+    console.log(renderDashboard(newState));
+  }
 }
 
 async function handlePhaseTransition(args = []) {
@@ -832,48 +1020,9 @@ async function handlePhaseTransition(args = []) {
     // ── Layer 2: Evidence validation ──
     if (!checkEvidenceGate(phase, projectDir, status, skipEvidence, skipEvidenceReason)) return 1;
 
-    // Capture the before-image for the echo below (#519). Read once here so a
-    // concurrent writer cannot make before/after disagree about their baseline.
-    const beforeSnapshot = (() => {
-      try {
-        const s = manager.read();
-        if (!s) return { phase: undefined, status: undefined, entryStatus: undefined };
-        const e = Array.isArray(s.phase_history) ? s.phase_history.find(x => x.phase === phase) : undefined;
-        return { phase: s.phase, status: s.status, entryStatus: e ? e.status : undefined };
-      } catch {
-        return { phase: undefined, status: undefined, entryStatus: undefined };
-      }
-    })();
+    const newState = applyTransition(manager, phase, status, outputs);
 
-    const newState = manager.transitionPhase(phase, status, { outputs });
-
-    // #519: before/after echo. The #507 failure mode was "the command either
-    // never ran or ran without effect" — both look identical in a terminal that
-    // prints only a success line. Printing the observed state on both sides
-    // makes those two cases distinguishable in the output itself.
-    const afterEntry = Array.isArray(newState.phase_history)
-      ? newState.phase_history.find(e => e.phase === phase)
-      : undefined;
-    const oldTop = `${beforeSnapshot.phase ?? '-'}/${beforeSnapshot.status ?? '-'}`;
-    const newTop = `${newState.phase ?? '-'}/${newState.status ?? '-'}`;
-    const oldEntry = beforeSnapshot.entryStatus ?? '(none)';
-    const newEntryStatus = afterEntry ? afterEntry.status : '(none)';
-    console.log(`✅ Phase ${phase} transitioned to '${status}'`);
-    console.log(`   before→after  phase/status: ${oldTop} → ${newTop}  |  phase ${phase} entry: ${oldEntry} → ${newEntryStatus}`);
-
-    // ── Layer 1.5: Auto-trigger Layer 2 reminder on Phase 6 completed ──
-    if (phase === 6 && status === 'completed') {
-      console.log('');
-      console.log('📋 [sprint-audit] Sprint complete — run final coverage audit:');
-      console.log('   npx xp-gate sprint-audit');
-    }
-
-    // Auto-render dashboard if --render flag is set
-    if (renderFlag) {
-      console.log('');
-      const dashboard = renderDashboard(newState);
-      console.log(dashboard);
-    }
+    printTransitionFollowUps(phase, status, renderFlag, newState);
 
     return 0;
   } catch (err) {
@@ -890,112 +1039,10 @@ async function handlePhaseTransition(args = []) {
  * @param {string} projectDir - Project root directory
  * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
  */
-function checkEvidence(phase, projectDir) {
-  return validateEvidence(phase, projectDir);
-}
 
-/**
- * Validate .code-walkthrough-result.json for code walkthrough mode.
- * Ported from githooks/pre-push Gate MW inline jq logic.
- *
- * @param {string} projectDir - Project root directory
- * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
- */
-function checkWalkthrough(projectDir) {
-  const walkthroughFile = path.join(projectDir, '.code-walkthrough-result.json');
-  const errors = [];
-  const warnings = [];
-
-  if (!fs.existsSync(walkthroughFile)) {
-    errors.push('.code-walkthrough-result.json not found — run delphi-review --mode code-walkthrough before push');
-    return { ok: false, errors, warnings };
-  }
-
-  let data;
-  try {
-    data = JSON.parse(fs.readFileSync(walkthroughFile, 'utf8'));
-  } catch {
-    errors.push('.code-walkthrough-result.json is malformed JSON');
-    return { ok: false, errors, warnings };
-  }
-
-  // Check verdict
-  if (data.verdict !== 'APPROVED') {
-    errors.push(`Code walkthrough verdict is "${data.verdict}" — must be APPROVED`);
-    return { ok: false, errors, warnings };
-  }
-
-  if (typeof data.commit !== 'string' || !/^[0-9a-f]{7,64}$/i.test(data.commit)) {
-    errors.push('Code walkthrough commit must be a hexadecimal Git commit ID');
-    return { ok: false, errors, warnings };
-  }
-
-  try {
-    const currentCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: projectDir,
-      env: createRepositoryGitEnv(),
-      encoding: 'utf8',
-      stdio: 'pipe',
-    }).trim();
-    if (data.commit !== currentCommit) {
-      errors.push(`Code walkthrough commit ${data.commit} does not match HEAD ${currentCommit}`);
-      return { ok: false, errors, warnings };
-    }
-  } catch {
-    errors.push('Unable to resolve the current Git commit for code walkthrough validation');
-    return { ok: false, errors, warnings };
-  }
-
-  // Check expiration
-  if (data.expires) {
-    const expiry = new Date(data.expires).getTime();
-    if (Date.now() > expiry) {
-      errors.push(`Code walkthrough expired at ${data.expires}`);
-      return { ok: false, errors, warnings };
-    }
-  }
-
-  return { ok: true, errors, warnings };
-}
-
-/**
- * D8 Layer 3: Check bypass audit log for any --no-verify bypassed commits on the current branch.
- * Blocks phase transition if bypassed commits exist.
- *
- * @param {string} projectDir - Project root directory
- * @returns {{ ok: boolean, bypassedCommits: string[] }}
- */
-function checkBypassAudit(projectDir) {
-  const auditFile = path.join(projectDir, '.xp-gate', 'bypass-audit.jsonl');
-  const bypassedCommits = [];
-
-  if (!fs.existsSync(auditFile)) {
-    return { ok: true, bypassedCommits };
-  }
-
-  const lines = fs.readFileSync(auditFile, 'utf8').trim().split('\n').filter(Boolean);
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line);
-      if (entry.type === 'precommit_bypass' && entry.commit) {
-        // Verify the commit is on the current branch
-        try {
-          execFileSync('git', ['merge-base', '--is-ancestor', entry.commit, 'HEAD'], {
-            cwd: projectDir,
-            env: createRepositoryGitEnv(),
-            stdio: 'pipe',
-          });
-          bypassedCommits.push(entry.commit);
-        } catch {
-          // Commit not on current branch — not relevant
-        }
-      }
-    } catch {
-      // Skip malformed lines
-    }
-  }
-
-  return { ok: bypassedCommits.length === 0, bypassedCommits };
-}
+const {
+  checkEvidence, checkWalkthrough, checkBypassAudit, validateWalkthroughVerdict,
+  loadWalkthroughFile, createRepositoryGitEnv, GIT_REPOSITORY_ENV_VARS,
+} = require('./prepush-evidence.js');
 
 module.exports = { handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence, checkEvidence, checkWalkthrough, checkBypassAudit };
