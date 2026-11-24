@@ -435,6 +435,84 @@ function carryUnevaluated(baseline, previous, unevaluated) {
   return carried;
 }
 
+/**
+ * Baseline TypeScript/JavaScript with ESLint.
+ *
+ * `mergeToolCounts` rather than assignment: a file linted by more than one tool keeps
+ * every tool's counts, and the previous assignment replaced the whole entry so the
+ * last tool to run erased the others.
+ *
+ * A project with no eslint config has nothing to baseline; staying quiet is correct.
+ * The silent-catch defect was about masking ERRORS, not about projects that
+ * legitimately have no tool.
+ *
+ * @param {object} baseline mutated in place
+ * @param {Set<string>} unevaluated files no linter could read
+ */
+function baselineTypeScript(baseline, unevaluated) {
+// TypeScript/JavaScript — ESLint
+const tsFiles = findFilesByExt(['.ts', '.tsx', '.js', '.jsx']);
+if (tsFiles.length > 0) {
+  const eslintConfigExists = fs.existsSync('.eslintrc.json') ||
+    fs.existsSync('.eslintrc.js') ||
+    fs.existsSync('.eslintrc.cjs') ||
+    fs.existsSync('eslint.config.js');
+  const eslintBin = resolveLocalBin('eslint');
+
+  const eslintAvailable = Boolean(eslintBin) || probeTool('npx eslint --version');
+
+  if (eslintConfigExists && eslintAvailable) {
+    const eslintCmd = eslintBin ? quoteBin(eslintBin) : 'npx eslint';
+    const { results } = lintAndAccount('eslint', tsFiles, batch => `${eslintCmd} ${batch.map(f => `"${f}"`).join(' ')}`, '-f json --no-warn-ignored', unevaluated);
+    const eslintCounts = {};
+    for (const fileResult of results) {
+      const fileName = matchResultToFile(fileResult.filePath, tsFiles);
+      if (!fileName) continue;
+      eslintCounts[fileName] = {
+        warnings: fileResult.warningCount || 0,
+        errors: fileResult.errorCount || 0,
+      };
+    }
+    // Merge, not overwrite: a file linted by more than one tool keeps every
+    // tool's counts. The previous assignment replaced the whole entry, so the
+    // last tool to run erased the others.
+    mergeToolCounts(baseline, 'eslint', eslintCounts);
+  } else if (tsFiles.length > 0 && !eslintConfigExists) {
+    // Not a failure: a project without an eslint config has nothing to
+    // baseline. Staying quiet here is correct; the silent-catch defect was
+    // about masking errors, not about projects that legitimately have no tool.
+  }
+}
+}
+
+/**
+ * Baseline Python with ruff.
+ *
+ * A result that names no file cannot be recorded against one; skipping it is the fix
+ * for the literal `undefined` key this used to write into the baseline.
+ */
+function baselinePython(baseline, unevaluated) {
+// Python — ruff
+const pyFiles = findFilesByExt(['.py']);
+if (pyFiles.length > 0) {
+  const ruffAvailable = probeTool('ruff --version');
+
+  if (ruffAvailable) {
+    const { results } = lintAndAccount('ruff', pyFiles, batch => `ruff check ${batch.map(f => `"${f}"`).join(' ')}`, '--output-format json', unevaluated);
+    const ruffCounts = {};
+    for (const fileResult of results) {
+      // A result that names no file cannot be recorded against one. Skipping it
+      // is the fix for the literal "undefined" key this used to write.
+      if (!fileResult.file) continue;
+      const messages = fileResult.messages || [];
+      ruffCounts[fileResult.file] = { warnings: messages.length, errors: 0 };
+    }
+    mergeToolCounts(baseline, 'ruff', ruffCounts);
+  }
+}
+
+}
+
 async function createBaseline() {
   ensureDir(getXpGateDir());
 
@@ -457,59 +535,9 @@ async function createBaseline() {
   const previous = readBaselineForMerge();
   const unevaluated = new Set();
 
-  // TypeScript/JavaScript — ESLint
-  const tsFiles = findFilesByExt(['.ts', '.tsx', '.js', '.jsx']);
-  if (tsFiles.length > 0) {
-    const eslintConfigExists = fs.existsSync('.eslintrc.json') ||
-      fs.existsSync('.eslintrc.js') ||
-      fs.existsSync('.eslintrc.cjs') ||
-      fs.existsSync('eslint.config.js');
-    const eslintBin = resolveLocalBin('eslint');
+  baselineTypeScript(baseline, unevaluated);
 
-    const eslintAvailable = Boolean(eslintBin) || probeTool('npx eslint --version');
-
-    if (eslintConfigExists && eslintAvailable) {
-      const eslintCmd = eslintBin ? quoteBin(eslintBin) : 'npx eslint';
-      const { results } = lintAndAccount('eslint', tsFiles, batch => `${eslintCmd} ${batch.map(f => `"${f}"`).join(' ')}`, '-f json --no-warn-ignored', unevaluated);
-      const eslintCounts = {};
-      for (const fileResult of results) {
-        const fileName = matchResultToFile(fileResult.filePath, tsFiles);
-        if (!fileName) continue;
-        eslintCounts[fileName] = {
-          warnings: fileResult.warningCount || 0,
-          errors: fileResult.errorCount || 0,
-        };
-      }
-      // Merge, not overwrite: a file linted by more than one tool keeps every
-      // tool's counts. The previous assignment replaced the whole entry, so the
-      // last tool to run erased the others.
-      mergeToolCounts(baseline, 'eslint', eslintCounts);
-    } else if (tsFiles.length > 0 && !eslintConfigExists) {
-      // Not a failure: a project without an eslint config has nothing to
-      // baseline. Staying quiet here is correct; the silent-catch defect was
-      // about masking errors, not about projects that legitimately have no tool.
-    }
-  }
-
-  // Python — ruff
-  const pyFiles = findFilesByExt(['.py']);
-  if (pyFiles.length > 0) {
-    const ruffAvailable = probeTool('ruff --version');
-
-    if (ruffAvailable) {
-      const { results } = lintAndAccount('ruff', pyFiles, batch => `ruff check ${batch.map(f => `"${f}"`).join(' ')}`, '--output-format json', unevaluated);
-      const ruffCounts = {};
-      for (const fileResult of results) {
-        // A result that names no file cannot be recorded against one. Skipping it
-        // is the fix for the literal "undefined" key this used to write.
-        if (!fileResult.file) continue;
-        const messages = fileResult.messages || [];
-        ruffCounts[fileResult.file] = { warnings: messages.length, errors: 0 };
-      }
-      mergeToolCounts(baseline, 'ruff', ruffCounts);
-    }
-  }
-
+  baselinePython(baseline, unevaluated);
   // Go — golangci-lint
   const goFiles = findFilesByExt(['.go']);
   if (goFiles.length > 0) {
