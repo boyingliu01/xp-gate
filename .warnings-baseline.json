@@ -29,7 +29,7 @@
   },
   "src/npm-package/lib/gate-runner.js": {
     "lastAnalyzed": "2026-11-20T14:42:46.813Z",
-    "totalWarnings": 2
+    "totalWarnings": 1
   },
   "src/npm-package/lib/init.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
