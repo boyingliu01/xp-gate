@@ -54,28 +54,10 @@ const epilogue = lines.slice(epilogueStart);
 const body = lines.slice(0, epilogueStart);
 
 // ── Locate gate sections inside the body ────────────────────────────────────
-const BANNER = /^# ={20,}\s*$/;
-const isGateBannerText = (t) => /^# GATE ?\d+[a-c]?:/i.test(t) || /^# Gate 1[2][a-c]?:/i.test(t);
+const { isGateBannerText, keyOf, findGateBanners } = require('./gate-banner-locator.cjs');
 
-const starts = [];
-for (let i = 0; i < body.length; i++) {
-  if (!BANNER.test(body[i])) continue;
-  for (let j = i + 1; j < Math.min(i + 8, body.length); j++) {
-    if (isGateBannerText(body[j])) {
-      starts.push({ banner: i, text: body[j].trim() });
-      break;
-    }
-    if (!/^#/.test(body[j])) break;
-  }
-}
+const starts = findGateBanners(body);
 
-function keyOf(t) {
-  const a = t.match(/^# GATE ?(\d+)([a-c]?):/i);
-  if (a) return a[2] ? a[1] + a[2] : a[1];
-  const b = t.match(/^# Gate 12([a-c]?):/i);
-  if (b) return b[1] ? '12' + b[1] : '12';
-  return null;
-}
 
 // Gate 13 carries a banner but no "# GATE 13:" marker; find it by its body.
 {
