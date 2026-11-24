@@ -123,47 +123,74 @@ function nestingOfRange(body: string, from: number, to: number, depth: number): 
  * level deeper), a nested function (whose body belongs to that function's own
  * score), or an ordinary token. Each returns where the scan resumes.
  */
+/**
+ * Skip an anonymous arrow whose parameters are parenthesised: `items.map((x) => {`.
+ *
+ * The scan reaches `(` before any word, so this has to be checked here rather than in
+ * `isNestedFunctionIntro`. Without it the parenthesised form is charged to the
+ * enclosing function while `x => {` is not -- the same construct scored two different
+ * ways (#749 walkthrough).
+ *
+ * @returns the index to resume from, or -1 when this is not such an arrow
+ */
+function consumeParenArrow(body: string, i: number, to: number): number {
+  if (body[i] !== '(') return -1;
+  const close = skipBalancedParen(body, i);
+  // A return-type annotation may sit between the parameter list and `=>`
+  // (`items.map((x): { ok: boolean } => { ... })`). Skipping past it keeps the arrow
+  // recognised, so its body is not charged to the enclosing function.
+  const afterParams = skipArrowReturnType(body, close, to);
+  if (!body.startsWith('=>', afterParams)) return -1;
+  const brace = findFunctionBodyBrace(body, afterParams, to);
+  return brace < 0 ? afterParams : skipBalancedBrace(body, brace);
+}
+
+/**
+ * Whether this word opens a control structure, rather than merely reading like one.
+ *
+ * A member access (`obj.if`) and a key or label (`{ if: ... }`) are not nesting, and
+ * saying so once keeps every caller from re-deriving it.
+ */
+function isNestingKeywordAt(body: string, word: { word: string; end: number }, i: number): boolean {
+  if (!NESTING_KEYWORDS.has(word.word)) return false;
+  return !isMemberAccess(body, i) && !isKeyOrLabel(body, word.end);
+}
+
+/**
+ * Skip a nested function's body, or just its intro when it has none.
+ *
+ * A nested function -- named or anonymous -- owns the structures in its own body: the
+ * adapter already reports it as its own function, scored there. Skipping it keeps this
+ * function's score from being charged for nesting a reader never sees at this level,
+ * and matches lizard's `-ENS`.
+ *
+ * An expression-bodied arrow (`const f = () => 1;`) has no body to skip, so only the
+ * intro is dropped -- skipping a range would swallow the rest of the function.
+ *
+ * @param from the end of the function's name or parameter list
+ */
+function skipNestedFunction(body: string, from: number, to: number): number {
+  const brace = findFunctionBodyBrace(body, from, to);
+  return brace < 0 ? from : skipBalancedBrace(body, brace);
+}
+
 function consumeStructure(
   body: string, i: number, to: number, depth: number, setMax: (v: number) => void,
 ): number {
-  // Anonymous arrow with a parenthesized parameter list: `items.map((x) => {`.
-  // The scan reaches `(` before any word, so this has to be checked here rather
-  // than in isNestedFunctionIntro. Without it the parenthesized form is charged
-  // to the enclosing function while `x => {` is not -- the same construct scored
-  // two different ways (#749 walkthrough).
-  if (body[i] === '(') {
-    const close = skipBalancedParen(body, i);
-    // A return-type annotation may sit between the parameter list and `=>`
-    // (`items.map((x): { ok: boolean } => { ... })`). Skip past it so the arrow
-    // is still recognized and its body is not charged to the enclosing function.
-    const afterParams = skipArrowReturnType(body, close, to);
-    if (body.startsWith('=>', afterParams)) {
-      const brace = findFunctionBodyBrace(body, afterParams, to);
-      return brace < 0 ? afterParams : skipBalancedBrace(body, brace);
-    }
-  }
+  const arrowEnd = consumeParenArrow(body, i, to);
+  if (arrowEnd >= 0) return arrowEnd;
+
   const word = readWord(body, i);
   if (!word) return i + 1;
-  if (NESTING_KEYWORDS.has(word.word) && !isMemberAccess(body, i) && !isKeyOrLabel(body, word.end)) {
-    // A control structure owns a nested region: count whatever nests inside it
-    // one level deeper, then resume past that region so its braces cannot be
-    // mistaken for the enclosing level's.
+  if (isNestingKeywordAt(body, word, i)) {
+    // A control structure owns a nested region: count whatever nests inside it one
+    // level deeper, then resume past that region so its braces cannot be mistaken for
+    // the enclosing level's.
     const scope = locateControlBody(body, word.end, to);
     setMax(nestingOfRange(body, scope.bodyStart, scope.bodyEnd, depth + 1));
     return scope.bodyEnd;
   }
-  if (isNestedFunctionIntro(body, i, word.end)) {
-    // A nested function -- named or anonymous -- owns the structures in its own
-    // body: the adapter already reports it as its own function, scored there.
-    // Skipping it here keeps this function's score from being charged for
-    // nesting a reader never sees at this level, and matches lizard's `-ENS`,
-    // which attributes a callback's nesting to the callback.
-    const brace = findFunctionBodyBrace(body, word.end, to);
-    // Expression-bodied (`const f = () => 1;`): no body to skip, so drop only
-    // the intro. Skipping a range here would swallow the rest of the function.
-    if (brace < 0) return word.end;
-    return skipBalancedBrace(body, brace);
-  }
+  if (isNestedFunctionIntro(body, i, word.end)) return skipNestedFunction(body, word.end, to);
   return word.end;
 }
 
@@ -315,12 +342,23 @@ function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number)
   if (body.startsWith('=>', afterWord)) return true;
   // Method shorthand: `{ m() { } }`, `m(): void { }`, `m<T>() { }`. lizard -ENS
   // reports the method as its own function and the enclosing body as 0.
-  if (body[afterWord] === '(' && isMethodSignature(body, afterWord)) return true;
-  if (body[afterWord] === '<') {
-    const afterGeneric = skipSpaces(body, skipBalancedAngle(body, afterWord), body.length);
-    if (body[afterGeneric] === '(' && isMethodSignature(body, afterGeneric)) return true;
-  }
+  if (isMethodShorthandAt(body, afterWord)) return true;
   return isAssignedFunctionIntro(body, current, wordEnd);
+}
+
+/**
+ * Whether a method shorthand starts at `from`: `{ m() { } }`, `m(): void { }`,
+ * `m<T>() { }`.
+ *
+ * The generic form needs the angle list skipped first, or `<T>` reads as a comparison
+ * and the method goes unrecognised -- then lizard `-ENS` reports the method as its own
+ * function while this scan charges its body to the enclosing one.
+ */
+function isMethodShorthandAt(body: string, from: number): boolean {
+  if (body[from] === '(') return isMethodSignature(body, from);
+  if (body[from] !== '<') return false;
+  const afterGeneric = skipSpaces(body, skipBalancedAngle(body, from), body.length);
+  return body[afterGeneric] === '(' && isMethodSignature(body, afterGeneric);
 }
 
 /**
