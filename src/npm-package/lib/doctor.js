@@ -1823,6 +1823,47 @@ function syncHookEntries(ctx) {
  *   refused: Array, errors: string[], backups: string[], force: boolean}} ctx
  *   arrays mutated in place
  */
+/**
+ * Copy one shared library, honouring the copy guard.
+ *
+ * Three outcomes before anything is written: identical is skipped, a refused guard
+ * is recorded as `refused` (the caller reports it), and a guard that reports no
+ * divergence at all is skipped. Only after those does the backup-then-copy happen.
+ *
+ * @param {{source: string, target: string, rel: string, force: boolean,
+ *   backupsDir: string, deployLog: string, version: string, synced: string[],
+ *   skipped: string[], refused: Array, errors: string[], backups: string[]}} p
+ *   arrays mutated in place
+ */
+function syncOneLibFile(p) {
+  const { source, target, rel, force, backupsDir, deployLog, version, synced, skipped, refused, errors, backups } = p;
+  try {
+    if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+      skipped.push(rel);
+      return;
+    }
+    if (fs.existsSync(target)) {
+      const decision = copyGuardDecision(source, target, force);
+      if (decision.refuse) {
+        refused.push({ name: rel, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown });
+        return;
+      }
+      if (decision.forced === false && decision.repoOnly === 0 && decision.installedOnly === 0) {
+        skipped.push(rel);
+        return;
+      }
+    }
+    const backup = backupBeforeOverwrite(target, backupsDir);
+    if (backup) backups.push(backup);
+    fs.copyFileSync(source, target);
+    fs.chmodSync(target, 0o755);
+    appendDeployLogEntry(deployLog, { file: rel, version, backup });
+    synced.push(rel);
+  } catch (err) {
+    errors.push(`${rel}: ${err.message}`);
+  }
+}
+
 function syncLibDirectory(ctx) {
   const { repoHooks, installedHooks, version, backupsDir, deployLog, synced, skipped, refused, errors, backups, force } = ctx;
   const repoLib = path.join(repoHooks, 'lib');
@@ -1847,32 +1888,39 @@ function syncLibDirectory(ctx) {
     const rel = `lib/${entry.name}`;
     const source = path.join(repoLib, entry.name);
     const target = path.join(installedLib, entry.name);
-    try {
-      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
-        skipped.push(rel);
-        continue;
-      }
-      if (fs.existsSync(target)) {
-        const decision = copyGuardDecision(source, target, force);
-        if (decision.refuse) {
-          refused.push({ name: rel, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown });
-          continue;
-        }
-        if (decision.forced === false && decision.repoOnly === 0 && decision.installedOnly === 0) {
-          skipped.push(rel);
-          continue;
-        }
-      }
-      const backup = backupBeforeOverwrite(target, backupsDir);
-      if (backup) backups.push(backup);
-      fs.copyFileSync(source, target);
-      fs.chmodSync(target, 0o755);
-      appendDeployLogEntry(deployLog, { file: rel, version, backup });
-      synced.push(rel);
-    } catch (err) {
-      errors.push(`${rel}: ${err.message}`);
-    }
+    syncOneLibFile({ source, target, rel, force, backupsDir, deployLog, version,
+      synced, skipped, refused, errors, backups });
   }
+}
+
+/**
+ * Check there is something to sync, and make sure the install directory exists.
+ *
+ * Returns a reason when the sync cannot proceed. Three failures share one exit
+ * here because they all mean the same thing to the caller: nothing was synced, and
+ * the reason is in `errors`.
+ *
+ * @param {string} repoHooks
+ * @param {string} installedHooks
+ * @param {string[]} errors appended to
+ * @returns {string|null} the reason, or null when the sync may proceed
+ */
+function prepareInstallDir(repoHooks, installedHooks, errors) {
+  if (!fs.existsSync(repoHooks)) {
+    errors.push(`no githooks/ directory at ${repoHooks}`);
+    return 'missing';
+  }
+  if (!hasCanonicalHooks(repoHooks)) {
+    errors.push(`no hook files in ${repoHooks} (only adapters?) -- nothing to sync from`);
+    return 'empty';
+  }
+  try {
+    fs.mkdirSync(installedHooks, { recursive: true });
+  } catch (err) {
+    errors.push(`cannot create ${installedHooks}: ${err.message}`);
+    return 'unwritable';
+  }
+  return null;
 }
 
 function syncGlobalHooksFromRepo(ctx = {}) {
@@ -1894,22 +1942,8 @@ function syncGlobalHooksFromRepo(ctx = {}) {
   const backupsDir = path.join(installedHooks, 'backups');
   const deployLog = path.join(installedHooks, 'deploy.log');
 
-  if (!fs.existsSync(repoHooks)) {
-    errors.push(`no githooks/ directory at ${repoHooks}`);
-    return { synced, skipped, refused, errors, installedHooks, backups };
-  }
-
-  if (!hasCanonicalHooks(repoHooks)) {
-    errors.push(`no hook files in ${repoHooks} (only adapters?) -- nothing to sync from`);
-    return { synced, skipped, refused, errors, installedHooks, backups };
-  }
-
-  try {
-    fs.mkdirSync(installedHooks, { recursive: true });
-  } catch (err) {
-    errors.push(`cannot create ${installedHooks}: ${err.message}`);
-    return { synced, skipped, refused, errors, installedHooks, backups };
-  }
+  const blocked = prepareInstallDir(repoHooks, installedHooks, errors);
+  if (blocked) return { synced, skipped, refused, errors, installedHooks, backups };
 
   syncHookEntries({
     names: DRIFT_COMPARED_HOOKS, repoDir: repoHooks, installDir: installedHooks,
@@ -2049,6 +2083,70 @@ async function checkAdapters(checks, mode, gitDirPromise) {
  *   D) Env + CLI tools — fully independent, run IN PARALLEL
  *   E) TUI + Skills — independent, run IN PARALLEL
  */
+/**
+ * Run the independent check groups concurrently and total their issue counts.
+ *
+ * The groups only share the `checks` sink and the git directory; nothing reads
+ * another's result. Running them concurrently is what keeps `doctor` responsive on
+ * a machine where every tool probe is a child process.
+ *
+ * The hook-drift group is deferred behind a resolved promise on purpose: it is
+ * repo-scoped (it compares `githooks/` against the install), so it must not delay
+ * the groups that apply to every project.
+ *
+ * @param {Array} checks shared sink, appended to by every group
+ * @param {object} config
+ * @param {{refreshEnv: boolean}} opts
+ * @returns {Promise<number>} total issues found
+ */
+async function runDiagnosticGroups(checks, config, opts) {
+  const gitDirPromise = getGitDir();
+
+  const hooksPromise = (async () => {
+    if (config.mode === 'local') return checkLocalHooks(checks);
+    return checkGlobalHooks(checks);
+  })();
+
+  const adaptersPromise = checkAdapters(checks, config.mode, gitDirPromise);
+
+  const envPromise = checkEnv(checks);
+  // #469: the tool probes run in the hook environment; --refresh-env swaps in the
+  // registry PATH so "installed but invisible" separates from "not installed". The
+  // staleness check always runs: it is what makes a stale terminal honest.
+  const cliToolsPromise = diagnoseCliToolsAsync(checks, { refreshEnv: opts.refreshEnv });
+  const stalenessPromise = diagnosePathStaleness(checks);
+
+  const tuiPromise = diagnoseTuiRegistration(checks);
+  const skillsPromise = diagnoseInstalledSkills(config, checks);
+
+  // Group E: repo-vs-installed hook drift (#451). Independent of config.mode: the
+  // drift matters exactly because the installed copy, not githooks/, is what
+  // executes. Gate modules drift independently of the hook files (#495), and the
+  // audit ledger rides the same repo-scoped group.
+  const driftPromise = Promise.resolve().then(() => {
+    const drift = diagnoseHookDrift();
+    checks.push(...drift.checks);
+    const moduleDrift = diagnoseModuleDrift();
+    checks.push(...moduleDrift.checks);
+    const ledger = diagnoseAuditLedger();
+    checks.push(...ledger.checks);
+    return drift.issues + moduleDrift.issues + ledger.issues;
+  });
+
+  const results = await Promise.allSettled([
+    hooksPromise, adaptersPromise, envPromise, cliToolsPromise,
+    stalenessPromise, tuiPromise, skillsPromise, driftPromise,
+  ]);
+
+  let issues = 0;
+  for (const result of results) {
+    if (result.status === 'fulfilled' && typeof result.value === 'number') {
+      issues += result.value;
+    }
+  }
+  return issues;
+}
+
 async function diagnoseAsync(refreshEnv = false, progress = null) {
   // #629: `progress` is a live view of the checks completed so far. The global
   // timeout used to discard everything diagnoseAsync had already produced; with a
@@ -2083,69 +2181,7 @@ async function diagnoseAsync(refreshEnv = false, progress = null) {
   issues += diagnoseTemplateDir(config, checks);
   // (Spawn capability probe already ran at the top of diagnoseAsync — #525.)
 
-  // --- Phase 2: Fetch gitDir early (needed by hooks and adapters) ---
-  const gitDirPromise = getGitDir();
-
-  // --- Phase 3: Run independent groups in parallel ---
-  // Group A: Hooks (needs config.mode + gitDir)
-  const hooksPromise = (async () => {
-    if (config.mode === 'local') {
-      return checkLocalHooks(checks);
-    }
-    return checkGlobalHooks(checks);
-  })();
-
-  // Group B: Adapters (needs config.mode + gitDir)
-  const adaptersPromise = checkAdapters(checks, config.mode, gitDirPromise);
-
-  // Group C: Environment checks + CLI tools — fully parallel
-  const envPromise = checkEnv(checks);
-  // #469: the tool probes run in the hook environment; --refresh-env swaps in
-  // the registry PATH so "installed but invisible" separates from "not
-  // installed". The staleness check runs always: it is what makes a stale
-  // terminal's green verdict honest.
-  const cliToolsPromise = diagnoseCliToolsAsync(checks, { refreshEnv });
-  const stalenessPromise = diagnosePathStaleness(checks);
-
-  // Group D: TUI + Skills (independent)
-  const tuiPromise = diagnoseTuiRegistration(checks);
-  const skillsPromise = diagnoseInstalledSkills(config, checks);
-
-  // Group E: repo-vs-installed hook drift (#451). Independent of config.mode:
-  // the drift matters exactly because the installed copy, not githooks/, is
-  // what executes. Detect if this is the xp-gate repo itself.
-  const driftPromise = Promise.resolve().then(() => {
-    const drift = diagnoseHookDrift();
-    checks.push(...drift.checks);
-    // The gate modules pre-commit sources at runtime drift independently of the
-    // hook files and live in a different directory (#495).
-    const moduleDrift = diagnoseModuleDrift();
-    checks.push(...moduleDrift.checks);
-    // Audit-ledger health (P0): telemetry anomalies are not hook drift, but
-    // they ride the same repo-scoped group and must be surfaced by doctor.
-    const ledger = diagnoseAuditLedger();
-    checks.push(...ledger.checks);
-    return drift.issues + moduleDrift.issues + ledger.issues;
-  });
-
-  // Wait for ALL parallel groups
-  const results = await Promise.allSettled([
-    hooksPromise,
-    adaptersPromise,
-    envPromise,
-    cliToolsPromise,
-    stalenessPromise,
-    tuiPromise,
-    skillsPromise,
-    driftPromise,
-  ]);
-
-  // Collect issue counts from settled promises
-  for (const result of results) {
-    if (result.status === 'fulfilled' && typeof result.value === 'number') {
-      issues += result.value;
-    }
-  }
+  issues += await runDiagnosticGroups(checks, config, { refreshEnv });
 
   return { checks, issues };
 }
