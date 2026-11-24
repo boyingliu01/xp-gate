@@ -55,13 +55,31 @@ async function fetchNpmLatestVersion(url: string): Promise<string | null> {
   }
 }
 
-function readCache(file: string): { ts: number; remoteVersion: string; localVersion?: string; status?: string } | null {
+/** A cache entry whose `remoteVersion` is present and whose age is under the TTL. */
+type CacheEntry = { ts: number; remoteVersion: string; localVersion?: string; status?: string }
+
+/**
+ * Whether a parsed cache entry is still usable.
+ *
+ * Both halves are required: an entry older than the TTL would report a stale version,
+ * and one without `remoteVersion` carries no answer at all.
+ */
+function isFreshEntry(data: CacheEntry): boolean {
+  return Date.now() - data.ts < CACHE_TTL_MS && Boolean(data.remoteVersion)
+}
+
+/**
+ * The cached update check, or null when there is nothing usable.
+ *
+ * Null is the ONLY failure answer: a missing file, unreadable content and a stale
+ * entry are all "no cached answer", and the caller then does the real check. Reporting
+ * them differently would move cache mechanics into the update logic.
+ */
+function readCache(file: string): CacheEntry | null {
   try {
     if (!existsSync(file)) return null
-    const raw = readFileSync(file, "utf8")
-    const data = JSON.parse(raw)
-    if (Date.now() - data.ts < CACHE_TTL_MS && data.remoteVersion) return data
-    return null
+    const data = JSON.parse(readFileSync(file, "utf8")) as CacheEntry
+    return isFreshEntry(data) ? data : null
   } catch {
     return null
   }
@@ -232,6 +250,23 @@ function readInstalledPluginVersion(pluginDir: string): string | null {
   }
 }
 
+/**
+ * Record the version comparison for the next run.
+ *
+ * The presence or absence of `status: "current"` is the whole message: with it the
+ * caller stays quiet, without it a notice is owed. Expressing that as an if/else-if
+ * that re-tested `remoteVersion && localVersion` in both arms said nothing new --
+ * both are already known non-empty by the time this is called.
+ */
+function recordVersionCheck(localVersion: string, remoteVersion: string): void {
+  const upToDate = !semverLt(localVersion, remoteVersion)
+  const entry: { ts: number; localVersion: string; remoteVersion: string; status?: string } = {
+    ts: Date.now(), localVersion, remoteVersion,
+  }
+  if (upToDate) entry.status = "current"
+  writeCache(OPENCODE_CACHE_FILE, entry)
+}
+
 async function checkPluginUpdate(pluginDir: string): Promise<void> {
   const cached = readCache(OPENCODE_CACHE_FILE)
   if (cached?.status === "current" && cached.remoteVersion) return
@@ -242,16 +277,7 @@ async function checkPluginUpdate(pluginDir: string): Promise<void> {
   const remoteVersion = await fetchNpmLatestVersion(OPENCODE_PLUGIN_REGISTRY)
   if (!remoteVersion) return
 
-  // The presence or absence of `status: "current"` is the whole message: with it
-  // the caller stays quiet, without it a notice is owed. It used to be expressed
-  // as an if/else-if that re-tested `remoteVersion && localVersion` in both arms,
-  // even though both were already known non-empty by this point.
-  const upToDate = !semverLt(localVersion, remoteVersion)
-  const entry: { ts: number; localVersion: string; remoteVersion: string; status?: string } = {
-    ts: Date.now(), localVersion, remoteVersion,
-  }
-  if (upToDate) entry.status = "current"
-  writeCache(OPENCODE_CACHE_FILE, entry)
+  recordVersionCheck(localVersion, remoteVersion)
 }
 
 // ── TUI upgrade notice ──
@@ -294,15 +320,30 @@ async function runBackgroundUpdates(pluginDir: string): Promise<string | null> {
   return null
 }
 
+/** How long a gate command may run before it is treated as hung. */
+const CMD_TIMEOUT_MS = 30000
+
+/**
+ * What to report when a command fails.
+ *
+ * stderr is preferred over message because it is the tool's own words; `message` is
+ * often the interpreter's paraphrase ("Command failed: xp-gate ...") and repeating it
+ * hides what actually went wrong.
+ */
+function failureText(err: unknown): string {
+  const error = err as { stderr?: string; message?: string }
+  if (error.stderr) return error.stderr
+  if (error.message) return `[XP-Gate] Error: ${error.message}`
+  return "[XP-Gate] Command failed."
+}
+
 async function runCmd(cmd: string, cwd: string): Promise<string> {
   try {
-    const { stdout } = await execAsync(cmd, { cwd, timeout: 30000 })
+    const { stdout } = await execAsync(cmd, { cwd, timeout: CMD_TIMEOUT_MS })
+    // A silent success is still a success; saying so stops it reading as a hang.
     return stdout || "[XP-Gate] Command completed (no output)."
-  } catch (err: unknown) {
-    const error = err as { stderr?: string; message?: string }
-    if (error.stderr) return error.stderr
-    if (error.message) return `[XP-Gate] Error: ${error.message}`
-    return "[XP-Gate] Command failed."
+  } catch (err) {
+    return failureText(err)
   }
 }
 
