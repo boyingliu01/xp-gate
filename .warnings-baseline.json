@@ -46,5 +46,9 @@
   "src/npm-package/scripts/sync-package-content.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
     "totalWarnings": 14
+  },
+  "scripts/delphi-external-review.cjs": {
+    "totalWarnings": 6,
+    "lastAnalyzed": "2026-11-24T06:19:37.247Z"
   }
 }
