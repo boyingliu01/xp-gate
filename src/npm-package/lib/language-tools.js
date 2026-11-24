@@ -1618,6 +1618,39 @@ if (conflicting.length) {
   return false;
 }
 
+/**
+ * Run the mutating actions, counting failures without stopping.
+ *
+ * One failed install must not strand the rest -- the operator wants to see every
+ * outcome in one pass, not discover them one re-run at a time. A missing installer
+ * command counts as a failure rather than being skipped silently: the tool stays
+ * broken either way, and only one of those tells the reader.
+ */
+function applyPlanActions(actions, io) {
+let failed = 0;
+for (const action of mutating) {
+  if (action.kind === 'remove-duplicate') {
+    const ok = removeFile(action.path);
+    if (!ok) failed += 1;
+    console.log(`${ok ? 'removed' : 'FAILED to remove'} ${action.path}`);
+    continue;
+  }
+  if (!action.command) {
+    failed += 1;
+    console.log(`FAILED ${action.tool}: no installer command for this platform`);
+    continue;
+  }
+  console.log(`> ${action.command}`);
+  const result = run(action.command) || { status: 1 };
+  if (result.status !== 0) {
+    failed += 1;
+    console.log(`FAILED ${action.tool} (exit ${result.status})`);
+  }
+}
+
+  return failed;
+}
+
 async function handleInstallTools(args, options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
   const autoYes = args.includes('--yes') || args.includes('-y');
@@ -1648,26 +1681,7 @@ async function handleInstallTools(args, options = {}) {
     return 0;
   }
 
-  let failed = 0;
-  for (const action of mutating) {
-    if (action.kind === 'remove-duplicate') {
-      const ok = removeFile(action.path);
-      if (!ok) failed += 1;
-      console.log(`${ok ? 'removed' : 'FAILED to remove'} ${action.path}`);
-      continue;
-    }
-    if (!action.command) {
-      failed += 1;
-      console.log(`FAILED ${action.tool}: no installer command for this platform`);
-      continue;
-    }
-    console.log(`> ${action.command}`);
-    const result = run(action.command) || { status: 1 };
-    if (result.status !== 0) {
-      failed += 1;
-      console.log(`FAILED ${action.tool} (exit ${result.status})`);
-    }
-  }
+  const failed = applyPlanActions(mutating, { run, removeFile });
 
   console.log('');
   if (failed > 0) {
