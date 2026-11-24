@@ -31,6 +31,145 @@ vi.mock('fs', async (importOriginal) => {
   };
 });
 
+
+/**
+ * A child-process double that lets a test fire 'close' on demand.
+ *
+ * The four run tests below each built this object inline, and each re-derived
+ * the same mock resets -- together 45% of this file was duplicated setup, which
+ * is what the duplication rule was reporting.
+ */
+function makeChildDouble(): {
+  child: ChildProcess;
+  fireClose: (code: number | null) => void;
+} {
+  let closeCb: ((code: number | null) => void) | null = null;
+  const child = {
+    stdout: { on: vi.fn() },
+    stderr: { on: vi.fn() },
+    on: vi.fn((event: string, cb: (code: number | null) => void) => {
+      if (event === 'close') closeCb = cb;
+    }),
+    kill: vi.fn(),
+    killed: false,
+  };
+  return {
+    child: child as unknown as ChildProcess,
+    fireClose: (code) => closeCb!(code),
+  };
+}
+
+/** Reset every child-process and fs mock, and stub PIT's on-disk layout. */
+async function resetPitestMocks(): Promise<void> {
+  const { existsSync, readFileSync, readdirSync } = await import('fs');
+  vi.mocked(execSync).mockReset();
+  vi.mocked(spawn).mockReset();
+  vi.mocked(existsSync).mockReset();
+  vi.mocked(readFileSync).mockReset();
+  vi.mocked(readdirSync).mockReset();
+  vi.mocked(execSync).mockImplementation(() => Buffer.from('Apache Maven 3.9.0'));
+  vi.mocked(existsSync).mockImplementation((p) => {
+    const path = String(p);
+    return path.endsWith('pom.xml')
+      || path.includes('pit-reports')
+      || path.endsWith('mutations.json');
+  });
+}
+
+
+/** What a given fixture pretends exists on disk. */
+interface FsLayout {
+  pom?: boolean;
+  gradle?: boolean;
+  gradlew?: boolean;
+  pitReports?: boolean;
+  mutationsJson?: boolean;
+}
+
+/**
+ * Stub `existsSync` to describe one build layout.
+ *
+ * Nine tests wrote this switch inline; only the booleans differed.
+ */
+async function stubLayout(layout: FsLayout): Promise<void> {
+  const { existsSync } = await import('fs');
+  vi.mocked(existsSync).mockImplementation((p) => {
+    const path = String(p);
+    if (path.includes('pom.xml')) return layout.pom === true;
+    if (path.includes('build.gradle')) return layout.gradle === true;
+    if (path.includes('gradlew')) return layout.gradlew === true;
+    if (path.includes('mutations.json')) return layout.mutationsJson === true;
+    if (path.includes('pit-reports')) return layout.pitReports === true;
+    return false;
+  });
+}
+
+/**
+ * Point `readFileSync` at a PIT report built from KILLED/SURVIVED rows.
+ *
+ * Ten tests constructed the same JSON by hand; the mutation rows are the only
+ * thing that varies, and the score assertions are derived from them.
+ */
+async function stubReport(rows: Array<[status: string, cls: string, file: string]>): Promise<void> {
+  const { readFileSync } = await import('fs');
+  vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+    mutations: rows.map(([status, mutatedClass, sourceFile]) => ({ status, mutatedClass, sourceFile })),
+  }));
+}
+
+/** Point `readFileSync` at a build file's contents. */
+async function stubBuildFile(contents: string): Promise<void> {
+  const { readFileSync } = await import('fs');
+  vi.mocked(readFileSync).mockReturnValue(contents);
+}
+
+/** Install a controllable child double and return its `fireClose`. */
+function stubChild(): { fireClose: (code: number | null) => void } {
+  const { child, fireClose } = makeChildDouble();
+  vi.mocked(spawn).mockReturnValue(child);
+  return { fireClose };
+}
+
+/** Pretend the given build tool answers `--version`. */
+async function stubToolVersion(output: string): Promise<void> {
+  const { execSync } = await import('child_process');
+  vi.mocked(execSync).mockReturnValueOnce(Buffer.from(output));
+}
+
+type PitestRunnerInstance = InstanceType<typeof import('../runners/pitest-runner').PitestRunner>;
+
+/**
+ * The current test's fixture directory.
+ *
+ * `tmpDir` is scoped to the describe block; a top-level helper cannot see it, and
+ * threading it through six call sites would recreate the repetition the helper
+ * exists to remove.
+ */
+let activeTmpDir = '';
+function currentTmpDir(): string {
+  return activeTmpDir;
+}
+
+/**
+ * Start a run on `runner`, then close the child double once its listeners exist.
+ *
+ * Six tests performed this by hand and each re-derived the same three steps.
+ * Centralising it also pins the `setImmediate` requirement: the shared spawn
+ * helper wires its listeners inside a Promise, so a 'close' fired before the
+ * microtask queue drains reaches nothing.
+ */
+async function runAndClose(
+  runner: PitestRunnerInstance,
+  files: string[],
+  fireClose: (code: number | null) => void,
+  code: number | null = 0,
+): Promise<Awaited<ReturnType<PitestRunnerInstance['run']>>> {
+  const promise = runner.run({ files, timeoutMs: 60_000, cwd: currentTmpDir() });
+  await new Promise((r) => setImmediate(r));
+  fireClose(code);
+  return promise;
+}
+
 describe('PitestRunner', () => {
   let PitestRunner: typeof import('../runners/pitest-runner').PitestRunner;
   let tmpDir: string;
@@ -38,7 +177,14 @@ describe('PitestRunner', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     tmpDir = join(tmpdir(), `xp-gate-pitest-test-${Date.now()}`);
-    mkdirSync(tmpDir, { recursive: true });
+    activeTmpDir = tmpDir;
+    try {
+      mkdirSync(tmpDir, { recursive: true });
+    } catch (err) {
+      // Fail with the directory named: a bare EACCES in beforeEach reads as a
+      // broken test rather than a broken environment.
+      throw new Error(`cannot create fixture dir ${tmpDir}: ${(err as Error).message}`);
+    }
     PitestRunner = (await import('../runners/pitest-runner')).PitestRunner;
   });
 
@@ -63,127 +209,100 @@ describe('PitestRunner', () => {
   });
 
   describe('isAvailable', () => {
-    it('should return false when neither Maven nor Gradle is available', async () => {
-      vi.mocked(execSync).mockImplementation(() => {
-        throw new Error('ENOENT');
+    /**
+     * Five cases that differ only in which build file exists and what it says.
+     *
+     * Table-driven because the five bodies were identical apart from those two
+     * values -- the duplication rule was reading them as copy-paste, and it was
+     * right: adding a sixth build tool meant copying a seventh block.
+     */
+    const CASES: Array<{
+      name: string;
+      tool?: string;
+      buildFile?: string;
+      expected: boolean;
+      expectVersionProbe?: string;
+      /** Maven is absent, so the runner must fall through to Gradle. */
+      mvnMissing?: boolean;
+    }> = [
+      { name: 'neither Maven nor Gradle is available', expected: false },
+      {
+        name: 'Maven is available and pom.xml has pitest-maven',
+        tool: 'Apache Maven 3.9.0',
+        buildFile: '<project><build><plugins><plugin><groupId>org.pitest</groupId><artifactId>pitest-maven</artifactId></plugin></plugins></build></project>',
+        expected: true,
+        expectVersionProbe: 'mvn --version',
+      },
+      {
+        name: 'Maven is available but pom.xml lacks the pitest plugin',
+        tool: 'Apache Maven 3.9.0',
+        buildFile: '<project><build><plugins></plugins></build></project>',
+        expected: false,
+      },
+      {
+        name: 'Gradle is available and build.gradle has the pitest plugin',
+        tool: 'Gradle 8.5',
+        buildFile: 'plugins { id("info.solidsoft.pitest") version "1.15.0" }',
+        expected: true,
+      },
+      {
+        name: './gradlew exists and build.gradle.kts has the pitest plugin',
+        tool: 'Gradle 8.5',
+        buildFile: 'plugins { id("info.solidsoft.gradle.pitest") version "1.15.0" }',
+        expected: true,
+        mvnMissing: true,
+      },
+    ];
+
+    for (const testCase of CASES) {
+      it(`should return ${testCase.expected} when ${testCase.name}`, async () => {
+        const { existsSync } = await import('fs');
+        const runner = new PitestRunner();
+
+        if (!testCase.tool) {
+          vi.mocked(existsSync).mockReturnValue(false);
+          vi.mocked(execSync).mockImplementation(() => {
+            throw new Error('ENOENT');
+          });
+        } else {
+          // Maven absent, Gradle present: the first probe throws, the second
+          // answers. The runner must fall through rather than give up.
+          if (testCase.mvnMissing) {
+            vi.mocked(execSync).mockImplementationOnce(() => {
+              throw new Error('mvn not found');
+            });
+          }
+          await stubToolVersion(testCase.tool);
+          vi.mocked(existsSync).mockReturnValue(true);
+        }
+        if (testCase.buildFile) {
+          await stubBuildFile(testCase.buildFile);
+        }
+
+        expect(await runner.isAvailable()).toBe(testCase.expected);
+        if (testCase.expectVersionProbe) {
+          expect(execSync).toHaveBeenCalledWith(testCase.expectVersionProbe, expect.any(Object));
+        }
       });
-
-      const runner = new PitestRunner();
-      const result = await runner.isAvailable();
-      expect(result).toBe(false);
-    });
-
-    it('should return true when Maven is available and pom.xml has pitest-maven', async () => {
-      const { existsSync, readFileSync } = await import('fs');
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(readFileSync).mockReturnValue(
-        '<project><build><plugins><plugin><groupId>org.pitest</groupId><artifactId>pitest-maven</artifactId></plugin></plugins></build></project>',
-      );
-
-      const runner = new PitestRunner();
-      const result = await runner.isAvailable();
-      expect(result).toBe(true);
-      expect(execSync).toHaveBeenCalledWith('mvn --version', expect.any(Object));
-    });
-
-    it('should return false when Maven is available but pom.xml lacks pitest plugin', async () => {
-      const { existsSync, readFileSync } = await import('fs');
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(readFileSync).mockReturnValue(
-        '<project><build><plugins></plugins></build></project>',
-      );
-
-      const runner = new PitestRunner();
-      const result = await runner.isAvailable();
-      expect(result).toBe(false);
-    });
-
-    it('should return true when Gradle is available and build.gradle has pitest plugin', async () => {
-      const { existsSync, readFileSync } = await import('fs');
-      vi.mocked(execSync)
-        .mockImplementationOnce(() => {
-          throw new Error('mvn not found');
-        })
-        .mockReturnValueOnce(Buffer.from('Gradle 8.5'));
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(readFileSync).mockReturnValue(
-        'plugins { id("info.solidsoft.pitest") version "1.15.0" }',
-      );
-
-      const runner = new PitestRunner();
-      const result = await runner.isAvailable();
-      expect(result).toBe(true);
-    });
-
-    it('should return true when ./gradlew exists with build.gradle.kts containing pitest plugin', async () => {
-      const { existsSync, readFileSync } = await import('fs');
-      vi.mocked(execSync)
-        .mockImplementationOnce(() => {
-          throw new Error('mvn not found');
-        });
-      vi.mocked(existsSync).mockReturnValue(true);
-      vi.mocked(readFileSync).mockReturnValue(
-        'plugins { id("info.solidsoft.gradle.pitest") version "1.15.0" }',
-      );
-
-      const runner = new PitestRunner();
-      const result = await runner.isAvailable();
-      expect(result).toBe(true);
-    });
+    }
   });
 
   describe('run - Maven branch', () => {
     it('should run PITest via Maven and parse JSON output', async () => {
-      const { existsSync, readFileSync, readdirSync } = await import('fs');
-
-      vi.mocked(execSync).mockReset();
-      vi.mocked(spawn).mockReset();
-      vi.mocked(existsSync).mockReset();
-      vi.mocked(readFileSync).mockReset();
-      vi.mocked(readdirSync).mockReset();
-
-      vi.mocked(execSync).mockImplementation(() => Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.endsWith('pom.xml')) return true;
-        if (path.includes('pit-reports')) return true;
-        if (path.endsWith('mutations.json')) return true;
-        return false;
-      });
+      const { readdirSync } = await import('fs');
+      await resetPitestMocks();
       vi.mocked(readdirSync).mockReturnValue(['202506300000'] as unknown as ReturnType<typeof readdirSync>);
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
-        mutations: [
-          { status: 'KILLED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.java' },
-          { status: 'KILLED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.java' },
-          { status: 'SURVIVED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.java' },
-          { status: 'SURVIVED', mutatedClass: 'com.example.Bar', sourceFile: 'Bar.java' },
-          { status: 'NO_COVERAGE', mutatedClass: 'com.example.Baz', sourceFile: 'Baz.java' },
-        ],
-      }));
+      await stubReport([
+        ['KILLED', 'com.example.Foo', 'Foo.java'],
+        ['KILLED', 'com.example.Foo', 'Foo.java'],
+        ['SURVIVED', 'com.example.Foo', 'Foo.java'],
+        ['SURVIVED', 'com.example.Bar', 'Bar.java'],
+        ['NO_COVERAGE', 'com.example.Baz', 'Baz.java'],
+      ]);
 
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event, cb) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { fireClose } = stubChild();
 
-      const runner = new PitestRunner();
-      const promise = runner.run({
-        files: ['src/main/java/com/example/Foo.java'],
-        timeoutMs: 60000,
-        cwd: tmpDir,
-      });
-
-      closeCb!(0);
-      const result = await promise;
+      const result = await runAndClose(new PitestRunner(), ['src/main/java/com/example/Foo.java'], fireClose!);
 
       expect(spawn).toHaveBeenCalledWith('mvn', [
         'test-compile',
@@ -209,49 +328,24 @@ describe('PitestRunner', () => {
       vi.mocked(spawn).mockReset();
       vi.mocked(execSync).mockReset();
 
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return false;
-        if (path.includes('build.gradle')) return true;
-        if (path.includes('gradlew')) return true;
-        if (path.includes('mutations.json')) return true;
-        return false;
-      });
+      await stubLayout({gradle: true, gradlew: true, mutationsJson: true});
 
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event, cb) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { fireClose } = stubChild();
 
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
-        mutations: [
-          { status: 'KILLED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.kt' },
-          { status: 'KILLED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.kt' },
-          { status: 'KILLED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.kt' },
-          { status: 'SURVIVED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.kt' },
-        ],
-      }));
+      await stubReport([
+        ['KILLED', 'com.example.Foo', 'Foo.kt'],
+        ['KILLED', 'com.example.Foo', 'Foo.kt'],
+        ['KILLED', 'com.example.Foo', 'Foo.kt'],
+        ['SURVIVED', 'com.example.Foo', 'Foo.kt'],
+      ]);
 
-      const runner = new PitestRunner();
-      const promise = runner.run({
-        files: ['src/main/kotlin/com/example/Foo.kt'],
-        timeoutMs: 60000,
-        cwd: tmpDir,
-      });
+      const result = await runAndClose(new PitestRunner(), ['src/main/kotlin/com/example/Foo.kt'], fireClose!);
 
-      closeCb!(0);
-      const result = await promise;
-
+      // stdin is explicitly ignored by the shared spawn helper: a tool that
+      // decides to prompt would otherwise block until the gate times out.
       expect(spawn).toHaveBeenCalledWith(join(tmpDir, 'gradlew'), ['pitest'], {
         cwd: tmpDir,
-        stdio: 'pipe',
+        stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
       });
       expect(result.timedOut).toBe(false);
@@ -260,45 +354,17 @@ describe('PitestRunner', () => {
     });
 
     it('should use gradle (not ./gradlew) when gradlew does not exist', async () => {
-      const { existsSync, readFileSync } = await import('fs');
 
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Gradle 8.5'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return false;
-        if (path.includes('build.gradle')) return true;
-        if (path.includes('gradlew')) return false;
-        if (path.includes('mutations.json')) return true;
-        return false;
-      });
+      await stubToolVersion('Gradle 8.5');
+      await stubLayout({gradle: true, mutationsJson: true});
 
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event, cb) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { fireClose } = stubChild();
 
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
-        mutations: [
-          { status: 'KILLED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.java' },
-        ],
-      }));
+      await stubReport([
+        ['KILLED', 'com.example.Foo', 'Foo.java'],
+      ]);
 
-      const runner = new PitestRunner();
-      const promise = runner.run({
-        files: ['src/main/java/com/example/Foo.java'],
-        timeoutMs: 60000,
-        cwd: tmpDir,
-      });
-
-      closeCb!(0);
-      const result = await promise;
+      const result = await runAndClose(new PitestRunner(), ['src/main/java/com/example/Foo.java'], fireClose!);
 
       expect(spawn).toHaveBeenCalledWith('gradle', ['pitest'], expect.objectContaining({ cwd: tmpDir }));
       expect(result.report).not.toBeNull();
@@ -328,14 +394,9 @@ describe('PitestRunner', () => {
     });
 
     it('should return timedOut=true when child process is killed by timeout', async () => {
-      const { existsSync } = await import('fs');
 
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return true;
-        return false;
-      });
+      await stubToolVersion('Apache Maven 3.9.0');
+      await stubLayout({pom: true});
 
       const mockChild = {
         stdout: { on: vi.fn() },
@@ -360,14 +421,9 @@ describe('PitestRunner', () => {
     });
 
     it('should return error when spawn fails', async () => {
-      const { existsSync } = await import('fs');
 
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return true;
-        return false;
-      });
+      await stubToolVersion('Apache Maven 3.9.0');
+      await stubLayout({pom: true});
 
       const mockChild = {
         stdout: { on: vi.fn() },
@@ -393,60 +449,27 @@ describe('PitestRunner', () => {
     });
 
     it('should return null report when mutations.json does not exist', async () => {
-      const { existsSync } = await import('fs');
 
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return true;
-        if (path.includes('pit-reports') && !path.includes('mutations.json')) return true;
-        if (path.includes('mutations.json')) return false;
-        return false;
-      });
+      await stubToolVersion('Apache Maven 3.9.0');
+      await stubLayout({pom: true});
 
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event, cb) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { fireClose } = stubChild();
 
-      const runner = new PitestRunner();
-      const promise = runner.run({
-        files: ['src/main/java/Foo.java'],
-        timeoutMs: 60000,
-        cwd: tmpDir,
-      });
-
-      closeCb!(0);
-      const result = await promise;
+      const result = await runAndClose(new PitestRunner(), ['src/main/java/Foo.java'], fireClose!);
 
       expect(result.report).toBeNull();
       expect(result.timedOut).toBe(false);
     });
 
     it('should return error string when Maven exits with non-zero code', async () => {
-      const { existsSync, readFileSync, readdirSync } = await import('fs');
+      const { readdirSync } = await import('fs');
 
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return true;
-        if (path.includes('mutations.json')) return true;
-        if (path.includes('pit-reports')) return true;
-        return false;
-      });
+      await stubToolVersion('Apache Maven 3.9.0');
+      await stubLayout({pom: true, pitReports: true, mutationsJson: true});
       vi.mocked(readdirSync).mockReturnValue(['202506300000'] as unknown as ReturnType<typeof readdirSync>);
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
-        mutations: [
-          { status: 'KILLED', mutatedClass: 'com.example.Foo', sourceFile: 'Foo.java' },
-        ],
-      }));
+      await stubReport([
+        ['KILLED', 'com.example.Foo', 'Foo.java'],
+      ]);
 
       let stderrCalled = false;
       const mockChild = {
@@ -481,80 +504,29 @@ describe('PitestRunner', () => {
     });
 
     it('should return null report when JSON is unparseable', async () => {
-      const { existsSync, readFileSync } = await import('fs');
+      const { readFileSync } = await import('fs');
 
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return true;
-        if (path.includes('mutations.json')) return true;
-        if (path.includes('pit-reports')) return true;
-        return false;
-      });
+      await stubToolVersion('Apache Maven 3.9.0');
+      await stubLayout({pom: true, pitReports: true, mutationsJson: true});
       vi.mocked(readFileSync).mockReturnValue('not valid json {{{');
 
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event, cb) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { fireClose } = stubChild();
 
-      const runner = new PitestRunner();
-      const promise = runner.run({
-        files: ['src/main/java/Foo.java'],
-        timeoutMs: 60000,
-        cwd: tmpDir,
-      });
-
-      closeCb!(0);
-      const result = await promise;
+      const result = await runAndClose(new PitestRunner(), ['src/main/java/Foo.java'], fireClose!);
 
       expect(result.report).toBeNull();
       expect(result.timedOut).toBe(false);
     });
 
     it('should return null report when mutations array is empty', async () => {
-      const { existsSync, readFileSync } = await import('fs');
 
-      vi.mocked(execSync).mockReturnValueOnce(Buffer.from('Apache Maven 3.9.0'));
-      vi.mocked(existsSync).mockImplementation((p) => {
-        const path = String(p);
-        if (path.includes('pom.xml')) return true;
-        if (path.includes('mutations.json')) return true;
-        if (path.includes('pit-reports')) return true;
-        return false;
-      });
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
-        mutations: [],
-      }));
+      await stubToolVersion('Apache Maven 3.9.0');
+      await stubLayout({pom: true, pitReports: true, mutationsJson: true});
+      await stubReport([]);
 
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event, cb) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { fireClose } = stubChild();
 
-      const runner = new PitestRunner();
-      const promise = runner.run({
-        files: ['src/main/java/Foo.java'],
-        timeoutMs: 60000,
-        cwd: tmpDir,
-      });
-
-      closeCb!(0);
-      const result = await promise;
+      const result = await runAndClose(new PitestRunner(), ['src/main/java/Foo.java'], fireClose!);
 
       expect(result.report).toBeNull();
       expect(result.timedOut).toBe(false);

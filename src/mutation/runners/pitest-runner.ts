@@ -1,5 +1,6 @@
 // @no-test-required: PITest wrapper — tested via gate-m integration + pre-push Gate M
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
+import { spawnWithCapture } from './spawn-with-capture';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import type {
@@ -86,120 +87,65 @@ export class PitestRunner implements MutationRunner {
   }
 
   private runMaven(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
-      const child = spawn(
-        'mvn',
-        [
-          'test-compile',
-          'org.pitest:pitest-maven:mutationCoverage',
-          '-DoutputFormats=JSON',
-        ],
-        {
-          stdio: 'pipe',
-          shell: true,
-          cwd: options.cwd,
-        },
-      );
-
-      let stderr = '';
-      let stdout = '';
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (code === null) {
-          resolve({ report: null, timedOut: true });
-          return;
-        }
-
-        const report = this.parsePitestJson(options.cwd, 'maven');
-        resolve({
-          report,
-          timedOut: false,
-          error: code !== 0 ? stderr || stdout : undefined,
-        });
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timeoutId);
-        resolve({ report: null, timedOut: false, error: err.message });
-      });
-    });
+    return this.runPitest(
+      'mvn',
+      ['test-compile', 'org.pitest:pitest-maven:mutationCoverage', '-DoutputFormats=JSON'],
+      options,
+      'maven',
+    );
   }
 
   private runGradle(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
-      const gradlewPath = join(options.cwd, 'gradlew');
-      const gradleCmd = existsSync(gradlewPath) ? gradlewPath : 'gradle';
+    const gradlewPath = join(options.cwd, 'gradlew');
+    const gradleCmd = existsSync(gradlewPath) ? gradlewPath : 'gradle';
+    return this.runPitest(gradleCmd, ['pitest'], options, 'gradle');
+  }
 
-      const child = spawn(gradleCmd, ['pitest'], {
-        stdio: 'pipe',
-        shell: true,
-        cwd: options.cwd,
-      });
-
-      let stderr = '';
-      let stdout = '';
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (code === null) {
-          resolve({ report: null, timedOut: true });
-          return;
-        }
-
-        const report = this.parsePitestJson(options.cwd, 'gradle');
-        resolve({
-          report,
-          timedOut: false,
-          error: code !== 0 ? stderr || stdout : undefined,
-        });
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timeoutId);
-        resolve({ report: null, timedOut: false, error: err.message });
-      });
+  /**
+   * Run PIT and read the report it wrote.
+   *
+   * Maven and Gradle differ only in how PIT is invoked and which report file it
+   * lands in; the spawn/timeout/capture skeleton was copied verbatim into both,
+   * which is two places for the timeout policy to drift apart.
+   */
+  private async runPitest(
+    command: string,
+    args: string[],
+    options: RunMutationOptions,
+    flavour: 'maven' | 'gradle',
+  ): Promise<MutationRunOutcome> {
+    const result = await spawnWithCapture(command, args, {
+      timeoutMs: options.timeoutMs,
+      cwd: options.cwd,
+      shell: true,
     });
+
+    if (result.error) {
+      return { report: null, timedOut: false, error: result.error };
+    }
+    if (result.timedOut) {
+      return { report: null, timedOut: true };
+    }
+    return {
+      report: this.parsePitestJson(options.cwd, flavour),
+      timedOut: false,
+      error: result.code !== 0 ? result.stderr || result.stdout : undefined,
+    };
   }
 
   private findMavenReportPath(cwd: string): string | null {
     const reportsDir = join(cwd, 'target', 'pit-reports');
-    if (!existsSync(reportsDir)) return null;
-    for (const entry of readdirSync(reportsDir)) {
-      const candidate = join(reportsDir, entry, 'mutations.json');
-      if (existsSync(candidate)) return candidate;
+    try {
+      for (const entry of readdirSync(reportsDir)) {
+        const candidate = join(reportsDir, entry, 'mutations.json');
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch {
+      // A missing or unreadable reports directory means PIT wrote nothing, which
+      // the caller reports as "no report" rather than as a crash. ENOENT here is
+      // routine (PIT skipped, or the build failed before the report step), so
+      // throwing would turn "no report" into an unhandled error.
+      return null;
     }
     return null;
   }

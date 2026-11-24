@@ -25,6 +25,55 @@ vi.mock('fs', async () => {
   };
 });
 
+
+/**
+ * A child-process double whose 'close' the test fires explicitly.
+ *
+ * Ten tests built this object inline. The shared spawn helper registers its
+ * listeners inside a Promise, so a test must let the microtask queue drain
+ * before firing it -- see `untilClose`.
+ */
+function makeChildDouble(): {
+  child: ChildProcess;
+  fireClose: (code: number | null) => void;
+} {
+  let closeCb: ((code: number | null) => void) | null = null;
+  const child = {
+    stdout: { on: vi.fn() },
+    stderr: { on: vi.fn() },
+    on: vi.fn((event: string, cb: (code: number | null) => void) => {
+      if (event === 'close') closeCb = cb;
+    }),
+    kill: vi.fn(),
+    killed: false,
+  };
+  return {
+    child: child as unknown as ChildProcess,
+    fireClose: (code) => closeCb!(code),
+  };
+}
+
+/** Let the shared spawn helper install its listeners before a test fires them. */
+async function untilClose(): Promise<void> {
+  await new Promise((r) => setImmediate(r));
+}
+
+
+/** Write the Stryker config and a report with the given score breakdown. */
+function writeStrykerFixtures(
+  dir: string,
+  report: { score: number; mutants: number; killed: number; survived: number } | null,
+): void {
+  writeFileSync(join(dir, 'stryker.prepush.conf.json'), '{}');
+  if (!report) return;
+  writeFileSync(join(dir, '.stryker-report.json'), JSON.stringify({
+    mutationScore: report.score,
+    nrOfMutants: report.mutants,
+    nrOfKilledMutants: report.killed,
+    nrOfSurvivedMutants: report.survived,
+  }));
+}
+
 describe('StrykerRunner', () => {
   let StrykerRunner: typeof import('../runners/stryker-runner').StrykerRunner;
   let tmpDir: string;
@@ -102,25 +151,10 @@ describe('StrykerRunner', () => {
 
   describe('run', () => {
     it('should spawn npx stryker run with correct args and parse valid report', async () => {
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { child: mockChild, fireClose } = makeChildDouble();
+      vi.mocked(spawn).mockReturnValue(mockChild);
 
-      writeFileSync(join(tmpDir, 'stryker.prepush.conf.json'), '{}');
-      writeFileSync(join(tmpDir, '.stryker-report.json'), JSON.stringify({
-        mutationScore: 75,
-        nrOfMutants: 40,
-        nrOfKilledMutants: 30,
-        nrOfSurvivedMutants: 10,
-      }));
+      writeStrykerFixtures(tmpDir, { score: 75, mutants: 40, killed: 30, survived: 10 });
 
       const runner = new StrykerRunner();
       const promise = runner.run({
@@ -129,7 +163,8 @@ describe('StrykerRunner', () => {
         cwd: tmpDir,
       });
 
-      closeCb!(0);
+      await untilClose();
+      fireClose!(0);
       const result = await promise;
 
       expect(spawn).toHaveBeenCalledWith(
@@ -140,7 +175,13 @@ describe('StrykerRunner', () => {
           '--mutate', 'src/a.ts',
           '--mutate', 'src/b.tsx',
         ],
-        expect.objectContaining({ cwd: tmpDir, stdio: 'pipe', shell: true }),
+        // stdin is explicitly ignored: a mutation tool that decides to prompt
+        // would otherwise block until the gate times out.
+        expect.objectContaining({
+          cwd: tmpDir,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+        }),
       );
 
       expect(result.timedOut).toBe(false);
@@ -153,17 +194,8 @@ describe('StrykerRunner', () => {
     });
 
     it('should omit --config when stryker.prepush.conf.json does not exist', async () => {
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { child: mockChild, fireClose } = makeChildDouble();
+      vi.mocked(spawn).mockReturnValue(mockChild);
 
       const runner = new StrykerRunner();
       const promise = runner.run({
@@ -172,7 +204,7 @@ describe('StrykerRunner', () => {
         cwd: tmpDir,
       });
 
-      closeCb!(0);
+      fireClose!(0);
       await promise;
 
       expect(spawn).toHaveBeenCalledWith(
@@ -299,17 +331,8 @@ describe('StrykerRunner', () => {
 
   describe('report parsing', () => {
     it('should parse valid Stryker JSON report', async () => {
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { child: mockChild, fireClose } = makeChildDouble();
+      vi.mocked(spawn).mockReturnValue(mockChild);
 
       writeFileSync(join(tmpDir, '.stryker-report.json'), JSON.stringify({
         mutationScore: 88.5,
@@ -325,7 +348,8 @@ describe('StrykerRunner', () => {
         cwd: tmpDir,
       });
 
-      closeCb!(0);
+      await untilClose();
+      fireClose!(0);
       const result = await promise;
 
       expect(result.report).not.toBeNull();
@@ -336,17 +360,8 @@ describe('StrykerRunner', () => {
     });
 
     it('should return null report for invalid JSON', async () => {
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { child: mockChild, fireClose } = makeChildDouble();
+      vi.mocked(spawn).mockReturnValue(mockChild);
 
       writeFileSync(join(tmpDir, '.stryker-report.json'), 'not valid json {{{');
 
@@ -357,24 +372,16 @@ describe('StrykerRunner', () => {
         cwd: tmpDir,
       });
 
-      closeCb!(0);
+      await untilClose();
+      fireClose!(0);
       const result = await promise;
 
       expect(result.report).toBeNull();
     });
 
     it('should default missing numeric fields to 0 (asNumber fallback)', async () => {
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { child: mockChild, fireClose } = makeChildDouble();
+      vi.mocked(spawn).mockReturnValue(mockChild);
 
       writeFileSync(join(tmpDir, '.stryker-report.json'), JSON.stringify({
         someOtherField: 'value',
@@ -387,7 +394,8 @@ describe('StrykerRunner', () => {
         cwd: tmpDir,
       });
 
-      closeCb!(0);
+      await untilClose();
+      fireClose!(0);
       const result = await promise;
 
       // asNumber defaults non-number values to 0; isNaN(0) is false → report is non-null
@@ -399,17 +407,8 @@ describe('StrykerRunner', () => {
     });
 
     it('should parse per-file breakdown from files object', async () => {
-      let closeCb: ((code: number | null) => void) | null = null;
-      const mockChild = {
-        stdout: { on: vi.fn() },
-        stderr: { on: vi.fn() },
-        on: vi.fn((event: string, cb: (code: number | null) => void) => {
-          if (event === 'close') closeCb = cb;
-        }),
-        kill: vi.fn(),
-        killed: false,
-      };
-      vi.mocked(spawn).mockReturnValue(mockChild as unknown as ChildProcess);
+      const { child: mockChild, fireClose } = makeChildDouble();
+      vi.mocked(spawn).mockReturnValue(mockChild);
 
       writeFileSync(join(tmpDir, '.stryker-report.json'), JSON.stringify({
         mutationScore: 70,
@@ -439,7 +438,8 @@ describe('StrykerRunner', () => {
         cwd: tmpDir,
       });
 
-      closeCb!(0);
+      await untilClose();
+      fireClose!(0);
       const result = await promise;
 
       expect(result.report).not.toBeNull();
