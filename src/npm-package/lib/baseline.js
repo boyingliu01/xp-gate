@@ -43,9 +43,18 @@ function readBaselineForMerge() {
   }
 }
 
+/**
+ * Create a directory if it does not exist, or fail with the path.
+ *
+ * Called before every baseline write, so a silent failure here surfaces later as
+ * "cannot write" with no indication that the directory was the problem.
+ */
 function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
+  if (fs.existsSync(dirPath)) return;
+  try {
     fs.mkdirSync(dirPath, { recursive: true });
+  } catch (err) {
+    throw new Error(`cannot create ${dirPath}: ${err.message}`);
   }
 }
 
@@ -201,18 +210,25 @@ function formatToolFailure(err) {
  * Report a linter that could not be evaluated.
  *
  * Silence is what let "TypeScript was never baselined" survive in this repo: the
- * command printed a cheerful "✅ Baseline created" while 652 files had contributed
- * nothing. A warning is the minimum contract -- the caller can still finish, but
+ * command printed a cheerful "✅ Baseline created" while hundreds of files had
+ * contributed nothing. A warning is the minimum contract -- the caller can still finish, but
  * the user is told which language went unmeasured and why.
  *
  * @param {string} tool
  * @param {string[]} errors
  */
+/** Three bad entries is enough to convey the pattern; a wall of paths gets skimmed. */
+const PREVIEW_ITEMS = 3;
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+/** A lint run's JSON can be large on a big tree; this was the previous inline cap. */
+const LINT_MAX_OUTPUT_MEGABYTES = 5;
+const LINT_MAX_OUTPUT_BYTES = LINT_MAX_OUTPUT_MEGABYTES * BYTES_PER_MEGABYTE;
+
 function recordFailures(tool, errors) {
   if (!errors || errors.length === 0) return;
   const unique = [...new Set(errors)];
-  const shown = unique.slice(0, 3).join('; ');
-  const more = unique.length > 3 ? ` (+${unique.length - 3} more)` : '';
+  const shown = unique.slice(0, PREVIEW_ITEMS).join('; ');
+  const more = unique.length > PREVIEW_ITEMS ? ` (+${unique.length - PREVIEW_ITEMS} more)` : '';
   console.warn(`⚠️  ${tool}: could not evaluate ${errors.length} batch(es) — ${shown}${more}`);
   console.warn(`   Files covered by a failed batch are absent from the baseline, not clean.`);
 }
@@ -291,7 +307,7 @@ function findFilesByExt(extensions) {
     const patterns = extensions.map(e => `"**/*${e}"`).join(' ');
     const result = execSync(`git ls-files ${patterns}`, {
       encoding: 'utf8',
-      maxBuffer: 5 * 1024 * 1024,
+      maxBuffer: LINT_MAX_OUTPUT_BYTES,
       cwd: process.cwd(),
     }).trim();
     return result ? result.split('\n') : [];
@@ -333,7 +349,7 @@ function findShellScripts() {
   try {
     const result = execSync(`git ls-files ${hookPatterns}`, {
       encoding: 'utf8',
-      maxBuffer: 5 * 1024 * 1024,
+      maxBuffer: LINT_MAX_OUTPUT_BYTES,
       cwd,
     }).trim();
     hooks = result ? result.split('\n') : [];
@@ -591,7 +607,15 @@ function showBaseline() {
     return 1;
   }
 
-  const data = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  } catch (err) {
+    // A baseline we cannot read is not an empty baseline; saying so prevents a
+    // caller from concluding the project has no recorded warnings.
+    console.error(`Error: cannot read baseline: ${err.message}`);
+    return 1;
+  }
   const files = Object.keys(data);
 
   if (files.length === 0) {
