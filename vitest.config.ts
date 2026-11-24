@@ -48,6 +48,13 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],
+      // NOTE for anyone reading coverage numbers: a single-file run
+      // (`vitest run path/to/x.test.js --coverage`) OVERWRITES
+      // coverage/coverage-summary.json with a report that only mentions the
+      // files that one test loaded. Measured 2026-11-24: a one-test probe turned
+      // the reported total from 87.28% into 3.74%, and reading that file
+      // afterwards looks exactly like the repo lost its coverage. Always
+      // regenerate with a full run before quoting a number.
       // #562: `plugins/` was inside `include`'s complement, so 4340 lines of
       // canonical plugin source were never measured -- while 28 test files and 225
       // tests already exercise them and pass. Measured in isolation those sources
