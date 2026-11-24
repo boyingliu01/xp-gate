@@ -605,4 +605,12 @@ module.exports = {
   // the CLI, so the only way to test it was to shell out and parse console
   // output. A function nobody can call directly is a function nobody can pin.
   handleReworkCheck,
+  // Pure display/parse helpers, exported so they can be pinned without rendering a
+  // whole table through the CLI.
+  parseTime,
+  getLatestTimestamp,
+  statusIcon,
+  formatDuration,
+  buildMetricsLine,
+  formatReqLines,
 };
