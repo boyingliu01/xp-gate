@@ -17,6 +17,7 @@
     "**/githooks/adapters/gate-*.sh",
     "**/plugins/*/skills/**",
     "**/plugins/*/lib/**",
-    "**/*/lib/client.js"
+    "**/*/lib/client.js",
+    "**/__tests__/**"
   ]
 }
