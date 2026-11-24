@@ -619,6 +619,8 @@ module.exports = {
     stripExtendedPrefix,
     archlintInvocation,
     reportLaunchFailure,
+    runBaselineRatchet,
+    printScanSummary,
     BLOCKING_SEVERITIES,
     BASELINE_FILE,
   },
