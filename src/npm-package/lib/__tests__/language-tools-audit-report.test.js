@@ -128,3 +128,48 @@ describe('check-tools --json', () => {
     expect(out).not.toContain('Quality Gate Tool Audit');
   });
 });
+
+describe('check-tools auto-detection', () => {
+  const { handleCheckTools } = require('../language-tools.js');
+  const os = require('node:os');
+  const nodeFs = require('node:fs');
+  const nodePath = require('node:path');
+
+  let fixture;
+
+  beforeEach(() => {
+    fixture = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'xp-gate-check-'));
+    nodeFs.writeFileSync(nodePath.join(fixture, 'package.json'), '{"name":"x"}');
+    nodeFs.writeFileSync(nodePath.join(fixture, 'tsconfig.json'), '{}');
+  });
+
+  afterEach(() => nodeFs.rmSync(fixture, { recursive: true, force: true }));
+
+  it('detects languages when none are named, instead of reporting nothing', async () => {
+    // A report that silently becomes empty reads as "complete". Detecting the
+    // language is what stops that.
+    const out = await capture(() =>
+      handleCheckTools([], { projectRoot: fixture, audit: () => [row()] }));
+    expect(out).toContain('gitleaks');
+  });
+
+  it('includes cross-language CLI tools when auto-detecting', async () => {
+    // The gate SCRIPTS call these directly, so they belong to the answer even
+    // when no detected language mentions them.
+    const seen = [];
+    await capture(() => handleCheckTools([], {
+      projectRoot: fixture,
+      audit: (tools) => { seen.push(...tools.map((t) => t.name)); return [row()]; },
+    }));
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  it('narrows to the named language when one is given', async () => {
+    const explicit = [];
+    await capture(() => handleCheckTools(['typescript'], {
+      projectRoot: fixture,
+      audit: (tools) => { explicit.push(...tools.map((t) => t.name)); return [row()]; },
+    }));
+    expect(explicit.length).toBeGreaterThan(0);
+  });
+});
