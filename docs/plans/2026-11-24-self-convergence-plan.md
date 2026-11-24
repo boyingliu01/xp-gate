@@ -68,15 +68,43 @@ BLOCK > WARN > SKIP > PASS
 
 ## 2. 执行顺序（按"减少扩散"排序）
 
-### P0｜让门禁可信（进行中，已完成 3 项）
+### P0｜让门禁可信（**主体完成**）
 
 | 项 | 状态 | 提交 |
 |---|---|---|
 | gate-5 状态不被降级 | ✅ | `eb1372fc` |
 | 统一 verdict 规则（gate-1/6） | ✅ | `c08b1c00` |
 | SKIP 原因可汇总（`audit --stats`） | ✅ | `2b105fa2` |
-| 工具解析统一（#843 PATH 回退） | ⏳ 待做 | — |
+| detail 追加而非覆盖（gate-5 全部 18 处） | ✅ | `571ed4c4` |
+| detail 按片段去重 | ✅ | `f44388c8` |
+| 停止自拼接导致的四倍重复 | ✅ | `1c30b823` |
+| 工具解析统一（#843 三条验收全部达成） | ✅ | `91e8318d`、`ccd22efb` |
+| #841 Windows shim 防护 | ✅ | `ccd22efb` |
 | Gate 2 镜像假阳性（28s→秒级） | ⏳ 待做 | — |
+
+#### #843 / #841 的验收证据（2026-11-24）
+
+```
+PATH 无 ~/.local/bin:
+  ✓ checkov  3.4.6 [found at ~/.local/bin/checkov (not on PATH)]
+  ✓ gitleaks 8.30.1
+  ✓ lizard   1.26.1
+
+PATH 含 /mnt/c Windows shim:
+  checkov → 不可用（正确拒绝，--version 通过但 exec 失败）
+
+正常 PATH:
+  checkov / gitleaks / semgrep / jscpd 全部可用
+```
+
+Gate 7 在 shim 优先的 PATH 下对含公开 ACL 的 `.tf` 正确 **BLOCKED**，
+说明它选中的是可执行的 checkov，不是坏掉的 shim。
+
+> **一个关键教训**：`resolve_tool_path` 和 `tool_is_available` 曾有
+> **不同的搜索顺序**。前者找到 `~/.local/bin/gitleaks`，后者却在同一路径上判"不可用"。
+> 两个函数回答同一个问题时，必须对**答案空间**达成一致——否则平台会自相矛盾：
+> 一个说"我找到了"，另一个说"它不能用"。
+
 
 ### P1｜清理已扩散的质量债
 
