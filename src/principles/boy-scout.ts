@@ -1,6 +1,5 @@
 import * as fs from 'fs/promises';
-import { analyze, getAdapterForFile } from './analyzer';
-import { getAllRules } from './index';
+import { analyzeWarningsForFiles } from './warnings-count';
 import { loadConfig, setActiveConfig } from './config';
 // Imported for the `--prune-baseline` command. The logic lives in its own module
 // because this file is already at the clean-code.many-exports limit; consumers
@@ -27,34 +26,6 @@ const RENAME_PARTS = 3;
 const SMALL_WARNING_BUDGET = 5;
 
 // Exported helper to get warning counts for a batch of files using the principles checker
-export async function analyzeWarningsForFiles(filesInput: string | string[]): Promise<Record<string, number>> {
-  const files = (typeof filesInput === 'string' ? filesInput.split(',') : filesInput)
-    .flatMap(f => f.split(',').map(s => s.trim()))
-    .filter(f => f);
-  if (files.length === 0) {
-    return {};
-  }
-
-  const rules = getAllRules();
-  const result = await analyze(files, rules, getAdapterForFile);
-
-  const fileWarnings: Record<string, number> = {};
-  
-  // Initialize all requested files with 0 warnings
-  for (const file of files) {
-    fileWarnings[file] = 0;
-  }
-  
-  // Count violations per file
-  for (const violation of result.violations) {
-    // Only count warnings and errors (ignore info level)
-    if (violation.severity === 'warning' || violation.severity === 'error') {
-      fileWarnings[violation.file] = (fileWarnings[violation.file] || 0) + 1;
-    }
-  }
-  
-  return fileWarnings;
-}
 
 interface BaselineEntry {
   eslint?: { warnings: number; errors: number };
@@ -85,47 +56,57 @@ interface EnforcementResult {
   };
 }
 
+/**
+ * How a single-letter git status maps to a bucket.
+ *
+ * A table because the mapping IS the rule: `A` added, `M` modified, `D` deleted. The
+ * switch it replaces was three `case`s plus a `default` that all did the same thing
+ * with a different key.
+ */
+const STATUS_BUCKETS: Record<string, keyof FileClassification> = {
+  A: 'new',
+  M: 'modified',
+  D: 'deleted',
+};
+
+/**
+ * The path a status line names, which may contain spaces.
+ *
+ * Everything after the status column, re-joined: a file called `my report.md` is one
+ * path, not two tokens.
+ */
+function pathOf(parts: string[]): string {
+  return parts.slice(1).join(' ');
+}
+
+/**
+ * Record a rename, which carries BOTH paths (`R100 old new`).
+ *
+ * Returns whether the line WAS a rename, so the caller keeps one guard instead of two:
+ * a truncated rename line is still a rename, just not one worth recording.
+ */
+function pushRename(result: FileClassification, parts: string[]): boolean {
+  if (parts[0].trim().charAt(0) !== 'R') return false;
+  if (parts.length >= RENAME_PARTS) result.renamed.push({ oldPath: parts[1], newPath: parts[2] });
+  return true;
+}
 export function classifyFiles(gitDiffLines: string[]): FileClassification {
-  const result: FileClassification = {
-    new: [],
-    modified: [],
-    deleted: [],
-    renamed: []
-  };
+  const result: FileClassification = { new: [], modified: [], deleted: [], renamed: [] };
 
   for (const line of gitDiffLines) {
     if (!line.trim()) continue;
-
     const parts = line.split(/\s+/).filter(Boolean);
     if (parts.length < 2) continue;
 
     const status = parts[0].trim();
-    // Guard the rename case before the switch so the body needs no extra level.
-    if (status.charAt(0) === 'R') {
-      // A rename line carries both the old and the new path.
-      if (parts.length < RENAME_PARTS) continue;
-      result.renamed.push({
-        oldPath: parts[1],
-        newPath: parts[2]
-      });
-      continue;
-    }
-
-    switch (status.charAt(0)) {
-      case 'A':
-        result.new.push(parts.slice(1).join(' '));
-        break;
-      case 'M':
-        result.modified.push(parts.slice(1).join(' '));
-        break;
-      case 'D':
-        result.deleted.push(parts.slice(1).join(' '));
-        break;
-      default:
-        break;
-    }
+    if (pushRename(result, parts)) continue;
+    const bucket = STATUS_BUCKETS[status.charAt(0)];
+    if (!bucket) continue;
+    // The buckets hold different shapes (paths vs rename pairs), so the assignment is
+    // narrowed per key rather than through a generic push.
+    if (bucket === 'renamed') continue;
+    (result[bucket] as string[]).push(pathOf(parts));
   }
-
   return result;
 }
 
@@ -203,15 +184,26 @@ export async function loadBaseline(baselinePath: string): Promise<Record<string,
 }
 
 /** Parse baseline JSON into an object map, or throw a located error. */
-function parseBaselineObject(content: string, baselinePath: string): Record<string, unknown> {
-  let parsed: unknown;
+/** Parse JSON, naming the file when it fails. */
+function parseJsonNamed(content: string, baselinePath: string): unknown {
   try {
-    parsed = JSON.parse(content);
+    return JSON.parse(content);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`Baseline ${baselinePath} is not valid JSON: ${reason}`);
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+}
+
+/** Whether `value` can serve as a path-to-entry map. */
+function isPlainRecord(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseBaselineObject(content: string, baselinePath: string): Record<string, unknown> {
+  const parsed = parseJsonNamed(content, baselinePath);
+  // An array is valid JSON but cannot be a baseline; saying "must be a JSON object"
+  // points at the shape rather than repeating the parse error.
+  if (!isPlainRecord(parsed)) {
     throw new Error(`Baseline ${baselinePath} must be a JSON object mapping paths to entries.`);
   }
   return parsed as Record<string, unknown>;
@@ -534,7 +526,8 @@ function collectBaselineTargets(parsed: Record<string, unknown>): string[] {
   return [...seen];
 }
 
-export async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<number> {
+/** Internal: reached through `main`, which is the exported entry point. */
+async function runEnforcementCommand(parsed: Record<string, unknown>): Promise<number> {
   try {
     const enforcementResult = await runEnforcement(
       (parsed.newFiles ?? []) as string[],
@@ -571,43 +564,35 @@ export async function main(): Promise<number> {
  * file. Exits 0 either way -- stale entries are housekeeping, and failing a
  * build over them would tempt people to disable the gate instead.
  */
-async function runPruneBaselineCommand(parsed: Record<string, unknown>): Promise<number> {
-  const baselinePath = typeof parsed.baselinePath === 'string'
-    ? parsed.baselinePath
-    : '.warnings-baseline.json';
-  const projectRoot = process.cwd();
+/** The baseline path from the parsed flags, or the default. */
+function baselinePathOf(parsed: Record<string, unknown>): string {
+  return typeof parsed.baselinePath === 'string' ? parsed.baselinePath : '.warnings-baseline.json';
+}
 
-  let raw: string;
+/**
+ * Read the baseline, or null when there is none.
+ *
+ * A missing baseline is not an error for this command: pruning a file that does not
+ * exist is simply nothing to do.
+ */
+async function readBaselineOrNull(baselinePath: string): Promise<string | null> {
   try {
-    raw = await fs.readFile(baselinePath, 'utf-8');
+    return await fs.readFile(baselinePath, 'utf-8');
   } catch {
     console.log(`ℹ️  No baseline at ${baselinePath} — nothing to prune.`);
-    return 0;
+    return null;
   }
+}
 
-  const result = pruneBaselineEntries(raw, projectRoot);
-  if (result.error) {
-    // Preserve the file: an entry we cannot classify must not be dropped.
-    console.error(`⚠️  ${result.error} — baseline left untouched.`);
-    return 1;
-  }
-
-  if (result.removed.length === 0) {
-    console.log(`✅ No stale baseline entries (${result.kept.length} entries checked).`);
-    return 0;
-  }
-
-  console.log(`Found ${result.removed.length} stale baseline entr(ies):`);
-  for (const file of result.removed) console.log(`  - ${file}`);
-
-  if (parsed.apply !== true) {
-    console.log('Dry run — re-run with --apply to remove them.');
-    return 0;
-  }
-
+/**
+ * Remove the stale entries and write the file back.
+ *
+ * The write is what makes this a repair rather than a report, so a failure names
+ * itself loudly -- a half-pruned baseline would look pruned on the next run.
+ */
+async function applyPrune(baselinePath: string, raw: string, removed: string[]): Promise<number> {
   const parsedBaseline = JSON.parse(raw) as Record<string, unknown>;
-  const removedSet = new Set(result.removed);
-  for (const file of result.removed) delete parsedBaseline[file];
+  for (const file of removed) delete parsedBaseline[file];
   try {
     await fs.writeFile(baselinePath, `${JSON.stringify(parsedBaseline, null, 2)}\n`, 'utf-8');
   } catch (error) {
@@ -615,8 +600,35 @@ async function runPruneBaselineCommand(parsed: Record<string, unknown>): Promise
     console.error(`❌ Could not write ${baselinePath}: ${detail}`);
     return 1;
   }
-  console.log(`✅ Removed ${removedSet.size} stale entr(ies) from ${baselinePath}.`);
+  console.log(`✅ Removed ${removed.length} stale entr(ies) from ${baselinePath}.`);
   return 0;
+}
+
+async function runPruneBaselineCommand(parsed: Record<string, unknown>): Promise<number> {
+  const baselinePath = baselinePathOf(parsed);
+  const raw = await readBaselineOrNull(baselinePath);
+  if (raw === null) return 0;
+
+  const result = pruneBaselineEntries(raw, process.cwd());
+  if (result.error) {
+    // Preserve the file: an entry we cannot classify must not be dropped.
+    console.error(`⚠️  ${result.error} — baseline left untouched.`);
+    return 1;
+  }
+  if (result.removed.length === 0) {
+    console.log(`✅ No stale baseline entries (${result.kept.length} entries checked).`);
+    return 0;
+  }
+
+  console.log(`Found ${result.removed.length} stale baseline entr(ies):`);
+  for (const file of result.removed) console.log(`  - ${file}`);
+  // Dry run by default: deleting history is not something a gate should do as a side
+  // effect of a normal run.
+  if (parsed.apply !== true) {
+    console.log('Dry run — re-run with --apply to remove them.');
+    return 0;
+  }
+  return applyPrune(baselinePath, raw, result.removed);
 }
 
 function splitCsvArg(raw: string | undefined): string[] {
@@ -879,3 +891,5 @@ export {
   runEnforcement,
   autoInitBaseline
 };
+
+export { analyzeWarningsForFiles } from './warnings-count';
