@@ -62,6 +62,22 @@ export default defineConfig({
       //    path), stale data (regenerated from an empty directory), and unloaded
       //    files (every file has non-zero coverage).
       //
+      //    CAUSE FOUND 2026-11-24 (round 49): a full run reports language-tools.js
+      //    at 50.0% (527/1054), while the same file measured with the 21 test files
+      //    that load it reports 97.24% (1025/1054). The gap is the whole file size,
+      //    not a rounding artefact -- the full run appears to record the file
+      //    without merging the worker coverage that actually exercised it. Checked
+      //    and NOT causative: duplicate module entry points (only one file exists),
+      //    `delete require.cache` in tests (those tests alone still measure 97.24%),
+      //    fs mocks (none), and the same treatment for rework.js and
+      //    gate-coverage.js (both match their full-run numbers exactly).
+      //
+      //    CONSEQUENCE: the aggregate UNDER-reports by ~0.9 percentage points while
+      //    this file is mismeasured. Corrected for the one file, the figure was
+      //    90.48% rather than the reported 89.46%. Quote the corrected number only
+      //    after re-measuring the file on its own; do not assume any other file is
+      //    fine -- check it the same way.
+      //
       //    So do not read a per-file number on a large file as evidence about its
       //    tests. Check whether tests exist, and instrument if it matters. The
       //    aggregate moves in the right direction; individual large files are not
