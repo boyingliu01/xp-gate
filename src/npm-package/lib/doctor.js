@@ -963,6 +963,9 @@ function readPair(repoFile, installedFile) {
  * import the .ts module). Grandfathers everything before AUDIT_LEDGER_SINCE;
  * only NEW implausible durations or unattributed commits count as issues.
  */
+/** The npm registry probe is a network call; it gets 8 s before being skipped. */
+const NPM_PROBE_TIMEOUT_MS = 8000;
+
 /** The runner gates on this; below it, a review exits 1 mid-run. */
 const MIN_NODE_MAJOR = 18;
 
@@ -4247,7 +4250,7 @@ async function checkDelphiVersionConsistency(add, options, npmLatest) {
       // `execWithTimeout` is async; reading `.trim()` off the Promise threw, and the
       // catch below swallowed it -- so a WORKING npm probe reported 'offline?' every
       // time. Measured: `Promise.prototype.trim` is undefined.
-      const probed = await execWithTimeout('npm view @boyingliu01/xp-gate version', 8000);
+      const probed = await execWithTimeout('npm view @boyingliu01/xp-gate version', NPM_PROBE_TIMEOUT_MS);
       versionDetail += `; npm latest probe: ${String(probed).trim()}`;
     } catch {
       versionStatus = 'SKIP';
