@@ -620,6 +620,8 @@ module.exports = {
     archlintInvocation,
     reportLaunchFailure,
     runBaselineRatchet,
+    runBuiltinScan,
+    runWithConfig,
     printScanSummary,
     BLOCKING_SEVERITIES,
     BASELINE_FILE,
