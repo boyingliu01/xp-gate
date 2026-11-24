@@ -2384,6 +2384,61 @@ function reportUnreadablePath(halves, checks) {
   return 0;
 }
 
+/**
+ * Gate tools that are installed but invisible to THIS terminal.
+ *
+ * A tool visible only under the refreshed (registry) PATH is "installed but
+ * invisible", never "not installed" -- the distinction the whole staleness check
+ * exists for. The hook environment is probed first, because that is where the gate
+ * will look for the tool; the refreshed path is the counterfactual.
+ *
+ * @param {object} registry as returned by readRegistryPath()
+ * @param {string} refreshedPath the registry PATH
+ * @returns {Promise<string[]>} `tool -> resolved path` entries
+ */
+async function findStaleInvisibleTools(registry, refreshedPath) {
+  const bash = checkBash();
+  const bashPath = bash.ok ? bash.path : null;
+  if (!bashPath) return [];
+
+  const invisible = [];
+  await Promise.all(GATE_CLI_TOOLS.map(async (entry) => {
+    const now = await probeToolInHookEnv(entry.tool, bashPath);
+    if (now) return;
+    const refreshed = await probeToolInHookEnv(entry.tool, bashPath, {
+      ...process.env,
+      PATH: refreshedPath,
+    });
+    if (refreshed) invisible.push(`${entry.tool} → ${refreshed}`);
+  }));
+  return invisible;
+}
+
+/**
+ * The stale-PATH warning: what is invisible, and what to do about it.
+ *
+ * The preview is capped at three entries. A machine can have dozens of stale
+ * entries, and a wall of paths is the reason a warning gets skimmed -- the count
+ * carries the scale, the three examples carry the shape.
+ *
+ * @param {{stale: string[], parts: string[], invisible: string[], checks: Array}} p
+ *   `checks` and `parts` are mutated
+ */
+function reportStalePath(p) {
+  const { stale, parts, invisible, checks } = p;
+  const preview = stale.length <= 3
+    ? stale.join(' ; ')
+    : `${stale.slice(0, 3).join(' ; ')} ; …+${stale.length - 3} more`;
+  parts.unshift(`PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview})`);
+  checks.push({
+    name: 'PATH freshness',
+    status: 'WARN',
+    detail: parts.join(' — ')
+      + '. A tool installed after this terminal opened needs a NEW terminal — or re-run: xp-gate doctor --refresh-env'
+      + (invisible.length ? ` — installed-but-invisible gate tools: ${invisible.join(', ')}` : ''),
+  });
+}
+
 async function diagnosePathStaleness(checks, options = {}) {
   if (process.platform !== 'win32') return 0;
   const registry = options.registry || (await readRegistryPath());
@@ -2422,32 +2477,9 @@ async function diagnosePathStaleness(checks, options = {}) {
   // Which gate tools does THIS terminal lose to staleness? A tool visible in
   // the hook env only under the registry PATH is "installed but invisible" —
   // never "not installed".
-  const bash = checkBash();
-  const bashPath = bash.ok ? bash.path : null;
   const refreshedPath = buildRefreshedPath(process.env.PATH || '', registry);
-  const invisible = [];
-  if (bashPath) {
-    await Promise.all(GATE_CLI_TOOLS.map(async (entry) => {
-      const now = await probeToolInHookEnv(entry.tool, bashPath);
-      if (now) return;
-      const refreshed = await probeToolInHookEnv(entry.tool, bashPath, {
-        ...process.env,
-        PATH: refreshedPath,
-      });
-      if (refreshed) invisible.push(`${entry.tool} → ${refreshed}`);
-    }));
-  }
-  const preview = stale.length <= 3
-    ? stale.join(' ; ')
-    : `${stale.slice(0, 3).join(' ; ')} ; …+${stale.length - 3} more`;
-  parts.unshift(`PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview})`);
-  checks.push({
-    name: 'PATH freshness',
-    status: 'WARN',
-    detail: parts.join(' — ')
-      + '. A tool installed after this terminal opened needs a NEW terminal — or re-run: xp-gate doctor --refresh-env'
-      + (invisible.length ? ` — installed-but-invisible gate tools: ${invisible.join(', ')}` : ''),
-  });
+  const invisible = await findStaleInvisibleTools(registry, refreshedPath);
+  reportStalePath({ stale, parts, invisible, checks });
   return 0;
 }
 
@@ -2956,23 +2988,92 @@ function fixHookDriftFromRepo() {
  *
  * @returns {boolean} Whether any hooks were updated
  */
+/**
+ * Where the hooks and adapters live for this install mode.
+ *
+ * Global mode uses one machine-wide pair. Local mode derives both from the git
+ * directory, and a project with no resolvable git dir cannot be repaired -- there is
+ * nowhere to write, so the caller reports "nothing fixed" rather than guessing a
+ * path.
+ *
+ * @param {boolean} isGlobal
+ * @returns {{hooksDestDir: string, adaptersDestDir: string}|null}
+ */
+function resolveHookDestinations(isGlobal) {
+  if (isGlobal) {
+    return { hooksDestDir: GLOBAL_HOOKS_DIR(), adaptersDestDir: GLOBAL_ADAPTERS_DIR() };
+  }
+  const gitDir = getGitDirSync();
+  if (!gitDir) return null;
+  const projectRoot = path.dirname(gitDir);
+  return {
+    hooksDestDir: path.join(gitDir, 'hooks'),
+    adaptersDestDir: path.join(projectRoot, 'githooks'),
+  };
+}
+
+/**
+ * Print what the sync refused to touch, and why it refused.
+ *
+ * The warning ends by saying there is NO rollback. That is not decoration: the
+ * refusal exists because the installed copy may hold work that exists nowhere else,
+ * so the operator has to judge against a copy they kept -- telling them to "undo" a
+ * write that never happened would be worse than saying nothing.
+ *
+ * @param {{diverged: Array, unknown: Array}} plan
+ */
+function reportBlockedHookSync(plan) {
+  if (!plan.hasBlocking) return;
+  console.log(`  ⚠️  ${plan.diverged.length + plan.unknown.length} hook/adapter file(s) NOT refreshed —`);
+  console.log('     the installed copy carries content the package does not, and overwriting');
+  console.log('     it would delete work that exists nowhere else:');
+  for (const d of plan.diverged) {
+    console.log(`     - ${d.name}: install has ${d.installedOnly} unique line(s), package has ${d.repoOnly}`);
+  }
+  for (const u of plan.unknown) {
+    console.log(`     - ${u.name}: installed copy could not be read`);
+  }
+  console.log('     Judge them (fold the hardening into the package, or move the file aside),');
+  console.log('     then re-run --fix.');
+  console.log('     There is no automatic backup of an overwritten hook/adapter file and nothing');
+  console.log('     in this tool can undo one — judge against a copy you kept, not against a rollback.');
+}
+
+/**
+ * Copy the files the plan judged safe, one at a time.
+ *
+ * A failure on one file is printed and the rest continue: a single unwritable
+ * target must not strand the other outdated hooks.
+ *
+ * @param {Array<{name: string, source: string, target: string}>} safe
+ * @returns {boolean} whether anything was refreshed
+ */
+function refreshSafeHooks(safe) {
+  console.log(`  Refreshing ${safe.length} outdated hook/adapter file(s)...`);
+  let refreshed = 0;
+  for (const entry of safe) {
+    if (!fs.existsSync(entry.source)) continue;
+    try {
+      fs.mkdirSync(path.dirname(entry.target), { recursive: true });
+      fs.copyFileSync(entry.source, entry.target);
+      fs.chmodSync(entry.target, 0o755);
+      refreshed++;
+    } catch (err) {
+      console.log(`  ✗ Could not refresh ${entry.name}: ${err.message}`);
+    }
+  }
+  return refreshed > 0;
+}
+
 function fixStaleHooks(config) {
   try {
     const { detectLocalModifications, getPackageRoot } = require('./update-hooks.js');
     const isGlobal = config.mode === 'global';
     const srcDir = getPackageRoot();
 
-    let hooksDestDir, adaptersDestDir;
-    if (isGlobal) {
-      hooksDestDir = GLOBAL_HOOKS_DIR();
-      adaptersDestDir = GLOBAL_ADAPTERS_DIR();
-    } else {
-      const gitDir = getGitDirSync();
-      if (!gitDir) return false;
-      const projectRoot = path.dirname(gitDir);
-      hooksDestDir = path.join(gitDir, 'hooks');
-      adaptersDestDir = path.join(projectRoot, 'githooks');
-    }
+    const dest = resolveHookDestinations(isGlobal);
+    if (!dest) return false;
+    const { hooksDestDir, adaptersDestDir } = dest;
 
     // Check if any hook files are stale (differ from package version)
     const modified = detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir);
@@ -2989,38 +3090,9 @@ function fixStaleHooks(config) {
       modified.flatMap((label) => staleSyncEntries(label, srcDir, hooksDestDir, adaptersDestDir)),
     );
 
-    if (plan.hasBlocking) {
-      console.log(`  ⚠️  ${plan.diverged.length + plan.unknown.length} hook/adapter file(s) NOT refreshed —`);
-      console.log('     the installed copy carries content the package does not, and overwriting');
-      console.log('     it would delete work that exists nowhere else:');
-      for (const d of plan.diverged) {
-        console.log(`     - ${d.name}: install has ${d.installedOnly} unique line(s), package has ${d.repoOnly}`);
-      }
-      for (const u of plan.unknown) {
-        console.log(`     - ${u.name}: installed copy could not be read`);
-      }
-      console.log('     Judge them (fold the hardening into the package, or move the file aside),');
-      console.log('     then re-run --fix.');
-      console.log('     There is no automatic backup of an overwritten hook/adapter file and nothing');
-      console.log('     in this tool can undo one — judge against a copy you kept, not against a rollback.');
-    }
-
+    reportBlockedHookSync(plan);
     if (plan.safe.length === 0) return plan.hasBlocking;
-
-    console.log(`  Refreshing ${plan.safe.length} outdated hook/adapter file(s)...`);
-    let refreshed = 0;
-    for (const entry of plan.safe) {
-      if (!fs.existsSync(entry.source)) continue;
-      try {
-        fs.mkdirSync(path.dirname(entry.target), { recursive: true });
-        fs.copyFileSync(entry.source, entry.target);
-        fs.chmodSync(entry.target, 0o755);
-        refreshed++;
-      } catch (err) {
-        console.log(`  ✗ Could not refresh ${entry.name}: ${err.message}`);
-      }
-    }
-    return refreshed > 0;
+    return refreshSafeHooks(plan.safe);
   } catch {
     return false;
   }
