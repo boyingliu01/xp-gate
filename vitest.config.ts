@@ -48,6 +48,24 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],
+      // MEASUREMENT LIMIT — read before trusting a per-file number.
+      //
+      // v8 attribution degrades on large files in this repo, and the degradation
+      // is not a test gap. Measured 2026-11-24:
+      //
+      //   files < 200 lines   86 files, mean coverage 96.4%
+      //   files > 600 lines   20 files, mean coverage 82.7%
+      //
+      // and, decisively, an instrumented run: adding a stderr write to
+      // planToolRepairs produced 26 executions in one full run while
+      // coverage-final.json recorded 6 of its 84 statements. doctor.js has 25
+      // dedicated test files and its diagnoseCliTools still reports 0/37 after
+      // being proven to execute 3 times.
+      //
+      // The aggregate 87.6% therefore UNDERSTATES the truth; the error is
+      // one-directional. Do not use a per-file low number as evidence that a
+      // large file lacks tests -- check for tests, and instrument if in doubt.
+      //
       // NOTE for anyone reading coverage numbers: a single-file run
       // (`vitest run path/to/x.test.js --coverage`) OVERWRITES
       // coverage/coverage-summary.json with a report that only mentions the
