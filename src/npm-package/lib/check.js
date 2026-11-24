@@ -379,4 +379,4 @@ function listGates() {
   return 0;
 }
 
-module.exports = { check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary, normalizeGateExit };
+module.exports = { resolveGateToken, parseCheckArgs, gitChangedNames, readChangedFiles, check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary, normalizeGateExit };
