@@ -1268,6 +1268,32 @@ const summary = summarizeAudit(rows);
  * cross-language tools) ride ALONGSIDE in `summary` and `crossLanguage` rather than
  * replacing the old shape.
  */
+/**
+ * The JSON shape of one audited tool.
+ *
+ * One factory for both call sites. They had drifted already -- the cross-language
+ * copy carried `npxInvoked` and the per-language one did not -- which is exactly the
+ * kind of divergence a second hand-written literal produces.
+ *
+ * `reason` is `undefined` when absent rather than omitted, so the key is stable for
+ * consumers that read it.
+ */
+function toolEntry(row) {
+  return {
+    name: row.name,
+    status: statusOfRow(row),
+    optional: row.optional,
+    version: row.version,
+    gates: row.gates,
+    duplicated: row.duplicated,
+    paths: row.paths,
+    outdated: row.outdated,
+    latestVersion: row.latestVersion,
+    currency: row.currency,
+    reason: row.validityReason || undefined,
+  };
+}
+
 function printAuditJson(rows, summary, args) {
   // CONTRACT, preserved from #468: the top level is keyed by language name and
   // each value is that language's tool list. Callers parse it that way, and a
@@ -1278,19 +1304,7 @@ function printAuditJson(rows, summary, args) {
   for (const row of rows) {
     for (const lang of (row.languages && row.languages.length ? row.languages : ['(cross-language)'])) {
       if (!byLanguage[lang]) byLanguage[lang] = [];
-      byLanguage[lang].push({
-        name: row.name,
-        status: statusOfRow(row),
-        optional: row.optional,
-        version: row.version,
-        gates: row.gates,
-        duplicated: row.duplicated,
-        paths: row.paths,
-        outdated: row.outdated,
-        latestVersion: row.latestVersion,
-        currency: row.currency,
-        reason: row.validityReason || undefined,
-      });
+      byLanguage[lang].push(toolEntry(row));
     }
   }
   // Tools the gate scripts call directly; reported once, not per language.
@@ -1298,20 +1312,7 @@ function printAuditJson(rows, summary, args) {
   // add a key to a contract callers compare exactly (#468).
   const crossLanguage = rows
     .filter((r) => !r.languages || r.languages.length === 0)
-    .map((r) => ({
-      name: r.name,
-      status: statusOfRow(r),
-      optional: r.optional,
-      version: r.version,
-      gates: r.gates,
-      duplicated: r.duplicated,
-      paths: r.paths,
-      outdated: r.outdated,
-      latestVersion: r.latestVersion,
-      currency: r.currency,
-      npxInvoked: r.npxInvoked,
-      reason: r.validityReason || undefined,
-    }));
+    .map((r) => ({ ...toolEntry(r), npxInvoked: r.npxInvoked }));
   if (crossLanguage.length > 0) byLanguage['(cross-language)'] = crossLanguage;
 
   // `summary` and the flat view are additive: they appear only when asked
