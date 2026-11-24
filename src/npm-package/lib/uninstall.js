@@ -670,61 +670,77 @@ function printUninstallPlan(mode, plan, purgeDirs, options) {
  * @returns {{hadErrors: boolean, backupMeta: object}} `backupMeta` is returned so the
  *   caller can decide whether to keep or discard the snapshot.
  */
-function executeUninstallPlan(plan, config, purgeDirs, options) {
-// §4.8 State machine: active → uninstalling
-saveConfig({ ...config, mode: 'uninstalling' });
-
-// §4.12 Step 4: Create backup snapshot before destructive operations
-const backupMeta = createBackupSnapshot(plan);
-
-// §4.12 Execute operations in order (non-destructive first, then destructive)
-let hadErrors = false;
-
-for (const item of plan) {
-  try {
-    hadErrors = !executePlanItem(item, config) || hadErrors;
-  } catch (e) {
-    console.warn(`  Warning: Could not remove ${item.label}: ${e.message}`);
-    hadErrors = true;
-  }
-}
-
-if (options.purge) {
-  for (const d of purgeDirs) {
+/**
+ * Delete the whole directories `--purge` asks for.
+ *
+ * Separate from the plan loop because these are trees removed with `force`, not
+ * owned files: there is no signature to check and no partial failure to report
+ * beyond "could not remove". A dry run prints them in the preview's shape, because
+ * the preview only lists what the PLAN will touch.
+ *
+ * @param {Array<{label: string, path: string}>} purgeDirs
+ * @param {{dryRun?: boolean}} options
+ * @returns {boolean} whether anything failed
+ */
+function runPurge(purgeDirs, options) {
+  let failed = false;
+  for (const dir of purgeDirs) {
     if (options.dryRun) {
-      console.log(`  • ${d.label}`);
+      console.log(`  • ${dir.label}`);
       continue;
     }
-    if (!fs.existsSync(d.path)) continue;
+    if (!fs.existsSync(dir.path)) continue;
     try {
-      fs.rmSync(d.path, { recursive: true, force: true });
-      console.log(`  Removed ${d.label}`);
+      fs.rmSync(dir.path, { recursive: true, force: true });
+      console.log(`  Removed ${dir.label}`);
+    } catch (err) {
+      console.warn(`  Warning: Could not remove ${dir.label}: ${err.message}`);
+      failed = true;
+    }
+  }
+  return failed;
+}
+
+function executeUninstallPlan(plan, config, purgeDirs, options) {
+  // §4.8 State machine: active → uninstalling
+  saveConfig({ ...config, mode: 'uninstalling' });
+
+  // §4.12 Step 4: Create backup snapshot before destructive operations
+  const backupMeta = createBackupSnapshot(plan);
+
+  // §4.12 Execute operations in order (non-destructive first, then destructive)
+  let hadErrors = false;
+
+  for (const item of plan) {
+    try {
+      hadErrors = !executePlanItem(item, config) || hadErrors;
     } catch (e) {
-      console.warn(`  Warning: Could not remove ${d.label}: ${e.message}`);
+      console.warn(`  Warning: Could not remove ${item.label}: ${e.message}`);
       hadErrors = true;
     }
   }
-}
 
-// §4.8 State machine: uninstalling → uninstalled
-try {
-  saveConfig({
-    ...getConfig() || config,
-    mode: 'uninstalled',
-    uninstalled: new Date().toISOString(),
-    manifest: undefined,
-  });
-} catch (e) {
-  // purge mode: config dir has been deleted, save is non-critical
-  if (!options.purge) throw e;
-  console.warn(`  Warning: Could not save config: ${e.message}`);
-}
+  const purgeErrors = options.purge ? runPurge(purgeDirs, options) : false;
 
-// §4.12 Step 11: Clean up backup on success
-if (!hadErrors) {
-  cleanupBackup(backupMeta);
-}
-  return { hadErrors, backupMeta };
+  // §4.8 State machine: uninstalling → uninstalled
+  try {
+    saveConfig({
+      ...getConfig() || config,
+      mode: 'uninstalled',
+      uninstalled: new Date().toISOString(),
+      manifest: undefined,
+    });
+  } catch (e) {
+    // purge mode: config dir has been deleted, save is non-critical
+    if (!options.purge) throw e;
+    console.warn(`  Warning: Could not save config: ${e.message}`);
+  }
+
+  // §4.12 Step 11: Clean up backup on success
+  if (!hadErrors) {
+    cleanupBackup(backupMeta);
+  }
+    return { hadErrors: hadErrors || purgeErrors, backupMeta };
 }
 
 async function uninstall(args) {
