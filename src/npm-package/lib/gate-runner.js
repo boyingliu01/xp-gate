@@ -1081,7 +1081,13 @@ function classifyJscpdRun(exitCode, output) {
   return 'clean';
 }
 
-function runJscpd(args, targetPath) {
+function runJscpd(args, targetPath, options = {}) {
+  // `spawn` and `findEntry` are injectable: the real ones launch a child process
+  // and walk the install trees, which made this 75-line block reachable only by
+  // actually having jscpd installed. The fallback chain is the interesting part
+  // (three attempts, each covering a different install shape), not the tool.
+  const spawn = options.spawn || spawnSync;
+  const findEntry = options.findEntry || findJscpdEntry;
   // Invoke jscpd's JS entry through `node` rather than going through .bin/.
   //
   // Two dead ends, both measured on Windows:
@@ -1118,7 +1124,7 @@ function runJscpd(args, targetPath) {
     appData: process.env.APPDATA,
     home: process.env.USERPROFILE || process.env.HOME,
   });
-  const entry = findJscpdEntry({ searchRoots: [targetPath, process.cwd(), ...globalPrefixes] });
+  const entry = findEntry({ searchRoots: [targetPath, process.cwd(), ...globalPrefixes] });
   let lastErr = null;
   // Third fallback is deliberately `--no-install`: a global jscpd is on PATH on the
   // dev machine (/c/Users/think/AppData/Roaming/npm/jscpd) but `npx` here was
@@ -1139,7 +1145,7 @@ function runJscpd(args, targetPath) {
       // straight to the terminal, so the gate could not tell a clean scan from one
       // that examined nothing -- #855. Replaying it immediately keeps the operator's
       // view identical to before.
-      const result = spawnSync(cmd, cmdArgs, {
+      const result = spawn(cmd, cmdArgs, {
         cwd: targetPath || process.cwd(),
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
@@ -1381,7 +1387,7 @@ async function invokeGateHandler(gateId, gate, targetPath, opts) {
   }
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
+module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, runJscpd, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
   // AC-670-03 asserts the --all preamble END-TO-END: that an all-mode run hands
   // the security gates a non-empty file population sourced from the list file and
   // sets GATE_SCOPE="all". With these unexported, the case could only take its
