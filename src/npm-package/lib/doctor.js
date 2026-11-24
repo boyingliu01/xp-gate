@@ -3110,6 +3110,74 @@ function doctorFlagContract(args) {
   return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag };
 }
 
+/**
+ * Report one sync result group: what was written, what was refused and why.
+ *
+ * The hook sync and the gate-module sync (#495) produced the same six-branch
+ * printout, including word-for-word the refusal warning. They differ only in
+ * the nouns, so the shape is here once and the callers supply those.
+ *
+ * @param {{synced: string[], skipped?: string[], refused: Array<{name: string, installedOnly: number, repoOnly: number}>, errors: string[], target?: string, syncedLabel?: string, refusedNouns?: string}} result
+ * @returns {number} 1 when errors were reported, 0 otherwise
+ */
+function reportSyncResult(result) {
+  if (result.errors.length > 0) {
+    for (const err of result.errors) console.log(`  ✗ ${err}`);
+    return 1;
+  }
+  if (result.synced.length > 0) {
+    console.log(`  ✓ Synced ${result.synced.join(', ')} from githooks/ to ${result.target}`);
+    console.log('    The updated hooks take effect on the next commit.');
+  } else if (result.skipped) {
+    console.log(`  ✓ Global hooks already match githooks/ (${result.skipped.join(', ') || 'nothing to sync'})`);
+  }
+  if (result.refused.length > 0) {
+    console.log('');
+    console.log(`  ⚠️  ${result.refused.length} ${result.refusedLabel} NOT synced — the installed copy`);
+    console.log('     carries content githooks/ does not, so overwriting would delete work:');
+    for (const r of result.refused) {
+      console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
+    }
+    console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
+    console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
+  }
+  return 0;
+}
+
+/**
+ * Sync installed hooks and gate modules from the repo, reporting both.
+ *
+ * @param {boolean} force
+ * @returns {number} 0 on success, 1 when either sync reported errors
+ */
+function runHookAndModuleSync(force) {
+  const hookSync = syncGlobalHooksFromRepo({ force });
+  const hookCode = reportSyncResult({
+    synced: hookSync.synced,
+    skipped: hookSync.skipped,
+    refused: hookSync.refused,
+    errors: hookSync.errors,
+    target: hookSync.installedHooks,
+    refusedLabel: 'shared library file(s)',
+  });
+  if (hookCode !== 0) return hookCode;
+  if (hookSync.backups.length > 0) {
+    console.log(`    Previous version(s) saved under ${path.join(hookSync.installedHooks, 'backups')}/ (${hookSync.backups.length} file(s)).`);
+  }
+
+  // #495: the gate modules are what the hook sources for Gates 3/4/7/8/9/10, so
+  // syncing only the hook files left the executed surface untouched.
+  const moduleSync = syncModulesFromRepo({ force });
+  return reportSyncResult({
+    synced: moduleSync.synced,
+    refused: moduleSync.refused,
+    errors: moduleSync.errors,
+    target: moduleSync.installedAdapters,
+    refusedLabel: 'module(s)',
+  });
+}
+
+
 async function doctor(args) {
   const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
   if (briefFlag && errors.length === 0) {
@@ -3155,55 +3223,10 @@ async function doctor(args) {
 
   // §4.13 (#451 REQ-2): explicit one-command sync from the repo's githooks/.
   if (syncHooks) {
-    const { synced, skipped, refused, errors, installedHooks, backups } = syncGlobalHooksFromRepo({ force });
-    if (errors.length > 0) {
-      for (const err of errors) console.log(`  ✗ ${err}`);
-      return 1;
-    }
-    if (synced.length > 0) {
-      console.log(`  ✓ Synced ${synced.join(', ')} from githooks/ to ${installedHooks}`);
-      console.log('    The updated hooks take effect on the next commit.');
-    } else {
-      console.log(`  ✓ Global hooks already match githooks/ (${skipped.join(', ') || 'nothing to sync'})`);
-    }
-    // #566: replacing an installed hook discards whatever was in it. Say where
-    // the previous version went, so a machine-only fix stays recoverable.
-    if (backups.length > 0) {
-      console.log(`    Previous version(s) saved under ${path.join(installedHooks, 'backups')}/ (${backups.length} file(s)).`);
-    }
-    if (refused.length > 0) {
-      console.log('');
-      console.log(`  ⚠️  ${refused.length} shared library file(s) NOT synced — the installed copy`);
-      console.log('     carries content githooks/ does not, so overwriting would delete work:');
-      for (const r of refused) {
-        console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
-      }
-      console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
-      console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
-    }
-
-    // #495: the gate modules are what the hook sources for Gates 3/4/7/8/9/10,
-    // so syncing only the hook files left the executed surface untouched.
-    const moduleSync = syncModulesFromRepo({ force });
-    if (moduleSync.errors.length > 0) {
-      for (const err of moduleSync.errors) console.log(`  ✗ ${err}`);
-      return 1;
-    }
-    if (moduleSync.synced.length > 0) {
-      console.log(`  ✓ Synced ${moduleSync.synced.length} gate module(s) to ${moduleSync.installedAdapters}`);
-      console.log(`    ${moduleSync.synced.join(', ')}`);
-    }
-    if (moduleSync.refused.length > 0) {
-      console.log('');
-      console.log(`  ⚠️  ${moduleSync.refused.length} module(s) NOT synced — the installed copy carries`);
-      console.log('     content the repo does not, so overwriting would delete work (#495):');
-      for (const r of moduleSync.refused) {
-        console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
-      }
-      console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
-      console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
-    }
+    const code = runHookAndModuleSync(force);
+    if (code !== 0) return code;
   }
+
 
   // §4.13: --fix only when mode === "active"
   if (fixMode && isActiveMode(config)) {
@@ -3585,6 +3608,124 @@ function checkSkillInstallParity(add, options) {
  *
  * @param {(name: string, status: string, detail?: string) => void} add
  */
+/**
+ * Problems with a Delphi profile's expert model bindings.
+ *
+ * Pure: profile in, problem list out. It was inline inside a try/catch inside an
+ * if/else inside the config check, four levels down, where the three distinct
+ * failure modes (missing role, duplicate model, unusable provider) were one
+ * compound condition.
+ *
+ * @param {object} profile
+ * @returns {string[]} human-readable problems; empty when the profile is usable
+ */
+function delphiModelProblems(profile) {
+  const experts = profile.experts || {};
+  const providers = profile.providers || {};
+  const models = DELPHI_ROLES.map((r) => experts[r] && experts[r].model);
+
+  const missingRoles = DELPHI_ROLES.filter((r, i) => !models[i]);
+  const duplicates = models.filter((m, i) => m && models.indexOf(m) !== i);
+  const badProviders = DELPHI_ROLES.filter((r) => {
+    const e = experts[r];
+    return !e || !providers[e.provider]
+      || !providers[e.provider].base_url
+      || String(providers[e.provider].base_url).indexOf('http') !== 0;
+  });
+
+  const problems = [];
+  if (missingRoles.length > 0) problems.push(`missing experts: ${missingRoles.join(', ')}`);
+  if (duplicates.length > 0) problems.push(`duplicate models: ${[...new Set(duplicates)].join(', ')}`);
+  if (badProviders.length > 0) problems.push(`unusable provider binding: ${badProviders.join(', ')}`);
+  return problems;
+}
+
+/**
+ * Report whether the installed xp-gate matches npm's latest.
+ *
+ * The npm probe is opt-in (`probeNpmLatest`) or pre-supplied (`npmLatest`): the
+ * doctor never blocks on the network, which an offline CI or a restricted shell
+ * would otherwise hit (#414 R1 FC-03).
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ * @param {object} options
+ * @param {string|null|undefined} npmLatest
+ */
+function checkDelphiVersionConsistency(add, options, npmLatest) {
+  const localVersion = getCliVersionSafe();
+  let versionStatus = 'PASS';
+  let versionDetail = `xp-gate ${localVersion}`;
+
+  if (npmLatest === undefined && options.probeNpmLatest === true) {
+    try {
+      versionDetail += `; npm latest probe: ${execWithTimeout('npm view @boyingliu01/xp-gate version', 8000).trim()}`;
+    } catch {
+      versionStatus = 'SKIP';
+      versionDetail += '; npm latest probe unavailable (offline?) — skipped';
+    }
+  } else if (typeof npmLatest === 'string' && npmLatest !== localVersion) {
+    versionStatus = 'FAIL';
+    versionDetail += `; npm latest ${npmLatest} differs from local ${localVersion} — update (npm install -g @boyingliu01/xp-gate@latest) or verify which side is stale`;
+  } else if (npmLatest === null || options.probeNpmLatest !== true) {
+    versionDetail += '; npm latest probe skipped (pass --npm-check or options.probeNpmLatest to run it)';
+  }
+  add('Delphi version consistency', versionStatus, versionDetail);
+}
+
+
+/**
+ * Check 7: DSH native-channel readiness (#443 REQ-6).
+ *
+ * Only meaningful when a DSH home exists. The two-layer switch (preset
+ * capability plus host setting) defaults to DISABLED, and a review that
+ * assumes native will silently run three same-model seats -- the failure this
+ * check exists to make visible before a review spends money on it.
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ */
+function checkDshChannelReadiness(add) {
+  // 7. DSH native-channel readiness (#443 REQ-6): only meaningful when a DSH
+  // home exists. The two-layer switch (preset capability + host setting)
+  // defaults to disabled, and a review that assumes native will silently run
+  // three same-model seats.
+  const dshHome = path.join(HOME_DIR(), '.dsh');
+  if (!fs.existsSync(dshHome)) {
+    add('DSH subagent model selection', 'SKIP', `no ${dshHome} — not a DSH environment`);
+  } else {
+    const settingsCandidates = [
+      path.join(dshHome, 'settings.json'),
+      path.join(dshHome, 'settings', 'settings.json'),
+      path.join(dshHome, 'config.json'),
+    ];
+    const settingsFile = settingsCandidates.find((p) => fs.existsSync(p));
+    if (!settingsFile) {
+      add('DSH subagent model selection', 'FAIL',
+        `${dshHome} exists but no settings file found — subagent model selection defaults to disabled (#443)`);
+    } else {
+      try {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+        const selection = settings.subagentModelSelection;
+        const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
+        const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
+        if (selection && selection.enabled === true && new Set(ids).size >= 3) {
+          add('DSH subagent model selection', 'PASS', `${settingsFile}: enabled, ${new Set(ids).size} distinct allowed models`);
+        } else if (selection && selection.enabled === true) {
+          add('DSH subagent model selection', 'FAIL',
+            `${settingsFile}: enabled but only ${new Set(ids).size} distinct allowedModels (need ≥3) — native channel unusable`);
+        } else {
+          // The switch shipping off is the platform default, not a defect:
+          // only an operator who explicitly enables it and under-provisions
+          // allowedModels has a real misconfiguration (#414 R1 FC-07).
+          add('DSH subagent model selection', 'SKIP',
+            `${settingsFile}: native model selection disabled (platform default) — the external channel is the contract path (#443)`);
+        }
+      } catch (err) {
+        add('DSH subagent model selection', 'SKIP', `${settingsFile} unparseable: ${err.message}`);
+      }
+    }
+  }
+}
+
 function checkDelphiConfigPing(add, options, globalConfigPath) {
   const { configPath, npmLatest } = options;
   // 5. Config ping: parseable, three distinct callable models. A duplicate
@@ -3618,22 +3759,9 @@ function checkDelphiConfigPing(add, options, globalConfigPath) {
       if (!profile) {
         add(cfgLabel, 'FAIL', `profile "${profileName}" not found`);
       } else {
-        const experts = profile.experts || {};
-        const models = DELPHI_ROLES.map((r) => experts[r] && experts[r].model);
-        const providers = profile.providers || {};
-        const missingRoles = DELPHI_ROLES.filter((r, i) => !models[i]);
-        const duplicates = models.filter((m, i) => m && models.indexOf(m) !== i);
-        const badProviders = DELPHI_ROLES.filter((r) => {
-          const e = experts[r];
-          return !e || !providers[e.provider]
-            || !providers[e.provider].base_url
-            || String(providers[e.provider].base_url).indexOf('http') !== 0;
-        });
-        if (missingRoles.length > 0 || duplicates.length > 0 || badProviders.length > 0) {
-          const problems = [];
-          if (missingRoles.length > 0) problems.push(`missing experts: ${missingRoles.join(', ')}`);
-          if (duplicates.length > 0) problems.push(`duplicate models: ${[...new Set(duplicates)].join(', ')}`);
-          if (badProviders.length > 0) problems.push(`unusable provider binding: ${badProviders.join(', ')}`);
+        const models = DELPHI_ROLES.map((r) => (profile.experts || {})[r] && profile.experts[r].model);
+        const problems = delphiModelProblems(profile);
+        if (problems.length > 0) {
           add(cfgLabel, 'FAIL', problems.join('; '));
         } else {
           // Always name the file that was actually read. Without it a user with
@@ -3703,68 +3831,13 @@ function checkDelphiConfigPing(add, options, globalConfigPath) {
     }
   }
 
-  // 6. Version consistency (#414 REQ-6): local files first. The npm-latest
-  // probe is opt-in (options.probeNpmLatest) or pre-supplied
-  // (options.npmLatest) — the doctor never blocks on the network, which is
-  // what an offline CI or restricted shell would otherwise hit (#414 R1 FC-03).
-  const localVersion = getCliVersionSafe();
-  let versionStatus = 'PASS';
-  let versionDetail = `xp-gate ${localVersion}`;
-  if (npmLatest === undefined && options.probeNpmLatest === true) {
-    try {
-      versionDetail += `; npm latest probe: ${execWithTimeout('npm view @boyingliu01/xp-gate version', 8000).trim()}`;
-    } catch {
-      versionStatus = 'SKIP';
-      versionDetail += '; npm latest probe unavailable (offline?) — skipped';
-    }
-  } else if (typeof npmLatest === 'string' && npmLatest !== localVersion) {
-    versionStatus = 'FAIL';
-    versionDetail += `; npm latest ${npmLatest} differs from local ${localVersion} — update (npm install -g @boyingliu01/xp-gate@latest) or verify which side is stale`;
-  } else if (npmLatest === null || options.probeNpmLatest !== true) {
-    versionDetail += '; npm latest probe skipped (pass --npm-check or options.probeNpmLatest to run it)';
-  }
-  add('Delphi version consistency', versionStatus, versionDetail);
+  // 6. Version consistency.
+  checkDelphiVersionConsistency(add, options, npmLatest);
 
-  // 7. DSH native-channel readiness (#443 REQ-6): only meaningful when a DSH
-  // home exists. The two-layer switch (preset capability + host setting)
-  // defaults to disabled, and a review that assumes native will silently run
-  // three same-model seats.
-  const dshHome = path.join(HOME_DIR(), '.dsh');
-  if (!fs.existsSync(dshHome)) {
-    add('DSH subagent model selection', 'SKIP', `no ${dshHome} — not a DSH environment`);
-  } else {
-    const settingsCandidates = [
-      path.join(dshHome, 'settings.json'),
-      path.join(dshHome, 'settings', 'settings.json'),
-      path.join(dshHome, 'config.json'),
-    ];
-    const settingsFile = settingsCandidates.find((p) => fs.existsSync(p));
-    if (!settingsFile) {
-      add('DSH subagent model selection', 'FAIL',
-        `${dshHome} exists but no settings file found — subagent model selection defaults to disabled (#443)`);
-    } else {
-      try {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-        const selection = settings.subagentModelSelection;
-        const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
-        const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
-        if (selection && selection.enabled === true && new Set(ids).size >= 3) {
-          add('DSH subagent model selection', 'PASS', `${settingsFile}: enabled, ${new Set(ids).size} distinct allowed models`);
-        } else if (selection && selection.enabled === true) {
-          add('DSH subagent model selection', 'FAIL',
-            `${settingsFile}: enabled but only ${new Set(ids).size} distinct allowedModels (need ≥3) — native channel unusable`);
-        } else {
-          // The switch shipping off is the platform default, not a defect:
-          // only an operator who explicitly enables it and under-provisions
-          // allowedModels has a real misconfiguration (#414 R1 FC-07).
-          add('DSH subagent model selection', 'SKIP',
-            `${settingsFile}: native model selection disabled (platform default) — the external channel is the contract path (#443)`);
-        }
-      } catch (err) {
-        add('DSH subagent model selection', 'SKIP', `${settingsFile} unparseable: ${err.message}`);
-      }
-    }
-  }
+
+  // 7. DSH native-channel readiness.
+  checkDshChannelReadiness(add);
+
 }
 
 async function doctorDelphi(options = {}) {
