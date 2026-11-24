@@ -1361,7 +1361,20 @@ function planToolRepairs(rows, options = {}) {
     // throwing out of a planning function.
     const userCopies = (row.userCopies || (row.distinctRealPaths || []).filter((p) => !isSystemOwned(p)));
     if (row.duplicated && userCopies.length > 1) {
-      const [keep, ...rest] = userCopies;
+      // Keep the copy the resolver actually hands to the gates, not whichever
+      // path happened to come first.
+      //
+      // Measured 2026-11-24: with the same tool and the same two paths, listing
+      // the copy the installer writes to FIRST made `writesToRemovedPath` false
+      // and listing it SECOND made it true -- the self-cancelling-plan guard
+      // therefore depended on the order of `distinctRealPaths`, which comes from
+      // however the locator walked PATH. A guard that only fires for half the
+      // callers is not a guard.
+      const preferred = row.resolvedPath && userCopies.includes(row.resolvedPath)
+        ? row.resolvedPath
+        : userCopies[0];
+      const keep = preferred;
+      const rest = userCopies.filter((p) => p !== keep);
       actions.push({ kind: 'keep', tool: row.name, path: keep });
       for (const dup of rest) {
         actions.push({ kind: 'remove-duplicate', tool: row.name, path: dup, keepPath: keep });
