@@ -3208,12 +3208,69 @@ const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--j
  *
  * @returns {{errors: string[], fixMode: boolean, syncHooks: boolean, force: boolean, installToolsFlag: boolean, jsonMode: boolean}}
  */
+/**
+ * Reject flag combinations that would silently do nothing, or do the wrong thing.
+ *
+ * Each rule here exists because the combination was accepted and misled someone.
+ * The recurring shape is a flag that only one code path reads: passing it alone was
+ * accepted, printed nothing, and changed nothing (#488 Round 4 found this for
+ * `--force`), which is indistinguishable from a repair that ran and found nothing
+ * to do.
+ *
+ * @param {{fixMode: boolean, syncHooks: boolean, force: boolean,
+ *   installToolsFlag: boolean, jsonMode: boolean, briefFlag: boolean}} f
+ * @param {{formatGiven: boolean, formatValue: string|null}} format
+ * @returns {string[]}
+ */
+function validateFlagCombinations(f, format) {
+  const errors = [];
+
+  if (format.formatGiven && !['json', 'text'].includes(format.formatValue)) {
+    errors.push(`Unknown --format value: ${format.formatValue || '(none)'} — expected json or text`);
+  }
+
+  if (f.jsonMode && (f.fixMode || f.syncHooks)) {
+    // A JSON report is a read; mixing it with the repair surface would put progress
+    // prose into the stream a script is parsing.
+    errors.push('--json/--format json cannot be combined with --fix or --sync-hooks');
+  }
+
+  // `--force` is read only by the sync path.
+  if (f.force && !f.syncHooks) {
+    errors.push('--force is only read by --sync-hooks, where it overrides the divergence refusal and overwrites without a backup');
+    errors.push('Pass --sync-hooks --force, or drop --force');
+  }
+
+  // `--install-tools` installs only inside the --fix repair surface.
+  if (f.installToolsFlag && !f.fixMode) {
+    errors.push('--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine');
+    errors.push('Pass --fix --install-tools, or drop --install-tools');
+  }
+
+  // #653: --brief exists to collapse exploratory probes into one cheap read. Users
+  // call it often BECAUSE it is cheap, so a write smuggled in would compound state
+  // changes instead of only latency.
+  if (f.briefFlag && (f.fixMode || f.syncHooks || f.installToolsFlag || f.force)) {
+    errors.push('--brief is a read-only fact dump and cannot be combined with --fix, --sync-hooks, --install-tools or --force');
+  }
+
+  return errors;
+}
+
 function doctorFlagContract(args) {
   const errors = [];
   // `--format json` carries a value; without this the value itself would be
   // reported as an unknown flag and the documented machine-readable mode could
   // never be reached (#304 promised it, nothing ever implemented it).
-  const formatValue = args[args.indexOf('--format') + 1] || null;
+  // `indexOf` returns -1 when absent, and -1 + 1 is 0 -- the FIRST argv entry, so a
+  // run without `--format` was reading its own first flag as the format value and
+  // rejecting `doctor --fix` as "unknown --format". Guard the miss explicitly.
+  // Three states, not two: `--format` absent (no opinion), present with a value,
+  // and present with nothing after it (an error -- silently dropping the flag was
+  // #488 AC-09).
+  const formatIndex = args.indexOf('--format');
+  const formatGiven = formatIndex >= 0;
+  const formatValue = formatGiven ? (args[formatIndex + 1] ?? null) : null;
   const flagTokens = args.filter((a, i) => !(i > 0 && args[i - 1] === '--format'));
   const unknownFlags = flagTokens.filter(a => !KNOWN_FLAGS.includes(a));
   if (unknownFlags.length > 0) {
@@ -3233,34 +3290,10 @@ function doctorFlagContract(args) {
   // Read-only: it changes the probe environment, never the machine.
   const refreshEnv = args.includes('--refresh-env');
   const jsonMode = args.includes('--json') || (args.includes('--format') && formatValue === 'json');
-  if (args.includes('--format') && !['json', 'text'].includes(formatValue)) {
-    errors.push(`Unknown --format value: ${formatValue || '(none)'} — expected json or text`);
-  }
-  if (jsonMode && (fixMode || syncHooks)) {
-    // A JSON report is a read; mixing it with the repair surface would put
-    // progress prose into the stream a script is parsing.
-    errors.push('--json/--format json cannot be combined with --fix or --sync-hooks');
-  }
-  // Round 4 (feasibility) caught the original #488 defect in a new place:
-  // `--force` is read only by the sync path, so `doctor --force` and
-  // `doctor --fix --force` were accepted, printed nothing and changed nothing.
-  if (force && !syncHooks) {
-    errors.push('--force is only read by --sync-hooks, where it overrides the divergence refusal and overwrites without a backup');
-    errors.push('Pass --sync-hooks --force, or drop --force');
-  }
-  // Same class: --install-tools installs only inside the --fix repair surface.
-  if (installToolsFlag && !fixMode) {
-    errors.push('--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine');
-    errors.push('Pass --fix --install-tools, or drop --install-tools');
-  }
-  // #653: --brief exists to collapse a class of exploratory probes (`where gcc`,
-  // Test-Path, per-file reads) into one cheap read. It is read-only by contract:
-  // users call it often precisely because it is cheap, so a write smuggled in
-  // would compound state changes instead of only latency.
   const briefFlag = args.includes('--brief');
-  if (briefFlag && (fixMode || syncHooks || installToolsFlag || force)) {
-    errors.push('--brief is a read-only fact dump and cannot be combined with --fix, --sync-hooks, --install-tools or --force');
-  }
+  const flags = { fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag };
+  errors.push(...validateFlagCombinations(flags, { formatGiven, formatValue }));
+
   return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag };
 }
 
