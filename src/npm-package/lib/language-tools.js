@@ -368,6 +368,13 @@ module.exports = {
   handleInstallTools,
   planToolRepairs,
   describeAction,
+  statusOfRow,
+  iconOfRow,
+  qualifiersOfRow,
+  printAuditReport,
+  toolEntry,
+  buildDetectionResult,
+  printAuditJson,
   getArchitectureTools,
   detectBuildFileDependency,
 };
