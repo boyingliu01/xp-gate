@@ -285,11 +285,18 @@ function cleanupBackup(backupMeta) {
  * Build the uninstall plan based on mode.
  * Returns an array of operation objects: { type, path, signature, label, critical }
  */
-function buildPlan(mode) {
-  const plan = [];
-  const manifest = getConfig() && getConfig().manifest ? getConfig().manifest : null;
-
-  if (mode === 'local') {
+/**
+ * Append the project-local uninstall entries to `plan`.
+ *
+ * Split out of `buildPlan`, which measured CCN 17 over 158 lines by holding
+ * both modes. `plan` is passed in rather than returned so the two halves
+ * compose without either owning the list, and the shared template entry stays
+ * in `buildPlan` where it belongs to neither.
+ *
+ * @param {Array<object>} plan
+ * @param {object|null} manifest
+ */
+function buildLocalPlanInto(plan, manifest) {
     const gitDir = getGitDir();
     if (gitDir) {
       const projectRoot = path.dirname(gitDir);
@@ -360,9 +367,15 @@ function buildPlan(mode) {
         });
       }
     }
-  }
+}
 
-  if (mode === 'global') {
+/**
+ * Append the global uninstall entries to `plan`.
+ *
+ * @param {Array<object>} plan
+ * @param {object|null} manifest
+ */
+function buildGlobalPlanInto(plan, manifest) {
     plan.push({
       type: 'gitconfig',
       action: 'unset-hooks-path',
@@ -429,6 +442,16 @@ function buildPlan(mode) {
         });
       }
     }
+}
+
+function buildPlan(mode) {
+  const config = getConfig();
+  const manifest = config && config.manifest ? config.manifest : null;
+  const plan = [];
+  if (mode === 'local') {
+    buildLocalPlanInto(plan, manifest);
+  } else if (mode === 'global') {
+    buildGlobalPlanInto(plan, manifest);
   }
 
   // Template dir is common to both modes
