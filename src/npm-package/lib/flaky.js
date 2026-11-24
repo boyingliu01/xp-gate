@@ -34,15 +34,15 @@ const MAX_RETRIES = 3;
 const FIELD_RE = /^\s*-\s+test:\s*(.+?)\s*$/
 const KV_RE = /^\s+([A-Za-z_][\w]*):\s*(.*?)\s*$/
 
+/** Whether `value` is wrapped in a matching pair of quotes of either kind. */
+function isQuoted(value) {
+  if (value.length < 2) return false
+  const first = value[0]
+  return (first === '"' || first === "'") && value[value.length - 1] === first
+}
+
 function stripQuotes(value) {
-  if (value.length >= 2) {
-    const first = value[0]
-    const last = value[value.length - 1]
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      return value.slice(1, -1)
-    }
-  }
-  return value
+  return isQuoted(value) ? value.slice(1, -1) : value
 }
 
 /**
@@ -55,37 +55,86 @@ function stripQuotes(value) {
  * @param {string} filePath
  * @returns {Array<object>}
  */
-function parseQuarantine(filePath) {
-  let text
+/** Read the quarantine file, or [] when it cannot be read at all. */
+function readQuarantineText(filePath) {
   try {
-    text = fs.readFileSync(filePath, 'utf8')
+    return fs.readFileSync(filePath, 'utf8')
   } catch {
-    return []
+    return ''
   }
-  const entries = []
-  let current = null
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.replace(/\s+$/, '')
-    if (line === '' || line.startsWith('#')) continue
-    const start = FIELD_RE.exec(line)
-    if (start) {
-      if (current) entries.push(current)
-      current = { test: stripQuotes(start[1]) }
-      continue
-    }
-    if (!current) continue
-    const kv = KV_RE.exec(line)
-    if (!kv) continue
-    const key = kv[1]
-    const value = stripQuotes(kv[2])
-    if (key === 'critical_path') {
-      current.critical_path = value === 'true'
-    } else {
-      current[key] = value
-    }
+}
+
+/**
+ * Parse the quarantine file into entries.
+ *
+ * The format is line-oriented: a `- test: <name>` line opens an entry, indented
+ * `key: value` lines add fields, and comments or blank lines are ignored. The parser
+ * therefore keeps ONE entry under construction and decides per line whether the line
+ * opens a new entry, extends the current one, or is noise.
+ *
+ * @param {string} filePath
+ * @returns {object[]}
+ */
+/** A line that carries no field: blank, or a comment. */
+function isNoise(line) {
+  return line === '' || line.startsWith('#')
+}
+
+function parseQuarantine(filePath) {
+  const lines = readQuarantineText(filePath).split(/\r?\n/).map((l) => l.replace(/\s+$/, ''));
+  const { entries, current } = lines.reduce(stepEntry, { entries: [], current: null });
+  return current ? [...entries, current] : entries;
+}
+
+/**
+ * Fold one line into the entry list.
+ *
+ * Kept as a reducer rather than a loop body: the loop needed three `continue`s to
+ * express "noise", "opens a new entry" and "extends the current one", and three exits
+ * from one loop is what put the parser over the complexity ceiling.
+ *
+ * @param {{entries: object[], current: object|null}} state
+ * @param {string} line
+ * @returns {{entries: object[], current: object|null}}
+ */
+function stepEntry(state, line) {
+  if (isNoise(line)) return state;
+  const opened = openEntry(line);
+  if (opened) {
+    return { entries: state.current ? [...state.entries, state.current] : state.entries, current: opened };
   }
-  if (current) entries.push(current)
-  return entries
+  if (state.current) applyField(state.current, line);
+  return state;
+}
+
+/**
+ * A new entry if this line starts one, else null.
+ *
+ * @param {string} line
+ * @param {object|null} current
+ * @returns {object|null}
+ */
+function openEntry(line, current) {
+  const start = FIELD_RE.exec(line)
+  return start ? { test: stripQuotes(start[1]) } : null
+}
+
+/**
+ * Apply a `key: value` line to the entry under construction.
+ *
+ * `critical_path` is the one field that is a BOOLEAN; every other field stays a
+ * string. Anything that is not a key/value pair is ignored rather than stored under
+ * an empty key.
+ *
+ * @param {object} entry mutated in place
+ * @param {string} line
+ */
+function applyField(entry, line) {
+  const kv = KV_RE.exec(line)
+  if (!kv) return
+  const [, key, rawValue] = kv
+  const value = stripQuotes(rawValue)
+  entry[key] = key === 'critical_path' ? value === 'true' : value
 }
 
 /** Parse an `YYYY-MM-DD` expiry into a UTC midnight Date, or null. */
@@ -119,16 +168,15 @@ function findExpiredQuarantine(entries, now) {
  */
 function findPolicyViolations(entries, now) {
   const at = now || new Date()
-  const violations = []
-  for (const entry of findExpiredQuarantine(entries, at)) {
-    violations.push({ rule: 'expired', entry })
-  }
-  for (const entry of entries) {
-    if (entry.critical_path && !violations.some((v) => v.entry === entry)) {
-      violations.push({ rule: 'critical-path-quarantined', entry })
-    }
-  }
-  return violations
+  const expired = new Set(findExpiredQuarantine(entries, at))
+  // One pass: a quarantined entry on the critical path is reported as `expired`,
+  // not twice. Two loops needed a `some()` scan to express that, which is what made
+  // this a branch.
+  return entries.flatMap((entry) => {
+    if (expired.has(entry)) return [{ rule: 'expired', entry }]
+    if (entry.critical_path) return [{ rule: 'critical-path-quarantined', entry }]
+    return []
+  })
 }
 
 /**
@@ -137,12 +185,15 @@ function findPolicyViolations(entries, now) {
  * Clamped, not validated-with-an-error: a bad value must not make the gate
  * unusable, and the direction of clamping always favours surfacing flakiness.
  */
+/** The default when a retry count is absent or unparseable. */
+const DEFAULT_MAX_RETRIES = 1
+
 function resolveMaxRetries(value) {
-  if (value === undefined || value === null || value === '') return 1
+  if (value == null || value === '') return DEFAULT_MAX_RETRIES
   const parsed = Number.parseInt(String(value), 10)
-  if (Number.isNaN(parsed)) return 1
-  if (parsed < 0) return 0
-  return Math.min(parsed, MAX_RETRIES)
+  if (Number.isNaN(parsed)) return DEFAULT_MAX_RETRIES
+  // A negative count means "no retries", not "the default": it was explicit.
+  return Math.max(0, Math.min(parsed, MAX_RETRIES))
 }
 
 /** Round to one decimal place without trailing `.0`. */
@@ -157,44 +208,92 @@ function pct(part, whole) {
  * Records carry `attempt` (1-based). A record with `attempt > 1` is a re-run and
  * is excluded from the first-attempt denominator — that exclusion IS the metric.
  */
+/**
+ * Fold one journal row into the counters.
+ *
+ * A row's `attempt` is 1-based and may be absent on older records, in which case it
+ * counts as a first attempt. A row that needed a re-run counts as a RERUN, not as a
+ * first attempt -- counting it in both would inflate the denominator and make the
+ * flaky rate look better than it is.
+ *
+ * @param {object} c counters, mutated
+ * @param {object} row
+ */
+/** A row's attempt number, defaulting to 1 when the field is absent or unusable. */
+function attemptOf(row) {
+  return Number.isFinite(row.attempt) ? row.attempt : 1;
+}
+
+/**
+ * Fold one journal row into the counters.
+ *
+ * A row that needed a re-run counts as a RERUN, not as a first attempt -- counting it
+ * in both would inflate the denominator and make the flaky rate look better than it
+ * is.
+ *
+ * @param {object} c counters, mutated
+ * @param {object} row
+ */
+function accumulateRow(c, row) {
+  if (!row || typeof row !== 'object') return;
+  if (row.quarantined === true) c.quarantined += 1;
+  const isRerun = attemptOf(row) > 1;
+  const bucket = isRerun ? 'rerun' : 'first';
+  countAttempt(c, bucket, row.passed === true);
+}
+
+/**
+ * Credit one attempt to its bucket.
+ *
+ * @param {object} c counters, mutated
+ * @param {'first'|'rerun'} bucket
+ * @param {boolean} passed
+ */
+function countAttempt(c, bucket, passed) {
+  if (bucket === 'rerun') {
+    c.reruns += 1;
+    if (passed) c.flakyRecoveries += 1;
+    return;
+  }
+  c.firstAttempts += 1;
+  if (passed) c.firstPasses += 1;
+}
+
 function computeFlakyStats(entries) {
   const rows = Array.isArray(entries) ? entries : []
-  let firstAttempts = 0
-  let firstPasses = 0
-  let flakyRecoveries = 0
-  let reruns = 0
-  let quarantined = 0
+  const c = { firstAttempts: 0, firstPasses: 0, flakyRecoveries: 0, reruns: 0, quarantined: 0 };
+  for (const row of rows) accumulateRow(c, row);
 
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue
-    if (row.quarantined === true) quarantined += 1
-    const attempt = Number.isFinite(row.attempt) ? row.attempt : 1
-    if (attempt > 1) {
-      reruns += 1
-      if (row.passed === true) flakyRecoveries += 1
-      continue
-    }
-    firstAttempts += 1
-    if (row.passed === true) firstPasses += 1
-  }
+  return buildStats({ totalRuns: rows.length, ...c });
+}
 
-  const measurable = reruns > 0
+/**
+ * Assemble the stats object, including the measured/unmeasured distinction.
+ *
+ * Without any re-run there is no evidence either way: reporting `flakyRate: 0` would
+ * claim "measured, and stable" from data that only says "not measured". The rate is
+ * therefore `null` with a reason, and `measurable` is what the caller branches on.
+ *
+ * @param {{totalRuns: number, firstAttempts: number, firstPasses: number,
+ *   reruns: number, flakyRecoveries: number, quarantined: number}} c counters
+ * @returns {object}
+ */
+function buildStats(c) {
+  const measurable = c.reruns > 0;
   return {
-    totalRuns: rows.length,
-    firstAttempts,
-    firstPasses,
-    firstPassRate: pct(firstPasses, firstAttempts),
-    reruns,
-    flakyRecoveries,
-    quarantined,
-    // Without any re-run there is no evidence either way. Reporting 0 here would
-    // claim "measured, and stable" from data that only says "not measured".
-    flakyRate: measurable ? pct(flakyRecoveries, firstAttempts + reruns) : null,
+    totalRuns: c.totalRuns,
+    firstAttempts: c.firstAttempts,
+    firstPasses: c.firstPasses,
+    firstPassRate: pct(c.firstPasses, c.firstAttempts),
+    reruns: c.reruns,
+    flakyRecoveries: c.flakyRecoveries,
+    quarantined: c.quarantined,
+    flakyRate: measurable ? pct(c.flakyRecoveries, c.firstAttempts + c.reruns) : null,
     measurable,
     reason: measurable
       ? null
       : 'no re-run records in the journal — flakiness is unmeasured, not zero',
-  }
+  };
 }
 
 module.exports = {
