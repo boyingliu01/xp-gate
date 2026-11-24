@@ -71,6 +71,14 @@ export default defineConfig({
         // coverage problem to be fixed by writing tests; no test can ever touch these
         // files. Two lists describing the same mirror must not drift.
         'src/npm-package/principles/**',
+        // Listed in test.exclude above but missing here -- the exact drift the
+        // comment warns about. Measured 2026-11-24: 12 mirror files at 0.00%,
+        // 2,813 statements, pulling the reported total from 87.23% to 82.30%.
+        'src/npm-package/mutation/**',
+        // Currently holds no .ts/.js, so it moves no number today; listed anyway
+        // because these two lists must not drift, and the next file added there
+        // would otherwise be measured at 0% without anyone noticing.
+        'src/npm-package/skills/**',
         'src/npm-package/gates/**',
         'src/npm-package/build-integrity/**',
         'src/npm-package/architecture/**',
