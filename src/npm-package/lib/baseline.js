@@ -513,6 +513,73 @@ if (pyFiles.length > 0) {
 
 }
 
+/**
+ * Baseline Go with golangci-lint. Unparseable output leaves the run's files alone:
+ * not measured is not clean.
+ */
+function baselineGo(baseline) {
+// Go — golangci-lint
+const goFiles = findFilesByExt(['.go']);
+if (goFiles.length > 0) {
+  try {
+    execSync('golangci-lint --version', { encoding: 'utf8' });
+    const output = runToolJson('golangci-lint run', '--out-format json');
+    if (output) {
+      const parsed = JSON.parse(output).Issues || [];
+      const warningsByFile = {};
+      for (const issue of parsed) {
+        const matchedFile = goFiles.find(f => issue.file.endsWith(f));
+        if (!matchedFile) continue;
+        if (!warningsByFile[matchedFile]) {
+          warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
+        }
+        if (issue.severity === 'error') {
+          warningsByFile[matchedFile].errors++;
+        } else {
+          warningsByFile[matchedFile].warnings++;
+        }
+      }
+      mergeToolCounts(baseline, 'golangci', warningsByFile);
+    }
+  } catch {
+    // golangci-lint unavailable — skip
+  }
+}
+}
+
+/**
+ * Baseline shell scripts with shellcheck, batched like the other tools: one argv for
+ * every script is the same platform-limit hazard the others avoid.
+ */
+function baselineShell(baseline, unevaluated) {
+// Shell — shellcheck
+const shFiles = findShellScripts();
+if (shFiles.length > 0) {
+  const shAvailable = probeTool('shellcheck --version');
+
+  if (shAvailable) {
+    // Same batching as the other tools: one argv for every shell script in the
+    // repo is the same platform-limit hazard, even though this repo happens to
+    // sit under the threshold today.
+    const { results } = lintAndAccount('shellcheck', shFiles, batch => `shellcheck -f json ${batch.map(f => `"${f}"`).join(' ')}`, '', unevaluated);
+    const warningsByFile = {};
+    for (const item of results) {
+      const matchedFile = matchResultToFile(item.file, shFiles);
+      if (!matchedFile) continue;
+      if (!warningsByFile[matchedFile]) {
+        warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
+      }
+      if (item.level === 'error') {
+        warningsByFile[matchedFile].errors++;
+      } else {
+        warningsByFile[matchedFile].warnings++;
+      }
+    }
+    mergeToolCounts(baseline, 'shellcheck', warningsByFile);
+  }
+}
+}
+
 async function createBaseline() {
   ensureDir(getXpGateDir());
 
@@ -538,60 +605,9 @@ async function createBaseline() {
   baselineTypeScript(baseline, unevaluated);
 
   baselinePython(baseline, unevaluated);
-  // Go — golangci-lint
-  const goFiles = findFilesByExt(['.go']);
-  if (goFiles.length > 0) {
-    try {
-      execSync('golangci-lint --version', { encoding: 'utf8' });
-      const output = runToolJson('golangci-lint run', '--out-format json');
-      if (output) {
-        const parsed = JSON.parse(output).Issues || [];
-        const warningsByFile = {};
-        for (const issue of parsed) {
-          const matchedFile = goFiles.find(f => issue.file.endsWith(f));
-          if (!matchedFile) continue;
-          if (!warningsByFile[matchedFile]) {
-            warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-          }
-          if (issue.severity === 'error') {
-            warningsByFile[matchedFile].errors++;
-          } else {
-            warningsByFile[matchedFile].warnings++;
-          }
-        }
-        mergeToolCounts(baseline, 'golangci', warningsByFile);
-      }
-    } catch {
-      // golangci-lint unavailable — skip
-    }
-  }
+  baselineGo(baseline);
 
-  // Shell — shellcheck
-  const shFiles = findShellScripts();
-  if (shFiles.length > 0) {
-    const shAvailable = probeTool('shellcheck --version');
-
-    if (shAvailable) {
-      // Same batching as the other tools: one argv for every shell script in the
-      // repo is the same platform-limit hazard, even though this repo happens to
-      // sit under the threshold today.
-      const { results } = lintAndAccount('shellcheck', shFiles, batch => `shellcheck -f json ${batch.map(f => `"${f}"`).join(' ')}`, '', unevaluated);
-      const warningsByFile = {};
-      for (const item of results) {
-        const matchedFile = matchResultToFile(item.file, shFiles);
-        if (!matchedFile) continue;
-        if (!warningsByFile[matchedFile]) {
-          warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-        }
-        if (item.level === 'error') {
-          warningsByFile[matchedFile].errors++;
-        } else {
-          warningsByFile[matchedFile].warnings++;
-        }
-      }
-      mergeToolCounts(baseline, 'shellcheck', warningsByFile);
-    }
-  }
+  baselineShell(baseline, unevaluated);
 
   // Restore what this run could not evaluate, so a broken toolchain cannot
   // rewrite known-bad files as clean. `baseline[file]` being set means some tool
