@@ -42,9 +42,5 @@
   "src/npm-package/scripts/sync-package-content.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
     "totalWarnings": 14
-  },
-  "scripts/__tests__/coverage-mirror-consistency.test.cjs": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-11-24T09:40:45.002Z"
   }
 }
