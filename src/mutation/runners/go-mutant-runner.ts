@@ -1,6 +1,6 @@
 // @no-test-required: Go mutation wrapper — tested via gate-m integration + pre-push Gate M
 import { spawnSync } from 'child_process';
-import { spawnWithCapture } from './spawn-with-capture';
+import { runMutationCommand } from './spawn-with-capture';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import type {
@@ -45,25 +45,11 @@ export class GoMutantRunner implements MutationRunner {
         '--quiet',
       ];
 
-      const result = await spawnWithCapture('gomutants', args, {
-        timeoutMs: options.timeoutMs,
-        cwd: options.cwd,
-        shell: true,
-      });
-
-      if (result.error) {
-        return { report: null, timedOut: false, error: result.error };
-      }
-      if (result.timedOut) {
-        return { report: null, timedOut: true };
-      }
-      // Exit codes: 0=pass, 10=below threshold, 11=below coverage
-      // All three produce a JSON report we can parse
-      return {
-        report: this.parseReport(reportPath),
-        timedOut: false,
-        error: result.code !== 0 ? result.stderr || result.stdout : undefined,
-      };
+      return runMutationCommand('gomutants', args, {
+      timeoutMs: options.timeoutMs,
+      cwd: options.cwd,
+      shell: true,
+    }, () => this.parseReport(reportPath));
   }
 
   private parseReport(reportPath: string): MutationRunResult | null {

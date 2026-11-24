@@ -1,5 +1,5 @@
 // @no-test-required: Stryker wrapper — tested via gate-m integration + pre-push Gate M
-import { spawnWithCapture } from './spawn-with-capture';
+import { runMutationCommand } from './spawn-with-capture';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type {
@@ -43,23 +43,11 @@ export class StrykerRunner implements MutationRunner {
       ...options.files.flatMap(f => ['--mutate', f]),
     ];
 
-    const result = await spawnWithCapture('npx', args, {
+    return runMutationCommand('npx', args, {
       timeoutMs: options.timeoutMs,
       cwd: options.cwd,
       shell: true,
-    });
-
-    if (result.error) {
-      return { report: null, timedOut: false, error: result.error };
-    }
-    if (result.timedOut) {
-      return { report: null, timedOut: true };
-    }
-    return {
-      report: this.parseReport(options.cwd),
-      timedOut: false,
-      error: result.code !== 0 ? result.stderr || result.stdout : undefined,
-    };
+    }, () => this.parseReport(options.cwd));
   }
 
   private resolveConfig(cwd: string): string | null {

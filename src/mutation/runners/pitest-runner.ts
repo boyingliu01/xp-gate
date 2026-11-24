@@ -1,6 +1,6 @@
 // @no-test-required: PITest wrapper — tested via gate-m integration + pre-push Gate M
 import { execSync } from 'child_process';
-import { spawnWithCapture } from './spawn-with-capture';
+import { runMutationCommand } from './spawn-with-capture';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import type {
@@ -114,23 +114,11 @@ export class PitestRunner implements MutationRunner {
     options: RunMutationOptions,
     flavour: 'maven' | 'gradle',
   ): Promise<MutationRunOutcome> {
-    const result = await spawnWithCapture(command, args, {
+    return runMutationCommand(command, args, {
       timeoutMs: options.timeoutMs,
       cwd: options.cwd,
       shell: true,
-    });
-
-    if (result.error) {
-      return { report: null, timedOut: false, error: result.error };
-    }
-    if (result.timedOut) {
-      return { report: null, timedOut: true };
-    }
-    return {
-      report: this.parsePitestJson(options.cwd, flavour),
-      timedOut: false,
-      error: result.code !== 0 ? result.stderr || result.stdout : undefined,
-    };
+    }, () => this.parsePitestJson(options.cwd, flavour));
   }
 
   private findMavenReportPath(cwd: string): string | null {

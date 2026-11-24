@@ -21,6 +21,7 @@
  * clean one.
  */
 import { spawn } from 'node:child_process';
+import type { MutationRunOutcome, MutationRunResult } from './types';
 
 export interface SpawnCaptureResult {
   stdout: string;
@@ -176,4 +177,47 @@ export function spawnWithCapture(
     wireOutcome(child, state, settle);
     armTimeout(child, state, options.timeoutMs);
   });
+}
+
+/**
+ * Run a mutation command and turn its spawn result into a RUN OUTCOME.
+ *
+ * Three runners had the same eight lines after their `spawnWithCapture` call: an
+ * error becomes `{report: null, error}`, a timeout becomes `{report: null,
+ * timedOut: true}`, and otherwise the report is parsed. Each copy was correct, and
+ * three copies of a decision is how the fourth runner -- the one written later --
+ * gets it subtly different.
+ *
+ * The order matters: a TIMED-OUT run that also failed to spawn is reported as an
+ * error, because "could not start" is the more actionable of the two facts. A
+ * timeout implies the process ran.
+ *
+ * @param command the executable
+ * @param args its arguments
+ * @param options spawn options
+ * @param parse reads the report from the working directory on success
+ * @returns the outcome the runner interface expects
+ */
+export async function runMutationCommand(
+  command: string,
+  args: string[],
+  options: SpawnCaptureOptions,
+  parse: () => MutationRunResult | null,
+): Promise<MutationRunOutcome> {
+  const result = await spawnWithCapture(command, args, options);
+  if (result.error) {
+    return { report: null, timedOut: false, error: result.error };
+  }
+  if (result.timedOut) {
+    return { report: null, timedOut: true };
+  }
+  // A non-zero exit is not itself a failure verdict: mutation tools exit non-zero
+  // for "score below threshold", and still write the report that says so. The
+  // stderr is carried as an `error` so the caller can show WHY without discarding
+  // the report the run produced.
+  return {
+    report: parse(),
+    timedOut: false,
+    error: result.code !== 0 ? result.stderr || result.stdout : undefined,
+  };
 }
