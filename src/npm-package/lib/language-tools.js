@@ -756,30 +756,35 @@ function makeLazyExtensionScanner(projectRoot) {
  * lists yaml/yml, and matching on those would make every repo with a CI YAML an
  * Infrastructure-as-Code project (#468).
  */
+/**
+ * The config files this entry matches: the literal name, or every file a `*` glob hits.
+ *
+ * A glob's directory listing is read once per pattern, and an unreadable project root
+ * yields no matches rather than throwing -- detection is a report about what was
+ * SEEN, and a directory we cannot list was not seen.
+ *
+ * @param {string} projectRoot
+ * @param {string} configFile a literal name or a pattern containing `*`
+ * @returns {string[]} matched names, relative to the project root
+ */
+function matchConfigFile(projectRoot, configFile) {
+  if (!configFile.includes('*')) {
+    return fs.existsSync(path.join(projectRoot, configFile)) ? [configFile] : [];
+  }
+  const regex = new RegExp(configFile.replace(/\*/g, '.*'));
+  try {
+    return fs.readdirSync(projectRoot).filter((file) => regex.test(file));
+  } catch {
+    return [];
+  }
+}
+
 function scanRegistryForLanguages(projectRoot, detected, configFiles, extensionSeen) {
 for (const [lang, def] of Object.entries(LANGUAGE_REGISTRY)) {
   const foundConfigs = [];
   
   for (const configFile of def.configFiles) {
-    // Handle glob patterns
-    if (configFile.includes('*')) {
-      // Simple glob matching
-      const pattern = configFile.replace(/\*/g, '.*');
-      const regex = new RegExp(pattern);
-      try {
-        const files = fs.readdirSync(projectRoot);
-        for (const file of files) {
-          if (regex.test(file)) {
-            foundConfigs.push(file);
-          }
-        }
-      } catch { /* ignore */ }
-    } else {
-      const configPath = path.join(projectRoot, configFile);
-      if (fs.existsSync(configPath)) {
-        foundConfigs.push(configFile);
-      }
-    }
+    foundConfigs.push(...matchConfigFile(projectRoot, configFile));
   }
 
   if (foundConfigs.length > 0) {
@@ -828,7 +833,7 @@ function checkTool(toolName, checkCmd) {
     encoding: 'utf8', 
     stdio: ['ignore', 'pipe', 'pipe'], 
     shell, 
-    timeout: 10000 
+    timeout: TOOL_PROBE_TIMEOUT_MS,
   };
 
   try {
@@ -906,7 +911,7 @@ function installTool(toolDef) {
     encoding: 'utf8', 
     stdio: 'inherit', 
     shell, 
-    timeout: 120000 
+    timeout: INSTALL_TIMEOUT_MS,
   };
 
   try {
@@ -944,8 +949,13 @@ function generateProjectConfig(projectRoot, languages, toolStatus) {
   };
 
   const configPath = path.join(projectRoot, '.xp-gate-config.json');
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  } catch (err) {
+    // The returned path is printed by the caller; a silent failure would report a
+    // config file that does not exist.
+    throw new Error(`cannot write ${configPath}: ${err.message}`);
+  }
   return configPath;
 }
 
@@ -1093,6 +1103,50 @@ function buildDetectionResult(detected, configFiles, toolStatus) {
   return { languages: detected, configFiles, tools };
 }
 
+/**
+ * Report that nothing was detected, in whichever shape the caller asked for.
+ *
+ * An empty result is a valid answer, not a failure: a directory with no recognisable
+ * project has no languages, and exiting non-zero would make a legitimate "nothing
+ * here" look like an error.
+ *
+ * @param {boolean} jsonOutput
+ * @returns {number} exit code
+ */
+function reportNoLanguages(jsonOutput) {
+  if (jsonOutput) {
+    console.log(JSON.stringify({ languages: [], configFiles: {} }, null, 2));
+  } else {
+    console.log('No languages detected.');
+  }
+  return 0;
+}
+
+/**
+ * How long a tool-probe command may take before it is treated as absent.
+ *
+ * Generous for a `--version` call, short enough that one wedged binary cannot stall a
+ * whole check-tools run.
+ */
+const TOOL_PROBE_TIMEOUT_MS = 10000;
+
+/**
+ * How long an installer may run before it is abandoned.
+ *
+ * Two orders of magnitude above a probe: a package manager legitimately downloads and
+ * compiles. The bound exists so an interactive prompt behind a pipe cannot hang the
+ * command forever.
+ */
+const INSTALL_TIMEOUT_MS = 120000;
+
+/**
+ * The outer bound on one installer invocation.
+ *
+ * Larger than the probe timeout by two orders of magnitude because a package manager
+ * legitimately downloads and compiles.
+ */
+const INSTALL_EXEC_TIMEOUT_MS = 600000;
+
 async function handleDetectLanguages(args, options = {}) {
   // Injectable like the other handle* functions in this file. It defaulted to
   // `process.cwd()` with no seam, so the only way to test it was to chdir --
@@ -1107,14 +1161,7 @@ async function handleDetectLanguages(args, options = {}) {
 
   const { detected, configFiles } = detectProjectLanguages(projectRoot);
 
-  if (detected.length === 0) {
-    if (jsonOutput) {
-      console.log(JSON.stringify({ languages: [], configFiles: {} }, null, 2));
-    } else {
-      console.log('No languages detected.');
-    }
-    return 0;
-  }
+  if (detected.length === 0) return reportNoLanguages(jsonOutput);
 
   const toolStatus = getToolsForLanguages(detected);
 
@@ -1549,7 +1596,7 @@ function describeAction(action) {
 function defaultRunCommand(command) {
   if (!command) return { status: 1, error: 'no installer command' };
   try {
-    execSync(command, { stdio: 'inherit', timeout: 600000, shell: true });
+    execSync(command, { stdio: 'inherit', timeout: INSTALL_EXEC_TIMEOUT_MS, shell: true });
     return { status: 0 };
   } catch (err) {
     return { status: typeof err.status === 'number' ? err.status : 1, error: String(err.message || err) };
