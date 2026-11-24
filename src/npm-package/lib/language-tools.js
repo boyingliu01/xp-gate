@@ -224,9 +224,7 @@ function detectProjectLanguages(projectRoot) {
 
   scanRegistryForLanguages(projectRoot, detected, configFiles, extensionSeen);
 
-
   resolveFlutterVersusDart(detected, projectRoot);
-
 
   return {
     detected: Array.from(detected),
@@ -248,6 +246,7 @@ const {
   TOOL_PROBE_TIMEOUT_MS,
   INSTALL_EXEC_TIMEOUT_MS,
 } = require('./tool-install.js');
+const { statusOfRow, iconOfRow, qualifiersOfRow } = require('./tool-display.js');
 
 /**
  * Read existing project config if present.
@@ -425,6 +424,18 @@ function reportNoLanguages(jsonOutput) {
   return 0;
 }
 
+/**
+ * Write the project language config and say WHERE it landed.
+ *
+ * The path is printed because the file is gitignored-by-convention in some projects
+ * and tracked in others; without it a reader cannot tell whether the write is
+ * something they need to commit.
+ */
+function writeProjectConfig(projectRoot, detected, toolStatus) {
+  const configPath = generateProjectConfig(projectRoot, detected, toolStatus);
+  console.log(`\nGenerated config: ${configPath}`);
+}
+
 async function handleDetectLanguages(args, options = {}) {
   // Injectable like the other handle* functions in this file. It defaulted to
   // `process.cwd()` with no seam, so the only way to test it was to chdir --
@@ -471,55 +482,10 @@ async function handleDetectLanguages(args, options = {}) {
     }
   }
 
-  if (writeConfig) {
-    const configPath = generateProjectConfig(projectRoot, detected, toolStatus);
-    console.log(`\nGenerated config: ${configPath}`);
-  }
-
+  if (writeConfig) writeProjectConfig(projectRoot, detected, toolStatus);
   return 0;
 }
 
-/**
- * Handle check-tools CLI command.
- * @param {string[]} args - Command arguments
- * @returns {Promise<number>} Exit code
- */
-/**
- * Render one audit row as the status the CLI contract uses.
- *
- * A row is unusable for two different reasons and they must not be merged:
- * the probe failed (missing/broken), or the probe could not be interpreted.
- * Both are "not usable", but only the first is "not installed".
- */
-function statusOfRow(row) {
-  return row.available ? 'available' : 'missing';
-}
-
-/** Icon for a row: present, present-but-flagged, or absent. */
-function iconOfRow(row) {
-  if (!row.available) return '✗';
-  if (row.duplicated || row.outdated) return '⚠';
-  return '✓';
-}
-
-/** Extra qualifiers appended to a human line, e.g. "duplicate ×2, 2.14.0 → 2.15.1". */
-function qualifiersOfRow(row) {
-  const parts = [];
-  if (row.duplicated) parts.push(`DUPLICATE ×${row.distinctRealPaths.length}`);
-  if (row.outdated && row.installedVersion && row.latestVersion) {
-    parts.push(`${row.installedVersion} → ${row.latestVersion} available`);
-  } else if (row.currency === 'unknown') {
-    parts.push('version currency unknown');
-  }
-  // #843: say WHERE the binary was found. "Installed but not on PATH" and
-  // "not installed" look identical in a pass/fail column and call for opposite
-  // actions -- add it to PATH (or symlink it), versus install it.
-  if (row.available && row.resolution === 'fallback' && row.resolvedPath) {
-    parts.push(`found at ${row.resolvedPath} (not on PATH)`);
-  }
-  if (!row.available && row.validityReason) parts.push(row.validityReason);
-  return parts.join('; ');
-}
 
 /**
  * Print the audit as a human-readable list.
