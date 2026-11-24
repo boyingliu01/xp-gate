@@ -218,6 +218,34 @@ function recordFailures(tool, errors) {
 }
 
 /**
+ * Fold one tool's per-file counts into the baseline.
+ *
+ * The Go and Shell sections each ended with the same twelve lines: accumulate
+ * `{warnings, errors}` per file, then either add the field to an existing entry
+ * and bump its `totalWarnings`, or create the entry. Two copies means two places
+ * that must agree on how a file with several tools is represented -- and a file
+ * linted by both is the normal case in a mixed repo.
+ *
+ * @param {object} baseline entries keyed by file
+ * @param {string} tool field name to store, e.g. 'shellcheck'
+ * @param {Object<string, {warnings: number, errors: number}>} warningsByFile
+ */
+function mergeToolCounts(baseline, tool, warningsByFile) {
+  for (const [file, counts] of Object.entries(warningsByFile)) {
+    if (baseline[file]) {
+      baseline[file][tool] = counts;
+      baseline[file].totalWarnings += counts.warnings;
+    } else {
+      baseline[file] = {
+        [tool]: counts,
+        totalWarnings: counts.warnings,
+        lastAnalyzed: new Date().toISOString(),
+      };
+    }
+  }
+}
+
+/**
  * Is this linter runnable?
  *
  * Four languages asked this with the same four-line try/catch around a
@@ -369,19 +397,19 @@ async function createBaseline() {
       );
       recordFailures('eslint', errors);
       failedFiles.forEach(f => unevaluated.add(f));
+      const eslintCounts = {};
       for (const fileResult of results) {
         const fileName = matchResultToFile(fileResult.filePath, tsFiles);
         if (!fileName) continue;
-
-        baseline[fileName] = {
-          eslint: {
-            warnings: fileResult.warningCount || 0,
-            errors: fileResult.errorCount || 0,
-          },
-          totalWarnings: fileResult.warningCount || 0,
-          lastAnalyzed: new Date().toISOString(),
+        eslintCounts[fileName] = {
+          warnings: fileResult.warningCount || 0,
+          errors: fileResult.errorCount || 0,
         };
       }
+      // Merge, not overwrite: a file linted by more than one tool keeps every
+      // tool's counts. The previous assignment replaced the whole entry, so the
+      // last tool to run erased the others.
+      mergeToolCounts(baseline, 'eslint', eslintCounts);
     } else if (tsFiles.length > 0 && !eslintConfigExists) {
       // Not a failure: a project without an eslint config has nothing to
       // baseline. Staying quiet here is correct; the silent-catch defect was
@@ -402,22 +430,15 @@ async function createBaseline() {
       );
       recordFailures('ruff', errors);
       failedFiles.forEach(f => unevaluated.add(f));
+      const ruffCounts = {};
       for (const fileResult of results) {
         // A result that names no file cannot be recorded against one. Skipping it
         // is the fix for the literal "undefined" key this used to write.
         if (!fileResult.file) continue;
         const messages = fileResult.messages || [];
-        if (!baseline[fileResult.file]) {
-          baseline[fileResult.file] = {
-            ruff: { warnings: messages.length, errors: 0 },
-            totalWarnings: messages.length,
-            lastAnalyzed: new Date().toISOString(),
-          };
-        } else {
-          baseline[fileResult.file].ruff = { warnings: messages.length, errors: 0 };
-          baseline[fileResult.file].totalWarnings += messages.length;
-        }
+        ruffCounts[fileResult.file] = { warnings: messages.length, errors: 0 };
       }
+      mergeToolCounts(baseline, 'ruff', ruffCounts);
     }
   }
 
@@ -442,18 +463,7 @@ async function createBaseline() {
             warningsByFile[matchedFile].warnings++;
           }
         }
-        for (const [file, counts] of Object.entries(warningsByFile)) {
-          if (baseline[file]) {
-            baseline[file].golangci = counts;
-            baseline[file].totalWarnings += counts.warnings;
-          } else {
-            baseline[file] = {
-              golangci: counts,
-              totalWarnings: counts.warnings,
-              lastAnalyzed: new Date().toISOString(),
-            };
-          }
-        }
+        mergeToolCounts(baseline, 'golangci', warningsByFile);
       }
     } catch {
       // golangci-lint unavailable — skip
@@ -489,18 +499,7 @@ async function createBaseline() {
           warningsByFile[matchedFile].warnings++;
         }
       }
-      for (const [file, counts] of Object.entries(warningsByFile)) {
-        if (baseline[file]) {
-          baseline[file].shellcheck = counts;
-          baseline[file].totalWarnings += counts.warnings;
-        } else {
-          baseline[file] = {
-            shellcheck: counts,
-            totalWarnings: counts.warnings,
-            lastAnalyzed: new Date().toISOString(),
-          };
-        }
-      }
+      mergeToolCounts(baseline, 'shellcheck', warningsByFile);
     }
   }
 
