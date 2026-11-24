@@ -153,8 +153,18 @@ function firstExisting(candidates) {
  * @param {string} contents newline-separated file list
  * @returns {string} path to the temp file
  */
+/** Distinguishes two lists written within the same millisecond. */
+let allFileListSequence = 0;
+
 function writeAllModeFileList(contents) {
-  const listFile = path.join(os.tmpdir(), `xp-gate-all-files-${process.pid}-${Date.now()}.txt`);
+  // pid + timestamp is NOT unique: two calls in the same millisecond produce the same
+  // name, and the second silently overwrites the file the first gate is about to
+  // read. A counter makes the name unique within the process as well.
+  allFileListSequence += 1;
+  const listFile = path.join(
+    os.tmpdir(),
+    `xp-gate-all-files-${process.pid}-${Date.now()}-${allFileListSequence}.txt`,
+  );
   try {
     fs.writeFileSync(listFile, contents, 'utf8');
   } catch (err) {
