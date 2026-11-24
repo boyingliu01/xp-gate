@@ -4137,28 +4137,91 @@ function checkDshChannelReadiness(add) {
   }
 }
 
-function checkDelphiConfigPing(add, options, globalConfigPath) {
-  const { configPath, npmLatest } = options;
-  // 5. Config ping: parseable, three distinct callable models. A duplicate
-  // model here is a review that will BLOCK later — say so now.
-  //
-  // #684: resolve the SAME way the runner does. A project-local config wins; a
-  // machine-level one under XDG_CONFIG_HOME (or ~/.config) is the documented
-  // fallback, and a review keeps working on it. Checking only `cwd` reported
-  // FAIL on the layout SKILL.md recommends and told the user to copy the example
-  // into the project — manufacturing the drifted duplicate #541 warns about.
-  //
-  // An explicit `configPath` is an ANSWER, not a hint: a caller that names a
-  // file means that file, so it disables the fallback. Otherwise a test (or a
-  // caller) pinning an absent path silently reads the developer's real global
-  // config and reports PASS — the same vacuous-pass shape this batch is fixing.
-  const projectCfgPath = configPath
-    || path.join(options.projectDir || process.cwd(), '.delphi-config.json');
-  const usingGlobalConfig = !configPath
-    && !fs.existsSync(projectCfgPath)
-    && fs.existsSync(globalConfigPath);
-  const cfgPath = usingGlobalConfig ? globalConfigPath : projectCfgPath;
-  const cfgLabel = 'Delphi config (.delphi-config.json)';
+/**
+ * Report seats that are not `local-*`, as a WARN.
+ *
+ * #574: the local-only rule is an operator preference (the 2026-10-03 quota burn),
+ * so doctor surfaces the cost exposure without failing a deliberately hosted seat.
+ * The HARD enforcement lives in Gate MW, which binds evidence to whatever the config
+ * declares rather than to a `local-` prefix. `scripts/check_delphi_local_models.py`
+ * holds the same rule with the same allowlist and exit code; reporting it here is
+ * what finally gives that guard a caller instead of leaving it in its docstring.
+ *
+ * @param {Function} add
+ * @param {Array<string|undefined>} models one per DELPHI_ROLES entry
+ */
+function reportHostedSeats(add, models) {
+  const label = 'Delphi local-model guard (#574)';
+  const hosted = DELPHI_ROLES
+    .map((role, i) => ({ role, model: models[i] }))
+    .filter(({ model }) => model && !String(model).toLowerCase().startsWith('local-'));
+
+  if (hosted.length === 0) {
+    add(label, 'PASS', `all ${DELPHI_ROLES.length} seats are local-*`);
+    return;
+  }
+  add(label, 'WARN',
+    `hosted (non local-*) seats: ${hosted.map(({ role, model }) => `${role}=${model}`).join(', ')} — `
+    + 'local-only review is the standing rule; run: python scripts/check_delphi_local_models.py --probe');
+}
+
+/**
+ * Warn when a project config shadows a global one whose seats differ.
+ *
+ * #541: loaders fall back to the global config only on ENOENT, so this project file
+ * always wins here. If the machine-wide config exists AND its seats differ, the
+ * effective model mix depends on cwd -- the cross-project drift class behind the
+ * 2026-10-03 quota burn. WARN, never FAIL: intentional overrides are legal, and only
+ * the cwd-dependence is the hazard.
+ *
+ * Seat shape is object-keyed OR array in the wild (`delphi-config.ts` accepts both),
+ * so both sides are normalized before comparing.
+ *
+ * @param {{add: Function, cfgPath: string, globalConfigPath: string, models: Array}} p
+ */
+function reportConfigShadow(p) {
+  const { add, cfgPath, globalConfigPath, models } = p;
+  try {
+    if (!fs.existsSync(globalConfigPath) || path.resolve(globalConfigPath) === path.resolve(cfgPath)) return;
+
+    const gRaw = JSON.parse(fs.readFileSync(globalConfigPath, 'utf8'));
+    const gProfile = gRaw.profiles && gRaw.profiles[gRaw.active_profile || 'default'];
+    const gExperts = (gProfile && gProfile.experts) || {};
+    const pickExpert = (experts, role, idx) => {
+      if (!experts) return null;
+      if (Array.isArray(experts)) {
+        const seat = experts.find((x) => x && x.role === role) || experts[idx];
+        return (seat && seat.model) || null;
+      }
+      return (experts[role] && experts[role].model) || null;
+    };
+    const gModels = DELPHI_ROLES.map((role, i) => pickExpert(gExperts, role, i));
+    // Compare only roles BOTH sides define: a role missing on one side is an
+    // incomplete config (already FAILed above), not drift.
+    const differing = DELPHI_ROLES.filter((role, i) => gModels[i] && models[i] && gModels[i] !== models[i]);
+    if (differing.length === 0) return;
+
+    add('Delphi config shadow (#541)', 'WARN',
+      `project config shadows ${globalConfigPath}; seats differ (${differing.join(', ')}) — `
+      + 'reviews run from other directories will use different models');
+  } catch {
+    // A broken global config is not this check's failure mode; claiming nothing is
+    // better than claiming agreement.
+  }
+}
+
+/**
+ * Read the Delphi config and report whether a review can run from it.
+ *
+ * The file that was actually read is always named. With both scopes present a user
+ * cannot otherwise tell which one the review will take, and that ambiguity is what
+ * made #684 hard to see.
+ *
+ * @param {{add: Function, cfgPath: string, cfgLabel: string,
+ *   usingGlobalConfig: boolean, globalConfigPath: string}} p
+ */
+function reportConfigFile(p) {
+  const { add, cfgPath, cfgLabel, usingGlobalConfig, globalConfigPath } = p;
   if (!fs.existsSync(cfgPath)) {
     add(cfgLabel, 'FAIL',
       `${cfgPath} not found (copy .delphi-config.json.example from the skill directory)`);
@@ -4190,57 +4253,40 @@ function checkDelphiConfigPing(add, options, globalConfigPath) {
           // same allowlist and exit code; doctor reports it here so the guard
           // finally has a caller (`xp-gate doctor delphi`) instead of existing
           // only in its own docstring.
-          const hostedSeats = DELPHI_ROLES.filter((r) => {
-            const m = models[DELPHI_ROLES.indexOf(r)];
-            return m && !String(m).toLowerCase().startsWith('local-');
-          });
-          if (hostedSeats.length > 0) {
-            add('Delphi local-model guard (#574)', 'WARN',
-              `hosted (non local-*) seats: ${hostedSeats.map((r) => `${r}=${models[DELPHI_ROLES.indexOf(r)]}`).join(', ')} — `
-                + 'local-only review is the standing rule; run: python scripts/check_delphi_local_models.py --probe');
-          } else {
-            add('Delphi local-model guard (#574)', 'PASS', `all ${DELPHI_ROLES.length} seats are local-*`);
-          }
+          reportHostedSeats(add, models);
         }
-        // #541 follow-up: shadow detection. Loaders fall back to the global
-        // config ONLY on ENOENT, so this project file always wins here. If the
-        // machine-wide config exists AND seats differ, the effective model mix
-        // depends on cwd — the cross-project drift class behind the 2026-10-03
-        // quota burn. Warn (intentional overrides are legal), never fail.
-        try {
-          if (fs.existsSync(globalConfigPath) && path.resolve(globalConfigPath) !== path.resolve(cfgPath)) {
-            const gRaw = JSON.parse(fs.readFileSync(globalConfigPath, 'utf8'));
-            const gProfileName = gRaw.active_profile || 'default';
-            const gProfile = gRaw.profiles && gRaw.profiles[gProfileName];
-            const gExperts = (gProfile && gProfile.experts) || {};
-            // Seat shape is object-keyed OR array in the wild (delphi-config.ts
-            // accepts both); normalize to a role->model map before comparing.
-            const pickExpert = (experts, role, idx) => {
-              if (!experts) return null;
-              if (Array.isArray(experts)) {
-                const e = experts.find((x) => x && x.role === role) || experts[idx];
-                return (e && e.model) || null;
-              }
-              return (experts[role] && experts[role].model) || null;
-            };
-            const gModels = DELPHI_ROLES.map((r, i) => pickExpert(gExperts, r, i));
-            // Compare only DELPHI_ROLES BOTH sides define: a role missing on one side
-            // is an incomplete config (check 5 already FAILs it), not drift.
-            const differing = DELPHI_ROLES.filter((r, i) => gModels[i] && models[i] && gModels[i] !== models[i]);
-            if (differing.length > 0) {
-              add('Delphi config shadow (#541)', 'WARN',
-                `project config shadows ${globalConfigPath}; seats differ (${differing.join(', ')}) — reviews run from other directories will use different models`);
-            }
-          }
-        } catch {
-          // A broken/unreadable global config is not this check's failure mode;
-          // silence here must not mask it elsewhere, so nothing is claimed.
-        }
+        reportConfigShadow({ add, cfgPath, globalConfigPath, models });
       }
     } catch (err) {
       add(cfgLabel, 'FAIL', `unparseable: ${err.message}`);
     }
   }
+
+}
+
+function checkDelphiConfigPing(add, options, globalConfigPath) {
+  const { configPath, npmLatest } = options;
+  // 5. Config ping: parseable, three distinct callable models. A duplicate
+  // model here is a review that will BLOCK later — say so now.
+  //
+  // #684: resolve the SAME way the runner does. A project-local config wins; a
+  // machine-level one under XDG_CONFIG_HOME (or ~/.config) is the documented
+  // fallback, and a review keeps working on it. Checking only `cwd` reported
+  // FAIL on the layout SKILL.md recommends and told the user to copy the example
+  // into the project — manufacturing the drifted duplicate #541 warns about.
+  //
+  // An explicit `configPath` is an ANSWER, not a hint: a caller that names a
+  // file means that file, so it disables the fallback. Otherwise a test (or a
+  // caller) pinning an absent path silently reads the developer's real global
+  // config and reports PASS — the same vacuous-pass shape this batch is fixing.
+  const projectCfgPath = configPath
+    || path.join(options.projectDir || process.cwd(), '.delphi-config.json');
+  const usingGlobalConfig = !configPath
+    && !fs.existsSync(projectCfgPath)
+    && fs.existsSync(globalConfigPath);
+  const cfgPath = usingGlobalConfig ? globalConfigPath : projectCfgPath;
+  const cfgLabel = 'Delphi config (.delphi-config.json)';
+  reportConfigFile({ add, cfgPath, cfgLabel, usingGlobalConfig, globalConfigPath });
 
   // 6. Version consistency.
   checkDelphiVersionConsistency(add, options, npmLatest);
