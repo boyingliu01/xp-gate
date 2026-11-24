@@ -1,4 +1,5 @@
 import { BaseAdapter } from './base';
+import { skipLineComment } from './line-comment';
 import { Adapter } from '../types';
 
 /**
@@ -246,7 +247,7 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     if (lex.inBlockComment) return this.skipBlockCommentBody(i, char, nextChar, lex);
     if (lex.inString) return this.skipStringBody(i, char, lex);
 
-    if (char === '/' && nextChar === '/') return this.skipLineComment(i);
+    if (char === '/' && nextChar === '/') return skipLineComment(this.fileContent, i);
     if (char === '/' && nextChar === '*') {
       lex.inBlockComment = true;
       return 2;
@@ -286,12 +287,6 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     return 0;
   }
 
-  /** Skip a `//` comment through, but not including, the newline. */
-  private skipLineComment(start: number): number {
-    let i = start;
-    while (i < this.fileContent.length && this.fileContent[i] !== '\n') i++;
-    return i - start;
-  }
 
   private skipBlockCommentBody(
     i: number,

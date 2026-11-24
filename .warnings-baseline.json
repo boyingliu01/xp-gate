@@ -46,5 +46,9 @@
   "src/principles/boy-scout.ts": {
     "lastAnalyzed": "2026-11-24T10:17:27.342Z",
     "totalWarnings": 1
+  },
+  "src/principles/adapters/base.ts": {
+    "totalWarnings": 2,
+    "lastAnalyzed": "2026-11-24T12:04:32.460Z"
   }
 }

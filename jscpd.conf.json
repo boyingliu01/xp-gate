@@ -18,6 +18,10 @@
     "**/plugins/*/skills/**",
     "**/plugins/*/lib/**",
     "**/*/lib/client.js",
-    "**/__tests__/**"
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.js",
+    "**/*.test.mjs",
+    "**/*.spec.ts"
   ]
 }
