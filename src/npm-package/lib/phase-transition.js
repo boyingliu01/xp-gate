@@ -218,6 +218,33 @@ function computeRequirementsHash(data, projectDir) {
  * @param {string} projectDir - Project root directory
  * @returns {{ ok: boolean, errors: string[], warnings: string[] }}
  */
+/**
+ * Record a validation problem where its severity depends on the sprint's schema.
+ *
+ * This decision was written out a dozen times inside `validateEvidence`, each copy
+ * repeating the same full warning sentence. A sprint created before
+ * `evidence_schema_version` 2 gets a WARNING: enforcing a rule the sprint was
+ * never created under would block work that is not at fault.
+ *
+ * Mutates the arrays rather than returning new ones, because every call site
+ * keeps pushing into the same `errors`/`warnings` afterwards -- handing back
+ * copies silently dropped the later entries (measured: five tests failed).
+ *
+ * @param {string} msg
+ * @param {string[]} errors
+ * @param {string[]} warnings
+ * @param {boolean} isLegacySprint
+ * @returns {boolean} true when the problem was downgraded to a warning
+ */
+function recordProblem(msg, errors, warnings, isLegacySprint) {
+  if (isLegacySprint) {
+    warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+    return true;
+  }
+  errors.push(msg);
+  return false;
+}
+
 function validateEvidence(phase, projectDir) {
   const evidenceConfig = EVIDENCE_FILES[phase];
   if (!evidenceConfig) {
@@ -246,11 +273,9 @@ function validateEvidence(phase, projectDir) {
   // Check file existence
   if (!fs.existsSync(evidenceFilePath)) {
     const msg = `Evidence file missing: ${evidenceConfig.path}`;
-    if (isLegacySprint) {
-      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+    if (recordProblem(msg, errors, warnings, isLegacySprint)) {
       return { ok: true, errors: [], warnings };
     }
-    errors.push(msg);
     return { ok: false, errors, warnings };
   }
 
@@ -261,18 +286,15 @@ function validateEvidence(phase, projectDir) {
     data = JSON.parse(raw);
   } catch {
     const msg = `${fileName} is malformed JSON`;
-    if (isLegacySprint) {
-      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+    if (recordProblem(msg, errors, warnings, isLegacySprint)) {
       return { ok: true, errors: [], warnings };
     }
-    errors.push(msg);
     return { ok: false, errors, warnings };
   }
 
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
     const msg = `${fileName} must contain a JSON object`;
-    if (isLegacySprint) {
-      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+    if (recordProblem(msg, errors, warnings, isLegacySprint)) {
       return { ok: true, errors: [], warnings };
     }
     return { ok: false, errors: [msg], warnings };
@@ -282,11 +304,7 @@ function validateEvidence(phase, projectDir) {
   for (const field of evidenceConfig.requiredFields) {
     if (!(field in data)) {
       const msg = `${fileName} is missing required field: ${field}`;
-      if (isLegacySprint) {
-        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-      } else {
-        errors.push(msg);
-      }
+      recordProblem(msg, errors, warnings, isLegacySprint);
     }
   }
 
@@ -298,11 +316,9 @@ function validateEvidence(phase, projectDir) {
   // Run blocking check
   if (!evidenceConfig.blockingCheck(data)) {
     const msg = `${fileName}: ${evidenceConfig.blockingMessage}`;
-    if (isLegacySprint) {
-      warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
+    if (recordProblem(msg, errors, warnings, isLegacySprint)) {
       return { ok: true, errors: [], warnings };
     }
-    errors.push(msg);
     return { ok: false, errors, warnings };
   }
 
@@ -311,18 +327,10 @@ function validateEvidence(phase, projectDir) {
     const currentHead = getCurrentHeadCommit(projectDir);
     if (currentHead === null) {
       const msg = `${fileName}: unable to resolve current Git HEAD; evidence identity cannot be verified`;
-      if (isLegacySprint) {
-        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-      } else {
-        errors.push(msg);
-      }
+      recordProblem(msg, errors, warnings, isLegacySprint);
     } else if (data.head_commit !== currentHead) {
       const msg = `${fileName}: head_commit mismatch — report has "${data.head_commit}", current HEAD is "${currentHead}"`;
-      if (isLegacySprint) {
-        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-      } else {
-        errors.push(msg);
-      }
+      recordProblem(msg, errors, warnings, isLegacySprint);
     }
   }
 
@@ -333,11 +341,7 @@ function validateEvidence(phase, projectDir) {
       const expectedHash = computeFileHash(specPath);
       if (data.spec_hash !== expectedHash) {
         const msg = `${fileName}: spec_hash mismatch — specification.yaml has changed since report was generated`;
-        if (isLegacySprint) {
-          warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-        } else {
-          errors.push(msg);
-        }
+        recordProblem(msg, errors, warnings, isLegacySprint);
       }
     }
   }
@@ -345,11 +349,7 @@ function validateEvidence(phase, projectDir) {
   if (phase === 2) {
     if (typeof data.requirements_hash !== 'string' || !/^[a-fA-F0-9]{64}$/.test(data.requirements_hash)) {
       const msg = `${fileName}: requirements_hash must be a 64-character hexadecimal SHA-256 digest`;
-      if (isLegacySprint) {
-        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-      } else {
-        errors.push(msg);
-      }
+      recordProblem(msg, errors, warnings, isLegacySprint);
     } else {
       const computedHash = computeRequirementsHash(data, projectDir);
       const hashError = computedHash.error || (
@@ -359,30 +359,18 @@ function validateEvidence(phase, projectDir) {
       );
       if (hashError) {
         const msg = `${fileName}: ${hashError}`;
-        if (isLegacySprint) {
-          warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-        } else {
-          errors.push(msg);
-        }
+        recordProblem(msg, errors, warnings, isLegacySprint);
       }
     }
     for (const validationError of validateRequirementsExpertEvidence(data)) {
       const msg = `${fileName}: ${validationError}`;
-      if (isLegacySprint) {
-        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-      } else {
-        errors.push(msg);
-      }
+      recordProblem(msg, errors, warnings, isLegacySprint);
     }
 
     const currentHead = getCurrentHeadCommit(projectDir);
     if (data.head_commit !== currentHead) {
       const msg = `${fileName}: head_commit mismatch — review has "${data.head_commit}", current HEAD is "${currentHead}"; regenerate the requirements review for the current commit`;
-      if (isLegacySprint) {
-        warnings.push(`WARNING: ${msg}. Upgrade sprint with evidence_schema_version >= 2 to enforce.`);
-      } else {
-        errors.push(msg);
-      }
+      recordProblem(msg, errors, warnings, isLegacySprint);
     }
   }
 
