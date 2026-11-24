@@ -1417,7 +1417,8 @@ async function invokeGateHandler(gateId, gate, targetPath, opts) {
   }
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, runJscpd, resolveGateImplementation, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
+module.exports = { writeAllModeFileList, removeFileList, buildFileSourceLines, firstExisting, resolveBashForGates,
+  findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, runJscpd, resolveGateImplementation, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
   // AC-670-03 asserts the --all preamble END-TO-END: that an all-mode run hands
   // the security gates a non-empty file population sourced from the list file and
   // sets GATE_SCOPE="all". With these unexported, the case could only take its
