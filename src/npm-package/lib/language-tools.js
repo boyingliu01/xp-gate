@@ -424,8 +424,13 @@ async function handleDetectLanguages(args, options = {}) {
   const jsonOutput = args.includes('--json');
   const writeConfig = args.includes('--write') || !jsonOutput;
 
-  console.log('Detecting project languages...');
-  console.log(`Project root: ${projectRoot}\n`);
+  // Human progress lines ONLY in human mode. Under `--json` stdout must hold exactly
+  // one document, and a leading "Detecting project languages..." makes it unparseable
+  // -- `jq` reports a syntax error pointing at the word, not at this line.
+  if (!jsonOutput) {
+    console.log('Detecting project languages...');
+    console.log(`Project root: ${projectRoot}\n`);
+  }
 
   const { detected, configFiles } = detectProjectLanguages(projectRoot);
 
