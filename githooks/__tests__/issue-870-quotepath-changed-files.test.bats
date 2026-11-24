@@ -42,8 +42,10 @@ setup() {
   git config user.name Test
   git config core.hooksPath /dev/null
 
-  # The gate body calls helpers from the hook libs; make them resolvable, and
-  # stub the two it needs that no test fixture provides.
+  # The gate body calls helpers from the hook libs (jscpd_is_build_output,
+  # detect_docs_only_commit, ...). Point it at the real lib tree rather than
+  # stubbing: the helpers under test here are the list-building ones, and a stub
+  # would replace exactly the code this suite is pinning.
   export XP_GATE_LIB_PATH="$REPO_ROOT/githooks/lib"
 }
 

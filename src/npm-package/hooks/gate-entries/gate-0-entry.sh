@@ -137,8 +137,11 @@ has_changelog_change=false
 # read the same list; they just match with `grep -E '\.(ts|js)$'`, which never
 # matches an escaped name -- the same miss, with no error to notice.
 #
-# Fixed here, where the list is computed (see the #640 note above: this is the
-# one place; everything else reads $XP_STAGED_ACM). `-c core.quotepath=false` is
+# Fixed here because this is where the #640 cache is computed and every consumer
+# that reads $XP_STAGED_ACM inherits it. It is NOT the only such call in the
+# tree: bare `git diff --cached --name-only` sites remain in gate-5/6/12b and
+# still receive escaped paths (issue #870 keeps the authoritative list; the
+# count there was 33 when this fix landed). `-c core.quotepath=false` is
 # preferred over `-z`: `-z` switches to NUL separation and every `while IFS=
 # read -r` caller would have to change, while disabling quotepath keeps the
 # one-line-one-path contract intact. A filename containing a literal newline
@@ -592,8 +595,9 @@ DASHBOARD_PATH_FILTER='^dashboard/'
 # the same list; they just match with `grep -E '\.(ts|js)$'`, which silently
 # never matches an escaped name -- the same miss, with no error to notice.
 #
-# Fixed here, at the single place the list is built, so a scanner added tomorrow
-# inherits it. `-c core.quotepath=false` over `-z`: `-z` switches to NUL
+# Fixed here for the same reason as the #640 cache above: consumers of this list
+# inherit it. The bare call sites elsewhere in the tree are not covered by this
+# change (scope note in #870). `-c core.quotepath=false` over `-z`: `-z` switches to NUL
 # separation and every `while IFS= read -r` caller would have to change, while
 # disabling quotepath keeps the one-line-one-path contract intact. A filename
 # containing a literal newline still breaks that contract, but that is a
