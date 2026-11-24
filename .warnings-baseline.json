@@ -3,10 +3,6 @@
     "lastAnalyzed": "2026-11-22T20:22:40.491Z",
     "totalWarnings": 1
   },
-  "scripts/delphi-external-review.cjs": {
-    "lastAnalyzed": "2026-11-24T06:19:37.247Z",
-    "totalWarnings": 6
-  },
   "src/build-integrity/__tests__/gate-10.test.ts": {
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
     "totalWarnings": 8

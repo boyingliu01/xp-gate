@@ -21,9 +21,6 @@ const VALID_MODES = ['design', 'code-walkthrough', 'requirements'];
 const DEFAULT_TIMEOUT_MS = 30000;
 
 // Shared by CLI --timeout-ms and provider timeout_ms validation.
-function isValidTimeoutMs(value) {
-  return Number.isInteger(value) && value >= 1000 && value <= 600000;
-}
 
 // Flag -> args key. `null` marks flags that take no value. Keeping this as data
 // means a new flag is one table row instead of one more switch arm (the switch
@@ -335,164 +332,20 @@ function readConfig(configPath, profileOverride) {
   };
 }
 
-// ── Distinct-model validation ───────────────────────────────────────────
-const REQUIRED_EXPERT_ROLES = ['architecture', 'technical', 'feasibility'];
-
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim() !== '';
-}
-
-// Roles must be EXACTLY the three required ones: a missing role means the
-// review would silently run with two experts, an extra one means the config
-// no longer matches the three-model policy. One pass reports both.
-function collectModelAssignments(expertMap) {
-  const assignments = [];
-  for (const role of REQUIRED_EXPERT_ROLES) {
-    const expert = expertMap[role];
-    if (!expert) return { error: `Missing required expert role: ${role}.` };
-    if (!isNonEmptyString(expert.model)) {
-      return { error: `Expert ${role} must define a non-empty model.` };
-    }
-    assignments.push({ role, model: expert.model.trim() });
-  }
-  const unexpectedRole = Object.keys(expertMap).find(role => !REQUIRED_EXPERT_ROLES.includes(role));
-  if (unexpectedRole) return { error: `Unsupported expert role: ${unexpectedRole}.` };
-  return { assignments };
-}
-
-function findDuplicateModel(assignments) {
-  const seen = new Map();
-  for (const { role, model } of assignments) {
-    const previousRole = seen.get(model);
-    if (previousRole) {
-      return `duplicate model "${model}" assigned to ${previousRole} and ${role}.`;
-    }
-    seen.set(model, role);
-  }
-  return null;
-}
-
-// Everything an expert's provider must carry to be callable. Returns the
-// human-readable reason instead of throwing, so the caller keeps one shape.
-function providerConfigError(role, expert, providerMap) {
-  if (!isNonEmptyString(expert.provider) || expert.provider === 'local') {
-    return `Expert ${role} must define a non-local callable provider.`;
-  }
-  const provider = providerMap[expert.provider];
-  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
-    return `Expert ${role} provider configuration must be an object.`;
-  }
-  if (!isNonEmptyString(provider.base_url)) {
-    return `Expert ${role} provider must define a non-empty base_url.`;
-  }
-  if (!isNonEmptyString(provider.api_key)) {
-    return `Expert ${role} provider must define a non-empty api_key.`;
-  }
-  if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
-    return `Expert ${role} provider ${expert.provider} timeout_ms must be an integer between 1000 and 600000.`;
-  }
-  return null;
-}
-
-function validateDistinctModels(experts, providers, consensus = {}) {
-  const expertMap = experts && typeof experts === 'object' ? experts : {};
-  const providerMap = providers && typeof providers === 'object' ? providers : {};
-
-  const collected = collectModelAssignments(expertMap);
-  if (collected.error) return { valid: false, reason: collected.error };
-
-  const duplicate = findDuplicateModel(collected.assignments);
-  if (duplicate) return { valid: false, reason: duplicate };
-
-  for (const role of REQUIRED_EXPERT_ROLES) {
-    const error = providerConfigError(role, expertMap[role], providerMap);
-    if (error) return { valid: false, reason: error };
-  }
-
-  if (consensus.cross_provider_required === true) {
-    return {
-      valid: true,
-      warning: 'cross_provider_required_ignored',
-    };
-  }
-
-  return { valid: true };
-}
+const {
+  isNonEmptyString,
+  collectModelAssignments,
+  findDuplicateModel,
+  providerConfigError,
+  validateDistinctModels,
+  isValidTimeoutMs,
+} = require('./delphi-model-validation.cjs');
 
 // ── JSON extraction (4-layer fallback) ─────────────────────────────────
-function extractJsonFromResponse(content) {
-  if (!content || typeof content !== 'string') {
-    return { parse_error: true, raw_content: String(content || '') };
-  }
-
-  const trimmed = content.trim();
-
-  // Layer 1: Direct parse
-  try {
-    return JSON.parse(trimmed);
-  } catch { /* continue */ }
-
-  // Layer 2: Strip markdown code block
-  const codeBlockMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (codeBlockMatch) {
-    try {
-      return JSON.parse(codeBlockMatch[1].trim());
-    } catch { /* continue */ }
-  }
-
-  // Layer 3: Extract first JSON object
-  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0]);
-    } catch { /* continue */ }
-  }
-
-  // Layer 4: Fallback
-  return { parse_error: true, raw_content: trimmed };
-}
+const { extractJsonFromResponse } = require('./delphi-json-extract.cjs');
 
 // ── System prompt templates ────────────────────────────────────────────
-const SYSTEM_PROMPTS = {
-  architecture: `你是架构评审专家（Delphi Method - Architecture Expert）。
-
-你的评审关注维度：
-1) 需求对齐度 — 设计是否完整覆盖所有需求
-2) 系统一致性 — 与现有架构风格、模式是否一致
-3) 模块边界清晰度 — 职责划分是否明确，耦合度是否合理
-4) 架构演进性 — 是否为未来扩展留有空间
-5) 技术选型合理性 — 技术栈选择是否有充分依据
-
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "CI-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
-
-  technical: `你是技术实现评审专家（Delphi Method - Technical Expert）。
-
-你的评审关注维度：
-1) 实现正确性 — 逻辑是否正确，边界条件是否处理
-2) 代码质量和设计模式 — 是否遵循 SOLID 原则，代码是否清晰
-3) 边界情况和错误处理 — 异常路径是否覆盖，错误处理是否健壮
-4) 性能影响 — 是否有性能瓶颈或资源泄漏风险
-5) 可测试性 — 代码是否易于编写单元测试
-
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "MC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
-
-  feasibility: `你是可行性分析专家（Delphi Method - Feasibility Expert）。
-
-你的评审关注维度：
-1) 实际约束（时间/资源/依赖）— 是否在现有约束下可行
-2) 风险识别和缓解 — 主要风险是否已识别，缓解措施是否充分
-3) 执行复杂度 — 实现难度是否被低估，依赖链是否清晰
-4) 替代方案 — 是否有更简单或更可靠的替代方案
-5) 回滚策略 — 如果实施失败，是否有退路
-
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "FC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
-};
-
-const MODE_FOCUS_PROMPTS = {
-  design: '',
-  'code-walkthrough': '\n\n本次评审聚焦已实现代码的正确性、风险和可验证结果。',
-  requirements: '\n\n本次评审聚焦需求陈述的完整性、一致性、可验收性和约束清晰度。',
-};
+const { SYSTEM_PROMPTS, MODE_FOCUS_PROMPTS } = require('./delphi-prompts.cjs');
 
 function buildSystemPrompt(role, mode = 'design') {
   const rolePrompt = SYSTEM_PROMPTS[role] || SYSTEM_PROMPTS.architecture;
@@ -540,7 +393,6 @@ function resolveTimeoutMs(args, providerConfig) {
 // answered normally, a 50 KB one killed the seat with no usable error, and a
 // dead expert seat blocks the whole review. The ceiling is therefore checked
 // before the request is made, where the message can say what to narrow.
-const DEFAULT_PROMPT_BUDGET_BYTES = 40000;
 
 // A seat-level override (`max_prompt_bytes` on the expert entry) exists because
 // the ceiling is a property of the model behind the seat, not of the runner.
@@ -582,113 +434,18 @@ function describePromptBudgetFailure({ bytes, maxBytes, expert }) {
 }
 
 // ── Seat prompt calibration (#481) ─────────────────────────────────────
-// The R1-R4 sprint review proved the ceiling is a seat × model route
-// property: g-glm-5.3-flash dropped 32-39 KB requests six times with
-// "Network error." while the same gateway served 36 KB to a differently
-// routed seat, and a ~60 byte smoke probe on the "dead" seat passed in 7s.
-// The optional per-seat `prompt_calibration` record carries the measured
-// bounds so failures can be classified against evidence instead of guessed.
-// A calibration record is only usable when it carries a measured PASS bound
-// and, if it also carries a FAIL bound, that bound is strictly larger. Each
-// broken shape names itself so the operator knows which field to correct.
-const CALIBRATION_SHAPE_HINT = 'needs measured_at and a finite last_pass_bytes > 0 (last_fail_bytes, if present, must be larger)';
-
-function isPositiveFinite(value) {
-  return Number.isFinite(value) && value > 0;
-}
-
-function calibrationProblem(raw) {
-  if (!isPlainObject(raw)) return 'must be an object';
-  const pass = raw.last_pass_bytes;
-  const fail = raw.last_fail_bytes;
-  const failOk = fail === undefined || isPositiveFinite(fail);
-  if (!isPositiveFinite(pass) || !failOk) return CALIBRATION_SHAPE_HINT;
-  if (fail !== undefined && !(fail > pass)) return 'has last_fail_bytes <= last_pass_bytes';
-  if (!isNonEmptyString(raw.measured_at)) return CALIBRATION_SHAPE_HINT;
-  return null;
-}
-
-function resolveSeatCalibration(expertConfig) {
-  const raw = expertConfig && expertConfig.prompt_calibration;
-  if (raw === undefined) return { calibration: null };
-  const problem = calibrationProblem(raw);
-  if (problem) {
-    console.error(`[delphi-review] WARNING: prompt_calibration ${problem}; ignoring the record.`);
-    return { calibration: null, warning: 'prompt_calibration_malformed' };
-  }
-  return {
-    calibration: {
-      measured_at: raw.measured_at,
-      model_id: typeof raw.model_id === 'string' ? raw.model_id : undefined,
-      gateway: typeof raw.gateway === 'string' ? raw.gateway : undefined,
-      last_pass_bytes: Math.trunc(raw.last_pass_bytes),
-      last_fail_bytes: raw.last_fail_bytes !== undefined ? Math.trunc(raw.last_fail_bytes) : undefined,
-    },
-  };
-}
-
-// Classify a failed expert call. A drop before any response on a payload above
-// the seat's calibrated passing size is a size ceiling, not a transient fault:
-// retrying the same payload cannot succeed, and reporting "Network error."
-// sends operators chasing a cause that is not there (#481). Everything else
-// gets a stable error_type so orchestrators can assert on the class instead of
-// parsing prose.
-// The calibrated ceiling for a seat, or null when the seat carries no usable
-// record. Null is meaningful: it is the "no evidence to reclassify on" branch.
-function calibratedCeiling(calibration) {
-  if (calibration && Number.isFinite(calibration.last_pass_bytes)) return calibration.last_pass_bytes;
-  return null;
-}
-
-// `error_kind` is the primary signal; the message literal stays as a
-// backward-compatible fallback for callers that hand-build results.
-function isPreResponseDrop(result) {
-  return !result.retryable
-    && (result.error_kind === 'pre_response_drop' || result.message === 'Network error.');
-}
-
-function sizeExceededResult(result, promptBytes, threshold) {
-  return {
-    ...result,
-    error_type: 'SIZE_EXCEEDED',
-    retryable: false,
-    bytes: promptBytes,
-    calibrated_pass_bytes: threshold,
-    message: `Request dropped before any response: ${promptBytes} bytes exceeds this seat's calibrated passing size `
-      + `(${threshold} bytes). Classified SIZE_EXCEEDED, not a network fault — trim the payload or recalibrate the seat.`,
-  };
-}
-
-// No calibration means no evidence to reclassify on — but an uncalibrated
-// seat dying on a full-budget payload is exactly how #481 started. Keep the
-// class honest (network_error) and point the operator at the protocol.
-function uncalibratedBudgetHint(result, promptBytes) {
-  return {
-    ...result,
-    error_type: 'network_error',
-    bytes: promptBytes,
-    message: `${result.message} Note: this seat has no prompt_calibration record and the payload is at the `
-      + 'default budget — this pattern matches an uncalibrated size ceiling. Recalibrate per the #481 protocol.',
-  };
-}
-
-function classifySeatFailure({ result, promptBytes, calibration }) {
-  if (!result || !result.error) return result;
-  if (!isPreResponseDrop(result)) {
-    return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
-  }
-  const threshold = calibratedCeiling(calibration);
-  if (!Number.isFinite(promptBytes)) {
-    return { ...result, error_type: 'network_error' };
-  }
-  if (threshold !== null && promptBytes > threshold) {
-    return sizeExceededResult(result, promptBytes, threshold);
-  }
-  if (threshold === null && promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES) {
-    return uncalibratedBudgetHint(result, promptBytes);
-  }
-  return { ...result, error_type: 'network_error' };
-}
+const {
+  isPlainObject,
+  DEFAULT_PROMPT_BUDGET_BYTES,
+  isPositiveFinite,
+  calibrationProblem,
+  resolveSeatCalibration,
+  calibratedCeiling,
+  isPreResponseDrop,
+  sizeExceededResult,
+  uncalibratedBudgetHint,
+  classifySeatFailure,
+} = require('./delphi-seat-calibration.cjs');
 
 // ── Schema retry (#414 REQ-5) ──────────────────────────────────────────
 // g-qwen3.8-flash occasionally answers in prose or malformed JSON (measured
@@ -939,11 +696,6 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
   }
 }
 
-function isPlainObject(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 function parseExpertVerdict(value) {
   if (!isPlainObject(value)) return { valid: false, message: 'Invalid expert verdict.' };

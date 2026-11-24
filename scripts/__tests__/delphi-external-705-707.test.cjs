@@ -28,13 +28,20 @@ const os = require('os');
 
 function loadModule() {
   const modulePath = path.resolve(__dirname, '..', 'delphi-external-review.cjs');
-  delete require.cache[modulePath];
+  // The runner delegates to sibling modules. Clearing only the entry point leaves
+  // those cached, so a case that changes its inputs between loads sees the
+  // previous state -- and the failure reads like a product bug.
+  const dir = path.dirname(modulePath);
+  for (const key of Object.keys(require.cache)) {
+    if (path.dirname(key) === dir && key.endsWith('.cjs')) delete require.cache[key];
+  }
   return require(modulePath);
 }
 
 function writeConfig(dir, providers) {
   const p = path.join(dir, 'config.json');
-  fs.writeFileSync(p, JSON.stringify({
+  try {
+    fs.writeFileSync(p, JSON.stringify({
     active_profile: 'default',
     profiles: {
       default: {
@@ -46,18 +53,41 @@ function writeConfig(dir, providers) {
         },
       },
     },
-  }, null, 2));
-  return p;
+    }, null, 2));
+    return p;
+  } catch (err) {
+    // Name the path: a bare EACCES in a fixture reads as a broken test rather
+    // than a broken environment.
+    throw new Error(`cannot write fixture config ${p}: ${err.message}`);
+  }
+}
+
+
+/**
+ * Stub `fetch` with a canned response.
+ *
+ * The 5xx cases each built the same response object inline; only the body varied.
+ * One factory keeps the shape in a single place -- `ok` must agree with `status`,
+ * and getting that wrong makes a test pass for the wrong reason.
+ */
+function stubFetch(status, body) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  }));
 }
 
 // ── #707: base_url 的 ${VAR} 展开 ───────────────────────────────────────
 describe('#707: base_url env placeholder expansion', () => {
   let dir;
   let exitSpy;
+  let readConfig;
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delphi-707-'));
     // 配置错误路径用 process.exit(1) 报错；测试里 replace 成抛异常才可断言。
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit'); });
+    ({ readConfig } = loadModule());
   });
   afterEach(() => {
     exitSpy.mockRestore();
@@ -68,7 +98,6 @@ describe('#707: base_url env placeholder expansion', () => {
   });
 
   it('expands ${VAR} in base_url from the environment', () => {
-    const { readConfig } = loadModule();
     process.env.GATEWAY_BASE_FOR_TEST = 'https://gateway.test/v1';
     const cfg = writeConfig(dir, {
       gw: { base_url: '${GATEWAY_BASE_FOR_TEST}', api_key: 'literal-key' },
@@ -81,7 +110,6 @@ describe('#707: base_url env placeholder expansion', () => {
   it('fails at config-load time when the base_url variable is unset', () => {
     // 这是 #707 的核心：占位符没展开必须在**校验层**报错并点名变量，
     // 而不是让字面量流到网络层、在那里以「连接失败」的形式失败。
-    const { readConfig } = loadModule();
     delete process.env.NOPE_GATEWAY_VAR;
     const cfg = writeConfig(dir, {
       gw: { base_url: '${NOPE_GATEWAY_VAR}', api_key: 'literal-key' },
@@ -99,7 +127,6 @@ describe('#707: base_url env placeholder expansion', () => {
 
   it('does not silently fall back to the literal placeholder', () => {
     // 退回字面量正是本 bug 的成因：配置看起来正常，URL 却不是一个 URL。
-    const { readConfig } = loadModule();
     delete process.env.ALSO_NOPE;
     const cfg = writeConfig(dir, {
       gw: { base_url: '${ALSO_NOPE}', api_key: 'literal-key' },
@@ -115,7 +142,6 @@ describe('#707: base_url env placeholder expansion', () => {
 
   it('leaves a literal base_url untouched', () => {
     // 反向守护：不能把正常配置当占位符处理。
-    const { readConfig } = loadModule();
     const cfg = writeConfig(dir, {
       gw: { base_url: 'https://literal.example/v1', api_key: 'literal-key' },
     });
@@ -133,18 +159,14 @@ describe('#705: 5xx provider error body is not discarded', () => {
 
   it('surfaces error.type and error.param from a 5xx body', async () => {
     const { callModelAPI } = loadModule();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({
+    stubFetch(500, {
         error: {
           message: 'Non-stream response processing failed: ',
           type: 'response_processing_error',
           param: 'non_stream_chat_response',
           code: '500',
         },
-      }),
-    }));
+      });
 
     const result = await callModelAPI(
       { base_url: 'https://example.test/v1', api_key: 'key' },
@@ -160,13 +182,9 @@ describe('#705: 5xx provider error body is not discarded', () => {
   it('marks a response_processing_error as non-retryable', async () => {
     // 内容相关失败重试必然同样失败。标成 retryable 只会白白烧掉重试预算。
     const { callModelAPI } = loadModule();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({
+    stubFetch(500, {
         error: { type: 'response_processing_error', param: 'non_stream_chat_response' },
-      }),
-    }));
+      });
 
     const result = await callModelAPI(
       { base_url: 'https://example.test/v1', api_key: 'key' },
@@ -197,11 +215,7 @@ describe('#705: 5xx provider error body is not discarded', () => {
 
   it('a genuine transient 5xx (no structured body) stays retryable', async () => {
     const { callModelAPI } = loadModule();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 502,
-      json: async () => ({}),
-    }));
+    stubFetch(502, {});
 
     const result = await callModelAPI(
       { base_url: 'https://example.test/v1', api_key: 'key' },
