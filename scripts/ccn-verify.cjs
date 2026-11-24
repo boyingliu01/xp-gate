@@ -498,6 +498,14 @@ function rescueBodyLines(srcLines, name, lineNo) {
   return span ? window.slice(span[0], span[1] + 1) : null;
 }
 
+function memoizedSourceReader(root) {
+  const cache = new Map();
+  return (rel) => {
+    if (!cache.has(rel)) cache.set(rel, readSourceLines(root, rel));
+    return cache.get(rel);
+  };
+}
+
 module.exports = {
   ccnOfBody,
   verifyRowCcn,
@@ -506,6 +514,7 @@ module.exports = {
   rewriteCsvRow,
   parseCsvRowIdentity,
   stripBlockComments,
+  memoizedSourceReader,
   findFunctionBody,
   locateBodyAtRow,
   parseCsvLine,

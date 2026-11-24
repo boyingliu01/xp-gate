@@ -16,6 +16,7 @@
 
 const { execFile, execFileSync } = require('child_process');
 const { stripNonCode, skipQuoted } = require('./ccn-strip-noncode.cjs');
+const { findSourceFiles } = require('./ccn-find-sources.cjs');
 const { printReport, productionOverThreshold } = require('./ccn-report-render.cjs');
 const {
   ccnOfBody,
@@ -25,6 +26,7 @@ const {
   rewriteCsvRow,
   parseCsvRowIdentity,
   stripBlockComments,
+  memoizedSourceReader,
   findFunctionBody,
   locateBodyAtRow,
   parseCsvLine,
@@ -36,7 +38,6 @@ const {
 const path = require('path');
 const fs = require('fs');
 
-const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|swift|cpp|cc|c|h|hpp|m|mm|dart|php|phtml)$/i;
 // Test-file classification. Keep equivalent to the exclusion regex in
 // githooks/gate-3.sh: the gate grades exactly the population this writer
 // records, so a divergence makes the ratchet report pre-existing code as new
@@ -128,48 +129,6 @@ function taggedError(code, message) {
   return err;
 }
 
-function findSourceFiles(root) {
-  const out = [];
-  // #731: `vendor` is composer's dependency tree, and it is NOT gitignored by
-  // default in PHP projects -- a committed vendor/ (which composer recommends
-  // for applications) is tracked, so the `tracked` filter below does not exclude
-  // it. Measured while onboarding PHP: a two-file fixture with a normal
-  // composer install produced baseline rows for
-  // `vendor/phpunit/php-code-coverage/.../bootstrap.bundle.min.js`, i.e. a third
-  // party's minified JS was being graded as the project's own production code.
-  // Same reasoning as node_modules; the name is just spelled differently.
-  const skipDirs = new Set(['.git', 'node_modules', 'dist', 'vendor', '.worktrees', '.codegraph', '.sprint-state', '.xp-gate']);
-  // Git-untracked files are not repo content: scratch dirs, .stryker-tmp
-  // sandboxes and .qoder reports would otherwise flood the report with
-  // phantom "production" functions that no gate can even see.
-  let tracked = null;
-  try {
-    tracked = new Set(
-      execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((p) => path.normalize(p))
-    );
-  } catch { /* outside a git repo: fall back to walking everything */ }
-  (function walk(dir) {
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (!skipDirs.has(e.name)) walk(full);
-      } else if (SOURCE_EXT.test(e.name)) {
-        const rel = path.relative(root, full);
-        if (!tracked || tracked.has(path.normalize(rel))) out.push(rel);
-      }
-    }
-  })(root);
-  return out;
-}
 
 // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name: field 8
 // is only trustworthy when it carries no '@'. A C operator function
@@ -303,6 +262,41 @@ function isReadableFile(target) {
 // and the ratchet baseline speak the same numbers. Fatal (exit 1) on a row
 // whose span cannot be verified above threshold — Gate 3 is fail-closed, so an
 // unverifiable hotspot must BLOCK instead of passing on an unvalidated count.
+/**
+ * A source-line reader that reads each file once.
+ *
+ * A CSV row repeats its file, so the naive reader re-reads the same source tens of
+ * times per run; the cache is what keeps verification proportional to the number of
+ * FILES rather than the number of functions.
+ *
+ * @param {string} root repo root
+ * @returns {(rel: string) => string[]|null}
+ */
+
+/**
+ * Exit rather than emit a complexity number nobody verified.
+ *
+ * An unverified row above the threshold is the case where a wrong number would drive
+ * a wrong decision, and the caller cannot tell it from a verified one.
+ */
+function refuseUnverifiedRows(tally, srcPath, allowUnverified) {
+  if (tally.unverified === 0 || allowUnverified) return;
+  console.error(`FAIL - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
+  process.exit(1);
+}
+
+/**
+ * Say what the verification actually did.
+ *
+ * These counters were incremented and thrown away, so "0 unverified" could not be told
+ * apart from "the guard never examined anything". Reported on stderr so stdout stays
+ * exactly the rewritten CSV.
+ */
+function reportTally(tally, srcPath, wanted) {
+  if (!wanted) return;
+  console.error(`[ccn-report] ${srcPath}: ${tally.rescued} row(s) rescued by name, ${tally.span_artefact} span artefact(s), ${tally.unverified} unverified`);
+}
+
 function csvRows(srcPath, root, opts = {}) {
   // The CSV is the input contract of this whole function. Failing to read it
   // must name the file, or the caller sees an empty row set and reads that as
@@ -313,11 +307,7 @@ function csvRows(srcPath, root, opts = {}) {
   } catch (err) {
     throw taggedError('ENOCSV', `cannot read lizard CSV at ${srcPath}: ${err.message}`);
   }
-  const lineCache = new Map();
-  const sourceLines = (rel) => {
-    if (!lineCache.has(rel)) lineCache.set(rel, readSourceLines(root, rel));
-    return lineCache.get(rel);
-  };
+  const sourceLines = memoizedSourceReader(root);
   const out = [];
   // One counter per classification, so the tally in the row loop is a lookup
   // instead of a four-way branch chain — the chain was part of what pushed this
@@ -331,17 +321,8 @@ function csvRows(srcPath, root, opts = {}) {
     const rewritten = rewriteCsvRow(line, { srcPath, root, sourceLines, tally });
     out.push(rewritten);
   }
-  if (tally.unverified > 0 && !opts.allowUnverified) {
-    console.error(`FAIL - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
-    process.exit(1);
-  }
-  // Say what the verification actually did. These counters were incremented and
-  // thrown away, so "0 unverified" could not be told apart from "the guard never
-  // examined anything" — the same unobservable-state problem this sprint exists
-  // to remove. Reported on stderr so stdout stays exactly the rewritten CSV.
-  if (opts.reportStats) {
-    console.error(`[ccn-report] ${srcPath}: ${tally.rescued} row(s) rescued by name, ${tally.span_artefact} span artefact(s), ${tally.unverified} unverified`);
-  }
+  refuseUnverifiedRows(tally, srcPath, opts.allowUnverified);
+  reportTally(tally, srcPath, opts.reportStats);
   // Only rows were rewritten; the trailing summary table is emitted by lizard
   // on a separate stream (stderr) when no --csv, so nothing else to fix here.
   return out.join('\n');
@@ -684,11 +665,22 @@ async function run(options = {}) {
  *
  * `nameCounts` maps `${file}::${name}` to how many rows carried that name.
  */
+/** Names that identify a row positionally, because they repeat within a file. */
+const ANONYMOUS_NAMES = new Set(['(anonymous)', '(anon)']);
+
+/**
+ * The baseline key for one function.
+ *
+ * A key is `file::name` UNLESS the name cannot identify the row on its own -- an
+ * anonymous function, or a name that appears twice in the same file -- in which case
+ * the line is appended. Without that, moving a duplicate silently reassigns one
+ * function's ceiling to the other.
+ */
 function baselineKey(f, nameCounts) {
-  const isAnon = f.name === '(anonymous)' || f.name === '(anon)';
-  if (isAnon) return `${f.file}::(anonymous)@${f.line}`;
-  const seen = nameCounts ? nameCounts.get(`${f.file}::${f.name}`) || 1 : 1;
-  return seen > 1 ? `${f.file}::${f.name}@${f.line}` : `${f.file}::${f.name}`;
+  const base = `${f.file}::${f.name}`;
+  if (ANONYMOUS_NAMES.has(f.name)) return `${f.file}::(anonymous)@${f.line}`;
+  const seen = nameCounts?.get(base) ?? 1;
+  return seen > 1 ? `${base}@${f.line}` : base;
 }
 
 /** Count how many rows carry each `${file}::${name}` pair. */
@@ -886,11 +878,20 @@ function writeBaseline(report) {
 // The version the baseline was written with, or null when the file predates the
 // record or the writer could not probe one. Kept separate from the comparison so
 // the shape-handling (three nested optional reads) is not folded into it.
+/**
+ * A plain object, or null.
+ *
+ * Sprinkled through the readers below because a baseline is USER-EDITABLE JSON: every
+ * level can be absent, and a missing level means "not recorded", never a crash.
+ */
+function asObject(value) {
+  return value && typeof value === 'object' ? value : null;
+}
+
+/** The lizard version a baseline records, or null when it records none. */
 function recordedLizardVersion(baselineRaw) {
-  if (!baselineRaw || typeof baselineRaw !== 'object') return null;
-  const recordedAnalyzer = baselineRaw.analyzer;
-  if (!recordedAnalyzer || typeof recordedAnalyzer !== 'object') return null;
-  return recordedAnalyzer.version ?? null;
+  const analyzer = asObject(asObject(baselineRaw)?.analyzer);
+  return analyzer?.version ?? null;
 }
 
 function assertAnalyzerMatches(baselineRaw, baselinePath, report) {
