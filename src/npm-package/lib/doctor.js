@@ -1047,30 +1047,6 @@ function diagnoseFlakyQuarantine(ctx = {}) {
   return { checks, issues };
 }
 
-function diagnoseModuleDrift(ctx = {}) {
-  const checks = [];
-  let issues = 0;
-
-  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
-  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-
-  // Silent without a canonical repo source to compare against: consumer
-  // projects have no `githooks/` root of truth, only what was installed.
-  if (!hasCanonicalHooks(repoHooks)) {
-    return { checks, issues };
-  }
-
-  const dirs = resolveExecutedModuleDirs({
-    globalAdapterDir: ctx.globalAdapterDir || ctx.installedAdapters,
-    projectGithooks: ctx.projectGithooks || repoHooks,
-    scriptDir: ctx.scriptDir,
-  });
-
-  // Copies the hook never resolves to, occupying the lookup positions it does
-  // resolve through. They are not drift -- nothing executes them -- but they are
-  // how #500 reproduces: the next install order shift, or a move to project
-  // mode, promotes one silently. Report with the absolute path so the developer
-  // can judge; do not count, because no shipped command removes them (#495 R2).
 /**
  * Compare each module the hook ACTUALLY executes against the repo's copy.
  *
@@ -1137,6 +1113,31 @@ function compareExecutedModules(repoHooks, dirs, checks, executedFor) {
   }
   return issues;
 }
+
+function diagnoseModuleDrift(ctx = {}) {
+  const checks = [];
+  let issues = 0;
+
+  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
+  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
+
+  // Silent without a canonical repo source to compare against: consumer
+  // projects have no `githooks/` root of truth, only what was installed.
+  if (!hasCanonicalHooks(repoHooks)) {
+    return { checks, issues };
+  }
+
+  const dirs = resolveExecutedModuleDirs({
+    globalAdapterDir: ctx.globalAdapterDir || ctx.installedAdapters,
+    projectGithooks: ctx.projectGithooks || repoHooks,
+    scriptDir: ctx.scriptDir,
+  });
+
+  // Copies the hook never resolves to, occupying the lookup positions it does
+  // resolve through. They are not drift -- nothing executes them -- but they are
+  // how #500 reproduces: the next install order shift, or a move to project
+  // mode, promotes one silently. Report with the absolute path so the developer
+  // can judge; do not count, because no shipped command removes them (#495 R2).
 
   const executedFor = new Map();
   issues += compareExecutedModules(repoHooks, dirs, checks, executedFor);
@@ -1753,6 +1754,127 @@ function appendDeployLogEntry(logPath, entry) {
  *
  * @returns {{synced: string[], skipped: string[], refused: Array<{name: string, repoOnly: number, installedOnly: number}>, errors: string[], installedHooks: string, backups: string[]}}
  */
+/**
+ * Copy a set of files from the repo into the install directory, recording what
+ * happened to each.
+ *
+ * Three outcomes per file, and the distinction matters: an identical file is
+ * `skipped` (nothing to do), a missing source is also `skipped` (this project does
+ * not carry it), and only a copy that actually ran is `synced`.
+ *
+ * #566: the previous version is backed up BEFORE the overwrite, because this is
+ * the moment machine-only work is lost. The exec bit is re-applied explicitly --
+ * a copied hook that is not executable silently never runs.
+ *
+ * Support files differ from hook entry points in two ways, and both are options
+ * rather than a second copy of this loop: they may live in a subdirectory (so the
+ * parent must be created -- #798, where `copyFileSync` failed with ENOENT and left
+ * a HALF-SYNCED hook that died on its first gate), and they are not executed by
+ * git, so no exec bit is set.
+ *
+ * @param {{names: string[], repoDir: string, installDir: string, version: string,
+ *   backupsDir: string, deployLog: string, synced: string[], skipped: string[],
+ *   errors: string[], backups: string[], createParents?: boolean,
+ *   keepExecBit?: boolean}} ctx arrays mutated in place
+ */
+function syncHookEntries(ctx) {
+  const { names, repoDir, installDir, version, backupsDir, deployLog, synced, skipped, errors, backups } = ctx;
+  const createParents = ctx.createParents === true;
+  const keepExecBit = ctx.keepExecBit !== false;
+  for (const name of names) {
+    const source = path.join(repoDir, name);
+    if (!fs.existsSync(source)) {
+      skipped.push(name);
+      continue;
+    }
+    const target = path.join(installDir, name);
+    try {
+      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+        skipped.push(name);
+        continue;
+      }
+      const backup = backupBeforeOverwrite(target, backupsDir);
+      if (backup) backups.push(backup);
+      if (createParents) fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(source, target);
+      if (keepExecBit) fs.chmodSync(target, 0o755);
+      // #583: record it, so a downstream can tell an overwrite from a fresh
+      // install without diffing checksums first.
+      appendDeployLogEntry(deployLog, { file: name, version, backup });
+      synced.push(name);
+    } catch (err) {
+      errors.push(`${name}: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Sync the shared `lib/` directory that pre-commit sources at runtime.
+ *
+ * A synced hook file without its libraries dies at the source line on the machine
+ * (#488), so this is not optional housekeeping. Each library gets the same refusal
+ * treatment as a gate module -- a shared library can carry machine-only hardening
+ * just as a module does, and the module guard and the lib guard must not disagree
+ * about how destructive a sync may be. Unreadable content refuses too: unknown is
+ * not the same as safe.
+ *
+ * @param {{repoHooks: string, installedHooks: string, version: string,
+ *   backupsDir: string, deployLog: string, synced: string[], skipped: string[],
+ *   refused: Array, errors: string[], backups: string[], force: boolean}} ctx
+ *   arrays mutated in place
+ */
+function syncLibDirectory(ctx) {
+  const { repoHooks, installedHooks, version, backupsDir, deployLog, synced, skipped, refused, errors, backups, force } = ctx;
+  const repoLib = path.join(repoHooks, 'lib');
+  const installedLib = path.join(installedHooks, 'lib');
+  if (!fs.existsSync(repoLib) || !fs.statSync(repoLib).isDirectory()) return;
+
+  try {
+    fs.mkdirSync(installedLib, { recursive: true });
+  } catch (err) {
+    errors.push(`cannot create ${installedLib}: ${err.message}`);
+    return;
+  }
+  let libEntries = [];
+  try {
+    libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
+  } catch (err) {
+    errors.push(`cannot read ${repoLib}: ${err.message}`);
+    return;
+  }
+  for (const entry of libEntries) {
+    if (!entry.isFile()) continue;
+    const rel = `lib/${entry.name}`;
+    const source = path.join(repoLib, entry.name);
+    const target = path.join(installedLib, entry.name);
+    try {
+      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+        skipped.push(rel);
+        continue;
+      }
+      if (fs.existsSync(target)) {
+        const decision = copyGuardDecision(source, target, force);
+        if (decision.refuse) {
+          refused.push({ name: rel, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown });
+          continue;
+        }
+        if (decision.forced === false && decision.repoOnly === 0 && decision.installedOnly === 0) {
+          skipped.push(rel);
+          continue;
+        }
+      }
+      const backup = backupBeforeOverwrite(target, backupsDir);
+      if (backup) backups.push(backup);
+      fs.copyFileSync(source, target);
+      fs.chmodSync(target, 0o755);
+      appendDeployLogEntry(deployLog, { file: rel, version, backup });
+      synced.push(rel);
+    } catch (err) {
+      errors.push(`${rel}: ${err.message}`);
+    }
+  }
+}
+
 function syncGlobalHooksFromRepo(ctx = {}) {
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
@@ -1789,124 +1911,25 @@ function syncGlobalHooksFromRepo(ctx = {}) {
     return { synced, skipped, refused, errors, installedHooks, backups };
   }
 
-  for (const name of DRIFT_COMPARED_HOOKS) {
-    const source = path.join(repoHooks, name);
-    if (!fs.existsSync(source)) {
-      skipped.push(name);
-      continue;
-    }
-    const target = path.join(installedHooks, name);
-    try {
-      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
-        skipped.push(name);
-        continue;
-      }
-      // #566: the previous version is kept, because this overwrite is the moment
-      // machine-only work is lost.
-      const backup = backupBeforeOverwrite(target, backupsDir);
-      if (backup) backups.push(backup);
-      // copyFileSync preserves content; the exec bit is re-applied explicitly
-      // because a copied hook that is not executable silently never runs.
-      fs.copyFileSync(source, target);
-      fs.chmodSync(target, 0o755);
-      // #583: record it, so a downstream can tell an overwrite from a fresh
-      // install without having to diff checksums first.
-      appendDeployLogEntry(deployLog, { file: name, version, backup });
-      synced.push(name);
-    } catch (err) {
-      errors.push(`${name}: ${err.message}`);
-    }
-  }
+  syncHookEntries({
+    names: DRIFT_COMPARED_HOOKS, repoDir: repoHooks, installDir: installedHooks,
+    version, backupsDir, deployLog, synced, skipped, errors, backups,
+  });
 
   // Hook support files (#505): sourced by the hooks but not Git entry points, so
   // they need the same copy treatment or an upgraded install dies at the source
   // line. Treated like the hooks themselves (always refreshed, no refusal) —
   // they hold no machine-local content.
-  for (const name of HOOK_SUPPORT_FILES) {
-    const source = path.join(repoHooks, name);
-    if (!fs.existsSync(source)) continue;
-    const target = path.join(installedHooks, name);
-    try {
-      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
-        skipped.push(name);
-        continue;
-      }
-      const backup = backupBeforeOverwrite(target, backupsDir);
-      if (backup) backups.push(backup);
-      // #798: support files may live in a subdirectory (gate-entries/*.sh). The
-      // install directory has no such subdirectory yet on an upgraded install, and
-      // copyFileSync does not create parents -- the entries failed with ENOENT
-      // while gate-driver.sh succeeded, leaving a half-synced hook that dies on
-      // its first gate instead of before any.
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.copyFileSync(source, target);
-      appendDeployLogEntry(deployLog, { file: name, version, backup });
-      synced.push(name);
-    } catch (err) {
-      errors.push(`${name}: ${err.message}`);
-    }
-  }
+  syncHookEntries({
+    names: HOOK_SUPPORT_FILES, repoDir: repoHooks, installDir: installedHooks,
+    version, backupsDir, deployLog, synced, skipped, errors, backups,
+    createParents: true, keepExecBit: false,
+  });
 
-  // lib/ shared libraries: pre-commit sources lib/*.sh, so a synced hook file
-  // without its libraries dies at the source line on the machine (#488).
-  const repoLib = path.join(repoHooks, 'lib');
-  const installedLib = path.join(installedHooks, 'lib');
-  if (fs.existsSync(repoLib) && fs.statSync(repoLib).isDirectory()) {
-    try {
-      fs.mkdirSync(installedLib, { recursive: true });
-    } catch (err) {
-      errors.push(`cannot create ${installedLib}: ${err.message}`);
-      return { synced, skipped, refused, errors, installedHooks, backups };
-    }
-    let libEntries = [];
-    try {
-      libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
-    } catch (err) {
-      errors.push(`cannot read ${repoLib}: ${err.message}`);
-      return { synced, skipped, refused, errors, installedHooks, backups };
-    }
-    for (const entry of libEntries) {
-      if (!entry.isFile()) continue;
-      const rel = `lib/${entry.name}`;
-      const source = path.join(repoLib, entry.name);
-      const target = path.join(installedLib, entry.name);
-      try {
-        if (fs.existsSync(target) && filesAreIdentical(source, target)) {
-          skipped.push(rel);
-          continue;
-        }
-        // A shared library can carry machine-only hardening just like a gate
-        // module does, so it gets the same refusal instead of an unconditional
-        // overwrite (#488 Round 2 -- the module guard and the lib guard must not
-        // disagree about how destructive a sync is allowed to be). Unreadable
-        // content refuses too: unknown is not the same as safe (#495 Round 3).
-        if (fs.existsSync(target)) {
-          const decision = copyGuardDecision(source, target, !!ctx.force);
-          if (decision.refuse) {
-            refused.push({
-              name: rel,
-              repoOnly: decision.repoOnly,
-              installedOnly: decision.installedOnly,
-              unknown: decision.unknown,
-            });
-            continue;
-          }
-          if (decision.forced === false && decision.repoOnly === 0 && decision.installedOnly === 0) {
-            skipped.push(rel);
-            continue;
-          }
-        }
-        const backup = backupBeforeOverwrite(target, backupsDir);
-        if (backup) backups.push(backup);
-        fs.copyFileSync(source, target);
-        fs.chmodSync(target, 0o755);
-        appendDeployLogEntry(deployLog, { file: rel, version, backup });
-        synced.push(rel);
-      } catch (err) {
-        errors.push(`${rel}: ${err.message}`);
-      }
-    }
-  }
+  syncLibDirectory({
+    repoHooks, installedHooks, version, backupsDir, deployLog,
+    synced, skipped, refused, errors, backups, force: !!ctx.force,
+  });
 
   return { synced, skipped, refused, errors, installedHooks, backups };
 }
