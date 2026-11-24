@@ -573,40 +573,88 @@ const PAIR_CONSUMED = 2;
  *
  * @returns `PAIR_CONSUMED` when a two-character pair was consumed whole, else 1.
  */
+/** A line comment ends at the newline, which is consumed with it. */
+function advanceLineComment(c: string, state: NestingScanState): number {
+  if (c === '\n') state.inLineComment = false;
+  return 1;
+}
+
+/** A block comment ends at the slash-star closing pair, so that pair consumes two. */
+function advanceBlockComment(c: string, next: string, state: NestingScanState): number {
+  if (c === '*' && next === '/') {
+    state.inBlockComment = false;
+    return 2;
+  }
+  return 1;
+}
+
+/**
+ * Inside a string: a backslash escapes the next character, the closing quote ends it.
+ *
+ * @param close called when the quote closes the context
+ */
+function advanceString(c: string, next: string, quote: string, close: () => void): number {
+  if (c === '\\') return 2;
+  if (c === quote) close();
+  return 1;
+}
+
+/**
+ * The string-like contexts, and how each closes.
+ *
+ * A table rather than a chain of `if (state.inX)`: the three contexts share one shape
+ * (escape consumes two, the closing quote ends it, everything else consumes one) and
+ * differ only in the quote character.
+ */
+const STRING_CONTEXTS: Array<{ flag: 'inSingle' | 'inDouble' | 'inTemplate'; quote: string }> = [
+  { flag: 'inSingle', quote: "'" },
+  { flag: 'inDouble', quote: '"' },
+  { flag: 'inTemplate', quote: '`' },
+];
+
+/**
+ * Recognise an opening comment or string delimiter, when no context is active.
+ *
+ * The order in `advanceNestingState` matters and is the whole algorithm: an opening
+ * delimiter is only seen when nothing else is active, so a slash-slash inside a
+ * string stays data and a quote inside a comment stays a comment.
+ *
+ * @returns characters consumed: 2 for a comment opener, 1 otherwise
+ */
+function openContext(c: string, next: string, state: NestingScanState): number {
+  if (c === '/' && next === '/') {
+    state.inLineComment = true;
+    return 2;
+  }
+  if (c === '/' && next === '*') {
+    state.inBlockComment = true;
+    return 2;
+  }
+  const opened = STRING_CONTEXTS.find((ctx) => ctx.quote === c);
+  if (opened) state[opened.flag] = true;
+  return 1;
+}
+
+/** The active string context for this state, if any. */
+function activeStringContext(state: NestingScanState) {
+  return STRING_CONTEXTS.find((ctx) => state[ctx.flag]);
+}
+
+/**
+ * Advance one lexical token, returning how many characters it consumed.
+ */
 function advanceNestingState(body: string, i: number, state: NestingScanState): number {
   const c = body[i];
   const next = body[i + 1];
 
-  if (state.inLineComment) {
-    if (c === '\n') state.inLineComment = false;
-    return 1;
-  }
-  if (state.inBlockComment) {
-    if (c === '*' && next === '/') { state.inBlockComment = false; return 2; }
-    return 1;
-  }
-  if (state.inSingle) {
-    if (c === '\\') return 2;
-    if (c === "'") state.inSingle = false;
-    return 1;
-  }
-  if (state.inDouble) {
-    if (c === '\\') return 2;
-    if (c === '"') state.inDouble = false;
-    return 1;
-  }
-  if (state.inTemplate) {
-    if (c === '\\') return 2;
-    if (c === '`') state.inTemplate = false;
-    return 1;
-  }
+  if (state.inLineComment) return advanceLineComment(c, state);
+  if (state.inBlockComment) return advanceBlockComment(c, next, state);
 
-  if (c === '/' && next === '/') { state.inLineComment = true; return 2; }
-  if (c === '/' && next === '*') { state.inBlockComment = true; return 2; }
-  if (c === "'") state.inSingle = true;
-  else if (c === '"') state.inDouble = true;
-  else if (c === '`') state.inTemplate = true;
-  return 1;
+  const context = activeStringContext(state);
+  if (context) {
+    return advanceString(c, next, context.quote, () => { state[context.flag] = false; });
+  }
+  return openContext(c, next, state);
 }
 
 /** True when the current state's character carries structure, not data. */
