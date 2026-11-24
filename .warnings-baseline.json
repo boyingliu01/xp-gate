@@ -1,8 +1,4 @@
 {
-  "scripts/ccn-report.cjs": {
-    "lastAnalyzed": "2026-11-22T20:22:40.491Z",
-    "totalWarnings": 1
-  },
   "src/build-integrity/__tests__/gate-10.test.ts": {
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
     "totalWarnings": 8
