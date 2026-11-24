@@ -75,6 +75,55 @@ function backupSprintState(projectRoot, state) {
  * @param {string[]} args - CLI arguments
  * @returns {Promise<number>} Exit code
  */
+/**
+ * Parse `sprint-init` arguments.
+ *
+ * Extracted from `handleSprintInit` (CCN 31), and it fixes a latent defect while
+ * doing so. The task description used to be "the first argument that is not a
+ * flag and is not equal to the --dir/--issues VALUES". That comparison is by
+ * value, so a task describing the very directory it targets --
+ *
+ *     xp-gate sprint-init "./src" --dir ./src
+ *
+ * -- found no task at all and failed with "Missing task_description". The flags
+ * are now consumed positionally: a flag takes the next token as its value, and
+ * the first token NOT consumed that way is the description.
+ *
+ * @param {string[]} args
+ * @returns {{forceFlag?: boolean, dryRunFlag?: boolean, projectDir?: string,
+ *   issues?: string, taskDescription?: string, error?: string}}
+ */
+function parseSprintInitArgs(args) {
+  const forceFlag = args.includes('--force');
+  const dryRunFlag = args.includes('--dry-run');
+
+  const consumed = new Set();
+  const takeValue = (flag) => {
+    const i = args.indexOf(flag);
+    if (i < 0 || i + 1 >= args.length) return null;
+    consumed.add(i + 1);
+    return args[i + 1];
+  };
+
+  const dirValue = takeValue('--dir');
+  const issuesValue = takeValue('--issues');
+  const projectDir = dirValue === null ? process.cwd() : dirValue;
+  const issues = issuesValue === null ? '' : issuesValue;
+
+  let taskDescription;
+  for (let i = 0; i < args.length; i += 1) {
+    if (consumed.has(i)) continue;
+    if (args[i].startsWith('--')) continue;
+    taskDescription = args[i];
+    break;
+  }
+
+  if (!taskDescription) {
+    return { error: 'Missing task_description. Usage: xp-gate sprint-init "<task_description>"' };
+  }
+  return { forceFlag, dryRunFlag, projectDir, issues, taskDescription };
+}
+
 async function handleSprintInit(args = []) {
   if (args.includes('--help')) {
     console.log('Usage: xp-gate sprint-init "<task_description>" [options]');
@@ -95,17 +144,10 @@ async function handleSprintInit(args = []) {
   }
 
   // Parse arguments
-  const forceFlag = args.includes('--force');
-  const dryRunFlag = args.includes('--dry-run');
-  const dirIdx = args.indexOf('--dir');
-  const projectDir = dirIdx >= 0 ? args[dirIdx + 1] : process.cwd();
-  const issuesIdx = args.indexOf('--issues');
-  const issues = issuesIdx >= 0 ? args[issuesIdx + 1] : '';
-
-  // First non-flag argument is task_description
-  const taskDescription = args.find(a => !a.startsWith('--') && a !== projectDir && a !== issues);
-  if (!taskDescription) {
-    console.error('Error: Missing task_description. Usage: xp-gate sprint-init "<task_description>"');
+  const parsed = parseSprintInitArgs(args);
+  const { forceFlag, dryRunFlag, projectDir, issues, taskDescription } = parsed;
+  if (parsed.error) {
+    console.error(`Error: ${parsed.error}`);
     return 1;
   }
 
@@ -245,4 +287,4 @@ async function handleSprintInit(args = []) {
   return 0;
 }
 
-module.exports = { handleSprintInit, detectBranch, generateSprintId, backupSprintState };
+module.exports = { handleSprintInit, detectBranch, generateSprintId, backupSprintState, parseSprintInitArgs };

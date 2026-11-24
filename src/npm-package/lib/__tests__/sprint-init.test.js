@@ -203,3 +203,45 @@ describe('handleSprintInit', () => {
     expect(JSON.stringify(state)).toContain('#1');
   });
 });
+
+describe('parseSprintInitArgs', () => {
+  const { parseSprintInitArgs } = require('../sprint-init.js');
+
+  it('takes the first bare token as the task description', () => {
+    const r = parseSprintInitArgs(['Build the thing']);
+    expect(r.taskDescription).toBe('Build the thing');
+    expect(r.forceFlag).toBe(false);
+    expect(r.dryRunFlag).toBe(false);
+  });
+
+  it('reads --dir and --issues values', () => {
+    const r = parseSprintInitArgs(['Task', '--dir', '/proj', '--issues', '#1,#2']);
+    expect(r.projectDir).toBe('/proj');
+    expect(r.issues).toBe('#1,#2');
+  });
+
+  it('recognises the flags', () => {
+    expect(parseSprintInitArgs(['T', '--force']).forceFlag).toBe(true);
+    expect(parseSprintInitArgs(['T', '--dry-run']).dryRunFlag).toBe(true);
+  });
+
+  it('fails when no description is given', () => {
+    expect(parseSprintInitArgs(['--force']).error).toMatch(/Missing task_description/);
+    expect(parseSprintInitArgs([]).error).toMatch(/Missing task_description/);
+  });
+
+  it('accepts a description that happens to equal a flag value', () => {
+    // The defect this shape fixes: the description used to be "the first token
+    // that is not a flag and is not equal to the --dir/--issues VALUE", so a task
+    // naming its own directory was not found at all.
+    expect(parseSprintInitArgs(['./src', '--dir', './src']).taskDescription).toBe('./src');
+    expect(parseSprintInitArgs(['#42', '--issues', '#42']).taskDescription).toBe('#42');
+  });
+
+  it('never mistakes a flag value for the description', () => {
+    // Consumed positionally: the token after --dir belongs to --dir.
+    const r = parseSprintInitArgs(['--dir', '/proj', 'Real task']);
+    expect(r.taskDescription).toBe('Real task');
+    expect(r.projectDir).toBe('/proj');
+  });
+});

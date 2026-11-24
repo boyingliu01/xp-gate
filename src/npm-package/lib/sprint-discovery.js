@@ -108,6 +108,67 @@ function checkWorktreeExists(worktreePath) {
  * @param {string} dir - Starting directory (typically process.cwd())
  * @returns {Array<{ state: object, sourcePath: string, worktreeExists: boolean }>}
  */
+/**
+ * A sprint's start time in milliseconds, or 0 when absent/unparseable.
+ *
+ * `new Date(x).getTime()` was written out three times -- twice in the dedupe
+ * tie-breaker and once in the sort. A missing timestamp must rank LAST, not
+ * throw and not be treated as "now", and three copies is three chances to get
+ * that default wrong.
+ *
+ * @param {{started_at?: string}} state
+ * @returns {number}
+ */
+function startTimeMs(state) {
+  const raw = state && state.started_at;
+  if (!raw) return 0;
+  const t = new Date(raw).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/**
+ * One entry per sprint id, preferring the most authoritative copy.
+ *
+ * Precedence, in order: a real worktree beats the cwd fallback; then the later
+ * `started_at`; then the lexicographically smaller `sourcePath` so the winner is
+ * deterministic when timestamps tie. Extracted from `discoverActiveSprints`
+ * (CCN 29) because this is a policy, not plumbing -- and the same sprint is
+ * routinely visible from two places at once.
+ *
+ * @param {Array} results
+ * @returns {Array}
+ */
+function dedupeById(results) {
+  const deduped = new Map();
+  for (const entry of results) {
+    const id = entry.state.id;
+    const existing = deduped.get(id);
+    if (!existing) {
+      deduped.set(id, entry);
+      continue;
+    }
+
+    // Prefer worktree version over cwd fallback.
+    if (entry.worktreeExists && !existing.worktreeExists) {
+      deduped.set(id, entry);
+      continue;
+    }
+    if (!entry.worktreeExists && existing.worktreeExists) {
+      continue;
+    }
+
+    // Both worktree or both cwd: tie-break by started_at, then by path.
+    const entryTs = startTimeMs(entry.state);
+    const existingTs = startTimeMs(existing.state);
+    if (entryTs > existingTs) {
+      deduped.set(id, entry);
+    } else if (entryTs === existingTs && entry.sourcePath < existing.sourcePath) {
+      deduped.set(id, entry);
+    }
+  }
+  return Array.from(deduped.values());
+}
+
 function discoverActiveSprints(dir) {
   const gitRoot = findGitRoot(dir);
   const results = [];
@@ -167,42 +228,12 @@ function discoverActiveSprints(dir) {
   }
 
   // ── 3. Deduplicate by state.id ──
-  // Prefer worktree version (worktreeExists=true) over cwd fallback.
-  // Tie-breaker for same-id worktrees: latest started_at wins;
-  // if timestamps equal, lexicographically smallest sourcePath wins.
-  const deduped = new Map();
-  for (const entry of results) {
-    const id = entry.state.id;
-    const existing = deduped.get(id);
-    if (!existing) {
-      deduped.set(id, entry);
-      continue;
-    }
-
-    // Prefer worktree version over cwd fallback
-    if (entry.worktreeExists && !existing.worktreeExists) {
-      deduped.set(id, entry);
-      continue;
-    }
-    if (!entry.worktreeExists && existing.worktreeExists) {
-      continue; // keep existing worktree version
-    }
-
-    // Both worktree or both cwd: tie-break by started_at
-    const entryTs = entry.state.started_at ? new Date(entry.state.started_at).getTime() : 0;
-    const existingTs = existing.state.started_at ? new Date(existing.state.started_at).getTime() : 0;
-
-    if (entryTs > existingTs) {
-      deduped.set(id, entry);
-    } else if (entryTs === existingTs && entry.sourcePath < existing.sourcePath) {
-      deduped.set(id, entry);
-    }
-  }
+  const dedupedEntries = dedupeById(results);
 
   // ── 4. Sort by started_at descending, then id descending ──
-  const sorted = Array.from(deduped.values()).sort((a, b) => {
-    const aTs = a.state.started_at ? new Date(a.state.started_at).getTime() : 0;
-    const bTs = b.state.started_at ? new Date(b.state.started_at).getTime() : 0;
+  const sorted = dedupedEntries.sort((a, b) => {
+    const aTs = startTimeMs(a.state);
+    const bTs = startTimeMs(b.state);
     if (bTs !== aTs) return bTs - aTs;
     // Secondary sort: id descending for deterministic order
     return String(b.state.id).localeCompare(String(a.state.id));
@@ -213,7 +244,7 @@ function discoverActiveSprints(dir) {
 }
 
 module.exports = {
-  discoverActiveSprints,
+  discoverActiveSprints, dedupeById, startTimeMs,
   findGitRoot,
   readSprintState,
   MAX_RESULTS,
