@@ -517,6 +517,29 @@ if (pyFiles.length > 0) {
  * Baseline Go with golangci-lint. Unparseable output leaves the run's files alone:
  * not measured is not clean.
  */
+/**
+ * Turn golangci-lint issues into per-file counts.
+ *
+ * An issue whose path matches none of the project's `.go` files is dropped rather
+ * than filed under a guessed key: golangci-lint reports absolute paths, and a partial
+ * match on a dependency would attribute its problems to this project.
+ *
+ * @param {Array} issues
+ * @param {string[]} goFiles project-relative paths
+ * @returns {Object<string, {warnings: number, errors: number}>}
+ */
+function countGoIssues(issues, goFiles) {
+  const byFile = {};
+  for (const issue of issues) {
+    const matched = goFiles.find((f) => issue.file.endsWith(f));
+    if (!matched) continue;
+    byFile[matched] = byFile[matched] || { warnings: 0, errors: 0 };
+    if (issue.severity === 'error') byFile[matched].errors += 1;
+    else byFile[matched].warnings += 1;
+  }
+  return byFile;
+}
+
 function baselineGo(baseline) {
 // Go — golangci-lint
 const goFiles = findFilesByExt(['.go']);
@@ -525,21 +548,7 @@ if (goFiles.length > 0) {
     execSync('golangci-lint --version', { encoding: 'utf8' });
     const output = runToolJson('golangci-lint run', '--out-format json');
     if (output) {
-      const parsed = JSON.parse(output).Issues || [];
-      const warningsByFile = {};
-      for (const issue of parsed) {
-        const matchedFile = goFiles.find(f => issue.file.endsWith(f));
-        if (!matchedFile) continue;
-        if (!warningsByFile[matchedFile]) {
-          warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-        }
-        if (issue.severity === 'error') {
-          warningsByFile[matchedFile].errors++;
-        } else {
-          warningsByFile[matchedFile].warnings++;
-        }
-      }
-      mergeToolCounts(baseline, 'golangci', warningsByFile);
+      mergeToolCounts(baseline, 'golangci', countGoIssues(JSON.parse(output).Issues || [], goFiles));
     }
   } catch {
     // golangci-lint unavailable — skip
@@ -615,7 +624,14 @@ async function createBaseline() {
   // shrinking, not data loss.
   carryUnevaluated(baseline, previous, unevaluated);
 
-  fs.writeFileSync(getBaselineFile(), JSON.stringify(baseline, null, 2));
+  // The write is the whole point of the rebuild; a silent failure would leave the
+  // previous baseline on disk while reporting a fresh one.
+  const target = getBaselineFile();
+  try {
+    fs.writeFileSync(target, JSON.stringify(baseline, null, 2));
+  } catch (err) {
+    throw new Error(`cannot write baseline to ${target}: ${err.message}`);
+  }
   return baseline;
 }
 
@@ -712,15 +728,19 @@ function compareBaselines(oldBaseline, currentBaseline) {
 
     totalWarningsDelta += delta;
 
+    // Early continues, not an else-if ladder: the four cases are mutually exclusive
+    // but each reads as its own sentence, and the ladder pushed the body past the
+    // nesting bound for no gain.
     if (!oldBaseline[file] && currentBaseline[file]) {
       added.push(`  + ${file} (${newW} warnings)`);
-    } else if (oldBaseline[file] && !currentBaseline[file]) {
-      removed.push(`  - ${file} (all ${oldW} warnings cleared)`);
-    } else if (delta > 0) {
-      increased.push(`  ↑ ${file} (${oldW} → ${newW}, +${delta})`);
-    } else if (delta < 0) {
-      decreased.push(`  ↓ ${file} (${oldW} → ${newW}, ${delta})`);
+      continue;
     }
+    if (oldBaseline[file] && !currentBaseline[file]) {
+      removed.push(`  - ${file} (all ${oldW} warnings cleared)`);
+      continue;
+    }
+    if (delta > 0) increased.push(`  ↑ ${file} (${oldW} → ${newW}, +${delta})`);
+    else if (delta < 0) decreased.push(`  ↓ ${file} (${oldW} → ${newW}, ${delta})`);
   }
 
   return { totalWarningsDelta, increased, decreased, added, removed };
@@ -764,7 +784,14 @@ async function diffBaseline() {
     return 1;
   }
 
-  const oldBaseline = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  let oldBaseline;
+  try {
+    oldBaseline = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  } catch (err) {
+    // Comparing against nothing would report every existing entry as new.
+    console.error(`Error: cannot read the current baseline: ${err.message}`);
+    return 1;
+  }
   const currentBaseline = await createBaseline();
 
   const result = compareBaselines(oldBaseline, currentBaseline);
