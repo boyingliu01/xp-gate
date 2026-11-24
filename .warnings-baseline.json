@@ -3,6 +3,10 @@
     "lastAnalyzed": "2026-11-22T20:22:40.491Z",
     "totalWarnings": 1
   },
+  "scripts/delphi-external-review.cjs": {
+    "lastAnalyzed": "2026-11-24T06:19:37.247Z",
+    "totalWarnings": 6
+  },
   "src/build-integrity/__tests__/gate-10.test.ts": {
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
     "totalWarnings": 8
@@ -46,9 +50,5 @@
   "src/npm-package/scripts/sync-package-content.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
     "totalWarnings": 14
-  },
-  "scripts/delphi-external-review.cjs": {
-    "totalWarnings": 6,
-    "lastAnalyzed": "2026-11-24T06:19:37.247Z"
   }
 }

@@ -132,7 +132,81 @@ function validateProviders(providers, profileName) {
   }
 }
 
-function readConfig(configPath, profileOverride) {
+/**
+ * Read a numeric consensus setting and clamp it into its allowed range.
+ *
+ * Two settings did this identically: coerce to a number, clamp to a floor and a
+ * ceiling, fall back to the default when the value is not usable, and warn when
+ * the configured value differs from the one actually used. The warning is the
+ * point -- a silently clamped threshold changes what "consensus" means on that
+ * machine.
+ *
+ * `clamped` means a CONFIGURED value was changed. An absent value uses the
+ * default and reports no clamp: telling the operator a setting they never wrote
+ * had been altered is a false alarm.
+ *
+ * @param {*} configured raw value from the config
+ * @param {{min: number, max: number, fallback: number, clamp: (n: number) => number}} bounds
+ * @returns {{value: number, clamped: boolean}}
+ */
+function clampConsensusSetting(configured, bounds) {
+  const usable = typeof configured === 'number' && Number.isFinite(configured);
+  const value = usable ? bounds.clamp(configured) : bounds.fallback;
+  // "Clamped" covers BOTH ways a configured value stops applying: out of range
+  // (0 rounds -> 1) and unusable ('high' -> the default). The existing contract
+  // treats an unparseable value as a change worth reporting, and it is -- a
+  // setting the operator wrote is not the one in force either way.
+  return { value, clamped: configured !== undefined && configured !== value };
+}
+
+/**
+ * Expand a `${VAR}` placeholder, or fail loudly.
+ *
+ * `api_key` and `base_url` each had their own copy, and the `base_url` one was
+ * ADDED later for a reason worth keeping: without expansion the literal text
+ * `${PG_GATEWAY}/v1/chat/completions` is a valid non-empty URL, so validation
+ * passed and the failure surfaced at the network layer as a DNS error while the
+ * config looked correct.
+ *
+ * Only a WHOLE `${NAME}` is a placeholder. `${A}${B}` is a template somebody may
+ * be assembling, and refusing it would reject a config that needs no expansion.
+ *
+ * @param {*} value
+ * @param {string} field 'api_key' | 'base_url'
+ * @param {string} profileName
+ * @param {string} providerName
+ * @returns {*} the expanded value, or the original
+ */
+function expandEnvPlaceholder(value, field, profileName, providerName) {
+  if (typeof value !== 'string') return value;
+  const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(value);
+  if (!match) return value;
+  const envName = match[1];
+  const envVal = process.env[envName];
+  if (envVal) return envVal;
+  console.error(
+    `[delphi-review] ERROR: Environment variable ${envName} is not set `
+    + `(profiles.${profileName}.providers.${providerName}.${field}). `
+    + 'Export it or point that provider at a literal value.',
+  );
+  process.exit(1);
+  return value;
+}
+
+/**
+ * Resolve and parse the config file.
+ *
+ * Split out of `readConfig`, which had grown past the 50-line bound by holding
+ * two jobs: decide WHICH file, then decide what it means. The first job carries
+ * a real hazard worth testing on its own -- a relative `--config` that this cwd
+ * lacks resolves to the machine-wide config, but only when the project file is
+ * genuinely ABSENT. Any other stat error aborts rather than silently routing the
+ * run to another config, which once routed calls to expensive models.
+ *
+ * @param {string} configPath
+ * @returns {object} the parsed config
+ */
+function loadConfigFile(configPath) {
   // Global fallback: a relative --config that this cwd does not have resolves
   // to the machine-wide ~/.config/xp-gate/.delphi-config.json. This is what
   // makes `--config .delphi-config.json` work from ANY project without each
@@ -172,56 +246,55 @@ function readConfig(configPath, profileOverride) {
     console.error(`[delphi-review] ERROR: Failed to parse config: ${err.message}`);
     process.exit(1);
   }
+  return raw;
+}
 
-  const profileName = profileOverride || raw.active_profile || 'default';
+/**
+ * Look up the named profile, or fail with the list of what IS available.
+ *
+ * Naming the alternatives is the whole value of the branch: "profile not found"
+ * alone leaves the operator re-reading a file that may be perfectly valid under a
+ * different key.
+ *
+ * @param {object} raw parsed config
+ * @param {string} profileName
+ * @returns {object}
+ */
+function requireProfile(raw, profileName) {
   const profile = raw.profiles?.[profileName];
+  if (profile) return profile;
+  console.error(`[delphi-review] ERROR: Profile "${profileName}" not found in config.`);
+  console.error(`[delphi-review] Available profiles: ${Object.keys(raw.profiles || {}).join(', ')}`);
+  process.exit(1);
+  return profile;
+}
 
-  if (!profile) {
-    console.error(`[delphi-review] ERROR: Profile "${profileName}" not found in config.`);
-    console.error(`[delphi-review] Available profiles: ${Object.keys(raw.profiles || {}).join(', ')}`);
-    process.exit(1);
-  }
-
-  // Resolve ${ENV_VAR} references in provider api_key fields
+/**
+ * Expand every provider's `${VAR}` placeholders in place, after validating shape.
+ *
+ * `validateProviders` runs FIRST so a structurally broken provider is reported as
+ * such rather than as a missing environment variable.
+ *
+ * @param {object} profile
+ * @param {string} profileName
+ * @returns {object} the providers map, with placeholders resolved in place
+ */
+function resolveProviderCredentials(profile, profileName) {
   const providers = profile.providers || {};
   validateProviders(providers, profileName);
   for (const [name, prov] of Object.entries(providers)) {
-    if (prov.api_key && prov.api_key.startsWith('${') && prov.api_key.endsWith('}')) {
-      const envName = prov.api_key.slice(2, -1);
-      const envVal = process.env[envName];
-      if (envVal) {
-        prov.api_key = envVal;
-      } else {
-        // A missing variable used to be a WARNING, after which the runner sent the
-        // literal `Bearer ${NAME}` and reported the 401 as "check API key" — the
-        // diagnosis pointed at a wrong key while the real cause was the shell.
-        console.error(`[delphi-review] ERROR: Environment variable ${envName} is not set (profiles.${profileName}.providers.${name}.api_key). Export it or point that provider at a literal key.`);
-        process.exit(1);
-      }
-    }
-
-    // (#707) base_url supports ${VAR} for the same reason api_key does: writing a
-    // gateway address as a placeholder is the natural way to keep an internal
-    // endpoint out of version control. Without expansion the placeholder is a
-    // perfectly valid non-empty string, so validation passed and the literal text
-    // `${PG_GATEWAY}/v1/chat/completions` went out as a URL — failing at the
-    // NETWORK layer with a DNS/connection error while the config looked correct.
-    // A caller (whale-sql-audit) had to hardcode its gateway into a distributed
-    // repo because of this.
-    //
-    // Failing here, at config load, names the variable; falling back to the
-    // literal is exactly what caused the original misdiagnosis, so it does not.
-    if (typeof prov.base_url === 'string'
-        && prov.base_url.startsWith('${') && prov.base_url.endsWith('}')) {
-      const envName = prov.base_url.slice(2, -1);
-      const envVal = process.env[envName];
-      if (!envVal) {
-        console.error(`[delphi-review] ERROR: Environment variable ${envName} is not set (profiles.${profileName}.providers.${name}.base_url). Export it or point that provider at a literal URL.`);
-        process.exit(1);
-      }
-      prov.base_url = envVal;
-    }
+    prov.api_key = expandEnvPlaceholder(prov.api_key, 'api_key', profileName, name);
+    prov.base_url = expandEnvPlaceholder(prov.base_url, 'base_url', profileName, name);
   }
+  return providers;
+}
+
+function readConfig(configPath, profileOverride) {
+  const raw = loadConfigFile(configPath);
+
+  const profileName = profileOverride || raw.active_profile || 'default';
+  const profile = requireProfile(raw, profileName);
+  const providers = resolveProviderCredentials(profile, profileName);
 
   const experts = Object.fromEntries(Object.entries(profile.experts || {}).map(([role, expert]) => [
     role,
@@ -234,20 +307,19 @@ function readConfig(configPath, profileOverride) {
   if (raw.consensus?.distinct_models_required === false) {
     warnings.push('distinct_models_required_forced');
   }
-  const configuredThreshold = raw.consensus?.threshold_percent;
-  const thresholdPercent = typeof configuredThreshold === 'number' && Number.isFinite(configuredThreshold)
-    ? Math.max(90, configuredThreshold)
-    : 90;
-  if (configuredThreshold !== undefined && configuredThreshold !== thresholdPercent) {
-    warnings.push('threshold_percent_clamped');
-  }
-  const configuredRounds = raw.consensus?.max_review_rounds;
-  const maxReviewRounds = typeof configuredRounds === 'number' && Number.isFinite(configuredRounds)
-    ? Math.min(5, Math.max(1, Math.trunc(configuredRounds)))
-    : 5;
-  if (configuredRounds !== undefined && configuredRounds !== maxReviewRounds) {
-    warnings.push('max_review_rounds_clamped');
-  }
+  // The 90 floor is a policy, not a default: a config may raise the bar, never
+  // lower it. The 5-round cap bounds cost; the 1-round floor bounds meaning.
+  const threshold = clampConsensusSetting(raw.consensus?.threshold_percent, {
+    min: 90, max: Number.MAX_SAFE_INTEGER, fallback: 90, clamp: (n) => Math.max(90, n),
+  });
+  const thresholdPercent = threshold.value;
+  if (threshold.clamped) warnings.push('threshold_percent_clamped');
+
+  const rounds = clampConsensusSetting(raw.consensus?.max_review_rounds, {
+    min: 1, max: 5, fallback: 5, clamp: (n) => Math.min(5, Math.max(1, Math.trunc(n))),
+  });
+  const maxReviewRounds = rounds.value;
+  if (rounds.clamped) warnings.push('max_review_rounds_clamped');
 
   return {
     active_profile: profileName,
@@ -441,11 +513,16 @@ function buildUserPrompt(reviewContent, otherExpertsJson, round) {
 // ── Input content resolution ───────────────────────────────────────────
 function resolveInputContent(args) {
   if (args.inputFile) {
-    if (!fs.existsSync(args.inputFile)) {
-      console.error(`[delphi-review] ERROR: Input file not found: ${args.inputFile}`);
+    // One read, not exists-then-read: the check-then-use pair has a window in
+    // which the file can vanish, and the ENOENT that follows would surface as an
+    // unhandled throw instead of the message below.
+    try {
+      return fs.readFileSync(args.inputFile, 'utf8');
+    } catch (err) {
+      console.error(`[delphi-review] ERROR: Cannot read input file ${args.inputFile}: ${err.message}`);
       process.exit(1);
+      return '';
     }
-    return fs.readFileSync(args.inputFile, 'utf8');
   }
   return args.input || '';
 }
@@ -792,6 +869,33 @@ function buildChatBody(model, systemPrompt, userPrompt) {
   };
 }
 
+/**
+ * Turn an HTTP response into the runner's result shape.
+ *
+ * The status ladder lived inline in `callModelAPI` (58 lines, over the bound).
+ * It is a policy about which failures are worth retrying and which need the
+ * operator -- 401/403 is a key problem the code cannot fix, 429 and 5xx may pass
+ * on their own, and anything else is reported without echoing the provider body.
+ *
+ * @param {Response} response
+ * @returns {Promise<object>}
+ */
+async function classifyHttpResponse(response) {
+  if (response.status === 401 || response.status === 403) {
+    return { error: true, message: `Authentication failed (${response.status}). Check API key in .delphi-config.json.` };
+  }
+  if (response.status === 429) {
+    return await classifyRateLimitResponse(response);
+  }
+  if (response.status >= 500) {
+    return await classifyServerErrorResponse(response);
+  }
+  if (!response.ok) {
+    return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
+  }
+  return await readSuccessfulResponse(response);
+}
+
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
   const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
   const body = buildChatBody(model, systemPrompt, userPrompt);
@@ -815,23 +919,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     });
     responseReceived = true;
 
-    if (response.status === 401 || response.status === 403) {
-      return { error: true, message: `Authentication failed (${response.status}). Check API key in .delphi-config.json.` };
-    }
-
-    if (response.status === 429) {
-      return await classifyRateLimitResponse(response);
-    }
-
-    if (response.status >= 500) {
-      return await classifyServerErrorResponse(response);
-    }
-
-    if (!response.ok) {
-      return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
-    }
-
-    return await readSuccessfulResponse(response);
+    return await classifyHttpResponse(response);
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       return { error: true, retryable: true, message: `Request timed out (${timeoutMs}ms). Raise --timeout-ms or the provider's timeout_ms.` };
@@ -924,14 +1012,36 @@ async function callWithRetry(providerConfig, model, systemPrompt, userPrompt, ma
   return lastResult;
 }
 
-// ── Main execution ─────────────────────────────────────────────────────
-async function main() {
-  checkNodeVersion();
+/**
+ * Read a file if it exists, else return null. Optional context, so a read failure
+ * is not fatal -- but it must not throw either.
+ *
+ * @param {string|undefined} filePath
+ * @returns {string|null}
+ */
+function readOptionalFile(filePath) {
+  if (!filePath) return null;
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    // The caller asked for optional context; an unreadable file means there is
+    // none, not that the review should abort.
+    return null;
+  }
+}
 
-  const args = parseArgs(process.argv.slice(2));
-  const config = readConfig(args.config, args.profile);
-
-  // Validate the complete expert map before fallback or provider lookup.
+/**
+ * Validate the expert map, then hand back the requested seat and its provider.
+ *
+ * Extracted from `main` (123 lines). The validation runs BEFORE the lookup on
+ * purpose: a duplicate-model config should be reported as that, not as "expert
+ * not found" because the seat it names happens to be the one that was shadowed.
+ *
+ * @param {object} config
+ * @param {string} expertName
+ * @returns {{expertConfig: object, provider: object}}
+ */
+function resolveSeat(config, expertName) {
   const validation = validateDistinctModels(config.experts, config.providers, config.consensus);
   if (!validation.valid) {
     console.error(`[delphi-review] ERROR: ${validation.reason}`);
@@ -944,36 +1054,72 @@ async function main() {
     console.error(`[delphi-review] WARNING: ${warning}`);
   }
 
-  // Get expert config
-  const expertConfig = config.experts[args.expert];
+  const expertConfig = config.experts[expertName];
   if (!expertConfig) {
-    console.error(`[delphi-review] ERROR: Expert "${args.expert}" not found in config.`);
+    console.error(`[delphi-review] ERROR: Expert "${expertName}" not found in config.`);
     process.exit(1);
   }
-
-  // Get provider config
   const provider = config.providers[expertConfig.provider];
   if (!provider) {
     console.error(`[delphi-review] ERROR: Provider "${expertConfig.provider}" not found in config.`);
     process.exit(1);
   }
+  return { expertConfig, provider };
+}
 
-  // Resolve input
-  const reviewContent = resolveInputContent(args);
-
-  // Resolve other experts context
-  let otherExpertsContent = null;
-  if (args.otherExpertsFile && fs.existsSync(args.otherExpertsFile)) {
-    otherExpertsContent = fs.readFileSync(args.otherExpertsFile, 'utf8');
+/**
+ * Shape the JSON a failed seat reports.
+ *
+ * Pure: everything it needs is an argument. The `bytes` fields are attached only
+ * when classification produced them, because a null byte count reads as a real
+ * measurement of zero.
+ *
+ * @param {object} outcome
+ * @param {string} expertName
+ * @param {{bytes: number}} budget
+ * @param {object} seatCalibration
+ * @returns {object}
+ */
+function buildErrorOutput(outcome, expertName, budget, seatCalibration) {
+  const classified = classifySeatFailure({
+    result: outcome,
+    promptBytes: budget.bytes,
+    calibration: seatCalibration.calibration,
+  });
+  const errorOutput = {
+    error: true,
+    error_type: classified.error_type,
+    expert_role: expertName,
+    message: classified.message,
+    retryable: classified.retryable || false,
+  };
+  if (classified.bytes !== undefined) {
+    errorOutput.bytes = classified.bytes;
+    errorOutput.calibrated_pass_bytes = classified.calibrated_pass_bytes;
   }
+  return errorOutput;
+}
 
-  // Build prompts
+/**
+ * Build the prompts and refuse the call if they exceed the prompt budget.
+ *
+ * The refusal happens BEFORE the request, not after the gateway kills it, and it
+ * writes the same JSON stdout contract as an API failure: an orchestrator reading
+ * that stream has to be able to tell "we never asked" from "the model answered
+ * wrongly". `resolveSeatCalibration` prints its own warning, so it is not echoed
+ * here (#414 R1 MN-03).
+ *
+ * @param {object} args
+ * @param {object} expertConfig
+ * @returns {{systemPrompt: string, userPrompt: string, budget: object, seatCalibration: object}}
+ */
+function preparePrompt(args, expertConfig) {
+  const reviewContent = resolveInputContent(args);
+  const otherExpertsContent = readOptionalFile(args.otherExpertsFile);
+
   const systemPrompt = buildSystemPrompt(args.expert, args.mode);
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
-  // Refuse before the request, not after the gateway kills it.
-  // resolveSeatCalibration already printed its own warning, if any — do not
-  // echo it a second time (#414 R1 MN-03).
   const seatCalibration = resolveSeatCalibration(expertConfig);
   const budget = checkPromptBudget({
     systemPrompt,
@@ -983,8 +1129,6 @@ async function main() {
   if (!budget.ok) {
     const message = describePromptBudgetFailure({ ...budget, expert: args.expert });
     console.error(`[delphi-review] ERROR: ${message}`);
-    // Same stdout contract as an API failure: an orchestrator parsing this stream
-    // must be able to tell "we never asked" from "the model answered wrongly".
     console.log(JSON.stringify({
       error: true,
       error_type: 'prompt_budget_exceeded',
@@ -996,6 +1140,19 @@ async function main() {
     }));
     process.exit(1);
   }
+  return { systemPrompt, userPrompt, budget, seatCalibration };
+}
+
+// ── Main execution ─────────────────────────────────────────────────────
+async function main() {
+  checkNodeVersion();
+
+  const args = parseArgs(process.argv.slice(2));
+  const config = readConfig(args.config, args.profile);
+
+  const { expertConfig, provider } = resolveSeat(config, args.expert);
+
+  const { systemPrompt, userPrompt, budget, seatCalibration } = preparePrompt(args, expertConfig);
 
   // Call API with retry; one schema-restating retry recovers malformed JSON
   // without ever faking a verdict (#414 REQ-5).
@@ -1009,23 +1166,7 @@ async function main() {
   });
 
   if (outcome.error) {
-    const classified = classifySeatFailure({
-      result: outcome,
-      promptBytes: budget.bytes,
-      calibration: seatCalibration.calibration,
-    });
-    const errorOutput = {
-      error: true,
-      error_type: classified.error_type,
-      expert_role: args.expert,
-      message: classified.message,
-      retryable: classified.retryable || false,
-    };
-    if (classified.bytes !== undefined) {
-      errorOutput.bytes = classified.bytes;
-      errorOutput.calibrated_pass_bytes = classified.calibrated_pass_bytes;
-    }
-    console.log(JSON.stringify(errorOutput));
+    console.log(JSON.stringify(buildErrorOutput(outcome, args.expert, budget, seatCalibration)));
     process.exit(1);
   }
 
@@ -1054,6 +1195,8 @@ if (require.main !== module) {
   module.exports = {
     parseArgs,
     readConfig,
+    expandEnvPlaceholder,
+    clampConsensusSetting,
     globalConfigPath,
     validateDistinctModels,
     extractJsonFromResponse,
