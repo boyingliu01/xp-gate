@@ -982,46 +982,96 @@ const AUDIT_LEDGER_SINCE = '2026-10-30T00:00:00.000Z';
 const AUDIT_MAX_PLAUSIBLE_MS = AUDIT_MAX_PLAUSIBLE_HOURS * 60 * 60 * 1000;
 
 function diagnoseAuditLedger(ctx = {}) {
-  const checks = [];
-  let issues = 0;
   const repoRoot = ctx.repoRoot || process.cwd();
   const logPath = path.join(repoRoot, '.xp-gate', 'audit.jsonl');
+
+  const loaded = loadAuditEntries(logPath);
+  if (loaded.verdict) return { checks: [loaded.verdict], issues: 0 };
+
+  const tally = tallyAuditAnomalies(loaded.entries);
+  return { checks: [auditLedgerCheck(tally)], issues: 0 };
+}
+
+/**
+ * Read the audit ledger, or the SKIP/WARN check that stands in for it.
+ *
+ * Returns `{ verdict }` when there is nothing to scan, `{ entries }` otherwise --
+ * one exit shape per outcome so the caller does not branch on three sentinels.
+ *
+ * @param {string} logPath
+ * @returns {{verdict?: object, entries?: object[]}}
+ */
+function loadAuditEntries(logPath) {
+  const name = 'Audit ledger';
   if (!fs.existsSync(logPath)) {
-    checks.push({ name: 'Audit ledger', status: 'SKIP', detail: 'no .xp-gate/audit.jsonl' });
-    return { checks, issues };
+    return { verdict: { name, status: 'SKIP', detail: 'no .xp-gate/audit.jsonl' } };
   }
-  let entries;
   try {
-    entries = fs.readFileSync(logPath, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const entries = fs.readFileSync(logPath, 'utf8')
+      .split(/\r?\n/)
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    return { entries };
   } catch (err) {
-    checks.push({ name: 'Audit ledger', status: 'WARN', detail: `unreadable: ${err.message}` });
-    return { checks, issues };
+    return { verdict: { name, status: 'WARN', detail: `unreadable: ${err.message}` } };
   }
-  let implausible = 0;
-  let missingCommit = 0;
-  let considered = 0;
-  for (const e of entries) {
-    if (typeof e.timestamp === 'string' && e.timestamp < AUDIT_LEDGER_SINCE) continue;
-    considered += 1;
-    if (typeof e.duration_ms === 'number'
-      && (!Number.isFinite(e.duration_ms) || e.duration_ms < 0 || e.duration_ms > AUDIT_MAX_PLAUSIBLE_MS)) {
-      implausible += 1;
-    }
-    if (!e.commit_hash || e.commit_hash === 'unknown') missingCommit += 1;
+}
+
+/**
+ * An implausible duration, or a commit the entry cannot be attributed to.
+ *
+ * An entry older than the ledger cutoff is skipped: the anomalies this check exists
+ * for were introduced by a specific release, and counting everything before it would
+ * report the same fixed history forever.
+ *
+ * @param {object[]} entries
+ * @returns {{considered: number, implausible: number, missingCommit: number}}
+ */
+function tallyAuditAnomalies(entries) {
+  const recent = entries.filter((e) => !(typeof e.timestamp === 'string' && e.timestamp < AUDIT_LEDGER_SINCE));
+  return {
+    considered: recent.length,
+    implausible: recent.filter(hasImplausibleDuration).length,
+    missingCommit: recent.filter(hasNoCommit).length,
+  };
+}
+
+/** A duration that is present but negative, non-finite, or absurdly long. */
+function hasImplausibleDuration(entry) {
+  if (typeof entry.duration_ms !== 'number') return false;
+  return !Number.isFinite(entry.duration_ms)
+    || entry.duration_ms < 0
+    || entry.duration_ms > AUDIT_MAX_PLAUSIBLE_MS;
+}
+
+/** An entry that cannot be attributed to a commit. */
+function hasNoCommit(entry) {
+  return !entry.commit_hash || entry.commit_hash === 'unknown';
+}
+
+/**
+ * The ledger's verdict.
+ *
+ * WARN, not FAIL: telemetry integrity is not a blocking gate, but it must be
+ * visible. The issue count stays 0 so it never inflates the FAIL tally.
+ *
+ * @param {{considered: number, implausible: number, missingCommit: number}} tally
+ * @returns {object}
+ */
+function auditLedgerCheck(tally) {
+  const name = 'Audit ledger';
+  const anomalies = tally.implausible + tally.missingCommit;
+  if (anomalies === 0) {
+    const noun = tally.considered === 1 ? 'entry' : 'entries';
+    return { name, status: 'PASS', detail: `${tally.considered} ${noun} clean since ${AUDIT_LEDGER_SINCE}` };
   }
-  const total = implausible + missingCommit;
-  if (total > 0) {
-    checks.push({
-      name: 'Audit ledger',
-      status: 'WARN',
-      detail: `${total} anomal${total === 1 ? 'y' : 'ies'} since ${AUDIT_LEDGER_SINCE} (${implausible} implausible duration, ${missingCommit} unattributed) — run: xp-gate audit --check`,
-    });
-    // WARN, not FAIL: telemetry integrity is not a blocking gate, but it must
-    // be visible. Kept at 0 issues so it never inflates the FAIL count.
-  } else {
-    checks.push({ name: 'Audit ledger', status: 'PASS', detail: `${considered} entr${considered === 1 ? 'y' : 'ies'} clean since ${AUDIT_LEDGER_SINCE}` });
-  }
-  return { checks, issues };
+  const plural = anomalies === 1 ? 'y' : 'ies';
+  return {
+    name,
+    status: 'WARN',
+    detail: `${anomalies} anomal${plural} since ${AUDIT_LEDGER_SINCE} `
+      + `(${tally.implausible} implausible duration, ${tally.missingCommit} unattributed) — run: xp-gate audit --check`,
+  };
 }
 
 /**
