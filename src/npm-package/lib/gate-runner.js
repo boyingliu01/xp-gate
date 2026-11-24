@@ -821,6 +821,11 @@ function jscpdDefaultIgnorePatterns() {
     '**/.nuxt/**',
     '**/vendor/**',
     '**/.xp-gate/**',
+    // The build mirror. Byte-identical to githooks/, plugins/ and skills/ by
+    // construction, so `jscpd` comparing it to them reports the mirror as
+    // duplicated code -- 28 s per run and a FAIL nobody can act on (measured
+    // 2026-11-24). Mirror drift has its own gate (12b).
+    '**/src/npm-package/**',
     '**/*.log',
     '**/*.txt',
     '**/*.yaml',
