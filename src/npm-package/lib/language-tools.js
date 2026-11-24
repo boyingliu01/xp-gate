@@ -1259,6 +1259,91 @@ const summary = summarizeAudit(rows);
   return { rows, summary };
 }
 
+/**
+ * Emit the audit as JSON in the shape callers expect.
+ *
+ * CONTRACT, preserved from #468: the TOP LEVEL is keyed by language name, each value
+ * being that language's tool list. Callers parse it that way and a shape change here
+ * silently broke them once. The audit's newer facts (duplicates, currency,
+ * cross-language tools) ride ALONGSIDE in `summary` and `crossLanguage` rather than
+ * replacing the old shape.
+ */
+function printAuditJson(rows, summary, args) {
+  // CONTRACT, preserved from #468: the top level is keyed by language name and
+  // each value is that language's tool list. Callers parse it that way, and a
+  // shape change here silently broke them once already. The audit's new facts
+  // (duplicates, currency, cross-language tools) therefore ride alongside in
+  // `summary` and `crossLanguage` rather than replacing the old shape.
+  const byLanguage = {};
+  for (const row of rows) {
+    for (const lang of (row.languages && row.languages.length ? row.languages : ['(cross-language)'])) {
+      if (!byLanguage[lang]) byLanguage[lang] = [];
+      byLanguage[lang].push({
+        name: row.name,
+        status: statusOfRow(row),
+        optional: row.optional,
+        version: row.version,
+        gates: row.gates,
+        duplicated: row.duplicated,
+        paths: row.paths,
+        outdated: row.outdated,
+        latestVersion: row.latestVersion,
+        currency: row.currency,
+        reason: row.validityReason || undefined,
+      });
+    }
+  }
+  // Tools the gate scripts call directly; reported once, not per language.
+  // Only emitted when such tools exist: an always-present empty group would
+  // add a key to a contract callers compare exactly (#468).
+  const crossLanguage = rows
+    .filter((r) => !r.languages || r.languages.length === 0)
+    .map((r) => ({
+      name: r.name,
+      status: statusOfRow(r),
+      optional: r.optional,
+      version: r.version,
+      gates: r.gates,
+      duplicated: r.duplicated,
+      paths: r.paths,
+      outdated: r.outdated,
+      latestVersion: r.latestVersion,
+      currency: r.currency,
+      npxInvoked: r.npxInvoked,
+      reason: r.validityReason || undefined,
+    }));
+  if (crossLanguage.length > 0) byLanguage['(cross-language)'] = crossLanguage;
+
+  // `summary` and the flat view are additive: they appear only when asked
+  // for, so the historical shape ({ <language>: [...] }) stays byte-identical
+  // for callers that parse it exactly (#468).
+  const wantsAuditFields = args.includes('--audit') || args.includes('--flat');
+  // The flat view uses the SAME field names as the grouped view (`status`,
+  // `version`), so a consumer can switch between them without remapping.
+  const flatView = rows.map((r) => ({
+    name: r.name,
+    status: statusOfRow(r),
+    optional: r.optional,
+    version: r.version,
+    installedVersion: r.installedVersion,
+    gates: r.gates,
+    languages: r.languages,
+    duplicated: r.duplicated,
+    paths: r.paths,
+    distinctRealPaths: r.distinctRealPaths,
+    outdated: r.outdated,
+    latestVersion: r.latestVersion,
+    currency: r.currency,
+    npxInvoked: r.npxInvoked,
+    reason: r.validityReason || undefined,
+  }));
+  console.log(JSON.stringify({
+    ...byLanguage,
+    ...(wantsAuditFields ? { summary } : {}),
+    ...(args.includes('--flat') ? { tools: flatView } : {}),
+  }, null, 2));
+}
+
 async function handleCheckTools(args, options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
   const jsonOutput = args.includes('--json');
@@ -1285,83 +1370,8 @@ async function handleCheckTools(args, options = {}) {
 
   const { rows, summary } = auditRequestedTools(args, { languages, includeCrossLanguage }, options);
 
-  if (jsonOutput) {
-    // CONTRACT, preserved from #468: the top level is keyed by language name and
-    // each value is that language's tool list. Callers parse it that way, and a
-    // shape change here silently broke them once already. The audit's new facts
-    // (duplicates, currency, cross-language tools) therefore ride alongside in
-    // `summary` and `crossLanguage` rather than replacing the old shape.
-    const byLanguage = {};
-    for (const row of rows) {
-      for (const lang of (row.languages && row.languages.length ? row.languages : ['(cross-language)'])) {
-        if (!byLanguage[lang]) byLanguage[lang] = [];
-        byLanguage[lang].push({
-          name: row.name,
-          status: statusOfRow(row),
-          optional: row.optional,
-          version: row.version,
-          gates: row.gates,
-          duplicated: row.duplicated,
-          paths: row.paths,
-          outdated: row.outdated,
-          latestVersion: row.latestVersion,
-          currency: row.currency,
-          reason: row.validityReason || undefined,
-        });
-      }
-    }
-    // Tools the gate scripts call directly; reported once, not per language.
-    // Only emitted when such tools exist: an always-present empty group would
-    // add a key to a contract callers compare exactly (#468).
-    const crossLanguage = rows
-      .filter((r) => !r.languages || r.languages.length === 0)
-      .map((r) => ({
-        name: r.name,
-        status: statusOfRow(r),
-        optional: r.optional,
-        version: r.version,
-        gates: r.gates,
-        duplicated: r.duplicated,
-        paths: r.paths,
-        outdated: r.outdated,
-        latestVersion: r.latestVersion,
-        currency: r.currency,
-        npxInvoked: r.npxInvoked,
-        reason: r.validityReason || undefined,
-      }));
-    if (crossLanguage.length > 0) byLanguage['(cross-language)'] = crossLanguage;
-
-    // `summary` and the flat view are additive: they appear only when asked
-    // for, so the historical shape ({ <language>: [...] }) stays byte-identical
-    // for callers that parse it exactly (#468).
-    const wantsAuditFields = args.includes('--audit') || args.includes('--flat');
-    // The flat view uses the SAME field names as the grouped view (`status`,
-    // `version`), so a consumer can switch between them without remapping.
-    const flatView = rows.map((r) => ({
-      name: r.name,
-      status: statusOfRow(r),
-      optional: r.optional,
-      version: r.version,
-      installedVersion: r.installedVersion,
-      gates: r.gates,
-      languages: r.languages,
-      duplicated: r.duplicated,
-      paths: r.paths,
-      distinctRealPaths: r.distinctRealPaths,
-      outdated: r.outdated,
-      latestVersion: r.latestVersion,
-      currency: r.currency,
-      npxInvoked: r.npxInvoked,
-      reason: r.validityReason || undefined,
-    }));
-    console.log(JSON.stringify({
-      ...byLanguage,
-      ...(wantsAuditFields ? { summary } : {}),
-      ...(args.includes('--flat') ? { tools: flatView } : {}),
-    }, null, 2));
-  } else {
-    printAuditReport(rows, summary);
-  }
+  if (jsonOutput) printAuditJson(rows, summary, args);
+  else printAuditReport(rows, summary);
 
   return 0;
 }
