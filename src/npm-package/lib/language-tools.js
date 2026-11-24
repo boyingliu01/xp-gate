@@ -1628,8 +1628,9 @@ if (conflicting.length) {
  * broken either way, and only one of those tells the reader.
  */
 function applyPlanActions(actions, io) {
-let failed = 0;
-for (const action of mutating) {
+  const { run, removeFile } = io;
+  let failed = 0;
+  for (const action of actions) {
   if (action.kind === 'remove-duplicate') {
     const ok = removeFile(action.path);
     if (!ok) failed += 1;
