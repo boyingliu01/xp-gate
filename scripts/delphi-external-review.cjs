@@ -746,6 +746,37 @@ function buildReviewOutput(verdict, args, provenance) {
 }
 
 // ── Retry logic ────────────────────────────────────────────────────────
+/** The first retry waits this long; each subsequent one doubles it. */
+const RETRY_BASE_DELAY_MS = 1000;
+
+/** Wait `ms` without blocking the event loop. */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Announce and take the back-off before retry number `attempt`.
+ *
+ * Exponential from a named base: 1 s, 2 s, 4 s. The wait is ANNOUNCED first, because a
+ * silent two-second pause reads as a hang, and the operator's next move (wait, or kill
+ * it) depends on knowing a retry is in progress.
+ *
+ * @param {number} attempt zero-based retry index
+ * @param {string} reason why the previous call is being retried
+ */
+async function backOffBeforeRetry(attempt, reason) {
+  const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+  console.error(`[delphi-review] Retryable error: ${reason}. Retrying in ${delay}ms...`);
+  await sleep(delay);
+}
+
+/**
+ * Call the model, retrying only the failures worth retrying.
+ *
+ * `retryable` is the PROVIDER's answer, not ours: a configuration error retried three
+ * times just wastes three timeouts, and the caller needs the first failure reported
+ * rather than the last one's symptoms.
+ */
 async function callWithRetry(providerConfig, model, systemPrompt, userPrompt, maxRetries = 2, timeoutMs = DEFAULT_TIMEOUT_MS) {
   let lastResult;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -755,11 +786,7 @@ async function callWithRetry(providerConfig, model, systemPrompt, userPrompt, ma
     if (!result.retryable) return result;
 
     lastResult = result;
-    if (attempt < maxRetries) {
-      const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
-      console.error(`[delphi-review] Retryable error: ${result.message}. Retrying in ${delay}ms...`);
-      await new Promise(r => setTimeout(r, delay));
-    }
+    if (attempt < maxRetries) await backOffBeforeRetry(attempt, result.message);
   }
   return lastResult;
 }
