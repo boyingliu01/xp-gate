@@ -497,14 +497,21 @@ function findConsumerGateVariant(gateModule, cwd) {
  *
  * @returns {{kind: 'variant', script: string} | {kind: 'module', entry: string} | {kind: 'fallback', script: string} | {kind: 'none'}}
  */
-function resolveGateImplementation(gateModule, targetCwd) {
-  const variant = findConsumerGateVariant(gateModule, targetCwd);
+function resolveGateImplementation(gateModule, targetCwd, options = {}) {
+  // The three lookups touch the filesystem and the package tree. Injectable so
+  // the PRECEDENCE order -- which is the contract, not the lookups -- can be
+  // driven directly.
+  const findVariant = options.findVariant || findConsumerGateVariant;
+  const findEntry = options.findEntry || findTsGateEntry;
+  const findScript = options.findScript || resolveGateScript;
+
+  const variant = findVariant(gateModule, targetCwd);
   if (variant) return { kind: 'variant', script: variant };
 
-  const entry = findTsGateEntry(gateModule);
+  const entry = findEntry(gateModule);
   if (entry) return { kind: 'module', entry };
 
-  const script = resolveGateScript(gateModule.replace('gate-', ''), targetCwd);
+  const script = findScript(gateModule.replace('gate-', ''), targetCwd);
   return script ? { kind: 'fallback', script } : { kind: 'none' };
 }
 
@@ -1387,7 +1394,7 @@ async function invokeGateHandler(gateId, gate, targetPath, opts) {
   }
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, runJscpd, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
+module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, runJscpd, resolveGateImplementation, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
   // AC-670-03 asserts the --all preamble END-TO-END: that an all-mode run hands
   // the security gates a non-empty file population sourced from the list file and
   // sets GATE_SCOPE="all". With these unexported, the case could only take its

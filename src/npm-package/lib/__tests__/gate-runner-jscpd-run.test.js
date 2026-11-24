@@ -107,3 +107,52 @@ describe('runJscpd', () => {
     expect(result).toBe('duplicates');
   });
 });
+
+describe('resolveGateImplementation', () => {
+  const { resolveGateImplementation } = require('../gate-runner.js');
+
+  const none = { findVariant: () => null, findEntry: () => null, findScript: () => null };
+
+  it('prefers a project-declared variant over everything else', () => {
+    // githooks/gates/ is the project's opt-in; the built-in must yield to it.
+    const impl = resolveGateImplementation('gate-3', '/proj', {
+      findVariant: () => '/proj/githooks/gates/gate-3.sh',
+      findEntry: () => '/pkg/gate-3.ts',
+      findScript: () => '/fallback/gate-3.sh',
+    });
+    expect(impl).toEqual({ kind: 'variant', script: '/proj/githooks/gates/gate-3.sh' });
+  });
+
+  it('falls back to the built-in module when no variant is declared', () => {
+    const impl = resolveGateImplementation('gate-3', '/proj', {
+      ...none,
+      findEntry: () => '/pkg/gate-3.ts',
+      findScript: () => '/fallback/gate-3.sh',
+    });
+    expect(impl).toEqual({ kind: 'module', entry: '/pkg/gate-3.ts' });
+  });
+
+  it('falls back to the bash script when no module entry exists', () => {
+    const impl = resolveGateImplementation('gate-3', '/proj', {
+      ...none,
+      findScript: () => '/fallback/gate-3.sh',
+    });
+    expect(impl).toEqual({ kind: 'fallback', script: '/fallback/gate-3.sh' });
+  });
+
+  it('reports "none" when nothing resolves', () => {
+    // #618: this used to fall through to `return 0`, so the --all summary counted
+    // a gate that ran nothing as passed.
+    expect(resolveGateImplementation('gate-3', '/proj', none)).toEqual({ kind: 'none' });
+  });
+
+  it('strips the gate- prefix before looking for a script', () => {
+    let asked = null;
+    resolveGateImplementation('gate-13', '/proj', {
+      ...none,
+      findScript: (name) => { asked = name; return null; },
+    });
+    // The script is named `13-compiler-strictness.sh`, not `gate-13-...`.
+    expect(asked).toBe('13');
+  });
+});
