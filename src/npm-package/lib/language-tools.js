@@ -1432,6 +1432,50 @@ function planUpgrade(row, installCmd, actions) {
   }
 }
 
+/**
+ * Plan removal of a duplicated tool's extra copies.
+ *
+ * Only USER-owned duplicates are a repair. A distro copy plus a user copy is
+ * coexistence (jq from apt vs a newer ~/.local/bin/jq), and removing either is not a
+ * fix: the distro one can drag dependencies with it, the user one is what the reader
+ * installed on purpose.
+ *
+ * The KEEP copy is the one the resolver hands to the gates, not whichever path came
+ * first. Measured 2026-11-24: with the same tool and the same two paths, listing the
+ * installer's copy FIRST made `writesToRemovedPath` false and listing it SECOND made
+ * it true -- the self-cancelling guard depended on the order of `distinctRealPaths`,
+ * which follows however the locator walked PATH. A guard that only fires for half the
+ * callers is not a guard.
+ *
+ * @returns {boolean} true when the row is fully handled and needs no further action
+ */
+function planDuplicateRemoval(row, userCopies, actions) {
+  if (row.duplicated && userCopies.length > 1) {
+    // Keep the copy the resolver actually hands to the gates, not whichever
+    // path happened to come first.
+    //
+    // Measured 2026-11-24: with the same tool and the same two paths, listing
+    // the copy the installer writes to FIRST made `writesToRemovedPath` false
+    // and listing it SECOND made it true -- the self-cancelling-plan guard
+    // therefore depended on the order of `distinctRealPaths`, which comes from
+    // however the locator walked PATH. A guard that only fires for half the
+    // callers is not a guard.
+    const preferred = row.resolvedPath && userCopies.includes(row.resolvedPath)
+      ? row.resolvedPath
+      : userCopies[0];
+    const keep = preferred;
+    const rest = userCopies.filter((p) => p !== keep);
+    actions.push({ kind: 'keep', tool: row.name, path: keep });
+    for (const dup of rest) {
+      actions.push({ kind: 'remove-duplicate', tool: row.name, path: dup, keepPath: keep });
+    }
+    // A tool that is duplicated but otherwise current needs no install step.
+    if (row.available && !row.outdated) return true;
+  }
+
+  return false;
+}
+
 function planToolRepairs(rows, options = {}) {
   const definitions = options.definitions || [];
   const platform = options.platform || process.platform;
@@ -1458,28 +1502,7 @@ function planToolRepairs(rows, options = {}) {
     // the plan honest -- no copies means no duplicate to remove -- instead of
     // throwing out of a planning function.
     const userCopies = (row.userCopies || (row.distinctRealPaths || []).filter((p) => !isSystemOwned(p)));
-    if (row.duplicated && userCopies.length > 1) {
-      // Keep the copy the resolver actually hands to the gates, not whichever
-      // path happened to come first.
-      //
-      // Measured 2026-11-24: with the same tool and the same two paths, listing
-      // the copy the installer writes to FIRST made `writesToRemovedPath` false
-      // and listing it SECOND made it true -- the self-cancelling-plan guard
-      // therefore depended on the order of `distinctRealPaths`, which comes from
-      // however the locator walked PATH. A guard that only fires for half the
-      // callers is not a guard.
-      const preferred = row.resolvedPath && userCopies.includes(row.resolvedPath)
-        ? row.resolvedPath
-        : userCopies[0];
-      const keep = preferred;
-      const rest = userCopies.filter((p) => p !== keep);
-      actions.push({ kind: 'keep', tool: row.name, path: keep });
-      for (const dup of rest) {
-        actions.push({ kind: 'remove-duplicate', tool: row.name, path: dup, keepPath: keep });
-      }
-      // A tool that is duplicated but otherwise current needs no install step.
-      if (row.available && !row.outdated) continue;
-    }
+    if (planDuplicateRemoval(row, userCopies, actions)) continue;
 
     if (!row.available) {
       if (row.optional) {
