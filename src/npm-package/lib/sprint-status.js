@@ -9,6 +9,18 @@
 
 const fs = require('fs');
 const path = require('path');
+const { statusIcon, formatDuration: formatDurationShared } = require('./sprint-format.js');
+
+/**
+ * A list row shows nothing for an unmeasured duration: "instantaneous" and "not
+ * measured" must not look alike, and neither should take visual weight.
+ *
+ * @param {number|null|undefined} seconds
+ * @returns {string}
+ */
+function formatDuration(seconds) {
+  return formatDurationShared(seconds);
+}
 const { execFileSync } = require('child_process');
 const { discoverActiveSprints } = require('./sprint-discovery');
 const { SprintStateManager } = require('./sprint-state-manager');
@@ -62,33 +74,7 @@ function readSprintState(dir) {
   }
 }
 
-/**
- * Get a phase's status icon.
- * @param {'completed'|'in_progress'|'pending'|string} status
- * @returns {string} Icon character
- */
-function statusIcon(status) {
-  switch (status) {
-    case 'completed': return '✅';
-    case 'in_progress': return '🔄';
-    case 'skipped': return '⏭️';
-    default: return '⏳';
-  }
-}
 
-/**
- * Format a duration in seconds to a human-readable string.
- * @param {number|null} seconds
- * @returns {string}
- */
-function formatDuration(seconds) {
-  if (seconds == null || seconds === 0) return '';
-  if (seconds < 60) return `${seconds}s`;
-  const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
-}
 
 /**
  * Format the sprint header lines (task description, ID, branch).

@@ -23,6 +23,18 @@
 'use strict';
 
 const path = require('path');
+const { statusIcon, formatDuration: formatDurationShared } = require('./sprint-format.js');
+
+/**
+ * The dashboard renders an unmeasured duration as `-` so the column keeps its width;
+ * a blank cell would make the table look ragged.
+ *
+ * @param {number|null|undefined} seconds
+ * @returns {string}
+ */
+function formatDuration(seconds) {
+  return formatDurationShared(seconds, { empty: '-' });
+}
 const fs = require('fs');
 const crypto = require('crypto');
 const { execFileSync, execSync } = require('child_process');
@@ -611,34 +623,7 @@ function buildProgressBar(lookup, currentPhase) {
   return `[${'█'.repeat(completed)}${'▓'.repeat(inProgress)}${'░'.repeat(remaining)}] ${pct}%`;
 }
 
-/** The status glyph for one phase row. */
-function statusIcon(status) {
-  switch (status) {
-    case 'completed': return '✅';
-    case 'in_progress': return '🔄';
-    case 'skipped': return '⏭️';
-    case 'failed': return '❌';
-    case 'paused': return '⏸️';
-    default: return '⏳';
-  }
-}
 
-/**
- * A duration as the largest sensible unit, or `-`.
- *
- * Seconds are the only unit for anything under a minute, so a 59-second phase
- * reads "59s" rather than "0m". Zero and null are both `-`: a phase with no
- * recorded duration is not instantaneous.
- */
-function formatDuration(seconds) {
-  if (seconds == null || seconds === 0) return '-';
-  if (seconds < 60) return `${seconds}s`;
-  const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ${mins % 60}m`;
-  return `${Math.floor(hrs / 24)}d ${hrs % 24}h`;
-}
 
 /**
  * The dashboard's title block: what this sprint is, and where it stands.
