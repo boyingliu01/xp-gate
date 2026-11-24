@@ -375,6 +375,9 @@ module.exports = {
   toolEntry,
   buildDetectionResult,
   printAuditJson,
+  reportSelfCancellingPlan,
+  applyPlanActions,
+  buildInstallPlan,
   getArchitectureTools,
   detectBuildFileDependency,
 };
