@@ -54,9 +54,5 @@
   "src/npm-package/scripts/sync-package-content.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
     "totalWarnings": 14
-  },
-  "scripts/__tests__/pre-push-resolution.test.cjs": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-11-24T00:14:30.100Z"
   }
 }
