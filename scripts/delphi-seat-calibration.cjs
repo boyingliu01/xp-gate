@@ -36,15 +36,41 @@ function isPositiveFinite(value) {
   return Number.isFinite(value) && value > 0;
 }
 
+/** An optional byte count: absent, or a positive finite number. */
+function isOptionalBytes(value) {
+  return value === undefined || isPositiveFinite(value);
+}
+
+/**
+ * The pair must be a REAL bracket: what passed must be smaller than what failed.
+ *
+ * Equal or inverted values describe no boundary at all, and using them would set a
+ * ceiling that excludes a prompt already known to work.
+ */
+function isOrderedPair(raw) {
+  return raw.last_fail_bytes === undefined || raw.last_fail_bytes > raw.last_pass_bytes;
+}
+
+/** The checks a calibration record must pass, each with the message to report. */
+const CALIBRATION_RULES = [
+  { fails: (raw) => !isPlainObject(raw), message: () => 'must be an object' },
+  {
+    fails: (raw) => !isPositiveFinite(raw.last_pass_bytes) || !isOptionalBytes(raw.last_fail_bytes),
+    message: () => CALIBRATION_SHAPE_HINT,
+  },
+  { fails: (raw) => !isOrderedPair(raw), message: () => 'has last_fail_bytes <= last_pass_bytes' },
+  { fails: (raw) => !isNonEmptyString(raw.measured_at), message: () => CALIBRATION_SHAPE_HINT },
+];
+
+/**
+ * Why this calibration record is unusable, or null when it is fine.
+ *
+ * A malformed record is IGNORED rather than fatal: a bad measurement should fall back
+ * to the default budget, not stop the review.
+ */
 function calibrationProblem(raw) {
-  if (!isPlainObject(raw)) return 'must be an object';
-  const pass = raw.last_pass_bytes;
-  const fail = raw.last_fail_bytes;
-  const failOk = fail === undefined || isPositiveFinite(fail);
-  if (!isPositiveFinite(pass) || !failOk) return CALIBRATION_SHAPE_HINT;
-  if (fail !== undefined && !(fail > pass)) return 'has last_fail_bytes <= last_pass_bytes';
-  if (!isNonEmptyString(raw.measured_at)) return CALIBRATION_SHAPE_HINT;
-  return null;
+  const broken = CALIBRATION_RULES.find((rule) => rule.fails(raw));
+  return broken ? broken.message() : null;
 }
 
 function resolveSeatCalibration(expertConfig) {
@@ -111,22 +137,62 @@ function uncalibratedBudgetHint(result, promptBytes) {
   };
 }
 
+/** A failure with no usable prompt size attached to it. */
+function asNetworkError(result) {
+  return { ...result, error_type: 'network_error' };
+}
+
+/**
+ * Whether this failure is a DROP before any response arrived -- the only kind a prompt
+ * budget can explain. A retryable transport error says nothing about size.
+ */
+function isBudgetCandidate(result, promptBytes) {
+  return isPreResponseDrop(result) && Number.isFinite(promptBytes);
+}
+
+/**
+ * Classify a seat's failure.
+ *
+ * The order matters and is the whole rule:
+ *
+ *   1. not an error at all            -> pass it through untouched;
+ *   2. not a pre-response drop        -> a transport error, never a size problem;
+ *   3. no usable prompt size          -> cannot be attributed, so network;
+ *   4. CALIBRATED and over the ceiling -> the measured limit is the explanation;
+ *   5. UNCALIBRATED and over the default -> say the budget is a guess, do not blame it;
+ *   6. otherwise                      -> network.
+ *
+ * Case 5 exists because an uncalibrated ceiling is a DEFAULT: reporting it as "size
+ * exceeded" would claim a measurement nobody made.
+ */
 function classifySeatFailure({ result, promptBytes, calibration }) {
   if (!result || !result.error) return result;
-  if (!isPreResponseDrop(result)) {
-    return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
+  if (!isPreResponseDrop(result)) return retryableOrNetwork(result);
+  if (!isBudgetCandidate(result, promptBytes)) return asNetworkError(result);
+
+  return budgetVerdict(result, promptBytes, calibratedCeiling(calibration));
+}
+
+/**
+ * The verdict for a drop that carried a prompt size.
+ *
+ * Split from the guards above so the three size outcomes read as three sentences rather
+ * than as a fourth level of nesting.
+ */
+function budgetVerdict(result, promptBytes, threshold) {
+  if (threshold !== null) {
+    return promptBytes > threshold
+      ? sizeExceededResult(result, promptBytes, threshold)
+      : asNetworkError(result);
   }
-  const threshold = calibratedCeiling(calibration);
-  if (!Number.isFinite(promptBytes)) {
-    return { ...result, error_type: 'network_error' };
-  }
-  if (threshold !== null && promptBytes > threshold) {
-    return sizeExceededResult(result, promptBytes, threshold);
-  }
-  if (threshold === null && promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES) {
-    return uncalibratedBudgetHint(result, promptBytes);
-  }
-  return { ...result, error_type: 'network_error' };
+  return promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES
+    ? uncalibratedBudgetHint(result, promptBytes)
+    : asNetworkError(result);
+}
+
+/** A transport failure: retryable says whether a second attempt could work. */
+function retryableOrNetwork(result) {
+  return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
 }
 
 
