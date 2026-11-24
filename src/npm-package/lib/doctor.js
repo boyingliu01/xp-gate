@@ -1282,6 +1282,52 @@ function moduleDriftDetail(repoText, installedText) {
  * @param {{repoRoot?: string, repoHooks?: string, installedAdapters?: string, force?: boolean}} [ctx]
  * @returns {{synced: string[], skipped: string[], refused: Array<{name: string, repoOnly: number, installedOnly: number}>, errors: string[], installedAdapters: string}}
  */
+/**
+ * Sync one gate module to the path that actually executes it.
+ *
+ * The ORDER of the checks is the substance. A module that is not installed is not
+ * this command's business (residue is reported by the diagnosis, never deleted by a
+ * sync). A module differing only in formatting is skipped rather than rewritten --
+ * copying it would churn the file and change nothing. Only after both does the copy
+ * guard run, and a refusal there is a decision about destroying machine-only
+ * hardening.
+ *
+ * @param {{name: string, repoHooks: string, dirs: object, force: boolean,
+ *   synced: string[], skipped: string[], refused: Array, errors: string[]}} q
+ *   arrays mutated in place
+ */
+function syncOneModule(q) {
+  const { name, repoHooks, dirs, force, synced, skipped, refused, errors } = q;
+  const source = repoModuleSource(repoHooks, name);
+  if (!source) return;
+  const target = executedModulePath(name, dirs);
+  if (!target) return; // nothing executes this module
+
+  if (pathsEquivalent(source, target) || filesAreIdentical(source, target)) {
+    skipped.push(name);
+    return;
+  }
+
+  const decision = copyGuardDecision(source, target, force);
+  // Formatting-only: nothing to repair, and rewriting the file would churn it.
+  if (!decision.refuse && !decision.forced && decision.repoOnly === 0 && decision.installedOnly === 0) {
+    skipped.push(name);
+    return;
+  }
+  if (decision.refuse) {
+    refused.push({ name, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown, target });
+    return;
+  }
+
+  try {
+    fs.copyFileSync(source, target);
+    fs.chmodSync(target, 0o755);
+    synced.push(name);
+  } catch (err) {
+    errors.push(`${name}: ${err.message}`);
+  }
+}
+
 function syncModulesFromRepo(ctx = {}) {
   const synced = [];
   const skipped = [];
@@ -1310,37 +1356,7 @@ function syncModulesFromRepo(ctx = {}) {
   const installedAdapters = dirs.globalAdapterDir;
 
   for (const name of repoModuleNames(repoHooks)) {
-    const source = repoModuleSource(repoHooks, name);
-    if (!source) continue;
-    const target = executedModulePath(name, dirs);
-    if (!target) continue; // nothing executes this module; residue is not this command's business
-    if (pathsEquivalent(source, target)) {
-      skipped.push(name);
-      continue;
-    }
-    if (filesAreIdentical(source, target)) {
-      skipped.push(name);
-      continue;
-    }
-
-    const decision = copyGuardDecision(source, target, !!ctx.force);
-    // Formatting-only: nothing to repair, and rewriting the file would churn it.
-    if (!decision.refuse && !decision.forced && decision.repoOnly === 0 && decision.installedOnly === 0) {
-      skipped.push(name);
-      continue;
-    }
-    if (decision.refuse) {
-      refused.push({ name, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown, target });
-      continue;
-    }
-
-    try {
-      fs.copyFileSync(source, target);
-      fs.chmodSync(target, 0o755);
-      synced.push(name);
-    } catch (err) {
-      errors.push(`${name}: ${err.message}`);
-    }
+    syncOneModule({ name, repoHooks, dirs, force: !!ctx.force, synced, skipped, refused, errors });
   }
 
   return { synced, skipped, refused, errors, installedAdapters, dirs, sourceMissing: false };
