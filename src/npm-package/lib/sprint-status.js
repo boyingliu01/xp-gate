@@ -613,4 +613,5 @@ module.exports = {
   formatDuration,
   buildMetricsLine,
   formatReqLines,
+  formatPhaseLine,
 };

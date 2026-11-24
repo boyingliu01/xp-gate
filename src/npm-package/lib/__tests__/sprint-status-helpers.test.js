@@ -132,3 +132,56 @@ describe('buildMetricsLine', () => {
     expect(s.buildMetricsLine({ coverage_pct: 0 })).toContain('0%');
   });
 });
+
+describe('formatPhaseLine', () => {
+  it('falls back to the registry name when the entry has none', () => {
+    // A phase recorded before names were stored must still print "BUILD", not "3".
+    const line = s.formatPhaseLine('3', { status: 'completed' }, 10);
+    expect(line).toContain('BUILD');
+  });
+
+  it('treats a missing entry as pending, not as an error', () => {
+    // A phase that has not started simply has no history entry.
+    const line = s.formatPhaseLine('4', undefined, 10);
+    expect(line).toContain('Pending');
+  });
+
+  it('spells out the status rather than only showing a glyph', () => {
+    // The glyph is a glance cue; the word is what a screen reader and a log carry.
+    for (const [status, label] of [
+      ['completed', 'Completed'], ['in_progress', 'In Progress'],
+      ['skipped', 'Skipped'], ['failed', 'Pending'],
+    ]) {
+      expect(s.formatPhaseLine('2', { status }, 10)).toContain(label);
+    }
+  });
+
+  it('pads the phase number to a fixed width so the columns line up', () => {
+    // A single-digit and a two-digit phase must occupy the same width, or the whole
+    // table below the phase list goes ragged.
+    // Real phase keys are 1..6; `padStart(4)` makes every one occupy the same width.
+    const lines = ['1', '2', '3', '4', '5', '6'].map((k) => s.formatPhaseLine(k, { status: 'completed' }, 10));
+    const icons = new Set(lines.map((l) => l.indexOf('✅')));
+    expect(icons.size).toBe(1);
+  });
+});
+
+describe('formatReqLines', () => {
+  it('returns no lines when the phase carries no requirement map', () => {
+    expect(s.formatReqLines(undefined)).toEqual([]);
+    expect(s.formatReqLines({})).toEqual([]);
+  });
+
+  it('renders one line per requirement, keeping the id and name', () => {
+    const lines = s.formatReqLines({
+      reqs: {
+        'REQ-001': { status: 'completed', name: 'first' },
+        'REQ-002': { status: 'in_progress', name: 'second' },
+      },
+    });
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('REQ-001');
+    expect(lines[0]).toContain('first');
+    expect(lines[1]).toContain('REQ-002');
+  });
+});
