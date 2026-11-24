@@ -40,28 +40,29 @@ function isPlainObject(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function parseTimestamp(value, field) {
-  const match = typeof value === 'string'
-    ? value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/)
-    : null;
-  if (!match) fail(`${field} must be a canonical UTC ISO-8601 timestamp.`);
+/** A canonical UTC ISO-8601 instant, with an optional millisecond fraction. */
+const TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
 
-  // Groups 1..6 are year, month, day, hour, minute, second; group 7 is the
-  // optional millisecond fraction. Keeping them as arrays means the "build the
-  // date" and "verify round-trip" steps share one ordered definition instead of
-  // repeating seven hand-numbered comparisons.
+/**
+ * The date one timestamp match describes.
+ *
+ * Groups 1..6 are year through second; group 7 is the optional fraction, padded to
+ * milliseconds. Built from the parts rather than by handing the string to `Date`, so a
+ * non-canonical spelling cannot be silently accepted by the platform's parser.
+ */
+function buildUtcDate(match) {
   const parts = match.slice(1, 7).map(Number);
   const [year, month, day, hour, minute, second] = parts;
   const milliseconds = Number((match[7] || '').padEnd(3, '0') || 0);
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(hour, minute, second, milliseconds);
+  return { date, expected: [...parts, milliseconds] };
+}
 
-  // A date silently rolls over ("2026-02-30" becomes March 2), so the only way
-  // to know the input was a real calendar instant is to read it back and compare
-  // every field.
-  const expected = [...parts, milliseconds];
-  const readBack = [
+/** The date's own fields, in the same order as `expected`. */
+function readBackFields(date) {
+  return [
     date.getUTCFullYear(),
     date.getUTCMonth() + 1,
     date.getUTCDate(),
@@ -70,7 +71,20 @@ function parseTimestamp(value, field) {
     date.getUTCSeconds(),
     date.getUTCMilliseconds(),
   ];
-  if (!readBack.every((actual, i) => actual === expected[i])) {
+}
+
+/**
+ * Read a canonical UTC timestamp, or fail naming the field.
+ *
+ * A date silently ROLLS OVER ("2026-02-30" becomes March 2), so the only way to know
+ * the input was a real calendar instant is to read it back and compare every field.
+ */
+function parseTimestamp(value, field) {
+  const match = typeof value === 'string' ? value.match(TIMESTAMP_RE) : null;
+  if (!match) fail(`${field} must be a canonical UTC ISO-8601 timestamp.`);
+
+  const { date, expected } = buildUtcDate(match);
+  if (!readBackFields(date).every((actual, i) => actual === expected[i])) {
     fail(`${field} must contain a valid UTC calendar date and time.`);
   }
   return date.getTime();
@@ -129,24 +143,37 @@ function seatsFromExperts(experts) {
  * @param {unknown} config parsed config document
  * @returns {Map<string, string>} role -> model id that evidence must match
  */
-function resolveBindingSeats(config) {
-  if (!isPlainObject(config)) fail(`${DELPHI_CONFIG_FILE} must contain a JSON object.`);
+/** Whether this config uses the legacy FLAT shape, where experts sit at top level. */
+function isFlatConfig(profiles) {
+  return !isPlainObject(profiles) || Object.keys(profiles).length === 0;
+}
 
-  const profiles = config.profiles;
-  if (!isPlainObject(profiles) || Object.keys(profiles).length === 0) {
-    // Legacy/flat shape: experts live at the top level.
-    return seatsFromExperts(config.experts);
-  }
+/**
+ * The experts of the profile the gate should read.
+ *
+ * A config with no profiles is the LEGACY flat shape, not a broken one: older
+ * releases wrote experts at the top level, and rejecting them would fail every
+ * existing setup on upgrade.
+ */
+function expertsOf(config, profiles) {
+  if (isFlatConfig(profiles)) return config.experts;
 
   const active = config.active_profile;
   if (typeof active !== 'string' || !isPlainObject(profiles[active])) {
+    // Naming the available profiles is what makes this actionable: the reader can
+    // pick one instead of re-reading the config to find the right spelling.
     const available = Object.keys(profiles).join(', ');
     fail(
       `${DELPHI_CONFIG_FILE} has no resolvable active_profile (active_profile=${JSON.stringify(active)}; `
         + `available: ${available}). Set one so the gate knows which seats bind.`
     );
   }
-  return seatsFromExperts(profiles[active].experts);
+  return profiles[active].experts;
+}
+
+function resolveBindingSeats(config) {
+  if (!isPlainObject(config)) fail(`${DELPHI_CONFIG_FILE} must contain a JSON object.`);
+  return seatsFromExperts(expertsOf(config, config.profiles));
 }
 
 /**
@@ -210,64 +237,70 @@ function globalConfigPath(env = process.env) {
  * @returns {Map<string, string>} seats; never null
  * @throws exits via fail() when neither location has a config
  */
+/**
+ * Read the config text from the project copy, or the machine-wide fallback.
+ *
+ * Both absent is a HARD failure that names both paths: a repo with walkthrough evidence
+ * and nothing binding it to seats cannot be verified, and "config not found" without
+ * the locations sends the reader to search.
+ *
+ * @returns the text and where it came from
+ */
+function readConfigText(projectPath, fallbackPath) {
+  try {
+    return { raw: fs.readFileSync(projectPath, 'utf8'), source: projectPath, fromProject: true };
+  } catch (projectError) {
+    if (!projectError || projectError.code !== 'ENOENT') {
+      fail(`cannot read ${DELPHI_CONFIG_FILE}: ${projectError && projectError.message ? projectError.message : String(projectError)}`);
+    }
+    return readFallbackConfig(fallbackPath, projectPath);
+  }
+}
+
+/** The machine-wide copy, used only when the project has none. */
+function readFallbackConfig(fallbackPath, projectPath) {
+  try {
+    return { raw: fs.readFileSync(fallbackPath, 'utf8'), source: fallbackPath, fromProject: false };
+  } catch (globalError) {
+    if (globalError && globalError.code === 'ENOENT') {
+      fail(
+        `no ${DELPHI_CONFIG_FILE} found, so the reviewer seats cannot be verified. `
+          + `Looked in: ${projectPath}, ${fallbackPath}. `
+          + `Create the machine-wide config or add one to the repository.`
+      );
+    }
+    fail(`cannot read ${DELPHI_CONFIG_FILE}: ${globalError && globalError.message ? globalError.message : String(globalError)}`);
+  }
+}
+
+/** Every required role must have a seat; the first missing one is named. */
+function assertAllRolesBound(seats) {
+  for (const role of REQUIRED_ROLES) {
+    if (!seats.has(role)) {
+      fail(`${DELPHI_CONFIG_FILE} declares no seat for the ${role} role; all three roles must be configured.`);
+    }
+  }
+}
+
 function loadBindingSeats(projectRoot, env = process.env) {
   const projectPath = path.join(projectRoot, DELPHI_CONFIG_FILE);
   const fallbackPath = globalConfigPath(env);
+  const { raw, source, fromProject } = readConfigText(projectPath, fallbackPath);
 
-  let raw;
-  let source = projectPath;
-  let projectMissing = false;
-  try {
-    raw = fs.readFileSync(projectPath, 'utf8');
-  } catch (projectError) {
-    if (projectError && projectError.code === 'ENOENT') {
-      projectMissing = true;
-      try {
-        raw = fs.readFileSync(fallbackPath, 'utf8');
-        source = fallbackPath;
-      } catch (globalError) {
-        if (globalError && globalError.code === 'ENOENT') {
-          // Both absent: this repo has walkthrough evidence but nothing binds
-          // it to seats. Fail closed and say exactly where we looked.
-          fail(
-            `no ${DELPHI_CONFIG_FILE} found, so the reviewer seats cannot be verified. `
-              + `Looked in: ${projectPath}, ${fallbackPath}. `
-              + `Create the machine-wide config or add one to the repository.`
-          );
-        }
-        fail(
-          `cannot read ${DELPHI_CONFIG_FILE}: ${globalError && globalError.message
-            ? globalError.message
-            : String(globalError)}`
-        );
-      }
-    } else {
-      fail(
-        `cannot read ${DELPHI_CONFIG_FILE}: ${projectError && projectError.message
-          ? projectError.message
-          : String(projectError)}`
-      );
-    }
-  }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     fail(`${source} is not valid JSON: ${error.message}`);
   }
+
   const seats = resolveBindingSeats(parsed);
-  for (const role of REQUIRED_ROLES) {
-    if (!seats.has(role)) {
-      fail(`${DELPHI_CONFIG_FILE} declares no seat for the ${role} role; all three roles must be configured.`);
-    }
-  }
-  // A repo-local copy that disagrees with the machine-wide one is exactly how
-  // the 2026-10-27 incident happened: a stale per-repo file silently won and the
-  // review kept using a seat that had been retired. Winning is still allowed
-  // (deliberate overrides exist), but it must never be silent.
-  if (!projectMissing) {
-    warnOnSeatDrift(projectPath, fallbackPath, seats);
-  }
+  assertAllRolesBound(seats);
+  // A repo-local copy that disagrees with the machine-wide one is how the 2026-10-27
+  // incident happened: a stale per-repo file silently won and the review kept using a
+  // retired seat. Winning is still allowed (deliberate overrides exist), but it must
+  // never be silent.
+  if (fromProject) warnOnSeatDrift(projectPath, fallbackPath, seats);
   return seats;
 }
 
@@ -288,31 +321,48 @@ function loadBindingSeats(projectRoot, env = process.env) {
  * @param {string} fallbackPath machine-wide config path
  * @param {Map<string, string>} projectSeats seats actually in effect
  */
-function warnOnSeatDrift(projectPath, fallbackPath, projectSeats) {
-  let machineRaw;
+/**
+ * Resolve the machine-wide config's seats, or null when there is nothing to compare.
+ *
+ * Null covers both "no machine config" and "unparseable machine config": neither is
+ * this function's business, and an unparseable one is reported by its own path when it
+ * is actually used.
+ */
+function machineSeatsOrNull(fallbackPath) {
   try {
-    machineRaw = fs.readFileSync(fallbackPath, 'utf8');
+    return resolveBindingSeats(JSON.parse(fs.readFileSync(fallbackPath, 'utf8')));
   } catch {
-    return; // no machine-wide config -> nothing to disagree with
+    return null;
   }
-  let machineSeats;
-  try {
-    machineSeats = resolveBindingSeats(JSON.parse(machineRaw));
-  } catch {
-    return; // a malformed machine config is reported by its own path when used
-  }
-  const drift = REQUIRED_ROLES.filter(
-    (role) => machineSeats.has(role) && projectSeats.get(role) !== machineSeats.get(role)
-  );
-  if (drift.length === 0) return;
+}
+
+/** A role whose repo seat differs from the machine-wide one. */
+function driftsFromMachine(role, projectSeats, machineSeats) {
+  return machineSeats.has(role) && projectSeats.get(role) !== machineSeats.get(role);
+}
+
+/** The drift announcement, one role per clause. */
+function driftWarning(drift, projectSeats, machineSeats) {
   const detail = drift
     .map((role) => `${role}: repo=${projectSeats.get(role)} machine=${machineSeats.get(role)}`)
     .join('; ');
-  process.stderr.write(
-    `⚠️  ${DELPHI_CONFIG_FILE} in this repository overrides the machine-wide seats `
-      + `(${detail}). The repository copy wins. If the machine-wide config was updated `
-      + `to retire a seat, this repo is still calling the old one.\n`
-  );
+  return `⚠️  ${DELPHI_CONFIG_FILE} in this repository overrides the machine-wide seats `
+    + `(${detail}). The repository copy wins. If the machine-wide config was updated `
+    + `to retire a seat, this repo is still calling the old one.\n`;
+}
+
+/**
+ * Warn when a repo-local config disagrees with the machine-wide one.
+ *
+ * Winning is allowed -- deliberate overrides exist -- but it must never be SILENT:
+ * a stale per-repo file silently outranking an updated machine config is how the
+ * 2026-10-27 incident kept a retired seat in use.
+ */
+function warnOnSeatDrift(projectPath, fallbackPath, projectSeats) {
+  const machineSeats = machineSeatsOrNull(fallbackPath);
+  if (!machineSeats) return;
+  const drift = REQUIRED_ROLES.filter((role) => driftsFromMachine(role, projectSeats, machineSeats));
+  if (drift.length > 0) process.stderr.write(driftWarning(drift, projectSeats, machineSeats));
 }
 
 /**

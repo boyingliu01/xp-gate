@@ -120,7 +120,7 @@
     "githooks/lib/validate-code-walkthrough.cjs::validateExperts": 1,
     "githooks/lib/validate-code-walkthrough.cjs::validateRequestedModel": 6,
     "githooks/lib/validate-code-walkthrough.cjs::validateResolvedModel": 4,
-    "githooks/lib/validate-code-walkthrough.cjs::warnOnSeatDrift": 1,
+    "githooks/lib/validate-code-walkthrough.cjs::warnOnSeatDrift": 3,
     "plugins/dsh/client/client.js::(anonymous)@122": 2,
     "plugins/dsh/client/client.js::(anonymous)@132": 2,
     "plugins/dsh/client/client.js::(anonymous)@151": 2,
