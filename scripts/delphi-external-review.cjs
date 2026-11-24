@@ -545,33 +545,47 @@ async function classifyRateLimitResponse(response) {
  * previous retryable=true, and an unparseable body keeps the previous behaviour
  * entirely — reading the body must not change the verdict on its own.
  */
+/** A provider's error detail, and whether it is a CONTENT-dependent failure. */
+/** The gateway's `error` object, or null when the body has none. */
+function providerErrorOf(body) {
+  return body && body.error && typeof body.error === 'object' ? body.error : null;
+}
+
+/** A field the error object carries, or '' when it is absent or not a string. */
+function stringField(holder, key) {
+  return typeof holder[key] === 'string' ? holder[key] : '';
+}
+
+function readProviderError(body) {
+  const error = providerErrorOf(body);
+  if (!error) return { detail: '', processingError: false };
+
+  const type = stringField(error, 'type');
+  const parts = [type, stringField(error, 'param')].filter(Boolean);
+  return {
+    detail: parts.length > 0 ? ` Provider reported: ${parts.join('/')}.` : '',
+    processingError: type === 'response_processing_error',
+  };
+}
+
 async function classifyServerErrorResponse(response) {
-  let detail = '';
-  let processingError = false;
+  let provider = { detail: '', processingError: false };
   try {
-    const body = await response.json();
-    if (body && body.error && typeof body.error === 'object') {
-      const type = typeof body.error.type === 'string' ? body.error.type : '';
-      const param = typeof body.error.param === 'string' ? body.error.param : '';
-      if (type === 'response_processing_error') {
-        processingError = true;
-      }
-      const parts = [type, param].filter(Boolean);
-      if (parts.length > 0) {
-        detail = ` Provider reported: ${parts.join('/')}.`;
-      }
-    }
+    provider = readProviderError(await response.json());
   } catch {
-    // body is not JSON; keep the previous behaviour untouched
+    // Body is not JSON; the plain status message is all there is to report.
   }
-  if (processingError) {
+  // A `response_processing_error` is CONTENT-dependent: the same prompt fails the same
+  // way every time, so retrying it only burns three timeouts. That distinction is what
+  // makes this retryable-false rather than a generic 5xx retry.
+  if (provider.processingError) {
     return {
       error: true,
       retryable: false,
-      message: `Server error (${response.status}).${detail} This is a content-dependent upstream processing failure, so retrying the same prompt will fail the same way.`,
+      message: `Server error (${response.status}).${provider.detail} This is a content-dependent upstream processing failure, so retrying the same prompt will fail the same way.`,
     };
   }
-  return { error: true, retryable: true, message: `Server error (${response.status}).${detail}` };
+  return { error: true, retryable: true, message: `Server error (${response.status}).${provider.detail}` };
 }
 
 /**

@@ -42,5 +42,9 @@
   "src/principles/boy-scout.ts": {
     "lastAnalyzed": "2026-11-24T10:17:27.342Z",
     "totalWarnings": 1
+  },
+  "scripts/ccn-report.cjs": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-11-24T14:17:59.745Z"
   }
 }

@@ -171,7 +171,6 @@ function findSourceFiles(root) {
   return out;
 }
 
-
 // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name: field 8
 // is only trustworthy when it carries no '@'. A C operator function
 // ("operator,@12-18@f.cpp") would otherwise be keyed as "@12" and vanish from the
@@ -180,18 +179,35 @@ function findSourceFiles(root) {
 //
 // Named so the three-branch precedence has one home and processSourceFile() does
 // not carry it inline (see the ratchet note on that function).
+/**
+ * The name to report from lizard's `long_name` field.
+ *
+ * A C operator function ("operator,@12-18@f.cpp") yields "@12" as its name, so a
+ * remaining `@` means the split hit the wrong delimiter -- and field 8 is the one that
+ * carries no `@` at all.
+ */
+function splitLongName(loc) {
+  const [rawName, rawSpan] = loc.split('@');
+  return { rawName, span: (rawSpan || '').split('-') };
+}
+
+/** A name is usable when it is non-empty and survived the split intact. */
+function usableName(rawName, fieldName) {
+  return !rawName || rawName.includes('@') ? fieldName || '(anon)' : rawName;
+}
+
+/** Parse the span's end, defaulting to 0 for a missing or unparseable value. */
+function endLineOf(rawEnd) {
+  return parseInt(rawEnd, 10) || 0;
+}
+
 function parseLongName(fields) {
   const fieldName = (fields[7] || '').trim();
   const loc = fields[5] || '';
   // No '@' in long_name: field 8 is the name, and an empty one is anonymous.
-  if (!loc.includes('@')) return { name: fieldName || '(anon)', lineNo: '', endNo: 0 };
-  const [rawName, rawSpan] = loc.split('@');
-  const span = (rawSpan || '').split('-');
-  // A C operator function ("operator,@12-18@f.cpp") yields "@12" as its name, so
-  // a remaining '@' means the split hit the wrong delimiter -- fall back to
-  // field 8, which carries no '@'.
-  const name = !rawName || rawName.includes('@') ? fieldName || '(anon)' : rawName;
-  return { name, lineNo: span[0], endNo: parseInt(span[1], 10) || 0 };
+  if (!loc.includes('@')) return { name: usableName('', fieldName), lineNo: '', endNo: 0 };
+  const { rawName, span } = splitLongName(loc);
+  return { name: usableName(rawName, fieldName), lineNo: span[0], endNo: endLineOf(span[1]) };
 }
 
 // Decide whether a lizard run's stdout is a measurement to trust. Shared by the
@@ -283,10 +299,6 @@ function isReadableFile(target) {
 // while lizard's own CSV matched the baseline exactly. A uniform offset is the
 // signature of a counting rule, not of code getting more complex.
 
-
-
-
-
 // Gate 3 (#544): rewrite `lizard --csv` rows with the VERIFIED CCN so the gate
 // and the ratchet baseline speak the same numbers. Fatal (exit 1) on a row
 // whose span cannot be verified above threshold — Gate 3 is fail-closed, so an
@@ -334,7 +346,6 @@ function csvRows(srcPath, root, opts = {}) {
   // on a separate stream (stderr) when no --csv, so nothing else to fix here.
   return out.join('\n');
 }
-
 
 // The CSV column positions in this file are that of lizard 1.21.3 (11 fields,
 // CCN at index 1, function locator at 5, path at 6). A different major/minor
@@ -960,7 +971,6 @@ function checkAgainstBaseline(report, get) {
   }
   console.log(`OK — ${report.functions.filter((f) => f.bucket === 'production').length} production function(s) within the ratchet`);
 }
-
 
 async function main() {
   const argv = process.argv.slice(2);
