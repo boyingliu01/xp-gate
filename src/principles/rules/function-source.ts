@@ -9,7 +9,7 @@
  * misses the other rules.
  */
 
-import { Severity } from '../../types';
+import { Severity } from '../types';
 
 /** One function as an adapter reports it, with the fields the rules read. */
 export interface InspectedFunction {

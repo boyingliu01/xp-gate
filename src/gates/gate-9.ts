@@ -161,6 +161,35 @@ function renderSemgrepBlock(
   return { status: 'FAIL', messages, exitCode: 1 };
 }
 
+/**
+ * Report a verdict the tool could not reach, and the SKIP it produces.
+ *
+ * Fail closed (#518): unparseable output and a scan that errored on everything are
+ * both "cannot judge", which must never be spelled PASS. The audit line records the
+ * tool's exit code because that is the evidence the skip rests on.
+ */
+function skipSemgrep(
+  reason: string,
+  detail: string,
+  stderr: string,
+  exitCode: number,
+  startMs: number,
+  messages: string[],
+): GateOutput {
+  messages.push(`     ⚠️  ${detail}`);
+  pushStderrDiagnostics(messages, stderr);
+  messages.push(`     ⏭️  SKIPPED - SAST (${reason})`);
+  recordAudit('gate-9', 'sast-security', 'SKIP', exitCode, startMs);
+  return { status: 'SKIP', messages, exitCode: 0 };
+}
+
+/**
+ * Parse semgrep's JSON and decide the verdict.
+ *
+ * Three outcomes and they are ordered deliberately: the two SKIPs are decided BEFORE
+ * any counting, because a scan that errored on everything has no findings to count
+ * and would otherwise read as a clean run (#475, #518 R2).
+ */
 function parseSemgrepResults(
   jsonOutput: string,
   exitCode: number,
@@ -172,26 +201,19 @@ function parseSemgrepResults(
   try {
     data = JSON.parse(jsonOutput);
   } catch {
-    // Fail closed (#518): unparseable output cannot be judged — SKIP, never PASS.
-    messages.push('     ⚠️  semgrep output unparseable or verdict fields missing — cannot determine verdict');
-    pushStderrDiagnostics(messages, stderr);
-    messages.push('     ⏭️  SKIPPED - SAST (semgrep output unparseable)');
-    recordAudit('gate-9', 'sast-security', 'SKIP', exitCode, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
+    return skipSemgrep('semgrep output unparseable',
+      'semgrep output unparseable or verdict fields missing — cannot determine verdict',
+      stderr, exitCode, startMs, messages);
   }
 
   const results: SemgrepFinding[] = data.results || [];
   const scanErrors = data.errors || [];
 
-  // Nothing scanned to a verdict: tool failure (nonzero exit) or scan errors on
-  // every input. Must neither block nor claim a pass (#475 contract, #518 R2:
-  // exit 0 + results:[] + errors:[{...}] used to fall through to PASS).
+  // exit 0 + `results: []` + `errors: [{...}]` used to fall through to PASS.
   if (results.length === 0 && (scanErrors.length > 0 || exitCode !== 0)) {
-    messages.push(`     ⚠️  semgrep exit=${exitCode}, scan errors=${scanErrors.length}, findings=${results.length} — nothing to judge`);
-    pushStderrDiagnostics(messages, stderr);
-    messages.push('     ⏭️  SKIPPED - SAST (semgrep runtime error)');
-    recordAudit('gate-9', 'sast-security', 'SKIP', exitCode, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
+    return skipSemgrep('semgrep runtime error',
+      `semgrep exit=${exitCode}, scan errors=${scanErrors.length}, findings=${results.length} — nothing to judge`,
+      stderr, exitCode, startMs, messages);
   }
 
   const { blocking, warnings } = countBySeverity(results);

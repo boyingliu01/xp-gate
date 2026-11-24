@@ -1,6 +1,6 @@
 import { Rule, Violation } from '../../types';
 import { getActiveConfig } from '../../config';
-import { extractFunctions, violationLineOf, severityOf, InspectedFunction } from './function-source';
+import { extractFunctions, violationLineOf, severityOf, InspectedFunction } from '../function-source';
 
 /**
  * Whether this function exceeds the configured parameter budget.
