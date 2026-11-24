@@ -55,13 +55,31 @@ async function fetchNpmLatestVersion(url: string): Promise<string | null> {
   }
 }
 
-function readCache(file: string): { ts: number; remoteVersion: string; localVersion?: string; status?: string } | null {
+/** A cache entry whose `remoteVersion` is present and whose age is under the TTL. */
+type CacheEntry = { ts: number; remoteVersion: string; localVersion?: string; status?: string }
+
+/**
+ * Whether a parsed cache entry is still usable.
+ *
+ * Both halves are required: an entry older than the TTL would report a stale version,
+ * and one without `remoteVersion` carries no answer at all.
+ */
+function isFreshEntry(data: CacheEntry): boolean {
+  return Date.now() - data.ts < CACHE_TTL_MS && Boolean(data.remoteVersion)
+}
+
+/**
+ * The cached update check, or null when there is nothing usable.
+ *
+ * Null is the ONLY failure answer: a missing file, unreadable content and a stale
+ * entry are all "no cached answer", and the caller then does the real check. Reporting
+ * them differently would move cache mechanics into the update logic.
+ */
+function readCache(file: string): CacheEntry | null {
   try {
     if (!existsSync(file)) return null
-    const raw = readFileSync(file, "utf8")
-    const data = JSON.parse(raw)
-    if (Date.now() - data.ts < CACHE_TTL_MS && data.remoteVersion) return data
-    return null
+    const data = JSON.parse(readFileSync(file, "utf8")) as CacheEntry
+    return isFreshEntry(data) ? data : null
   } catch {
     return null
   }
@@ -232,6 +250,23 @@ function readInstalledPluginVersion(pluginDir: string): string | null {
   }
 }
 
+/**
+ * Record the version comparison for the next run.
+ *
+ * The presence or absence of `status: "current"` is the whole message: with it the
+ * caller stays quiet, without it a notice is owed. Expressing that as an if/else-if
+ * that re-tested `remoteVersion && localVersion` in both arms said nothing new --
+ * both are already known non-empty by the time this is called.
+ */
+function recordVersionCheck(localVersion: string, remoteVersion: string): void {
+  const upToDate = !semverLt(localVersion, remoteVersion)
+  const entry: { ts: number; localVersion: string; remoteVersion: string; status?: string } = {
+    ts: Date.now(), localVersion, remoteVersion,
+  }
+  if (upToDate) entry.status = "current"
+  writeCache(OPENCODE_CACHE_FILE, entry)
+}
+
 async function checkPluginUpdate(pluginDir: string): Promise<void> {
   const cached = readCache(OPENCODE_CACHE_FILE)
   if (cached?.status === "current" && cached.remoteVersion) return
@@ -242,16 +277,7 @@ async function checkPluginUpdate(pluginDir: string): Promise<void> {
   const remoteVersion = await fetchNpmLatestVersion(OPENCODE_PLUGIN_REGISTRY)
   if (!remoteVersion) return
 
-  // The presence or absence of `status: "current"` is the whole message: with it
-  // the caller stays quiet, without it a notice is owed. It used to be expressed
-  // as an if/else-if that re-tested `remoteVersion && localVersion` in both arms,
-  // even though both were already known non-empty by this point.
-  const upToDate = !semverLt(localVersion, remoteVersion)
-  const entry: { ts: number; localVersion: string; remoteVersion: string; status?: string } = {
-    ts: Date.now(), localVersion, remoteVersion,
-  }
-  if (upToDate) entry.status = "current"
-  writeCache(OPENCODE_CACHE_FILE, entry)
+  recordVersionCheck(localVersion, remoteVersion)
 }
 
 // ── TUI upgrade notice ──
@@ -294,15 +320,30 @@ async function runBackgroundUpdates(pluginDir: string): Promise<string | null> {
   return null
 }
 
+/** How long a gate command may run before it is treated as hung. */
+const CMD_TIMEOUT_MS = 30000
+
+/**
+ * What to report when a command fails.
+ *
+ * stderr is preferred over message because it is the tool's own words; `message` is
+ * often the interpreter's paraphrase ("Command failed: xp-gate ...") and repeating it
+ * hides what actually went wrong.
+ */
+function failureText(err: unknown): string {
+  const error = err as { stderr?: string; message?: string }
+  if (error.stderr) return error.stderr
+  if (error.message) return `[XP-Gate] Error: ${error.message}`
+  return "[XP-Gate] Command failed."
+}
+
 async function runCmd(cmd: string, cwd: string): Promise<string> {
   try {
-    const { stdout } = await execAsync(cmd, { cwd, timeout: 30000 })
+    const { stdout } = await execAsync(cmd, { cwd, timeout: CMD_TIMEOUT_MS })
+    // A silent success is still a success; saying so stops it reading as a hang.
     return stdout || "[XP-Gate] Command completed (no output)."
-  } catch (err: unknown) {
-    const error = err as { stderr?: string; message?: string }
-    if (error.stderr) return error.stderr
-    if (error.message) return `[XP-Gate] Error: ${error.message}`
-    return "[XP-Gate] Command failed."
+  } catch (err) {
+    return failureText(err)
   }
 }
 
@@ -614,30 +655,52 @@ function sessionReloadModelTool() {
 
 // Boy Scout (#447): same treatment as reloadSessionModel — logic at module
 // scope, execute() is pure wiring.
+/** Longest title the OpenCode UI renders without truncating on its own terms. */
+const MAX_SESSION_TITLE = 120;
+
+/**
+ * Escape a value for a single-quoted SQL literal.
+ *
+ * Doubling the quote is what SQLite understands as an embedded quote; anything
+ * fancier would still have to agree with it.
+ */
+function sqlLiteral(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+/**
+ * The title to use for this rename.
+ *
+ * `||` rather than `??` on purpose: an explicitly EMPTY title falls back to
+ * auto-generation, matching the original if/else. Both "not given" and "given as
+ * nothing" mean the caller wants a generated one.
+ *
+ * @returns the trimmed title, or null when none could be produced
+ */
+function resolveSessionTitle(dbPath: string, sessionId: string, newTitle?: string): string | null {
+  const title = newTitle || generateSessionTitle(dbPath, sessionId)
+  if (!title || title.trim().length === 0) return null
+  return title.trim().substring(0, MAX_SESSION_TITLE)
+}
+
 function renameSession(sessionId: string, newTitle?: string): string {
   const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-
   if (!existsSync(dbPath)) {
     return "Session rename failed: OpenCode database not found at " + dbPath
   }
 
-  // `||` (not `??`): an explicitly empty title falls back to auto-generation,
-  // matching the original if/else.
-  const title = newTitle || generateSessionTitle(dbPath, sessionId)
-  if (!title || title.trim().length === 0) {
+  const trimmed = resolveSessionTitle(dbPath, sessionId, newTitle)
+  if (!trimmed) {
     return "Session rename failed: could not generate a title (no user messages found)"
   }
 
-  const trimmed = title.trim().substring(0, 120)
-  const escapedTitle = trimmed.replace(/'/g, "''")
-  const escapedId = sessionId.replace(/'/g, "''")
-  const sql = `UPDATE session SET title = '${escapedTitle}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
+  const sql = `UPDATE session SET title = '${sqlLiteral(trimmed)}', `
+    + `time_updated = ${Date.now()} WHERE id = '${sqlLiteral(sessionId)}'`
   try {
     execFileSync("sqlite3", [dbPath, sql], { timeout: SQLITE_TIMEOUT_MS })
     return `Session renamed to: "${trimmed}"`
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return `Session rename failed: ${msg}`
+    return `Session rename failed: ${err instanceof Error ? err.message : String(err)}`
   }
 }
 
