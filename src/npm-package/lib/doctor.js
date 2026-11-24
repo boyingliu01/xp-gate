@@ -3386,21 +3386,22 @@ function formatDoctorJson(checks, issues) {
 // real failure was silent: drifted agent bindings looked like a working setup
 // (B2), a stale skill copy made reinstall = downgrade (B4), and a missing
 // runner script surfaced only as a failed review (B3).
-async function doctorDelphi(options = {}) {
-  const { configPath, npmLatest } = options;
-  // #541: the shadow check needs the loader's global fallback path. It is
-  // injectable for tests; the default mirrors delphi-config.ts /
-  // delphi-external-review.cjs resolution (XDG_CONFIG_HOME honored).
-  const globalConfigPath = options.globalConfigPath
-    || path.join(process.env.XDG_CONFIG_HOME || path.join(require('os').homedir(), '.config'), 'xp-gate', '.delphi-config.json');
-  const checks = [];
-  const add = (name, status, detail) => checks.push({ name, status, detail });
+/**
+ * Check 2: Qoder Delphi agent bindings.
+ *
+ * Extracted from `doctorDelphi`, which measured CCN 81 over 235 lines by
+ * holding five independent checks. Each one is its own question with its own
+ * states, and inlining them made a failure impossible to locate.
+ *
+ * Reports through the caller's `add` so the check list stays one list.
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ * @param {{projectDir?: string}} options
+ */
+/** The three Delphi expert roles, in the order every report lists them. */
+const DELPHI_ROLES = ['architecture', 'technical', 'feasibility'];
 
-  // 1. Node >= 18: the runner gates on it and exits 1 mid-review otherwise.
-  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
-  add('Node.js >= 18', nodeMajor >= 18 ? 'PASS' : 'FAIL',
-    `current: ${process.versions.node}`);
-
+function checkDelphiAgentBindings(add, options) {
   // 2. Qoder agent bindings: present, parseable, three distinct ids, matching
   // what this version ships. A stale binding is a repair, not an error to
   // retype: the detail names delphi-setup. Project-level agents (from
@@ -3422,12 +3423,11 @@ async function doctorDelphi(options = {}) {
   const channelResolution = delphiChannel.resolveChannels({ home: channelHome });
   const nativeDisabled = !channelResolution.nativeEnabled;
   const { readQoderModelId } = require('./init.js');
-  const roles = ['architecture', 'technical', 'feasibility'];
   const homeAgentsDir = path.join(HOME_DIR(), '.qoder', 'agents');
   // Injectable for tests; defaults to the cwd the doctor runs from.
   const projectAgentsDir = path.join(options.projectDir || process.cwd(), '.qoder', 'agents');
-  const homeComplete = roles.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
-  const projectComplete = roles.every((r) => fs.existsSync(path.join(projectAgentsDir, `delphi-${r}.md`)));
+  const homeComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
+  const projectComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(projectAgentsDir, `delphi-${r}.md`)));
   const agentsDir = projectComplete ? projectAgentsDir : homeAgentsDir;
   const agentsSource = projectComplete
     ? `project-level ${agentsDir}`
@@ -3444,7 +3444,7 @@ async function doctorDelphi(options = {}) {
       `native channel disabled (channels=${channelResolution.channels.join(',')} via ${channelResolution.source}) — `
       + 'Delphi review runs through the external provider');
   }
-  for (const role of nativeDisabled ? [] : roles) {
+  for (const role of nativeDisabled ? [] : DELPHI_ROLES) {
     const agentPath = path.join(agentsDir, `delphi-${role}.md`);
     if (!fs.existsSync(agentPath)) {
       agentsStatus = 'FAIL';
@@ -3480,14 +3480,29 @@ async function doctorDelphi(options = {}) {
   // empty agentIds (the disabled path) would compute `0 !== 3` and re-report the very
   // FAIL the SKIP above just replaced.
   if (!nativeDisabled) {
-    if (agentIds.length !== roles.length) agentsStatus = 'FAIL';
+    if (agentIds.length !== DELPHI_ROLES.length) agentsStatus = 'FAIL';
     if (new Set(agentIds).size !== agentIds.length) {
       agentsStatus = 'FAIL';
       agentDetails.push('duplicate model binding across experts — three DISTINCT ids are required');
     }
     add('Qoder Delphi agent bindings', agentsStatus, agentDetails.join('; ') || 'all three bound');
   }
+}
 
+/**
+ * Check 3: installed skill copies match what this version ships.
+ *
+ * A drifted installed copy is how "reinstall from an old local repo" became a
+ * downgrade (#414 B4). Every bundled file is compared, not just SKILL.md --
+ * the install script copies *.json and references/ too (#414 R1 MI-03).
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ * @param {object} options
+ * @returns {string} the resolved installed skill dir, which the runner-locate
+ *   check below reads. Returning it keeps ONE resolution instead of duplicating
+ *   the platform mapping at the second call site.
+ */
+function checkSkillInstallParity(add, options) {
   // 3. Skill install parity: a drifted installed copy is how "reinstall from
   // an old local repo" became a downgrade (#414 B4). Every bundled file is
   // compared, not just SKILL.md — the install script copies *.json and
@@ -3558,20 +3573,20 @@ async function doctorDelphi(options = {}) {
       }
     }
   }
+  return installedSkillDir;
+}
 
-  // 4. Runner script locate: the runner must be findable from the places a
-  // review actually starts.
-  const runnerCandidates = [
-    ['package bundle', path.join(PKG_DIR, 'scripts', 'delphi-external-review.cjs')],
-    ['project', path.join(process.cwd(), 'scripts', 'delphi-external-review.cjs')],
-    ['installed skill', path.join(installedSkillDir, 'scripts', 'delphi-external-review.cjs')],
-  ];
-  const foundRunner = runnerCandidates.filter(([, p]) => fs.existsSync(p));
-  add('delphi-external-review runner', foundRunner.length > 0 ? 'PASS' : 'FAIL',
-    foundRunner.length > 0
-      ? foundRunner.map(([label, p]) => `${label}: ${p}`).join('; ')
-      : 'not found in package bundle, project, or installed skill');
-
+/**
+ * Check 5: the Delphi config parses and names three distinct callable models.
+ *
+ * Pulled out of `doctorDelphi` because it is the largest single check and the
+ * least related to the others: everything above asks "is this installed", this
+ * one asks "will a review actually run".
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ */
+function checkDelphiConfigPing(add, options, globalConfigPath) {
+  const { configPath, npmLatest } = options;
   // 5. Config ping: parseable, three distinct callable models. A duplicate
   // model here is a review that will BLOCK later — say so now.
   //
@@ -3604,11 +3619,11 @@ async function doctorDelphi(options = {}) {
         add(cfgLabel, 'FAIL', `profile "${profileName}" not found`);
       } else {
         const experts = profile.experts || {};
-        const models = roles.map((r) => experts[r] && experts[r].model);
+        const models = DELPHI_ROLES.map((r) => experts[r] && experts[r].model);
         const providers = profile.providers || {};
-        const missingRoles = roles.filter((r, i) => !models[i]);
+        const missingRoles = DELPHI_ROLES.filter((r, i) => !models[i]);
         const duplicates = models.filter((m, i) => m && models.indexOf(m) !== i);
-        const badProviders = roles.filter((r) => {
+        const badProviders = DELPHI_ROLES.filter((r) => {
           const e = experts[r];
           return !e || !providers[e.provider]
             || !providers[e.provider].base_url
@@ -3636,16 +3651,16 @@ async function doctorDelphi(options = {}) {
           // same allowlist and exit code; doctor reports it here so the guard
           // finally has a caller (`xp-gate doctor delphi`) instead of existing
           // only in its own docstring.
-          const hostedSeats = roles.filter((r) => {
-            const m = models[roles.indexOf(r)];
+          const hostedSeats = DELPHI_ROLES.filter((r) => {
+            const m = models[DELPHI_ROLES.indexOf(r)];
             return m && !String(m).toLowerCase().startsWith('local-');
           });
           if (hostedSeats.length > 0) {
             add('Delphi local-model guard (#574)', 'WARN',
-              `hosted (non local-*) seats: ${hostedSeats.map((r) => `${r}=${models[roles.indexOf(r)]}`).join(', ')} — `
+              `hosted (non local-*) seats: ${hostedSeats.map((r) => `${r}=${models[DELPHI_ROLES.indexOf(r)]}`).join(', ')} — `
                 + 'local-only review is the standing rule; run: python scripts/check_delphi_local_models.py --probe');
           } else {
-            add('Delphi local-model guard (#574)', 'PASS', `all ${roles.length} seats are local-*`);
+            add('Delphi local-model guard (#574)', 'PASS', `all ${DELPHI_ROLES.length} seats are local-*`);
           }
         }
         // #541 follow-up: shadow detection. Loaders fall back to the global
@@ -3669,10 +3684,10 @@ async function doctorDelphi(options = {}) {
               }
               return (experts[role] && experts[role].model) || null;
             };
-            const gModels = roles.map((r, i) => pickExpert(gExperts, r, i));
-            // Compare only roles BOTH sides define: a role missing on one side
+            const gModels = DELPHI_ROLES.map((r, i) => pickExpert(gExperts, r, i));
+            // Compare only DELPHI_ROLES BOTH sides define: a role missing on one side
             // is an incomplete config (check 5 already FAILs it), not drift.
-            const differing = roles.filter((r, i) => gModels[i] && models[i] && gModels[i] !== models[i]);
+            const differing = DELPHI_ROLES.filter((r, i) => gModels[i] && models[i] && gModels[i] !== models[i]);
             if (differing.length > 0) {
               add('Delphi config shadow (#541)', 'WARN',
                 `project config shadows ${globalConfigPath}; seats differ (${differing.join(', ')}) — reviews run from other directories will use different models`);
@@ -3750,6 +3765,45 @@ async function doctorDelphi(options = {}) {
       }
     }
   }
+}
+
+async function doctorDelphi(options = {}) {
+  const { configPath, npmLatest } = options;
+  // #541: the shadow check needs the loader's global fallback path. It is
+  // injectable for tests; the default mirrors delphi-config.ts /
+  // delphi-external-review.cjs resolution (XDG_CONFIG_HOME honored).
+  const globalConfigPath = options.globalConfigPath
+    || path.join(process.env.XDG_CONFIG_HOME || path.join(require('os').homedir(), '.config'), 'xp-gate', '.delphi-config.json');
+  const checks = [];
+  const add = (name, status, detail) => checks.push({ name, status, detail });
+
+  // 1. Node >= 18: the runner gates on it and exits 1 mid-review otherwise.
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  add('Node.js >= 18', nodeMajor >= 18 ? 'PASS' : 'FAIL',
+    `current: ${process.versions.node}`);
+
+  // 2. Qoder agent bindings.
+  checkDelphiAgentBindings(add, options);
+
+  // 3. Skill install parity. It also resolves the installed skill dir, which
+  // the runner-locate check below needs.
+  const installedSkillDir = checkSkillInstallParity(add, options);
+
+  // 4. Runner script locate: the runner must be findable from the places a
+  // review actually starts.
+  const runnerCandidates = [
+    ['package bundle', path.join(PKG_DIR, 'scripts', 'delphi-external-review.cjs')],
+    ['project', path.join(process.cwd(), 'scripts', 'delphi-external-review.cjs')],
+    ['installed skill', path.join(installedSkillDir, 'scripts', 'delphi-external-review.cjs')],
+  ];
+  const foundRunner = runnerCandidates.filter(([, p]) => fs.existsSync(p));
+  add('delphi-external-review runner', foundRunner.length > 0 ? 'PASS' : 'FAIL',
+    foundRunner.length > 0
+      ? foundRunner.map(([label, p]) => `${label}: ${p}`).join('; ')
+      : 'not found in package bundle, project, or installed skill');
+
+  // 5. Config ping.
+  checkDelphiConfigPing(add, options, globalConfigPath);
 
   for (const check of checks) {
     const mark = check.status === 'PASS' ? '✓' : check.status === 'SKIP' ? '○' : check.status === 'WARN' ? '⚠' : '✗';
