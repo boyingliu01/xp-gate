@@ -703,72 +703,110 @@ function parseLanguageFlag(args) {
  * @param {string} projectRoot - Project root directory
  * @returns {{detected: string[], configFiles: Object.<string, string[]>}}
  */
+/**
+ * Decide between Flutter and Dart, which are not independent answers.
+ *
+ * Flutter IMPLIES Dart: reporting both makes a Flutter app look like a Dart project
+ * that happens to use Flutter. A `pubspec.yaml` mentioning flutter is the
+ * authoritative signal, so it overrides the extension-based guess rather than
+ * adding to it.
+ *
+ * @param {Set<string>} detected mutated in place
+ * @param {string} projectRoot
+ */
+function resolveFlutterVersusDart(detected, projectRoot) {
+  if (detected.has('flutter') && detected.has('dart')) detected.delete('dart');
+
+  const pubspecPath = path.join(projectRoot, 'pubspec.yaml');
+  if (!fs.existsSync(pubspecPath)) return;
+  try {
+    if (fs.readFileSync(pubspecPath, 'utf8').includes('flutter:')) {
+      detected.delete('dart');
+      detected.add('flutter');
+    }
+  } catch {
+    // An unreadable pubspec leaves the extension-based detection as it stands.
+  }
+}
+
+/**
+ * A predicate over the file extensions present in a project, scanned on first use.
+ *
+ * Lazy on purpose: the extension fallback is only consulted for languages that have
+ * no config file to look for, and the scan is bounded rather than a full walk. On a
+ * config-heavy project it never runs at all; on an extension-only one it runs once,
+ * not once per language.
+ *
+ * @param {string} projectRoot
+ * @returns {(ext: string) => boolean}
+ */
+function makeLazyExtensionScanner(projectRoot) {
+  let scanned = null;
+  return (ext) => {
+    if (scanned === null) scanned = extensionsPresentIn(projectRoot);
+    return scanned.has(ext);
+  };
+}
+
+/**
+ * Walk the registry and record every language the project shows evidence of.
+ *
+ * A language is detected by a config file OR, when it has none to look for, by its
+ * extension. Config files take precedence because extension lists are broad -- IaC
+ * lists yaml/yml, and matching on those would make every repo with a CI YAML an
+ * Infrastructure-as-Code project (#468).
+ */
+function scanRegistryForLanguages(projectRoot, detected, configFiles, extensionSeen) {
+for (const [lang, def] of Object.entries(LANGUAGE_REGISTRY)) {
+  const foundConfigs = [];
+  
+  for (const configFile of def.configFiles) {
+    // Handle glob patterns
+    if (configFile.includes('*')) {
+      // Simple glob matching
+      const pattern = configFile.replace(/\*/g, '.*');
+      const regex = new RegExp(pattern);
+      try {
+        const files = fs.readdirSync(projectRoot);
+        for (const file of files) {
+          if (regex.test(file)) {
+            foundConfigs.push(file);
+          }
+        }
+      } catch { /* ignore */ }
+    } else {
+      const configPath = path.join(projectRoot, configFile);
+      if (fs.existsSync(configPath)) {
+        foundConfigs.push(configFile);
+      }
+    }
+  }
+
+  if (foundConfigs.length > 0) {
+    detected.add(lang);
+    configFiles[lang] = foundConfigs;
+  } else if (def.configFiles.length === 0 && def.extensions.some(extensionSeen)) {
+    // Shell and PowerShell have no package-manager manifest to key off, so file
+    // extensions are their only possible signal (#468). Languages that do have
+    // config files keep using them: their extension lists are broad (IaC lists
+    // yaml/yml), and matching on those would make every repo with a CI YAML an
+    // Infrastructure-as-Code project.
+    detected.add(lang);
+  }
+}
+}
+
 function detectProjectLanguages(projectRoot) {
   const detected = new Set();
   const configFiles = {};
 
-  // Scanned lazily: the extension fallback is only consulted for languages that
-  // have no config file to look for, and the scan is bounded, not a full walk.
-  let scannedExtensions = null;
-  const extensionSeen = (ext) => {
-    if (scannedExtensions === null) scannedExtensions = extensionsPresentIn(projectRoot);
-    return scannedExtensions.has(ext);
-  };
+  const extensionSeen = makeLazyExtensionScanner(projectRoot);
 
-  for (const [lang, def] of Object.entries(LANGUAGE_REGISTRY)) {
-    const foundConfigs = [];
-    
-    for (const configFile of def.configFiles) {
-      // Handle glob patterns
-      if (configFile.includes('*')) {
-        // Simple glob matching
-        const pattern = configFile.replace(/\*/g, '.*');
-        const regex = new RegExp(pattern);
-        try {
-          const files = fs.readdirSync(projectRoot);
-          for (const file of files) {
-            if (regex.test(file)) {
-              foundConfigs.push(file);
-            }
-          }
-        } catch { /* ignore */ }
-      } else {
-        const configPath = path.join(projectRoot, configFile);
-        if (fs.existsSync(configPath)) {
-          foundConfigs.push(configFile);
-        }
-      }
-    }
+  scanRegistryForLanguages(projectRoot, detected, configFiles, extensionSeen);
 
-    if (foundConfigs.length > 0) {
-      detected.add(lang);
-      configFiles[lang] = foundConfigs;
-    } else if (def.configFiles.length === 0 && def.extensions.some(extensionSeen)) {
-      // Shell and PowerShell have no package-manager manifest to key off, so file
-      // extensions are their only possible signal (#468). Languages that do have
-      // config files keep using them: their extension lists are broad (IaC lists
-      // yaml/yml), and matching on those would make every repo with a CI YAML an
-      // Infrastructure-as-Code project.
-      detected.add(lang);
-    }
-  }
 
-  // Special case: Flutter vs Dart
-  if (detected.has('flutter') && detected.has('dart')) {
-    detected.delete('dart'); // Flutter implies Dart
-  }
+  resolveFlutterVersusDart(detected, projectRoot);
 
-  // Check for Flutter specifically
-  const pubspecPath = path.join(projectRoot, 'pubspec.yaml');
-  if (fs.existsSync(pubspecPath)) {
-    try {
-      const content = fs.readFileSync(pubspecPath, 'utf8');
-      if (content.includes('flutter:')) {
-        detected.delete('dart');
-        detected.add('flutter');
-      }
-    } catch { /* ignore */ }
-  }
 
   return {
     detected: Array.from(detected),
