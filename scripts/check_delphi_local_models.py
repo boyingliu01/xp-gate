@@ -153,6 +153,60 @@ def load_json(path):
         return False
 
 
+def seat_items(experts):
+    """The (role, seat) pairs of a profile's `experts`, however it is shaped.
+
+    A dict is the current form; a LIST was the older one, and a config carried
+    straight from an older release must not crash the probe.
+    """
+    if isinstance(experts, dict):
+        return experts.items()
+    return [(e.get("role", i), e) for i, e in enumerate(experts)]
+
+
+def resolve_base_url(seat, prof, providers):
+    """The base_url a seat should be probed against, or None when ambiguous.
+
+    Route each seat through ITS OWN provider (R10 CI-01); only when the profile
+    declares exactly ONE provider may a seat without an explicit provider inherit
+    it. With several providers an unspecified seat is a FAIL -- guessing could probe
+    (or ship) against the wrong gateway (R11 MA-01).
+
+    Returns None rather than a guess when the seat's provider is unresolved AND the
+    profile has more than one candidate: two gateways and no way to tell which one
+    is a question for the operator, not something to settle by picking one.
+    """
+    name = seat.get("provider") or prof.get("provider") or ""
+    base = providers.get(name, {}).get("base_url")
+    if base:
+        return base
+    bases = {p.get("base_url") for p in providers.values() if p.get("base_url")}
+    return bases.pop() if len(bases) == 1 else None
+
+
+def probe_profile(path, cfg, key):
+    """Probe every seat of one config file. Returns False on any failed seat."""
+    prof = active_profile(cfg)
+    if not prof:
+        print(
+            f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})"
+        )
+        return True
+
+    providers = prof.get("providers", {})
+    ok = True
+    for role, seat in seat_items(prof.get("experts", {})):
+        base = resolve_base_url(seat, prof, providers)
+        if not base:
+            print(
+                f"PROBE FAIL role={role}: provider {seat.get('provider')!r} unresolved among {len(providers)} providers"
+            )
+            ok = False
+            continue
+        ok = probe_one_seat(base, key, role, str(seat.get("model") or "")) and ok
+    return ok
+
+
 def probe(cfg_by_path):
     key = (os.environ.get("WHALECLOUD_API_KEY") or "").strip()
     if not key:
@@ -160,40 +214,7 @@ def probe(cfg_by_path):
         return True
     ok = True
     for path, cfg in cfg_by_path.items():
-        prof = active_profile(cfg)
-        if not prof:
-            print(
-                f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})"
-            )
-            continue
-        providers = prof.get("providers", {})
-        experts = prof.get("experts", {})
-        items = (
-            experts.items()
-            if isinstance(experts, dict)
-            else [(e.get("role", i), e) for i, e in enumerate(experts)]
-        )
-        for role, seat in items:
-            # Route each seat through ITS OWN provider (R10 CI-01); only when
-            # the profile declares exactly ONE provider may a seat without an
-            # explicit provider inherit it. With several providers an
-            # unspecified seat is a FAIL — guessing could probe (or ship)
-            # against the wrong gateway (R11 MA-01).
-            name = seat.get("provider") or prof.get("provider") or ""
-            base = providers.get(name, {}).get("base_url")
-            if not base:
-                bases = {
-                    p.get("base_url") for p in providers.values() if p.get("base_url")
-                }
-                if len(bases) == 1:
-                    base = bases.pop()
-                else:
-                    print(
-                        f"PROBE FAIL role={role}: provider {name!r} unresolved among {len(providers)} providers"
-                    )
-                    ok = False
-                    continue
-            ok = probe_one_seat(base, key, role, str(seat.get("model") or "")) and ok
+        ok = probe_profile(path, cfg, key) and ok
     return ok
 
 

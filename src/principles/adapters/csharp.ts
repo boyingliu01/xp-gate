@@ -243,49 +243,58 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     const char = this.fileContent[i];
     const nextChar = this.fileContent[i + 1] || '';
 
+    const inContext = this.skipActiveContext(i, char, nextChar, lex);
+    if (inContext !== null) return inContext;
+    return this.openContext(i, char, nextChar, lex);
+  }
+
+  /**
+   * Continue whatever literal or comment is already open, or null.
+   *
+   * Checked before ANY opener, so a `//` inside a raw string stays text and a quote
+   * inside a comment stays a comment.
+   */
+  private skipActiveContext(
+    i: number,
+    char: string,
+    nextChar: string,
+    lex: CSharpLexState,
+  ): number | null {
     if (lex.inRawString) return this.skipRawStringBody(i, lex);
     if (lex.inBlockComment) return this.skipBlockCommentBody(i, char, nextChar, lex);
     if (lex.inString) return this.skipStringBody(i, char, lex);
+    return null;
+  }
 
+  /**
+   * Recognise a construct that opens here, or return 0 for a structural character.
+   *
+   * C# has three string forms and they are told apart by PREFIX, not by the quote
+   * alone: `@"` is verbatim (where `""` escapes a quote and a backslash is literal),
+   * a run of 3+ quotes is raw, and a bare quote is ordinary.
+   */
+  private openContext(i: number, char: string, nextChar: string, lex: CSharpLexState): number {
     if (char === '/' && nextChar === '/') return skipLineComment(this.fileContent, i);
     if (char === '/' && nextChar === '*') {
       lex.inBlockComment = true;
       return 2;
     }
-
-    // `@"` opens a verbatim string; `"` alone opens a normal one.
     if (char === '@' && nextChar === '"') {
       lex.inString = true;
       lex.inVerbatimString = true;
       lex.stringChar = '"';
       return 2;
     }
-
-    // A run of 3+ quotes is a raw string literal.
-    if (char === '"') {
-      let run = 0;
-      let k = i;
-      while (this.fileContent[k] === '"') { run++; k++; }
-      if (run >= 3) {
-        lex.inRawString = true;
-        lex.rawStringQuoteCount = run;
-        return run;
-      }
-      lex.inString = true;
-      lex.inVerbatimString = false;
-      lex.stringChar = '"';
-      return 1;
-    }
-
+    if (char === '"') return openDoubleQuoteString(this.fileContent, i, lex);
     if (char === "'") {
       lex.inString = true;
       lex.inVerbatimString = false;
       lex.stringChar = "'";
       return 1;
     }
-
     return 0;
   }
+
 
 
   private skipBlockCommentBody(
@@ -339,4 +348,28 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     }
     return run;
   }
+}
+/**
+ * A `"` opens a raw literal when it starts a run of 3+, else an ordinary one.
+ *
+ * The run is counted BEFORE the state changes: a raw literal consumes the whole run
+ * as its opening delimiter, so three quotes must not be read as an empty string.
+ *
+ * A module-level function rather than a method because `CSharpAdapter` sits at the
+ * class-size ceiling -- and this reads nothing but its arguments.
+ *
+ * @returns characters consumed
+ */
+function openDoubleQuoteString(content: string, i: number, lex: CSharpLexState): number {
+  let run = 0;
+  while (content[i + run] === '"') run++;
+  if (run >= 3) {
+    lex.inRawString = true;
+    lex.rawStringQuoteCount = run;
+    return run;
+  }
+  lex.inString = true;
+  lex.inVerbatimString = false;
+  lex.stringChar = '"';
+  return 1;
 }

@@ -68,6 +68,13 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+/** The shard budget turns "hangs forever" into a named failure; see
+ * `runShard` for the measurement behind it. */
+const DEFAULT_SHARD_TIMEOUT_MIN = 45;
+
+/** Runners that make bats' `--jobs` work; without one it runs serially. */
+const PARALLEL_RUNNERS = ['parallel', 'rush', 'semaphore', 'shlock', 'flock'];
+
 const BATS_DIR = path.join(ROOT, 'githooks', '__tests__');
 
 /**
@@ -167,9 +174,45 @@ const DEFAULT_MS = 3000;
  * the same on a developer's machine and on a runner, and so it can be pasted
  * into a local command unchanged.
  */
+/**
+ * Read a suite directory, or report why it could not be read.
+ *
+ * An unreadable directory is not an EMPTY one: reporting zero suites lets the run
+ * "pass" having executed nothing, which is the failure mode this whole script
+ * exists to prevent.
+ *
+ * @returns {string[]} empty when unreadable
+ */
+function readSuitesOrReport(dir) {
+  try {
+    return fs.readdirSync(dir);
+  } catch (err) {
+    console.error(`❌ cannot read the suite directory ${dir}: ${err.message}`);
+    // Empty, not null: the caller runs nothing, visibly, rather than passing as if
+    // there were nothing to run.
+    return [];
+  }
+}
+
+/**
+ * Whether one parallel runner is on PATH.
+ *
+ * A probe that cannot run answers "not present", which is the SAFE answer: the shard
+ * then runs serially rather than asking for parallelism it does not have.
+ */
+function runnerProbeSucceeded(tool) {
+  const windows = process.platform === 'win32';
+  try {
+    const probe = spawnSync(windows ? 'where' : 'command', windows ? [tool] : ['-v', tool],
+      { cwd: ROOT, stdio: 'ignore', shell: !windows });
+    return probe.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 function listSuites(dir = BATS_DIR) {
-  return fs
-    .readdirSync(dir)
+  return readSuitesOrReport(dir)
     .filter((f) => f.endsWith('.bats'))
     .sort()
     .map((f) => path.relative(ROOT, path.join(dir, f)).split(path.sep).join('/'));
@@ -267,15 +310,45 @@ function findBatsBin() {
  * which is why this check exists rather than trusting the `--jobs` request.
  */
 function hasParallelRunner() {
-  for (const tool of ['parallel', 'rush', 'semaphore', 'shlock', 'flock']) {
-    const probe = spawnSync(process.platform === 'win32' ? 'where' : 'command',
-      process.platform === 'win32' ? [tool] : ['-v', tool],
-      { cwd: ROOT, stdio: 'ignore', shell: process.platform !== 'win32' });
-    if (probe.status === 0) {
-      return true;
-    }
+  return PARALLEL_RUNNERS.some((tool) => runnerProbeSucceeded(tool));
+}
+
+/**
+ * How many bats jobs to actually use.
+ *
+ * `--jobs N` is a REQUEST, not a guarantee: -j needs GNU parallel or rush INSIDE the
+ * runner, and when neither is present bats aborts the whole shard with
+ * "ERROR: flock/shlock is required for parallelization within files!" -- printing no
+ * test results at all. Asking for parallelism therefore falls back to serial, which
+ * is the documented behaviour; the warning is what keeps that from being silent.
+ *
+ * @param {number} requested
+ * @returns {number} 1 when parallelism is unavailable
+ */
+function resolveJobs(requested) {
+  const usable = requested > 1 && hasParallelRunner();
+  if (!usable && requested > 1) {
+    console.warn(
+      `⚠️  --jobs ${requested} ignored: no parallel runner (GNU parallel / rush / ` +
+        `semaphore / shlock) on PATH. Running serially.`
+    );
   }
-  return false;
+  return usable ? requested : 1;
+}
+
+/**
+ * The bats argument list.
+ *
+ * `--print-output-on-failure` is kept from the original step: it is what made a red
+ * build diagnosable (#591).
+ *
+ * @param {number} effectiveJobs resolved by `resolveJobs`
+ * @param {string[]} files suites to run
+ * @returns {string[]}
+ */
+function batsArgs(effectiveJobs, files) {
+  const jobsArgs = effectiveJobs > 1 ? ['--jobs', String(effectiveJobs)] : [];
+  return [...jobsArgs, '--print-output-on-failure', ...files];
 }
 
 function runShard(files, jobs) {
@@ -286,31 +359,8 @@ function runShard(files, jobs) {
     return 1;
   }
   const args = [bin];
-  // -j needs GNU parallel or rush INSIDE the runner. When neither is present
-  // bats errors out, so the flag is only added when the operator asks AND the
-  // runner exists; otherwise the shard still runs, serially, which is correct
-  // if slower. `--print-output-on-failure` is kept from the original step: it
-  // is what made a red build diagnosable (#591).
-  //
-  // The "runner exists" half of that sentence was documented but never coded:
-  // `--jobs N` was passed on the operator's word alone, so on Windows --
-  // where none of the four (parallel/rush/semaphore/shlock) is installed --
-  // bats aborted the whole shard with
-  //     ERROR: flock/shlock is required for parallelization within files!
-  // and printed no test results at all. Asking for parallelism is a request,
-  // not a guarantee; falling back to serial is the documented behaviour, and
-  // now it is the actual one.
-  const effectiveJobs = jobs > 1 && hasParallelRunner() ? jobs : 1;
-  if (jobs > 1 && effectiveJobs === 1) {
-    console.warn(
-      `⚠️  --jobs ${jobs} ignored: no parallel runner (GNU parallel / rush / ` +
-        `semaphore / shlock) on PATH. Running serially.`
-    );
-  }
-  if (effectiveJobs > 1) {
-    args.push('--jobs', String(effectiveJobs));
-  }
-  args.push('--print-output-on-failure', ...files);
+  const effectiveJobs = resolveJobs(jobs);
+  args.push(...batsArgs(effectiveJobs, files));
 
   console.log(
     `Running ${files.length} suite(s)` +
@@ -339,30 +389,41 @@ function runShard(files, jobs) {
   // no parallel runner exists (measured: 18m47s of a 22m24s job is serial bats).
   const timeoutMs = Number(process.env.XP_GATE_BATS_TIMEOUT_MS) > 0
     ? Number(process.env.XP_GATE_BATS_TIMEOUT_MS)
-    : 45 * 60 * 1000;
+    : DEFAULT_SHARD_TIMEOUT_MIN * 60 * 1000;
 
-  const result = spawnSync('bash', args, {
-    cwd: ROOT,
-    stdio: 'inherit',
-    timeout: timeoutMs,
-  });
-  // A timeout surfaces in TWO different shapes depending on the platform and on
-  // whether a signal or the exit status is observed first, and the splitting
-  // was measured, not assumed: on Windows this run reports
-  //     result.error.code === 'ETIMEDOUT', error.message 'spawnSync bash ETIMEDOUT'
-  // while other paths set signal='SIGTERM' with a null status. Checking only
-  // the signal would have reported the Windows case as "could not start the
-  // runner" -- the opposite of what happened.
-  const timedOut =
-    result.error?.code === 'ETIMEDOUT' ||
-    (result.signal === 'SIGTERM' && (result.status === null || result.status !== 0));
+  let result;
+  try {
+    result = spawnSync('bash', args, { cwd: ROOT, stdio: 'inherit', timeout: timeoutMs });
+  } catch (err) {
+    console.error(`❌ could not start the bats runner: ${err.message}`);
+    return 1;
+  }
+  return interpretShardResult(result, timeoutMs);
+}
+
+/**
+ * Turn a shard's spawn result into an exit code.
+ *
+ * A timeout surfaces in TWO shapes depending on platform and on whether a signal or
+ * the exit status is observed first, and the splitting was measured, not assumed: on
+ * Windows this reports `error.code === 'ETIMEDOUT'` with message
+ * "spawnSync bash ETIMEDOUT", while other paths set `signal: 'SIGTERM'` and a null
+ * status. Checking only the signal would have reported the Windows case as "could not
+ * start the runner" -- the opposite of what happened.
+ *
+ * @param {object} result spawnSync result
+ * @param {number} timeoutMs the budget that was applied
+ * @returns {number} exit code
+ */
+function interpretShardResult(result, timeoutMs) {
+  const timedOut = result.error?.code === 'ETIMEDOUT'
+    || (result.signal === 'SIGTERM' && (result.status === null || result.status !== 0));
   if (timedOut) {
-    const budget = Math.round(timeoutMs / 1000);
     console.error(
-      `❌ bats did not finish within ${budget}s (XP_GATE_BATS_TIMEOUT_MS). ` +
-        `A suite is hung rather than slow: the slowest measured suite takes 880s. ` +
-        `Re-run the shard with --print-only to see which files it contains, then ` +
-        `run them one at a time.`
+      `❌ bats did not finish within ${Math.round(timeoutMs / 1000)}s (XP_GATE_BATS_TIMEOUT_MS). `
+        + 'A suite is hung rather than slow: the slowest measured suite takes 880s. '
+        + 'Re-run the shard with --print-only to see which files it contains, then '
+        + 'run them one at a time.'
     );
     return 1;
   }
