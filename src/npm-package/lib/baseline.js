@@ -218,6 +218,26 @@ function recordFailures(tool, errors) {
 }
 
 /**
+ * Is this linter runnable?
+ *
+ * Four languages asked this with the same four-line try/catch around a
+ * `<tool> --version` call. One definition means one behaviour: a tool that
+ * answers is usable, one that throws is not, and the caller records the
+ * unmeasured files either way.
+ *
+ * @param {string} versionCmd e.g. 'ruff --version'
+ * @returns {boolean}
+ */
+function probeTool(versionCmd) {
+  try {
+    execSync(versionCmd, { encoding: 'utf8', stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Match a linter's reported path back to one of the files we asked about.
  *
  * Returns null rather than undefined when nothing matches. The previous version
@@ -338,15 +358,7 @@ async function createBaseline() {
       fs.existsSync('eslint.config.js');
     const eslintBin = resolveLocalBin('eslint');
 
-    let eslintAvailable = Boolean(eslintBin);
-    if (!eslintAvailable) {
-      try {
-        execSync('npx eslint --version', { encoding: 'utf8', stdio: 'pipe' });
-        eslintAvailable = true;
-      } catch {
-        eslintAvailable = false;
-      }
-    }
+    const eslintAvailable = Boolean(eslintBin) || probeTool('npx eslint --version');
 
     if (eslintConfigExists && eslintAvailable) {
       const eslintCmd = eslintBin ? quoteBin(eslintBin) : 'npx eslint';
@@ -380,13 +392,7 @@ async function createBaseline() {
   // Python — ruff
   const pyFiles = findFilesByExt(['.py']);
   if (pyFiles.length > 0) {
-    let ruffAvailable = false;
-    try {
-      execSync('ruff --version', { encoding: 'utf8', stdio: 'pipe' });
-      ruffAvailable = true;
-    } catch {
-      ruffAvailable = false;
-    }
+    const ruffAvailable = probeTool('ruff --version');
 
     if (ruffAvailable) {
       const { results, errors, failedFiles } = runLintInBatches(
@@ -457,13 +463,7 @@ async function createBaseline() {
   // Shell — shellcheck
   const shFiles = findShellScripts();
   if (shFiles.length > 0) {
-    let shAvailable = false;
-    try {
-      execSync('shellcheck --version', { encoding: 'utf8', stdio: 'pipe' });
-      shAvailable = true;
-    } catch {
-      shAvailable = false;
-    }
+    const shAvailable = probeTool('shellcheck --version');
 
     if (shAvailable) {
       // Same batching as the other tools: one argv for every shell script in the
