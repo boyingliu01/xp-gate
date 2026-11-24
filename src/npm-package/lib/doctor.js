@@ -211,7 +211,7 @@ async function execWithTimeout(cmd, opts = {}) {
   // tool as exit 1 + "'x' is not recognized"), and re-running it would only
   // burn time, so that path still returns null immediately.
   const { attempts, ...execOpts } = opts;
-  const maxAttempts = process.platform === 'win32' ? (attempts || 3) : 1;
+  const maxAttempts = process.platform === 'win32' ? (attempts || WINDOWS_EXEC_ATTEMPTS) : 1;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const { stdout, stderr } = await execAsync(cmd, {
@@ -224,7 +224,7 @@ async function execWithTimeout(cmd, opts = {}) {
         // existing null check ("probe produced nothing") applies — an empty
         // non-null result would read as a present tool with no version.
         if (attempt + 1 < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 50));
+          await new Promise(resolve => setTimeout(resolve, EXEC_RETRY_DELAY_MS));
           continue;
         }
         return null;
@@ -959,8 +959,17 @@ function readPair(repoFile, installedFile) {
  * import the .ts module). Grandfathers everything before AUDIT_LEDGER_SINCE;
  * only NEW implausible durations or unattributed commits count as issues.
  */
+/** Windows reports a missing tool as exit 1, so a retry separates a real failure
+ * from a transient one. */
+const WINDOWS_EXEC_ATTEMPTS = 3;
+/** Back-off between those attempts (the previous inline value). */
+const EXEC_RETRY_DELAY_MS = 50;
+
+/** A tool call longer than this is a measurement artefact, not a real duration. */
+const AUDIT_MAX_PLAUSIBLE_HOURS = 6;
+
 const AUDIT_LEDGER_SINCE = '2026-10-30T00:00:00.000Z';
-const AUDIT_MAX_PLAUSIBLE_MS = 6 * 60 * 60 * 1000;
+const AUDIT_MAX_PLAUSIBLE_MS = AUDIT_MAX_PLAUSIBLE_HOURS * 60 * 60 * 1000;
 
 function diagnoseAuditLedger(ctx = {}) {
   const checks = [];
@@ -2424,11 +2433,17 @@ async function findStaleInvisibleTools(registry, refreshedPath) {
  * @param {{stale: string[], parts: string[], invisible: string[], checks: Array}} p
  *   `checks` and `parts` are mutated
  */
+/** A review needs three DISTINCT models; two of the same model is one opinion twice. */
+const MIN_DISTINCT_MODELS = 3;
+
+/** Three entries convey the pattern; a wall of paths gets skimmed. */
+const PREVIEW_ITEMS = 3;
+
 function reportStalePath(p) {
   const { stale, parts, invisible, checks } = p;
-  const preview = stale.length <= 3
+  const preview = stale.length <= PREVIEW_ITEMS
     ? stale.join(' ; ')
-    : `${stale.slice(0, 3).join(' ; ')} ; …+${stale.length - 3} more`;
+    : `${stale.slice(0, PREVIEW_ITEMS).join(' ; ')} ; …+${stale.length - PREVIEW_ITEMS} more`;
   parts.unshift(`PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview})`);
   checks.push({
     name: 'PATH freshness',
@@ -4191,7 +4206,7 @@ function checkDshChannelReadiness(add) {
         const selection = settings.subagentModelSelection;
         const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
         const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
-        if (selection && selection.enabled === true && new Set(ids).size >= 3) {
+        if (selection && selection.enabled === true && new Set(ids).size >= MIN_DISTINCT_MODELS) {
           add('DSH subagent model selection', 'PASS', `${settingsFile}: enabled, ${new Set(ids).size} distinct allowed models`);
         } else if (selection && selection.enabled === true) {
           add('DSH subagent model selection', 'FAIL',
