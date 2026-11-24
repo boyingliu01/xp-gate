@@ -26,7 +26,7 @@ validate_regular_file "$mirror"
 # separate from the default "does the mirror match" verifier.
 # shellcheck source=scripts/lib/mirror-post-sync.sh
 . "$(dirname "$0")/lib/mirror-post-sync.sh"
-xp_gate_assert_post_sync "$mirror" "$@"
+xp_gate_assert_post_sync "$mirror" "$@" || [ $? -eq 2 ] || exit $?
 
 if ! cmp -s "$canonical" "$mirror"; then
   printf '%s\n' "FAIL: $mirror differs from canonical $canonical before sync" >&2

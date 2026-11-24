@@ -31,7 +31,7 @@ validate_regular_tree "$mirror"
 # separate from the default "does the mirror match" verifier.
 # shellcheck source=scripts/lib/mirror-post-sync.sh
 . "$(dirname "$0")/lib/mirror-post-sync.sh"
-xp_gate_assert_post_sync "$mirror" "$@"
+xp_gate_assert_post_sync "$mirror" "$@" || [ $? -eq 2 ] || exit $?
 
 # `__tests__/` is deliberately absent from the mirror: it holds the source tree's
 # own vitest suites, which the npm package neither ships nor runs. Before P1-E
