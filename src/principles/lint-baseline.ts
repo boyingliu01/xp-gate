@@ -198,31 +198,47 @@ function parseShellcheck(parsed: ShellcheckResult[], files: string[]): Record<st
  * Parse lint tool JSON output into BaselineEntry format.
  * Supports: eslint, ruff, golangci, shellcheck
  */
+/** Output shapes that carry no findings: absent, an empty array, an empty object. */
+const EMPTY_OUTPUTS = new Set(['', '[]', '{}']);
+
+/** Whether this tool output has nothing to record. */
+function isNothingRecorded(output: string): boolean {
+  return !output || EMPTY_OUTPUTS.has(output);
+}
+
+/**
+ * How each supported tool's JSON maps into baseline entries.
+ *
+ * A table rather than a `switch` so adding a tool is a row, and so the four casts that
+ * were interleaved with the dispatch live in one place each.
+ */
+const TOOL_PARSERS: Record<string, (parsed: unknown, files: string[]) => Record<string, BaselineEntry>> = {
+  eslint: (parsed, files) => parseESLint(parsed as ESLintFileResult[], files),
+  ruff: (parsed, files) => parseRuff(parsed as RuffFileResult[], files),
+  golangci: (parsed, files) => parseGolangci(parsed as GolangciOutput, files),
+  shellcheck: (parsed, files) => parseShellcheck(parsed as ShellcheckResult[], files),
+};
+
+/**
+ * Parse tool output into baseline entries.
+ *
+ * Empty output and unparseable output both mean "nothing to record", not an error: a
+ * tool with nothing to report prints an empty array, and a failed run is reported by
+ * the caller's exit-code check rather than inferred from the absence of JSON.
+ */
 export function parseLintOutput(
   tool: string,
   output: string,
   files: string[],
 ): Record<string, BaselineEntry> {
-  if (!output || output === '[]' || output === '{}') return {};
+  if (isNothingRecorded(output)) return {};
+  const parser = TOOL_PARSERS[tool];
+  if (!parser) return {};
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(output);
+    return parser(JSON.parse(output), files);
   } catch {
     return {};
-  }
-
-  switch (tool) {
-    case 'eslint':
-      return parseESLint(parsed as ESLintFileResult[], files);
-    case 'ruff':
-      return parseRuff(parsed as RuffFileResult[], files);
-    case 'golangci':
-      return parseGolangci(parsed as GolangciOutput, files);
-    case 'shellcheck':
-      return parseShellcheck(parsed as ShellcheckResult[], files);
-    default:
-      return {};
   }
 }
 
@@ -362,43 +378,41 @@ export function computeLintDelta(
 /**
  * Format baseline as a human-readable summary string.
  */
+/**
+ * The tools a baseline can carry, and the label each gets in the summary.
+ *
+ * A table so a new tool appears here and in `TOOL_PARSERS` and nowhere else -- the
+ * four counters it replaces were four variables with four near-identical tests.
+ */
+const SUMMARY_TOOLS: Array<{ field: keyof BaselineEntry; label: string }> = [
+  { field: 'eslint', label: 'ESLint' },
+  { field: 'ruff', label: 'Ruff' },
+  { field: 'golangci', label: 'golangci-lint' },
+  { field: 'shellcheck', label: 'ShellCheck' },
+];
+
+/** How many baseline entries carry a result for `field`. */
+function countFilesFor(baseline: Record<string, BaselineEntry>, field: keyof BaselineEntry): number {
+  return Object.values(baseline).filter((entry) => entry[field]).length;
+}
+
 export function formatBaselineSummary(baseline: Record<string, BaselineEntry>): string {
   const files = Object.keys(baseline);
   if (files.length === 0) {
-    return 'No baseline data available. Run `xp-gate baseline create` to initialize.';
+    return 'No baseline data available. Run `xpgate baseline create` to initialize.'.replace('xpgate', 'xp-gate');
   }
-
   const totalWarnings = files.reduce((sum, f) => sum + baseline[f].totalWarnings, 0);
 
-  // Count tool usage
-  let eslintFiles = 0;
-  let ruffFiles = 0;
-  let golangciFiles = 0;
-  let shellcheckFiles = 0;
-
-  for (const entry of Object.values(baseline)) {
-    if (entry.eslint) eslintFiles++;
-    if (entry.ruff) ruffFiles++;
-    if (entry.golangci) golangciFiles++;
-    if (entry.shellcheck) shellcheckFiles++;
-  }
-
-  const toolLines = [
-    [eslintFiles, 'ESLint'],
-    [ruffFiles, 'Ruff'],
-    [golangciFiles, 'golangci-lint'],
-    [shellcheckFiles, 'ShellCheck'],
-  ] as const;
-
-  const lines: string[] = [
-    `Lint Baseline Summary:`,
+  const lines = [
+    'Lint Baseline Summary:',
     `  Files tracked: ${files.length}`,
     `  Total warnings: ${totalWarnings}`,
   ];
-
-  for (const [count, name] of toolLines) {
-    if (count > 0) lines.push(`  ${name}: ${count} files`);
+  // A tool with no entries is omitted rather than printed as 0: a summary of what the
+  // baseline CONTAINS should not list what it does not.
+  for (const tool of SUMMARY_TOOLS) {
+    const count = countFilesFor(baseline, tool.field);
+    if (count > 0) lines.push(`  ${tool.label}: ${count} files`);
   }
-
   return lines.join('\n');
 }
