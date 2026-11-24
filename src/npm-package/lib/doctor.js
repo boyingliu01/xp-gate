@@ -3624,57 +3624,32 @@ function reportLanguageToolRepairs(opts) {
   }
 }
 
-async function doctor(args) {
-  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
-  if (briefFlag && errors.length === 0) return runBriefReport(jsonMode);
-  if (errors.length > 0) {
-    for (const error of errors) console.error(error);
-    return 1;
-  }
-
-  if (!jsonMode) {
-    console.log('XP-Gate Doctor');
-    console.log('==============');
-  }
-
-  // §4.13 (#451 REQ-3): state which hook files actually execute, so "I edited
-  // githooks/ but nothing changed" is answerable without reading git config.
-  if (!jsonMode) printEffectiveHooks();
-  // #495: the same for the gate modules the hook sources at runtime.
-  if (!jsonMode) printEffectiveModules();
-
-  const config = getConfig();
-
-  // §4.8: mode === "uninstalled" → print "xp-gate is not installed"
-  if (isUninstalledMode(config)) return reportUninstalled(jsonMode);
-
-  // §4.13 (#451 REQ-2): explicit one-command sync from the repo's githooks/.
-  if (syncHooks) {
-    const code = runHookAndModuleSync(force);
-    if (code !== 0) return code;
-  }
-
-
-  // §4.13: --fix only when mode === "active"
-  if (fixMode && isActiveMode(config)) {
-    fixIssues(null, config, installToolsFlag);
-  }
-
-  // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
-  // even if network/subprocess checks stack up (fix #348: 43s on Windows).
-  // #629: give diagnoseAsync a live sink so a deadline can keep what finished.
-  // Without it, `Promise.race` discarded the entire diagnosis -- so the SAME
-  // healthy install reported different results run to run, and a timed-out run
-  // lost the skills section entirely (scrapers read 0/12 installed skills).
+/**
+ * Run the diagnosis under a deadline, keeping whatever finished.
+ *
+ * #348: a stack of network/subprocess probes once took 43 s on Windows, so the whole
+ * run needs a bound. #629: the naive `Promise.race` DISCARDED everything the
+ * diagnosis had produced, so the same healthy install reported different results run
+ * to run and a timed-out run lost the skills section entirely (scrapers read 0/12
+ * installed skills). The live `progress` sink is what makes a deadline able to say
+ * "these finished, those did not" instead of replacing the diagnosis with a
+ * placeholder.
+ *
+ * The pending surfaces are named individually so the reader knows exactly which
+ * conclusions are missing, not merely that "something timed out".
+ *
+ * @param {boolean} refreshEnv
+ * @returns {Promise<{checks: Array, issues: number, timedOut: boolean}>}
+ */
+async function raceDiagnosis(refreshEnv) {
   const progress = { checks: [], getIssues: () => 0 };
   const diagnosisPromise = diagnoseAsync(refreshEnv, progress);
-  let diagnosisTimer = null;
+
+  let timer = null;
   const timeoutPromise = new Promise((resolve) => {
-    diagnosisTimer = setTimeout(() => {
+    timer = setTimeout(() => {
       const completed = Array.isArray(progress.checks) ? progress.checks : [];
       const reported = new Set(completed.map((c) => c && c.name));
-      // Name the surfaces that did NOT report, so the reader knows exactly which
-      // conclusions are missing rather than just "something timed out".
       const pending = ['Hooks', 'Adapters', 'Skills', 'Gate env', 'OpenCode TUI']
         .filter((name) => !reported.has(name));
       resolve(mergeTimedOutDiagnosis(
@@ -3683,46 +3658,167 @@ async function doctor(args) {
       ));
     }, GLOBAL_DIAGNOSIS_TIMEOUT_MS);
   });
-  const { checks, issues: diagnosedIssues, timedOut } = await Promise.race([
-    diagnosisPromise.then(r => ({ ...r, timedOut: false })),
+
+  const result = await Promise.race([
+    diagnosisPromise.then((r) => ({ ...r, timedOut: false })),
     timeoutPromise,
   ]);
-  clearTimeout(diagnosisTimer);
-  let issues = diagnosedIssues;
+  clearTimeout(timer);
+  return { checks: result.checks, issues: result.issues, timedOut: result.timedOut };
+}
+
+/**
+ * Run the explicitly requested hook/module sync.
+ *
+ * §4.13 (#451 REQ-2): `doctor --sync-hooks` exists because editing `githooks/` changes
+ * nothing until the installed copies are refreshed -- the trap that made #451 read as
+ * "my edit does nothing". A non-zero result stops the run: the diagnosis that follows
+ * would describe the state the sync just failed to reach.
+ *
+ * @param {boolean} force
+ * @returns {boolean} whether the sync succeeded
+ */
+function runExplicitSync(force) {
+  return runHookAndModuleSync(force) === 0;
+}
+
+/**
+ * Emit the machine-readable report.
+ *
+ * `--format json` means EXACTLY one JSON document on stdout, so the human report and
+ * the trailing checks' own chatter are silenced while their results are still
+ * collected into `checks`. Silencing by swapping `console.log` is the blunt way to do
+ * it, and the `finally` is not optional: a throwing check would otherwise leave the
+ * process unable to print anything at all.
+ *
+ * @param {Array} checks
+ * @param {number} issues
+ * @param {number} issues
+ * @returns {Promise<number>} exit code
+ */
+async function emitJsonReport(checks, issues) {
+  const say = console.log;
+  console.log = () => {};
+  try {
+    // JSON mode is read-only by contract, so the language-tool count is discarded.
+    issues += (await collectTrailing(checks)).issues;
+  } finally {
+    console.log = say;
+  }
+  console.log(JSON.stringify(formatDoctorJson(checks, issues)));
+  return issues > 0 ? 1 : 0;
+}
+
+/**
+ * Re-diagnose after `--fix` so the run reports the RESULT, not the intent.
+ *
+ * The post-fix race mirrors the pre-fix one, including its failure mode: a timeout
+ * discards the drift surface, so the post-fix report must not read as "all clear".
+ * The placeholder says the result is UNCONFIRMED, not clean -- otherwise a fix that
+ * could not be verified would be indistinguishable from one that worked.
+ *
+ * @returns {Promise<void>}
+ */
+async function reportPostFixDiagnosis() {
+  console.log('\nRe-running diagnosis after fix...');
+  const postDiagPromise = diagnoseAsync();
+  let postTimer = null;
+  const postTimeout = new Promise((resolve) => {
+    postTimer = setTimeout(() => resolve({
+      checks: [{
+        name: 'Post-fix diagnosis',
+        status: 'WARN',
+        detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — the fix result is unconfirmed, not clean`,
+      }],
+      issues: 1,
+      timedOut: true,
+    }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
+  });
+
+  const { checks: postChecks, timedOut: postTimedOut } = await Promise.race([
+    postDiagPromise.then((r) => ({ ...r, timedOut: false })),
+    postTimeout,
+  ]);
+  clearTimeout(postTimer);
+  if (postTimedOut) {
+    postChecks.push(...diagnoseHookDrift().checks, ...diagnoseModuleDrift().checks);
+  }
+  printReport(postChecks);
+}
+
+/**
+ * Print the header and which hook files and gate modules actually execute.
+ *
+ * §4.13 (#451 REQ-3): the question "I edited `githooks/` but nothing changed" is
+ * answered by printing the effective paths, not by asking the reader to work it out
+ * from git config. #495 added the same for the gate modules the hook sources at
+ * runtime, since those drift independently of the hook files.
+ *
+ * Human output only -- `--format json` puts one document on stdout and nothing else.
+ */
+function printEffectiveLayout() {
+  console.log('XP-Gate Doctor');
+  console.log('==============');
+  printEffectiveHooks();
+  printEffectiveModules();
+}
+
+/**
+ * Handle the two ways a run can end before any diagnosis: `--brief`, and bad flags.
+ *
+ * `--brief` is checked FIRST and only when the flags are valid: it answers its own
+ * question and never reads the diagnosis surface, so flagging an unrelated unknown
+ * flag would be noise on a call designed to be cheap.
+ *
+ * @param {{briefFlag: boolean, errors: string[], jsonMode: boolean}} p
+ * @returns {number|null} an exit code when the run ends here, else null
+ */
+function handlePreflight(p) {
+  const { briefFlag, errors, jsonMode } = p;
+  if (briefFlag && errors.length === 0) {
+    runBriefReport(jsonMode);
+    return process.exitCode ?? 0;
+  }
+  if (errors.length === 0) return null;
+  for (const error of errors) console.error(error);
+  return 1;
+}
+
+async function doctor(args) {
+  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
+  const preflight = handlePreflight({ briefFlag, errors, jsonMode });
+  if (preflight !== null) return preflight;
+
+  const config = getConfig();
+  if (!jsonMode) printEffectiveLayout();
+  // §4.8: mode === "uninstalled" → print "xp-gate is not installed"
+  if (isUninstalledMode(config)) return reportUninstalled(jsonMode);
+
+  if (syncHooks && !runExplicitSync(force)) return 1;
+  if (fixMode && isActiveMode(config)) fixIssues(null, config, installToolsFlag);
+
+  // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
+  // even if network/subprocess checks stack up (fix #348: 43s on Windows).
+  // #629: give diagnoseAsync a live sink so a deadline can keep what finished.
+  // Without it, `Promise.race` discarded the entire diagnosis -- so the SAME
+  // healthy install reported different results run to run, and a timed-out run
+  // lost the skills section entirely (scrapers read 0/12 installed skills).
+  const diagnosis = await raceDiagnosis(refreshEnv);
+  const { checks, timedOut } = diagnosis;
+  let issues = diagnosis.issues;
 
   // A timeout discards every check that had not reported yet, including the
   // drift surface, so the raced result must never be allowed to read as clean
   // (#495 Round 2 -- this is the "stale modules, doctor green" outcome itself).
   issues += coverIncompleteRun(timedOut, checks, issues);
 
-  const collectTrailingChecks = async () => {
-    const { issues: trailing, langIssues } = await collectTrailing(checks);
-    return { trailing, langIssues };
-  };
-
-  if (jsonMode) {
-    // Machine-readable output means EXACTLY one JSON document on stdout, so the
-    // human report and the trailing checks' chatter are silenced while their
-    // results are still collected into `checks`.
-    const say = console.log;
-    console.log = () => {};
-    try {
-      // JSON mode is read-only by contract, so the language-tool count is discarded.
-      issues += (await collectTrailingChecks()).trailing;
-    } finally {
-      console.log = say;
-    }
-    console.log(JSON.stringify(formatDoctorJson(checks, issues)));
-    return issues > 0 ? 1 : 0;
-  }
+  if (jsonMode) return await emitJsonReport(checks, issues);
 
   printReport(checks);
 
-  const trailing = await collectTrailingChecks();
-  issues += trailing.trailing;
-  const langIssues = trailing.langIssues;
-
-  reportLanguageToolRepairs({ fixMode, installToolsFlag, langIssues });
+  const trailing = await collectTrailing(checks);
+  issues += trailing.issues;
+  reportLanguageToolRepairs({ fixMode, installToolsFlag, langIssues: trailing.langIssues });
 
 
 
@@ -3733,30 +3829,7 @@ async function doctor(args) {
 
   console.log(`\n✗ ${issues} issue(s) found`);
 
-  // Re-run diagnosis after fix to report updated status
-  if (fixMode && isActiveMode(config)) {
-    console.log('\nRe-running diagnosis after fix...');
-    const postDiagPromise = diagnoseAsync();
-    let postTimer = null;
-    const postTimeout = new Promise((resolve) => {
-      postTimer = setTimeout(() => resolve({
-        checks: [{ name: 'Post-fix diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — the fix result is unconfirmed, not clean` }],
-        issues: 1,
-        timedOut: true,
-      }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
-    });
-    const { checks: postChecks, timedOut: postTimedOut } = await Promise.race([
-      postDiagPromise.then(r => ({ ...r, timedOut: false })),
-      postTimeout,
-    ]);
-    clearTimeout(postTimer);
-    // Symmetry with the pre-fix race above: a timeout here discards the drift
-    // surface too, so the post-fix report must not read as "all clear".
-    if (postTimedOut) {
-      postChecks.push(...diagnoseHookDrift().checks, ...diagnoseModuleDrift().checks);
-    }
-    printReport(postChecks);
-  }
+  if (fixMode && isActiveMode(config)) await reportPostFixDiagnosis();
 
   return issues > 0 ? 1 : 0;
 }

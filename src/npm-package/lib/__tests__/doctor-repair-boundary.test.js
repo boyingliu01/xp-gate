@@ -26,7 +26,7 @@ describe('doctor/install repair boundary (#502)', () => {
     // The gate now lives in `reportLanguageToolRepairs`, so assert it there and
     // check that `doctor` reaches that function -- pinning the old inline line
     // would forbid extracting it.
-    expect(DOCTOR).toMatch(/reportLanguageToolRepairs\(\{ fixMode, installToolsFlag, langIssues \}\)/);
+    expect(DOCTOR).toMatch(/reportLanguageToolRepairs\(\{ fixMode, installToolsFlag, langIssues: trailing\.langIssues \}\)/);
     const repairFn = DOCTOR.slice(DOCTOR.indexOf('function reportLanguageToolRepairs('));
     expect(repairFn).toMatch(/if \(!installToolsFlag\)/);
     // And the install itself must sit AFTER that guard, never before it.
