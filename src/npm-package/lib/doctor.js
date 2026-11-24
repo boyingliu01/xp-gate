@@ -2344,6 +2344,30 @@ async function readRegistryPath() {
  * be perfectly healthy; only this terminal is stale, and the remedy is a
  * new terminal (or `xp-gate doctor --refresh-env`).
  */
+/**
+ * Report that PATH freshness could not be determined.
+ *
+ * Fail closed: no readable registry hive is NOT evidence of freshness, so this is
+ * a WARN with the reason attached, never a PASS. The advice is included because the
+ * consequence is concrete -- after installing a tool, a stale PATH makes "not
+ * found" mean "not in this terminal", and the operator needs to know that before
+ * believing any verdict.
+ *
+ * @param {Array<{label: string, error: string}>} halves
+ * @param {Array} checks appended to
+ * @returns {number} 0 -- a WARN contributes no issue count
+ */
+function reportUnreadablePath(halves, checks) {
+  const reasons = halves.map((h) => `${h.label}: ${h.error}`).join('; ');
+  checks.push({
+    name: 'PATH freshness',
+    status: 'WARN',
+    detail: `Could not read the registry PATH (${reasons}) — staleness unknown. `
+      + 'After installing a tool, open a new terminal before trusting any "not found" verdict.',
+  });
+  return 0;
+}
+
 async function diagnosePathStaleness(checks, options = {}) {
   if (process.platform !== 'win32') return 0;
   const registry = options.registry || (await readRegistryPath());
@@ -2361,15 +2385,7 @@ async function diagnosePathStaleness(checks, options = {}) {
   let status = 'PASS';
   const parts = [];
   let stale;
-  if (usable.length === 0) {
-    // Fail closed: no readable hive is not evidence of freshness.
-    checks.push({
-      name: 'PATH freshness',
-      status: 'WARN',
-      detail: `Could not read the registry PATH (${halves.map((h) => `${h.label}: ${h.error}`).join('; ')}) — staleness unknown. After installing a tool, open a new terminal before trusting any "not found" verdict.`,
-    });
-    return 0;
-  }
+  if (usable.length === 0) return reportUnreadablePath(halves, checks);
   stale = [
     ...usable.flatMap((h) => findStalePathEntries(process.env.PATH || '', h.entries)),
   ];
