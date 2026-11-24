@@ -245,93 +245,134 @@ function recordProblem(msg, errors, warnings, isLegacySprint) {
   return false;
 }
 
-function validateEvidence(phase, projectDir) {
-  const evidenceConfig = EVIDENCE_FILES[phase];
-  if (!evidenceConfig) {
-    return { ok: true, errors: [], warnings: [] };
-  }
-
-  // Read sprint state to determine evidence_schema_version
-  let evidenceSchemaVersion = 0;
+/**
+ * The evidence schema version this sprint was created under, or 0.
+ *
+ * A sprint predating `evidence_schema_version` is treated as legacy (0), and
+ * legacy sprints get WARNINGS where current ones get ERRORS. Unreadable state
+ * therefore degrades to "even more lenient", which is the safe direction: a
+ * corrupted state file must not start BLOCKING phase transitions that ran fine
+ * yesterday.
+ *
+ * @param {string} projectDir
+ * @returns {number}
+ */
+function readEvidenceSchemaVersion(projectDir) {
   try {
     const manager = new SprintStateManager(projectDir);
     const state = manager.read();
     if (state && typeof state.evidence_schema_version === 'number') {
-      evidenceSchemaVersion = state.evidence_schema_version;
+      return state.evidence_schema_version;
     }
   } catch {
-    // If state can't be read, treat as legacy (version 0)
+    // Unreadable state is not a versioned sprint.
   }
+  return 0;
+}
 
-  const isLegacySprint = evidenceSchemaVersion < 2;
-  const errors = [];
-  const warnings = [];
+/**
+ * Read and parse the evidence file, or produce the verdict that ends validation.
+ *
+ * Three failures share one shape: record the problem, then either pass (legacy
+ * sprint, where the rule was not in force) or fail. They differ only in the
+ * message and in whether the failing messages list is replaced, which is why the
+ * third case reports `errors: [msg]` rather than the accumulated array.
+ *
+ * Returns `{ verdict }` when validation should stop, `{ data }` otherwise -- a
+ * single exit point per outcome, so the caller keeps one shape.
+ *
+ * @param {string} evidenceFilePath
+ * @param {string} configuredPath
+ * @param {string[]} errors
+ * @param {string[]} warnings
+ * @param {boolean} isLegacySprint
+ * @returns {{verdict?: object, data?: object}}
+ */
+function loadEvidence(evidenceFilePath, configuredPath, errors, warnings, isLegacySprint) {
+  const fileName = path.basename(configuredPath);
 
-  const evidenceFilePath = path.join(projectDir, evidenceConfig.path);
-  const fileName = path.basename(evidenceConfig.path);
-
-  // Check file existence
   if (!fs.existsSync(evidenceFilePath)) {
-    const msg = `Evidence file missing: ${evidenceConfig.path}`;
+    const msg = `Evidence file missing: ${configuredPath}`;
     if (recordProblem(msg, errors, warnings, isLegacySprint)) {
-      return { ok: true, errors: [], warnings };
+      return { verdict: { ok: true, errors: [], warnings } };
     }
-    return { ok: false, errors, warnings };
+    return { verdict: { ok: false, errors, warnings } };
   }
 
-  // Parse JSON
   let data;
   try {
-    const raw = fs.readFileSync(evidenceFilePath, 'utf8');
-    data = JSON.parse(raw);
+    data = JSON.parse(fs.readFileSync(evidenceFilePath, 'utf8'));
   } catch {
     const msg = `${fileName} is malformed JSON`;
     if (recordProblem(msg, errors, warnings, isLegacySprint)) {
-      return { ok: true, errors: [], warnings };
+      return { verdict: { ok: true, errors: [], warnings } };
     }
-    return { ok: false, errors, warnings };
+    return { verdict: { ok: false, errors, warnings } };
   }
 
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
     const msg = `${fileName} must contain a JSON object`;
     if (recordProblem(msg, errors, warnings, isLegacySprint)) {
-      return { ok: true, errors: [], warnings };
+      return { verdict: { ok: true, errors: [], warnings } };
     }
-    return { ok: false, errors: [msg], warnings };
+    return { verdict: { ok: false, errors: [msg], warnings } };
   }
 
-  // Check required fields
-  for (const field of evidenceConfig.requiredFields) {
-    if (!(field in data)) {
-      const msg = `${fileName} is missing required field: ${field}`;
-      recordProblem(msg, errors, warnings, isLegacySprint);
-    }
-  }
+  return { data };
+}
 
-  // If any required fields missing for new sprint, block early
-  if (errors.length > 0) {
-    return { ok: false, errors, warnings };
+/**
+ * The evidence must describe the commit under review.
+ *
+ * Anti-staleness: a report generated before the last commit says nothing about
+ * the code as it now stands. `currentHead === null` is reported separately -- "I
+ * could not determine HEAD" and "HEAD moved" need different fixes, and collapsing
+ * them would tell an operator to regenerate a report when the repository itself is
+ * the problem.
+ *
+ * @param {string} fileName
+ * @param {object} data
+ * @param {string} projectDir
+ * @param {string[]} errors
+ * @param {string[]} warnings
+ * @param {boolean} isLegacySprint
+ */
+function checkHeadCommit(fileName, data, projectDir, errors, warnings, isLegacySprint) {
+  const currentHead = getCurrentHeadCommit(projectDir);
+  if (currentHead === null) {
+    const msg = `${fileName}: unable to resolve current Git HEAD; evidence identity cannot be verified`;
+    recordProblem(msg, errors, warnings, isLegacySprint);
+  } else if (data.head_commit !== currentHead) {
+    const msg = `${fileName}: head_commit mismatch — report has "${data.head_commit}", current HEAD is "${currentHead}"`;
+    recordProblem(msg, errors, warnings, isLegacySprint);
   }
+}
 
-  // Run blocking check
-  if (!evidenceConfig.blockingCheck(data)) {
-    const msg = `${fileName}: ${evidenceConfig.blockingMessage}`;
-    if (recordProblem(msg, errors, warnings, isLegacySprint)) {
-      return { ok: true, errors: [], warnings };
-    }
-    return { ok: false, errors, warnings };
-  }
-
-  // Phase-specific anti-staleness checks
+/**
+ * Anti-staleness checks specific to phases 2 and 4.
+ *
+ * Both phases review artifacts that are expensive to regenerate and cheap to let
+ * rot: a spec hash, a requirements hash, the commit the review was written
+ * against. Each check records rather than returns, so a report with several
+ * staleness problems names all of them in one pass.
+ *
+ * Phase 2 does NOT re-check head_commit; the shared branch in the caller already
+ * does, and it used to be checked twice.
+ *
+ * @param {number} phase
+ * @param {string} fileName
+ * @param {object} data
+ * @param {string} projectDir
+ * @param {string[]} errors
+ * @param {string[]} warnings
+ * @param {boolean} isLegacySprint
+ */
+function checkPhaseSpecificEvidence(phase, fileName, data, projectDir, errors, warnings, isLegacySprint) {
+  // Phase-specific anti-staleness checks. Phase 2's head_commit is checked here
+  // too, so the branch below must NOT check it again -- it used to, and a phase-2
+  // report with a stale HEAD produced TWO warnings for one problem.
   if (phase === 2 || phase === 4) {
-    const currentHead = getCurrentHeadCommit(projectDir);
-    if (currentHead === null) {
-      const msg = `${fileName}: unable to resolve current Git HEAD; evidence identity cannot be verified`;
-      recordProblem(msg, errors, warnings, isLegacySprint);
-    } else if (data.head_commit !== currentHead) {
-      const msg = `${fileName}: head_commit mismatch — report has "${data.head_commit}", current HEAD is "${currentHead}"`;
-      recordProblem(msg, errors, warnings, isLegacySprint);
-    }
+    checkHeadCommit(fileName, data, projectDir, errors, warnings, isLegacySprint);
   }
 
   if (phase === 4) {
@@ -367,12 +408,49 @@ function validateEvidence(phase, projectDir) {
       recordProblem(msg, errors, warnings, isLegacySprint);
     }
 
-    const currentHead = getCurrentHeadCommit(projectDir);
-    if (data.head_commit !== currentHead) {
-      const msg = `${fileName}: head_commit mismatch — review has "${data.head_commit}", current HEAD is "${currentHead}"; regenerate the requirements review for the current commit`;
+  }
+}
+
+function validateEvidence(phase, projectDir) {
+  const evidenceConfig = EVIDENCE_FILES[phase];
+  if (!evidenceConfig) {
+    return { ok: true, errors: [], warnings: [] };
+  }
+
+  const isLegacySprint = readEvidenceSchemaVersion(projectDir) < 2;
+  const errors = [];
+  const warnings = [];
+
+  const evidenceFilePath = path.join(projectDir, evidenceConfig.path);
+  const fileName = path.basename(evidenceConfig.path);
+
+  const loaded = loadEvidence(evidenceFilePath, evidenceConfig.path, errors, warnings, isLegacySprint);
+  if (loaded.verdict) return loaded.verdict;
+  const data = loaded.data;
+
+  // Check required fields
+  for (const field of evidenceConfig.requiredFields) {
+    if (!(field in data)) {
+      const msg = `${fileName} is missing required field: ${field}`;
       recordProblem(msg, errors, warnings, isLegacySprint);
     }
   }
+
+  // If any required fields missing for new sprint, block early
+  if (errors.length > 0) {
+    return { ok: false, errors, warnings };
+  }
+
+  // Run blocking check
+  if (!evidenceConfig.blockingCheck(data)) {
+    const msg = `${fileName}: ${evidenceConfig.blockingMessage}`;
+    if (recordProblem(msg, errors, warnings, isLegacySprint)) {
+      return { ok: true, errors: [], warnings };
+    }
+    return { ok: false, errors, warnings };
+  }
+
+  checkPhaseSpecificEvidence(phase, fileName, data, projectDir, errors, warnings, isLegacySprint);
 
   if (errors.length > 0) {
     return { ok: false, errors, warnings };
@@ -599,9 +677,13 @@ function passesSequenceGuard(manager, phase, status, forceTransition) {
   return false;
 }
 
-
-async function handlePhaseTransition(args = []) {
-  if (args.includes('--help')) {
+/**
+ * Print the phase-transition usage text.
+ *
+ * Separated so the command body reads as what it does. The text is the contract
+ * users copy from, so it lives in one place.
+ */
+function printTransitionUsage() {
     console.log('Usage: xp-gate phase-transition <phase> <status> [options]');
     console.log('');
     console.log('Arguments:');
@@ -621,6 +703,109 @@ async function handlePhaseTransition(args = []) {
     console.log('  xp-gate phase-transition 2 in_progress --outputs \'{"spec":"path.yaml"}\'');
     console.log('  xp-gate phase-transition 4 completed --skip-evidence "Emergency hotfix"');
     console.log('  xp-gate phase-transition 3 completed --force   # skip-order override');
+}
+
+/**
+ * Warn when the phase being entered had an unfinished predecessor.
+ *
+ * Layer 1 of the #519 guard. Unlike layer 0 it does NOT block: entering a phase
+ * whose predecessor was never marked complete is a warning, because the state
+ * file is a record of what someone reported, not a source of truth about what
+ * happened, and blocking on it would strand a sprint whose history was lost.
+ *
+ * Extracted so `handlePhaseTransition` loses both its deepest nesting and a
+ * dozen lines it does not need to read.
+ *
+ * @param {object} manager SprintStateManager
+ * @param {number} phase
+ * @param {string} status
+ */
+function warnOnUnfinishedPredecessor(manager, phase, status) {
+  if (status !== 'in_progress' || phase < 2) return;
+
+  const preState = manager.read();
+  if (!preState || !Array.isArray(preState.phase_history)) return;
+
+  const prevPhase = phase - 1;
+  const prevEntry = preState.phase_history.find((e) => e.phase === prevPhase);
+  const prevName = PHASE_NAMES[prevPhase] || `Phase ${prevPhase}`;
+  // 'completed' and 'skipped' are both valid predecessor statuses.
+  if (!prevEntry || (prevEntry.status !== 'completed' && prevEntry.status !== 'skipped')) {
+    console.warn(`⚠️  [sprint-audit] Phase ${prevPhase} (${prevName}) not recorded as 'completed'`);
+    console.warn(`   Previous phase may have been skipped. Run: xp-gate phase-transition ${prevPhase} completed`);
+  }
+}
+
+/**
+ * Layer 2 of the #519 guard: completing a phase requires its evidence.
+ *
+ * `--skip-evidence` is an audited bypass, not a silent one: it demands a reason,
+ * records the skip, and warns that a third skip in one sprint raises an alert.
+ * The command cannot tell whether a skip was justified, so it makes the skip
+ * visible to the retro instead.
+ *
+ * @param {number} phase
+ * @param {string} projectDir
+ * @param {string} status
+ * @param {boolean} skipEvidence
+ * @param {string} skipEvidenceReason
+ * @returns {boolean} true when the transition may proceed
+ */
+function checkEvidenceGate(phase, projectDir, status, skipEvidence, skipEvidenceReason) {
+  if (status !== 'completed' || !EVIDENCE_FILES[phase]) return true;
+
+  if (skipEvidence) {
+    if (!skipEvidenceReason) {
+      console.error('Error: --skip-evidence requires --reason "<text>" to be provided');
+      return false;
+    }
+    logEvidenceSkip(projectDir, phase, skipEvidenceReason);
+    console.warn('⚠️  Evidence skipped. This will appear in retro reports. Single-sprint limit: >2 skips per sprint will trigger an alert.');
+    return true;
+  }
+
+  const evidence = validateEvidence(phase, projectDir);
+  for (const w of evidence.warnings) {
+    console.warn(`⚠️  [sprint-audit] ${w}`);
+  }
+  if (evidence.ok) return true;
+
+  for (const e of evidence.errors) {
+    console.error(`❌ [sprint-audit] ${e}`);
+  }
+  console.error(`   Phase ${phase} (${PHASE_NAMES[phase]}) cannot transition to 'completed' without valid evidence.`);
+  console.error('   Use --skip-evidence "<reason>" to bypass (audited).');
+  return false;
+}
+
+/** The statuses a phase transition may name. */
+const VALID_TRANSITION_STATUSES = ['in_progress', 'completed', 'skipped', 'failed', 'paused'];
+
+/**
+ * Reject a phase number or status that cannot apply, naming what IS valid.
+ *
+ * Pure check-and-report. `parseInt('abc')` is NaN, and NaN fails every comparison
+ * silently, so the guard is what keeps a typo from reaching the state file.
+ *
+ * @param {number} phase
+ * @param {string} status
+ * @returns {boolean}
+ */
+function validateTransitionInput(phase, status) {
+  if (!Number.isInteger(phase) || phase < 1 || phase > 6) {
+    console.error(`Error: Phase must be 1-6, got ${phase}`);
+    return false;
+  }
+  if (!VALID_TRANSITION_STATUSES.includes(status)) {
+    console.error(`Error: Status must be one of: ${VALID_TRANSITION_STATUSES.join(', ')}`);
+    return false;
+  }
+  return true;
+}
+
+async function handlePhaseTransition(args = []) {
+  if (args.includes('--help')) {
+    printTransitionUsage();
     return 0;
   }
 
@@ -632,17 +817,7 @@ async function handlePhaseTransition(args = []) {
   const { phase, status, projectDir, renderFlag, outputs,
     skipEvidence, skipEvidenceReason, forceTransition } = parsed;
 
-  // Validate inputs
-  if (phase < 1 || phase > 6) {
-    console.error(`Error: Phase must be 1-6, got ${phase}`);
-    return 1;
-  }
-
-  const validStatuses = ['in_progress', 'completed', 'skipped', 'failed', 'paused'];
-  if (!validStatuses.includes(status)) {
-    console.error(`Error: Status must be one of: ${validStatuses.join(', ')}`);
-    return 1;
-  }
+  if (!validateTransitionInput(phase, status)) return 1;
 
   // Execute transition
   try {
@@ -652,52 +827,10 @@ async function handlePhaseTransition(args = []) {
     if (!passesSequenceGuard(manager, phase, status, forceTransition)) return 1;
 
     // ── Layer 1: Pre-transition gate check ──
-    // Check BEFORE transitionPhase() to validate previous phase completion.
-    // Runs when status === 'in_progress' and phase >= 2.
-    // No side effects — only outputs WARNING, does not modify state.
-    if (status === 'in_progress' && phase >= 2) {
-      const preState = manager.read();
-      if (preState && Array.isArray(preState.phase_history)) {
-        const prevPhase = phase - 1;
-        const prevEntry = preState.phase_history.find(e => e.phase === prevPhase);
-        const prevName = PHASE_NAMES[prevPhase] || `Phase ${prevPhase}`;
-        // 'completed' and 'skipped' are both valid predecessor statuses
-        if (!prevEntry || (prevEntry.status !== 'completed' && prevEntry.status !== 'skipped')) {
-          console.warn(
-            `⚠️  [sprint-audit] Phase ${prevPhase} (${prevName}) not recorded as 'completed'`
-          );
-          console.warn(
-            `   Previous phase may have been skipped. Run: xp-gate phase-transition ${prevPhase} completed`
-          );
-        }
-      }
-      // If no sprint-state.json exists yet, skip check (no previous phase to validate)
-    }
+    warnOnUnfinishedPredecessor(manager, phase, status);
 
-    // ── Layer 2: Evidence validation (blocks on status === 'completed') ──
-    if (status === 'completed' && EVIDENCE_FILES[phase]) {
-      if (skipEvidence) {
-        if (!skipEvidenceReason) {
-          console.error('Error: --skip-evidence requires --reason "<text>" to be provided');
-          return 1;
-        }
-        logEvidenceSkip(projectDir, phase, skipEvidenceReason);
-        console.warn('⚠️  Evidence skipped. This will appear in retro reports. Single-sprint limit: >2 skips per sprint will trigger an alert.');
-      } else {
-        const evidence = validateEvidence(phase, projectDir);
-        for (const w of evidence.warnings) {
-          console.warn(`⚠️  [sprint-audit] ${w}`);
-        }
-        if (!evidence.ok) {
-          for (const e of evidence.errors) {
-            console.error(`❌ [sprint-audit] ${e}`);
-          }
-          console.error(`   Phase ${phase} (${PHASE_NAMES[phase]}) cannot transition to 'completed' without valid evidence.`);
-          console.error(`   Use --skip-evidence "<reason>" to bypass (audited).`);
-          return 1;
-        }
-      }
-    }
+    // ── Layer 2: Evidence validation ──
+    if (!checkEvidenceGate(phase, projectDir, status, skipEvidence, skipEvidenceReason)) return 1;
 
     // Capture the before-image for the echo below (#519). Read once here so a
     // concurrent writer cannot make before/after disagree about their baseline.

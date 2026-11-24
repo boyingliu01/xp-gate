@@ -37,7 +37,7 @@
   },
   "src/npm-package/lib/phase-transition.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
-    "totalWarnings": 8
+    "totalWarnings": 6
   },
   "src/npm-package/lib/test-alignment.ts": {
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
