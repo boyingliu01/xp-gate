@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import { joinImportStatement, hasCodeAfterLeadingComment } from './gate-10-lines';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as fsNative from 'fs';
@@ -321,67 +322,6 @@ function scanImportAt(
   // re-scanning them would let the static pattern match a fragment and report
   // the import twice at the wrong line.
   return statement.consumed;
-}
-
-/**
- * Assemble a multi-line `import`/`export ... from '...'` statement starting at
- * `start`, or return null when that line does not open one.
- *
- * Returns the joined text and how many FOLLOWING lines were consumed, so the
- * caller can advance past them. The joining character is a space, which keeps
- * `from` adjacent to its quotes without disturbing `['"]` matching; the text is
- * only used for matching, never for the reported line number, so collapsing
- * newlines cannot shift a position that is reported.
- */
-function joinImportStatement(
-  lines: string[],
-  start: number,
-): { text: string; consumed: number } | null {
-  const first = lines[start];
-  // Only a line that BEGINS a static import/export can open a statement, and
-  // only a statement without its path yet needs joining.
-  if (!/^\s*(?:import|export)\b/.test(first)) return null;
-  if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(first)) return null; // already complete
-  const parts: string[] = [first];
-  for (let k = start + 1; k < lines.length && parts.length <= 40; k++) {
-    parts.push(lines[k]);
-    if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(lines[k])) {
-      return { text: parts.join(' '), consumed: k - start };
-    }
-  }
-  return null; // not a statement after all (or absurdly long): leave it alone
-}
-
-/**
- * Does any CODE follow the comment that starts this line?
- *
- * Returns true when the line does not start with a comment at all, so callers
- * can treat it as the single "should this line be scanned?" question. Only
- * three prefixes can begin a comment line and each closes in exactly one way,
- * so this needs no lexer — the masker has already established that the line is
- * not inside a literal or template.
- *
- * Skipping on the raw prefix alone was a real MISS: `/* eslint-disable *&#47;
- * import real from './real';` starts with `/*`, so the whole line was dropped
- * and the genuine import on it was never checked — the one direction a
- * compliance gate must not fail in. Measured before this fix: `[]`.
- *
- *   `//...`      -> nothing can follow on the same line
- *   `/* ... *&#47;`  -> whatever follows the first `*&#47;` is code
- *   `* ...`      -> a JSDoc continuation; `*&#47;` ends it, else nothing follows
- */
-function hasCodeAfterLeadingComment(originalLine: string): boolean {
-  const trimmed = originalLine.trim();
-  if (trimmed.startsWith('//')) return false; // nothing can follow on this line
-  if (trimmed.startsWith('/*') || trimmed.startsWith('*')) {
-    // A `/*` opener and a JSDoc `*` continuation both end at the first `*/`.
-    const close = trimmed.indexOf('*/');
-    // An unterminated block comment runs to the end of the file: no code here.
-    if (close === -1) return false;
-    const rest = trimmed.slice(close + 2).trim();
-    return rest.length > 0 && !rest.startsWith('//');
-  }
-  return true;
 }
 
 /** Apply one pattern to a single line; every relative hit is pushed with its line number. */
