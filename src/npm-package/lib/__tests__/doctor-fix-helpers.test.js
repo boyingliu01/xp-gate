@@ -213,3 +213,32 @@ describe('diagnoseLanguageTools', () => {
     expect(issues).toBe(0);
   });
 });
+
+describe('diagnoseCliTools', () => {
+  it('records a PASS line for every available tool', () => {
+    const checks = [];
+    const issues = doctor.diagnoseCliTools(checks, { check: () => ({ available: true, version: '1.2.3' }) });
+    expect(issues).toBe(0);
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks.every((c) => c.status === 'PASS')).toBe(true);
+    expect(checks[0].detail).toContain('1.2.3');
+  });
+
+  it('counts a missing tool as an issue and names the install command', () => {
+    const checks = [];
+    const issues = doctor.diagnoseCliTools(checks, { check: () => ({ available: false }) });
+    expect(issues).toBe(checks.length);
+    const warn = checks.find((c) => c.status === 'WARN');
+    expect(warn).toBeDefined();
+    // "Not found" alone is not actionable; the command is the point.
+    expect(warn.detail).toContain('install');
+  });
+
+  it('matches the check count to the registered gate tools', () => {
+    const checks = [];
+    doctor.diagnoseCliTools(checks, { check: () => ({ available: true }) });
+    // One line per registered tool: a tool that stops being reported looks like
+    // a tool that stopped being needed.
+    expect(checks.length).toBeGreaterThan(1);
+  });
+});

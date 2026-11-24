@@ -2489,12 +2489,15 @@ function diagnoseTemplateDir(config, checks) {
  * @param {Array} checks
  * @returns {number} issue count
  */
-function diagnoseCliTools(checks) {
+function diagnoseCliTools(checks, options = {}) {
   let issues = 0;
   const platform = process.platform;
+  // Injectable probe: the real one shells out to every gate tool, which is why
+  // this loop was only ever reached by a full doctor run.
+  const probe = options.check || checkCliTool;
 
   for (const entry of GATE_CLI_TOOLS) {
-    const { available, version } = checkCliTool(entry.tool);
+    const { available, version } = probe(entry.tool);
     const gateLabels = entry.gates.join(', ');
 
     if (available) {
@@ -3969,7 +3972,7 @@ function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
 }
 
 module.exports = {
-  doctor, doctorDelphi, isXpGateFile, diagnoseLanguageTools, SIGNATURES, getHookSignatures, isXpGateHookContent,
+  doctor, doctorDelphi, isXpGateFile, diagnoseLanguageTools, diagnoseCliTools, SIGNATURES, getHookSignatures, isXpGateHookContent,
   fixVersionMismatch,
   fixTemplateDirMismatch,
   fixMissingHooks,
