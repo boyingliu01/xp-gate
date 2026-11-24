@@ -743,30 +743,22 @@ function executeUninstallPlan(plan, config, purgeDirs, options) {
     return { hadErrors: hadErrors || purgeErrors, backupMeta };
 }
 
-async function uninstall(args) {
-  const options = {
-    dryRun: args.includes('--dry-run'),
-    force: args.includes('--force'),
-    forceLocal: args.includes('--local'),
-    forceGlobal: args.includes('--global'),
-    purge: args.includes('--purge'),
-  };
-
-  // §4.3 Step 1: Read config
-  const config = getConfig();
-
-  // §4.3 Step 1: No config → exit cleanly (AC-09 idempotency)
-  if (!config) {
-    console.log('No xp-gate installation found');
-    return 0;
-  }
-
-  // §4.3 Step 1: Already uninstalled → exit cleanly (AC-09 idempotency)
-  if (config.mode === 'uninstalled') {
-    console.log('No xp-gate installation found');
-    return 0;
-  }
-
+/**
+ * Decide the install mode and build the plan (plus purge targets).
+ *
+ * Returns `mode: null` when there is nothing xp-gate-shaped on this machine, which
+ * the caller reports as a clean exit -- uninstalling twice is not an error, and
+ * saying so twice is idempotency (#AC-09), not noise.
+ *
+ * Purge targets are scoped to the MODE: a local install has a project `.xp-gate/`
+ * worth removing, a global one does not, and `force` flags override the recorded
+ * mode so a half-broken config can still be cleaned up.
+ *
+ * @param {object} config
+ * @param {{forceLocal?: boolean, forceGlobal?: boolean, purge?: boolean}} options
+ * @returns {{mode: string|null, plan: Array, purgeDirs: Array}}
+ */
+function prepareUninstallPlan(config, options) {
   // §4.3 Step 2: Determine mode
   let mode = config.mode;
   if (options.forceLocal) mode = 'local';
@@ -795,6 +787,37 @@ async function uninstall(args) {
       }
     }
   }
+
+  return { mode, plan, purgeDirs };
+}
+
+async function uninstall(args) {
+  const options = {
+    dryRun: args.includes('--dry-run'),
+    force: args.includes('--force'),
+    forceLocal: args.includes('--local'),
+    forceGlobal: args.includes('--global'),
+    purge: args.includes('--purge'),
+  };
+
+  // §4.3 Step 1: Read config
+  const config = getConfig();
+
+  // §4.3 Step 1: No config → exit cleanly (AC-09 idempotency)
+  if (!config) {
+    console.log('No xp-gate installation found');
+    return 0;
+  }
+
+  // §4.3 Step 1: Already uninstalled → exit cleanly (AC-09 idempotency)
+  if (config.mode === 'uninstalled') {
+    console.log('No xp-gate installation found');
+    return 0;
+  }
+
+  const prepared = prepareUninstallPlan(config, options);
+  if (prepared.mode === null) return 0;
+  const { mode, plan, purgeDirs } = prepared;
 
   if (plan.length === 0 && purgeDirs.length === 0) {
     console.log('Nothing to uninstall');
