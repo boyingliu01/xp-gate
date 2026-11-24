@@ -190,6 +190,38 @@ function skipSemgrep(
  * any counting, because a scan that errored on everything has no findings to count
  * and would otherwise read as a clean run (#475, #518 R2).
  */
+/** A semgrep JSON document, with the two arrays this gate reads. */
+interface SemgrepDocument {
+  results?: SemgrepFinding[];
+  errors?: Array<{ message?: string }>;
+}
+
+/**
+ * Parse semgrep's JSON, or null when it is not parseable.
+ *
+ * Null rather than a thrown error because the caller's response is a SKIP, not a
+ * crash: unparseable output cannot be judged (#518), and "cannot judge" is a verdict.
+ */
+function parseSemgrepJson(jsonOutput: string): SemgrepDocument | null {
+  try {
+    return JSON.parse(jsonOutput) as SemgrepDocument;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether this output carries a verdict at all.
+ *
+ * No findings is only trustworthy when the scan itself succeeded: `exit 0 + results:
+ * [] + errors: [{...}]` means semgrep scanned nothing, and that combination used to
+ * fall through to PASS (#475, #518 R2).
+ */
+function hasVerdict(results: SemgrepFinding[], scanErrors: unknown[], exitCode: number): boolean {
+  if (results.length > 0) return true;
+  return scanErrors.length === 0 && exitCode === 0;
+}
+
 function parseSemgrepResults(
   jsonOutput: string,
   exitCode: number,
@@ -197,10 +229,8 @@ function parseSemgrepResults(
   startMs: number,
   messages: string[]
 ): GateOutput {
-  let data: { results?: SemgrepFinding[]; errors?: Array<{ message?: string }> };
-  try {
-    data = JSON.parse(jsonOutput);
-  } catch {
+  const data = parseSemgrepJson(jsonOutput);
+  if (!data) {
     return skipSemgrep('semgrep output unparseable',
       'semgrep output unparseable or verdict fields missing — cannot determine verdict',
       stderr, exitCode, startMs, messages);
@@ -209,8 +239,7 @@ function parseSemgrepResults(
   const results: SemgrepFinding[] = data.results || [];
   const scanErrors = data.errors || [];
 
-  // exit 0 + `results: []` + `errors: [{...}]` used to fall through to PASS.
-  if (results.length === 0 && (scanErrors.length > 0 || exitCode !== 0)) {
+  if (!hasVerdict(results, scanErrors, exitCode)) {
     return skipSemgrep('semgrep runtime error',
       `semgrep exit=${exitCode}, scan errors=${scanErrors.length}, findings=${results.length} — nothing to judge`,
       stderr, exitCode, startMs, messages);
@@ -223,6 +252,21 @@ function parseSemgrepResults(
     return renderSemgrepBlock(blocking, warnings, findingLines, startMs, messages);
   }
 
+  return renderSemgrepPass(warnings, findingLines, startMs, messages);
+}
+
+/**
+ * The PASS verdict, with non-blocking findings shown rather than dropped.
+ *
+ * A finding that does not block is still a fact the reader paid for: listing it is
+ * what separates "clean" from "clean enough for this gate".
+ */
+function renderSemgrepPass(
+  warnings: number,
+  findingLines: string[],
+  startMs: number,
+  messages: string[],
+): GateOutput {
   messages.push('');
   messages.push('     ✅ PASSED - No blocking vulnerabilities');
   if (warnings > 0) {
