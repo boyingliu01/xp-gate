@@ -3982,6 +3982,41 @@ function resolveAgentTarget(options) {
   };
 }
 
+/**
+ * Inspect ONE role's installed agent file against the bundled template.
+ *
+ * The three failure classes are reported separately because each has its own remedy
+ * (#414 R1 MI-02): a missing file needs an install, an unparseable binding needs
+ * `delphi-setup`, and a bundle without a parseable template is install CORRUPTION --
+ * skipping that comparison would hide it behind a healthy-looking id (#414 R1 FC-08).
+ *
+ * @param {string} role
+ * @param {string} agentsDir
+ * @param {(p: string) => string|null} readId
+ * @returns {{ok: boolean, detail: string, id?: string}}
+ */
+function inspectAgentBinding(role, agentsDir, readId) {
+  const agentPath = path.join(agentsDir, `delphi-${role}.md`);
+  if (!fs.existsSync(agentPath)) {
+    return {
+      ok: false,
+      detail: `delphi-${role}.md missing (run: xp-gate init --global, or delphi-setup --local --project for project scope)`,
+    };
+  }
+  const id = readId(agentPath);
+  if (id === null) {
+    return { ok: false, detail: `delphi-${role}.md has no quoted model binding (repair: xp-gate delphi-setup)` };
+  }
+  const bundledId = readId(path.join(PKG_DIR, 'plugins', 'qoder', 'agents', `delphi-${role}.md`));
+  if (bundledId === null) {
+    return { ok: false, detail: `delphi-${role}: bundled template missing/unreadable — reinstall xp-gate` };
+  }
+  if (bundledId !== id) {
+    return { ok: true, id, detail: `delphi-${role}: ${id} (this version ships ${bundledId} — repair: xp-gate delphi-setup)` };
+  }
+  return { ok: true, id, detail: `delphi-${role}: ${id}` };
+}
+
 function checkDelphiAgentBindings(add, options) {
   // 2. Qoder agent bindings: present, parseable, three distinct ids, matching
   // what this version ships. A stale binding is a repair, not an error to
@@ -4008,32 +4043,10 @@ function checkDelphiAgentBindings(add, options) {
       + 'Delphi review runs through the external provider');
   }
   for (const role of nativeDisabled ? [] : DELPHI_ROLES) {
-    const agentPath = path.join(agentsDir, `delphi-${role}.md`);
-    if (!fs.existsSync(agentPath)) {
-      agentsStatus = 'FAIL';
-      agentDetails.push(`delphi-${role}.md missing (run: xp-gate init --global, or delphi-setup --local --project for project scope)`);
-      continue;
-    }
-    const id = readQoderModelId(agentPath);
-    if (id === null) {
-      agentsStatus = 'FAIL';
-      agentDetails.push(`delphi-${role}.md has no quoted model binding (repair: xp-gate delphi-setup)`);
-      continue;
-    }
-    const bundledId = readQoderModelId(path.join(PKG_DIR, 'plugins', 'qoder', 'agents', `delphi-${role}.md`));
-    if (bundledId === null) {
-      // A bundle without a parseable template is install corruption: skipping
-      // the comparison would hide it behind a healthy-looking id (#414 R1 FC-08).
-      agentsStatus = 'FAIL';
-      agentDetails.push(`delphi-${role}: bundled template missing/unreadable — reinstall xp-gate`);
-      continue;
-    }
-    if (bundledId !== id) {
-      agentDetails.push(`delphi-${role}: ${id} (this version ships ${bundledId} — repair: xp-gate delphi-setup)`);
-    } else {
-      agentDetails.push(`delphi-${role}: ${id}`);
-    }
-    agentIds.push(id);
+    const outcome = inspectAgentBinding(role, agentsDir, readQoderModelId);
+    if (!outcome.ok) agentsStatus = 'FAIL';
+    agentDetails.push(outcome.detail);
+    if (outcome.id) agentIds.push(outcome.id);
   }
   // Report every problem class independently: missing files, unparseable
   // bindings and duplicates can coexist, and each has a different remedy
@@ -4065,62 +4078,42 @@ function checkDelphiAgentBindings(add, options) {
  *   check below reads. Returning it keeps ONE resolution instead of duplicating
  *   the platform mapping at the second call site.
  */
-function checkSkillInstallParity(add, options) {
-  // 3. Skill install parity: a drifted installed copy is how "reinstall from
-  // an old local repo" became a downgrade (#414 B4). Every bundled file is
-  // compared, not just SKILL.md — the install script copies *.json and
-  // references/ too, and B4-style drift hits those equally (#414 R1 MI-03).
-  //
-  // #635 follow-up: this was a THIRD hand-written platform→directory table
-  // (after PLATFORM_PROFILES and install-skill's own), and it had no `dsh` arm,
-  // so on a DSH machine it resolved to `~/.config/opencode/skills/delphi-review`
-  // — a directory that does not exist. `otherDeployedSkillDirs()` below rescued
-  // the parity check, but the runner-locate check further down read this path
-  // directly and never consulted the full platform set. Derive it instead, so
-  // the mapping has one source of truth and a new platform needs no edit here.
-  const platform = detectPlatform();
-  const installedSkillDir = path.join(getSkillsDirs(platform)[0], 'delphi-review');
-  // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
-  // real failure mode and must be drivable without mutating the package.
-  const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
-  const sha256 = (p) => fileSha256(p);
-  // A bundle we cannot read is reported as an empty bundle, which the parity check
-  // already treats as "every installed file is extra" -- a truthful, loud outcome.
-  const listBundledSkillFiles = (dir, base = dir, out = []) => {
-    if (!fs.existsSync(dir)) return out;
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return out;
-    }
-    for (const entry of entries) {
-      const p = path.join(dir, entry.name);
-      if (entry.isDirectory()) listBundledSkillFiles(p, base, out);
-      else out.push(path.relative(base, p));
-    }
+/**
+ * Every file in the bundled skill, relative to its root.
+ *
+ * A bundle we cannot read is reported as an EMPTY bundle, which the parity check
+ * already treats as "every installed file is extra" -- a truthful, loud outcome.
+ *
+ * @param {string} dir
+ * @param {string} [base]
+ * @param {string[]} [out]
+ * @returns {string[]}
+ */
+function listBundledSkillFiles(dir, base = dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
     return out;
-  };
-  // #725 follow-up: decide "installed anywhere?" from the full platform set, not
-  // just the directory `detectPlatform()` selects — a dsh-only machine has no
-  // marker detectPlatform() keys on, so the opencode fallback directory never
-  // exists and the old check falsely reported "not installed" even though the
-  // copy IS deployed under ~/.dsh/skills.
-  const deployedDirs = otherDeployedSkillDirs(installedSkillDir);
-  if (deployedDirs.length === 0) {
-    add('Delphi skill install parity', 'FAIL',
-      `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
-  } else {
-    const bundledFiles = listBundledSkillFiles(bundledSkillDir);
-    if (bundledFiles.length === 0) {
-      // An installed copy next to an empty bundle is install corruption —
-      // "0 files match" must never read as healthy (#414 R2 MN-R2-01). The
-      // bundled dir ships inside the installed package itself, so an
-      // unreachable one is a broken install, not a transient condition
-      // (#414 R3 FC-05): FAILing is the doctor's job here.
-      add('Delphi skill install parity', 'FAIL',
-        `bundled skill directory missing or empty: ${bundledSkillDir} — reinstall xp-gate`);
-    } else {
+  }
+  for (const entry of entries) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) listBundledSkillFiles(p, base, out);
+    else out.push(path.relative(base, p));
+  }
+  return out;
+}
+
+/**
+ * Compare every deployed copy against the bundle and report the verdict.
+ *
+ * #725: EVERY platform with the skill deployed is checked, not only the one
+ * `detectPlatform()` selects. On a machine with both Qoder and OpenCode the OpenCode
+ * copy was frozen at an old version while this check reported PASS, because it never
+ * looked there -- the drifted copy was invisible to both `update-skill` and `doctor`.
+ */
+function reportSkillParity(add, deployedDirs, bundledFiles, bundledSkillDir, sha256) {
       // #725: check every platform that has the skill deployed, not only the one
       // `detectPlatform()` selects. On a machine with both Qoder and OpenCode the
       // OpenCode copy was frozen at an old version and this check reported PASS,
@@ -4142,6 +4135,50 @@ function checkSkillInstallParity(add, options) {
         add('Delphi skill install parity', 'PASS',
           `${bundledFiles.length} file(s) match the bundle across ${deployedDirs.length} platform(s)`);
       }
+}
+
+function checkSkillInstallParity(add, options) {
+  // 3. Skill install parity: a drifted installed copy is how "reinstall from
+  // an old local repo" became a downgrade (#414 B4). Every bundled file is
+  // compared, not just SKILL.md — the install script copies *.json and
+  // references/ too, and B4-style drift hits those equally (#414 R1 MI-03).
+  //
+  // #635 follow-up: this was a THIRD hand-written platform→directory table
+  // (after PLATFORM_PROFILES and install-skill's own), and it had no `dsh` arm,
+  // so on a DSH machine it resolved to `~/.config/opencode/skills/delphi-review`
+  // — a directory that does not exist. `otherDeployedSkillDirs()` below rescued
+  // the parity check, but the runner-locate check further down read this path
+  // directly and never consulted the full platform set. Derive it instead, so
+  // the mapping has one source of truth and a new platform needs no edit here.
+  const platform = detectPlatform();
+  const installedSkillDir = path.join(getSkillsDirs(platform)[0], 'delphi-review');
+  // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
+  // real failure mode and must be drivable without mutating the package.
+  const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
+  const sha256 = (p) => fileSha256(p);
+  // A bundle we cannot read is reported as an empty bundle, which the parity check
+  // already treats as "every installed file is extra" -- a truthful, loud outcome.
+  // #725 follow-up: decide "installed anywhere?" from the full platform set, not
+  // just the directory `detectPlatform()` selects — a dsh-only machine has no
+  // marker detectPlatform() keys on, so the opencode fallback directory never
+  // exists and the old check falsely reported "not installed" even though the
+  // copy IS deployed under ~/.dsh/skills.
+  const deployedDirs = otherDeployedSkillDirs(installedSkillDir);
+  if (deployedDirs.length === 0) {
+    add('Delphi skill install parity', 'FAIL',
+      `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
+  } else {
+    const bundledFiles = listBundledSkillFiles(bundledSkillDir);
+    if (bundledFiles.length === 0) {
+      // An installed copy next to an empty bundle is install corruption —
+      // "0 files match" must never read as healthy (#414 R2 MN-R2-01). The
+      // bundled dir ships inside the installed package itself, so an
+      // unreachable one is a broken install, not a transient condition
+      // (#414 R3 FC-05): FAILing is the doctor's job here.
+      add('Delphi skill install parity', 'FAIL',
+        `bundled skill directory missing or empty: ${bundledSkillDir} — reinstall xp-gate`);
+    } else {
+      reportSkillParity(add, deployedDirs, bundledFiles, bundledSkillDir, sha256);
     }
   }
   return installedSkillDir;
