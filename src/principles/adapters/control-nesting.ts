@@ -393,25 +393,46 @@ function skipAsyncModifier(body: string, from: number): number {
  *   and silently drops every control structure after the arrow.
  */
 function findFunctionBodyBrace(body: string, from: number, to: number): number {
-  // Walk to the parameters (if any) and step over the whole list, including
-  // nested braces inside it.
-  let start = from;
-  for (; start < to; start++) {
-    if (body[start] === '(' || body[start] === '{' || body[start] === ';') break;
-  }
-  let i = start;
-  if (body[i] === '(') i = skipSpaces(body, skipBalancedParen(body, i), to);
+  const params = indexOfParameterList(body, from, to);
+  const afterParams = skipParameterList(body, params, to);
   // A return-type annotation sits between the parameter list and the body
-  // (`function inner(): { a: number } { ... }`), and braces inside it are not
-  // the body. When an annotation is present the body brace is located directly.
-  if (body[skipSpaces(body, i, to)] === ':') {
-    return findBraceAfterReturnType(body, i, to);
+  // (`function inner(): { a: number } { ... }`), and braces inside it are not the
+  // body -- so the body is located by the annotation scanner instead.
+  if (body[skipSpaces(body, afterParams, to)] === ':') {
+    return findBraceAfterReturnType(body, afterParams, to);
   }
-  for (; i < to; i++) {
+  return indexOfBodyBrace(body, afterParams, to);
+}
+
+/**
+ * Index of the parameter list's `(`, or of whatever ends the intro first.
+ *
+ * Stops at `(`, `{` or `;`: the first is the parameter list, the second means the body
+ * began without one, and the third means there is no body at all.
+ */
+function indexOfParameterList(body: string, from: number, to: number): number {
+  for (let i = from; i < to; i++) {
+    if (body[i] === '(' || body[i] === '{' || body[i] === ';') return i;
+  }
+  return to;
+}
+
+/** Step over the whole parameter list, including braces nested inside it. */
+function skipParameterList(body: string, at: number, to: number): number {
+  if (body[at] !== '(') return at;
+  return skipSpaces(body, skipBalancedParen(body, at), to);
+}
+
+/**
+ * The body's `{`, or -1 when there is none.
+ *
+ * A `;` or `}` before any brace means an expression-bodied arrow, or a `function` whose
+ * `{` never appears. -1 makes the caller RESUME its own scan rather than skip a bogus
+ * range -- a wrong range would swallow every function after it.
+ */
+function indexOfBodyBrace(body: string, from: number, to: number): number {
+  for (let i = from; i < to; i++) {
     if (body[i] === '{') return i;
-    // No braced body before the statement ends: an expression-bodied arrow or a
-    // `function` whose `{` never appears. Report -1 so the caller resumes the
-    // scan instead of skipping a bogus range.
     if (body[i] === ';' || body[i] === '}') return -1;
   }
   return -1;
