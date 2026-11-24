@@ -298,24 +298,55 @@ function writeUpgradeNotice(notice: UpgradeNotice): void {
 
 // ── Combined background check (runs once on first chat.message) ──
 
+/**
+ * Announce an upgrade outcome and return the message.
+ *
+ * All three outcomes do the same three things -- build a message, write a notice for
+ * the TUI, return the message -- so they share one path and differ only in the text
+ * and the notice kind.
+ *
+ * @param kind what the notice says happened
+ * @param result the update check's findings
+ * @param message what to show the user
+ * @returns the message, so the caller can surface it directly
+ */
+function announceUpgrade(kind: UpgradeNotice["kind"], result: XpGateUpdateResult, message: string): string {
+  writeUpgradeNotice({
+    kind,
+    localVersion: result.localVersion,
+    remoteVersion: result.remoteVersion,
+    message,
+    ts: Date.now(),
+  })
+  return message
+}
+
+/**
+ * Whether this run should tell the user a newer version exists.
+ *
+ * Both versions must be present: a check that could not read either one is not
+ * evidence that an upgrade is available.
+ */
+function isNewerAvailable(result: XpGateUpdateResult): boolean {
+  if (!result.remoteVersion || !result.localVersion) return false
+  return semverLt(result.localVersion, result.remoteVersion)
+}
+
 async function runBackgroundUpdates(pluginDir: string): Promise<string | null> {
   const result = await checkXpGateUpdate()
   await checkPluginUpdate(pluginDir)
 
   if (result.action === "upgraded") {
-    const msg = `[XP-Gate] Auto-upgraded from v${result.localVersion} to v${result.remoteVersion}`
-    writeUpgradeNotice({ kind: "upgraded", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
-    return msg
+    return announceUpgrade("upgraded", result,
+      `[XP-Gate] Auto-upgraded from v${result.localVersion} to v${result.remoteVersion}`)
   }
   if (result.action === "error") {
-    const msg = `[XP-Gate] Upgrade check: v${result.remoteVersion} available (auto-upgrade failed: ${result.error})`
-    writeUpgradeNotice({ kind: "error", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
-    return msg
+    return announceUpgrade("error", result,
+      `[XP-Gate] Upgrade check: v${result.remoteVersion} available (auto-upgrade failed: ${result.error})`)
   }
-  if (result.remoteVersion && result.localVersion && semverLt(result.localVersion, result.remoteVersion)) {
-    const msg = `[XP-Gate] New version v${result.remoteVersion} available (you have v${result.localVersion})`
-    writeUpgradeNotice({ kind: "outdated", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
-    return msg
+  if (isNewerAvailable(result)) {
+    return announceUpgrade("outdated", result,
+      `[XP-Gate] New version v${result.remoteVersion} available (you have v${result.localVersion})`)
   }
   return null
 }
@@ -405,29 +436,32 @@ function generateSessionTitle(dbPath: string, sessionId: string): string {
   }
 }
 
+/** Action verbs a task description usually opens with. */
+const TASK_MARKER = /(?:implement|add|create|build|develop|fix|refactor|optimize|update|remove|merge|deploy|release|publish|design|review)\s+[^.?!\n]{5,80}/gi
+
+/** Shortest fragment worth showing as a title. */
+const MIN_TITLE_LENGTH = 10
+
+/**
+ * The first phrase that reads like a task ("implement the parser").
+ *
+ * Preferred over the first sentence because a session usually opens with framing
+ * ("I was looking at...") before saying what it is doing.
+ */
+function firstTaskPhrase(text: string): string {
+  const hit = text.match(TASK_MARKER)
+  return hit && hit.length > 0 ? hit[0].trim() : ""
+}
+
+/** The first sentence long enough to say something. */
+function firstUsefulSentence(text: string): string {
+  const sentence = text.split(/[.?!]\s+/).find((part) => part.length > MIN_TITLE_LENGTH)
+  return sentence ? sentence.trim() : ""
+}
+
 function extractTitleFromText(text: string): string {
-  const taskMarkers = [
-    /(?:implement|add|create|build|develop|fix|refactor|optimize|update|remove|merge|deploy|release|publish|design|review)\s+[^.?!\n]{5,80}/gi,
-  ]
-
-  const matches: string[] = []
-  for (const marker of taskMarkers) {
-    const hits = text.matchAll(marker)
-    for (const hit of hits) {
-      matches.push(hit[0].trim())
-    }
-  }
-
-  if (matches.length > 0) {
-    return matches[0].substring(0, 120)
-  }
-
-  const firstSentence = text.split(/[.?!]\s+/).filter(s => s.length > 10)[0]
-  if (firstSentence && firstSentence.length > 5) {
-    return firstSentence.substring(0, 120).trim()
-  }
-
-  return ""
+  const candidate = firstTaskPhrase(text) || firstUsefulSentence(text)
+  return candidate ? candidate.substring(0, MAX_SESSION_TITLE) : ""
 }
 
 // ── Plugin definition ──
@@ -509,6 +543,21 @@ function gateArchTool(directory: string) {
   })
 }
 
+/**
+ * Render a stored model value for display.
+ *
+ * The column holds JSON (`{providerID, id}`), but older rows hold a bare string, and
+ * showing that verbatim is more useful than "unknown".
+ */
+function describeModel(raw: string): string {
+  if (!raw) return "unknown"
+  try {
+    const parsed = JSON.parse(raw)
+    return `${parsed.providerID || "?"}/${parsed.id || "?"}`
+  } catch {
+    return raw
+  }
+}
 function readCurrentSessionModel(dbPath: string, sessionId: string): string {
   try {
     // execFileSync, NOT execSync (#639). `sessionId` comes from the caller's
@@ -529,13 +578,7 @@ function readCurrentSessionModel(dbPath: string, sessionId: string): string {
       encoding: "utf8",
       timeout: SQLITE_TIMEOUT_MS,
     }).trim()
-    if (!currentRaw) return "unknown"
-    try {
-      const parsed = JSON.parse(currentRaw)
-      return `${parsed.providerID || "?"}/${parsed.id || "?"}`
-    } catch {
-      return currentRaw
-    }
+    return describeModel(currentRaw)
   } catch {
     return "unknown"
   }
