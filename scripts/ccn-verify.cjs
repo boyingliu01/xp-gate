@@ -41,26 +41,43 @@ const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
 // rest of the line, which is what a single-line scanner can honestly do.
 // Copy `text` through, replacing any block comment with a single space. Returns
 // { kept, open } where `open` reports a comment that runs past end of line.
+/** Quote characters that open a string this scan must step over whole. */
+const QUOTES = new Set(['"', "'", '`']);
+
+/**
+ * Copy a block comment out, or report that it runs past this text.
+ *
+ * The body is replaced by a single space so two tokens never fuse, and the line count
+ * is untouched -- branch counting depends on it.
+ *
+ * @returns `{ next, open }`: where to resume, and whether the comment continues
+ */
+function consumeBlockComment(text, i) {
+  const close = text.indexOf('*/', i + 2);
+  return close < 0 ? { next: text.length, open: true } : { next: close + 2, open: false };
+}
+
+/** What the scan at `i` produced: text to append, where to resume, and whether open. */
+function scanAt(text, i) {
+  const ch = text[i];
+  if (QUOTES.has(ch)) {
+    const next = skipQuoted(text, i, ch);
+    return { text: text.slice(i, next), next, open: false };
+  }
+  if (ch === '/' && text[i + 1] === '*') {
+    const comment = consumeBlockComment(text, i);
+    return { text: ' ', next: comment.next, open: comment.open };
+  }
+  return { text: ch, next: i + 1, open: false };
+}
+
 function stripBlockCommentOnce(text) {
   let kept = '';
-  let i = 0;
-  while (i < text.length) {
-    const ch = text[i];
-    if (ch === '"' || ch === "'" || ch === '`') {
-      const next = skipQuoted(text, i, ch);
-      kept += text.slice(i, next);
-      i = next;
-      continue;
-    }
-    if (ch === '/' && text[i + 1] === '*') {
-      const close = text.indexOf('*/', i + 2);
-      if (close < 0) return { kept, open: true };
-      i = close + 2;
-      kept += ' ';
-      continue;
-    }
-    kept += ch;
-    i++;
+  for (let i = 0; i < text.length;) {
+    const step = scanAt(text, i);
+    if (step.open) return { kept, open: true };
+    kept += step.text;
+    i = step.next;
   }
   return { kept, open: false };
 }
@@ -201,17 +218,35 @@ function classifyUnverifiedRow({ body, ccn, reportedSpan }) {
 //
 // Returns the row text to emit. `tally` is mutated with the classification of an
 // unverified row; csvRows aggregates it and decides whether to fail.
+/** A line that carries data rather than the header. */
+function isDataRow(line) {
+  return !/^NLOC\b/.test(line) && /^\d+,/.test(line);
+}
+
+/** Re-quote a field when it contains a comma or a quote. */
+function quoteField(value) {
+  return /[",]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+/**
+ * Rewrite one CSV row's CCN when the brace check corrected it.
+ *
+ * Field 1 is the CCN column -- writing to field 4 would silently overwrite
+ * `location_size` and leave the wrong complexity in place.
+ *
+ * A row the verifier could not correct is returned VERBATIM rather than re-serialised:
+ * re-quoting an untouched row would churn the output for no change.
+ */
 function rewriteCsvRow(line, { srcPath, root, sourceLines, tally }) {
-  if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) return line;
+  if (!isDataRow(line)) return line;
   const row = parseCsvRowIdentity(line, srcPath, root);
   if (!row) return line;
   const verified = verifyCcnForRow({ sourceLines, ...row, tally });
   if (!verified.corrected) return line;
+
   const cols = parseCsvLine(line);
-  // Field 1 is the CCN column — writing to field 4 would silently overwrite
-  // location_size and leave the wrong complexity in place.
   cols[1] = String(verified.ccn);
-  return cols.map((c) => (/[",]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',');
+  return cols.map(quoteField).join(',');
 }
 
 // Decode one CSV row into the fields the verifier needs, or null when the row
@@ -424,21 +459,44 @@ function findDeclarationLine(lines, name) {
   return null;
 }
 
+/** What one CSV character did to the parser state. */
+function consumeQuoted(line, i, cur) {
+  const ch = line[i];
+  if (ch !== '"') return { cur: cur + ch, next: i + 1, closed: false };
+  // A doubled quote is an ESCAPED quote inside the field, not the end of it.
+  if (line[i + 1] === '"') return { cur: cur + '"', next: i + 2, closed: false };
+  return { cur, next: i + 1, closed: true };
+}
+
+/**
+ * Parse one lizard CSV row.
+ *
+ * Fields are quoted where they contain commas; there are no embedded newlines. Both
+ * quote rules matter: without the doubled-quote case a path containing `"` ends the
+ * field early, and every subsequent column shifts.
+ *
+ * @param {string} line
+ * @returns {string[]}
+ */
 function parseCsvLine(line) {
-  // lizard CSV rows: fields quoted where they contain commas; no embedded newlines.
   const fields = [];
   let cur = '';
-  let q = false;
-  for (let i = 0; i < line.length; i++) {
+  let quoted = false;
+  for (let i = 0; i < line.length;) {
     const ch = line[i];
-    if (q) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; } else q = false;
-      } else cur += ch;
-    } else if (ch === '"') q = true;
-    else if (ch === ',') { fields.push(cur); cur = ''; }
-    else cur += ch;
+    if (quoted) {
+      const step = consumeQuoted(line, i, cur);
+      cur = step.cur;
+      quoted = !step.closed;
+      i = step.next;
+      continue;
+    }
+    if (ch === '"') quoted = true;
+    else if (ch === ',') { fields.push(cur); cur = ''; } else cur += ch;
+    i++;
   }
+  // The final field is pushed unconditionally: a trailing separator produces an empty
+  // one, which is what the column contract expects.
   fields.push(cur);
   return fields;
 }
