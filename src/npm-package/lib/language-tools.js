@@ -1074,6 +1074,25 @@ module.exports = {
  * @param {string[]} args - Command arguments
  * @returns {Promise<number>} Exit code
  */
+/**
+ * The JSON shape of a detection result: languages, where they were found, tools.
+ *
+ * `tools` is keyed by language, so a consumer can answer "what is missing for Rust"
+ * without re-deriving the language list.
+ */
+function buildDetectionResult(detected, configFiles, toolStatus) {
+  const tools = {};
+  for (const [lang, list] of Object.entries(toolStatus)) {
+    tools[lang] = list.map((t) => ({
+      name: t.tool.name,
+      status: t.status,
+      optional: t.tool.optional,
+      version: t.version,
+    }));
+  }
+  return { languages: detected, configFiles, tools };
+}
+
 async function handleDetectLanguages(args, options = {}) {
   // Injectable like the other handle* functions in this file. It defaulted to
   // `process.cwd()` with no seam, so the only way to test it was to chdir --
@@ -1100,20 +1119,7 @@ async function handleDetectLanguages(args, options = {}) {
   const toolStatus = getToolsForLanguages(detected);
 
   if (jsonOutput) {
-    const result = {
-      languages: detected,
-      configFiles,
-      tools: {},
-    };
-    for (const [lang, tools] of Object.entries(toolStatus)) {
-      result.tools[lang] = tools.map(t => ({
-        name: t.tool.name,
-        status: t.status,
-        optional: t.tool.optional,
-        version: t.version,
-      }));
-    }
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(buildDetectionResult(detected, configFiles, toolStatus), null, 2));
   } else {
     console.log('Detected languages:');
     for (const lang of detected) {
