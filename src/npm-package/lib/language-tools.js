@@ -355,6 +355,8 @@ function getArchitectureTools() {
 
 module.exports = {
   LANGUAGE_REGISTRY,
+  extensionsPresentIn,
+  makeLazyExtensionScanner,
   detectProjectLanguages,
   checkTool,
   getToolsForLanguages,
@@ -365,6 +367,7 @@ module.exports = {
   handleCheckTools,
   handleInstallTools,
   planToolRepairs,
+  describeAction,
   getArchitectureTools,
   detectBuildFileDependency,
 };
