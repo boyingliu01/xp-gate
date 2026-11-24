@@ -1,4 +1,5 @@
 import { BaseAdapter } from './base';
+import { maskLiterals } from './typescript-mask';
 import { Adapter } from '../types';
 import { isCallPosition } from './position-analysis';
 import { claimMember, countTopLevelMembers } from './member-scan';
@@ -57,16 +58,35 @@ const CONTROL_KEYWORDS = new Set([
 // function boundary when a return annotation contains a brace literal.
 type ScanStep = { depth: number; resume: number };
 
+/** Characters that open a generic/array context. */
+const DEPTH_OPENERS = new Set(['<', '[']);
+/** Characters that close one. `}` closes the enclosing block, not a generic. */
+const DEPTH_CLOSERS = new Set(['>', ']', '}']);
+
+/**
+ * Advance one character, reporting the new depth and where to resume.
+ *
+ * A parenthesised group is skipped WHOLE: parens only appear inside a header
+ * (`class X extends Y<() => void>`), never as body structure, so scanning inside one
+ * would count its contents as depth.
+ *
+ * `Math.max(0, …)` on closers: a `>` in a comparison is not a generic close, and a
+ * negative depth would make every later check wrong.
+ */
 const stepDepth = (masked: string, c: string, i: number, depth: number): ScanStep => {
   if (c === '(') {
     const { end } = readParenGroup(masked, i);
     return { depth, resume: end - 1 };
   }
-  if (c === '<' || c === '[') return { depth: depth + 1, resume: i };
-  if (c === '>' || c === ']') return { depth: Math.max(0, depth - 1), resume: i };
-  if (c === '}') return { depth: Math.max(0, depth - 1), resume: i };
+  if (DEPTH_OPENERS.has(c)) return { depth: depth + 1, resume: i };
+  if (DEPTH_CLOSERS.has(c)) return { depth: Math.max(0, depth - 1), resume: i };
   return { depth, resume: i };
 };
+
+/** Whether the character ends a header without a braced body. */
+function isHeaderTerminator(c: string, depth: number): boolean {
+  return (c === ';' || c === '\n') && depth === 0;
+}
 
 function findBodyBrace(masked: string, parenIndex: number): number {
   if (masked[parenIndex] !== '(') return -1;
@@ -75,15 +95,13 @@ function findBodyBrace(masked: string, parenIndex: number): number {
   let i = end;
   while (i < masked.length) {
     const c = masked[i];
-    if (c === '{') {
-      if (depth === 0) return i;
-      depth++;
-      i++;
-      continue;
-    }
-    // A line break or semicolon before any brace means this header has no
-    // braced body (an interface member or an overload signature).
-    if ((c === ';' || c === '\n') && depth === 0) return -1;
+    // A brace at depth 0 IS the body; deeper it is a generic argument
+    // (`<{a: number}>`), so the scan keeps going.
+    if (c === '{' && depth === 0) return i;
+    // A line break or semicolon before any brace means this header has no braced
+    // body -- an interface member or an overload signature.
+    if (isHeaderTerminator(c, depth)) return -1;
+
     const stepped = stepDepth(masked, c, i, depth);
     depth = stepped.depth;
     i = stepped.resume + 1;
@@ -329,28 +347,47 @@ const ARROW_ASSIGNMENT = /(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*
 
 /** The three quoted states shared by the parameter/paren scanners. */
 /** Count top-level, comma-separated parameters in a raw parameter list. */
+/**
+ * How many parameters a raw parameter list holds.
+ *
+ * Counting COMMAS at depth 0 is the whole rule: a comma inside a generic
+ * (`Map<K, V>`), an array literal or a string does not separate parameters. That is
+ * why the scan tracks nesting and quote state before deciding.
+ *
+ * An empty list is 0, not 1: `()` declares nothing, and the naive "start at 1" would
+ * report one parameter for every no-argument function.
+ */
 function countParams(rawList: string): number {
   const trimmed = rawList.trim();
   if (trimmed === '') return 0;
 
   const depth = { value: 0 };
-  let count = 1;
   const state = newQuoteState();
+  let count = 1;
 
   for (let i = 0; i < trimmed.length;) {
     if (inQuotedState(state)) {
       i += advanceQuoteState(trimmed, i, state);
       continue;
     }
-    const c = trimmed[i];
-    if (isQuote(c)) {
-      advanceQuoteState(trimmed, i, state);
-    } else if (!applyDelimiter(c, depth) && c === ',' && depth.value === 0) {
-      count++;
-    }
+    if (!deepensParamNesting(trimmed[i], depth)) count += 1;
     i++;
   }
   return count;
+}
+
+/**
+ * Whether this character is NOT a top-level parameter separator.
+ *
+ * Absorbing the decision keeps the loop to one test. A quote opens a state; a
+ * delimiter changes depth; anything else is a separator only when it is a top-level
+ * comma.
+ *
+ * @returns true when the caller should not count a new parameter
+ */
+function deepensParamNesting(c: string, depth: { value: number }): boolean {
+  if (isQuote(c)) return true;
+  return applyDelimiter(c, depth) || c !== ',' || depth.value !== 0;
 }
 
 /** What one step of the paren-group scan did, so the caller can react. */
@@ -431,187 +468,6 @@ function ioOperationsIn(body: string): string[] {
   return [...found];
 }
 
-/**
- * Blank a `//` line comment starting at `start`.
- * Stops AT the newline so line numbering survives (the newline is the caller's
- * to consume as an ordinary character).
- * @returns the index to resume scanning from.
- */
-function maskLineComment(src: string, out: string[], start: number): number {
-  let i = start;
-  while (i < src.length && src[i] !== '\n') { out[i] = ' '; i++; }
-  return i;
-}
-
-/**
- * Blank a block comment starting at `start` (which holds `/`).
- *
- * #602: newlines inside the comment must survive. Blanking them shifts every
- * subsequent line number, so `lineOf()` and every line-numbered violation after
- * a multi-line comment would point at the wrong line -- exactly the defect the
- * line-comment branch never had, because it stops AT the newline.
- *
- * @returns the index to resume scanning from.
- */
-function maskBlockComment(src: string, out: string[], start: number): number {
-  let i = start;
-  out[i] = ' '; out[i + 1] = ' '; i += 2;
-  while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
-    if (src[i] !== '\n') out[i] = ' ';
-    i++;
-  }
-  if (i < src.length) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
-  return i;
-}
-
-/**
- * Decide whether the `/` at `index` opens a regex literal rather than being
- * division. A regex may only start where an expression may start: at the very
- * beginning, after an operator/punctuation, or after a keyword that expects an
- * expression (`return /re/`, `typeof /re/`, ...).
- */
-function opensRegexLiteral(src: string, index: number): boolean {
-  const before = src.substring(0, index).replace(/\s+$/, '');
-  const prev = before[before.length - 1];
-  if (prev === undefined) return true;
-  if (/[=(,:[!&|?{};+\-*%^~<>]/.test(prev)) return true;
-  return /(?:^|[^\w$])(return|typeof|case|in|of|new|delete|void|instanceof)$/.test(before);
-}
-
-/**
- * Find where a regex literal starting at `start` closes, honouring `\` escapes
- * and character classes (`[/]` must not close the literal).
- * @returns the index of the closing `/`, or -1 when the line ends first (so the
- *          slash really was division).
- */
-function findRegexClose(src: string, start: number): number {
-  let inClass = false;
-  for (let j = start + 1; j < src.length; j++) {
-    const d = src[j];
-    if (d === '\\') { j++; continue; }
-    if (d === '\n') return -1;
-    if (d === '[') { inClass = true; continue; }
-    if (d === ']') { inClass = false; continue; }
-    if (d === '/' && !inClass) return j;
-  }
-  return -1;
-}
-
-/**
- * Blank a regex literal (and its trailing flags) starting at `start`.
- * @returns the index to resume scanning from.
- */
-function maskRegexLiteral(src: string, out: string[], start: number): number {
-  const close = findRegexClose(src, start);
-  if (close < 0) return start;
-  for (let k = start; k <= close; k++) out[k] = ' ';
-  let i = close + 1;
-  while (i < src.length && /[a-z]/i.test(src[i])) { out[i] = ' '; i++; }
-  return i;
-}
-
-/**
- * Blank a quoted or template literal starting at `start`.
- * A backtick runs to its closing backtick (interpolations included); a single
- * or double quote stops at an unescaped newline, matching a syntax error.
- * @returns the index to resume scanning from.
- */
-function maskStringLiteral(src: string, out: string[], start: number): number {
-  const quote = src[start];
-  out[start] = ' ';
-  let i = start + 1;
-  while (i < src.length) {
-    const d = src[i];
-    if (d === '\\') {
-      out[i] = ' ';
-      if (i + 1 < src.length) out[i + 1] = ' ';
-      i += 2;
-      continue;
-    }
-    if (d === quote) { out[i] = ' '; i++; break; }
-    if (d === '\n' && quote !== '`') break;
-    out[i] = ' ';
-    i++;
-  }
-  return i;
-}
-
-/**
- * Blank out comments and string/template literals, preserving offsets.
- * A single left-to-right scan is used rather than chained `.replace()` calls:
- * sequential regex replacement re-scans text that earlier passes produced and
- * can pair a quote inside a regex literal with a quote in a later comment,
- * swallowing hundreds of lines (observed as a 302-line phantom function).
- *
- * The scan dispatches to one masking routine per construct and otherwise copies
- * the character through, so the loop's own branching stays flat (#602: split
- * from a single 36-CCN body into five routines the tests can pin separately).
- */
-/**
- * The maskers, asked in order at each index.
- *
- * A comment opener must be tried before a regex: `/` starts both, and `//` after a
- * paren is a comment rather than the beginning of one. A masker returns the next index
- * to examine, or -1 when the construct it recognises is not actually there.
- */
-const LITERAL_MASKERS: Array<(src: string, out: string[], i: number) => number> = [
-  maskCommentAt,
-  maskRegexAt,
-  maskStringAt,
-];
-
-/**
- * Blank out every comment, regex and string body, keeping the source LENGTH.
- *
- * Positions have to survive masking: the caller maps offsets back onto the original
- * text (to read a function's real extent, for instance), so a replacement that changed
- * the length would shift everything after it.
- */
-function maskLiterals(src: string): string {
-  const out = src.split('');
-  let i = 0;
-  while (i < src.length) {
-    const next = nextMaskedIndex(src, out, i);
-    i = next > i ? next : i + 1;
-  }
-  return out.join('');
-}
-
-/**
- * The index a masker says to resume from, or `i` when none of them applies.
- *
- * Taking the first masker that ADVANCES (rather than the first that matches) is what
- * keeps `i` moving: a masker that recognises the opening but cannot find the end
- * returns -1, and the scan must then treat the character as ordinary code.
- */
-function nextMaskedIndex(src: string, out: string[], i: number): number {
-  for (const mask of LITERAL_MASKERS) {
-    const resumed = mask(src, out, i);
-    if (resumed > i) return resumed;
-  }
-  return i;
-}
-
-/** `//` and block comments. */
-function maskCommentAt(src: string, out: string[], i: number): number {
-  if (src[i] !== '/') return -1;
-  if (src[i + 1] === '/') return maskLineComment(src, out, i);
-  if (src[i + 1] === '*') return maskBlockComment(src, out, i);
-  return -1;
-}
-
-/** A regex literal, only where an expression may start. */
-function maskRegexAt(src: string, out: string[], i: number): number {
-  if (src[i] !== '/' || !opensRegexLiteral(src, i)) return -1;
-  return maskRegexLiteral(src, out, i);
-}
-
-/** A single-, double- or back-quoted run. */
-function maskStringAt(src: string, out: string[], i: number): number {
-  const c = src[i];
-  if (c !== "'" && c !== '"' && c !== '`') return -1;
-  return maskStringLiteral(src, out, i);
-}
 
 /**
  * The metrics the rule set actually reads (see src/principles/rules/**).
