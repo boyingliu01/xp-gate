@@ -1036,8 +1036,12 @@ module.exports = {
  * @param {string[]} args - Command arguments
  * @returns {Promise<number>} Exit code
  */
-async function handleDetectLanguages(args) {
-  const projectRoot = process.cwd();
+async function handleDetectLanguages(args, options = {}) {
+  // Injectable like the other handle* functions in this file. It defaulted to
+  // `process.cwd()` with no seam, so the only way to test it was to chdir --
+  // which vitest workers do not allow, and which made the whole command
+  // untestable rather than merely untested.
+  const projectRoot = options.projectRoot || process.cwd();
   const jsonOutput = args.includes('--json');
   const writeConfig = args.includes('--write') || !jsonOutput;
 

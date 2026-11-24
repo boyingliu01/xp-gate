@@ -95,3 +95,36 @@ describe('check-tools report', () => {
     }
   });
 });
+
+describe('check-tools --json', () => {
+  const { handleCheckTools } = require('../language-tools.js');
+
+  const auditRows = [
+    row({ name: 'gitleaks' }),
+    row({ name: 'terraform', available: false, installedVersion: null, currency: 'missing', optional: true }),
+  ];
+
+  it('emits parseable JSON instead of the table', async () => {
+    const out = await capture(() =>
+      handleCheckTools(['--json'], { languages: ['typescript'], audit: () => auditRows }));
+    const json = JSON.parse(out.slice(out.indexOf('{')));
+    expect(json).toBeTypeOf('object');
+    // The contract is keyed by language, each holding that language's tool list
+    // (#468); a flat array would break every existing consumer.
+    expect(Array.isArray(json)).toBe(false);
+  });
+
+  it('reports currency and availability per tool in JSON mode', async () => {
+    const out = await capture(() =>
+      handleCheckTools(['--json'], { languages: ['typescript'], audit: () => auditRows }));
+    const text = out.slice(out.indexOf('{'));
+    expect(text).toContain('gitleaks');
+    expect(text).toContain('terraform');
+  });
+
+  it('does not print the human table in JSON mode', async () => {
+    const out = await capture(() =>
+      handleCheckTools(['--json'], { languages: ['typescript'], audit: () => auditRows }));
+    expect(out).not.toContain('Quality Gate Tool Audit');
+  });
+});
