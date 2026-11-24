@@ -72,11 +72,23 @@ export default defineConfig({
       //    fs mocks (none), and the same treatment for rework.js and
       //    gate-coverage.js (both match their full-run numbers exactly).
       //
-      //    CONSEQUENCE: the aggregate UNDER-reports by ~0.9 percentage points while
-      //    this file is mismeasured. Corrected for the one file, the figure was
-      //    90.48% rather than the reported 89.46%. Quote the corrected number only
-      //    after re-measuring the file on its own; do not assume any other file is
-      //    fine -- check it the same way.
+      //    VERIFIED ACROSS THE TREE 2026-11-24 (round 50): every file of 300+ lines
+      //    (47 of them) was re-measured with the tests that reference it. Exactly TWO
+      //    disagree with the full run:
+      //
+      //      language-tools.js   50.0% reported  ->  97.24% measured  (+47.2)
+      //      gate-runner.js      87.8% reported  ->  97.9%  measured  (+10.1)
+      //
+      //    The other 45 match to within 5 points, so this is NOT a general provider
+      //    flaw and the per-file numbers are usable elsewhere.
+      //
+      //    CONSEQUENCE: the aggregate UNDER-reports. Corrected for those two files:
+      //
+      //      reported  43648 / 48793 = 89.46%
+      //      corrected 44292 / 48793 = 90.78%   (the 90% line is 43,914 lines)
+      //
+      //    Re-run the same check before quoting the corrected figure; the correction
+      //    is only as good as the re-measurement behind it.
       //
       //    So do not read a per-file number on a large file as evidence about its
       //    tests. Check whether tests exist, and instrument if it matters. The
