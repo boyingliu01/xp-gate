@@ -16,10 +16,15 @@ const { detectPlatform, getTemplateDir } = sharedPaths;
 // written the config, and `--fix` returned 1 on a healthy installation.
 //
 // These are therefore read through the module at each use, not destructured.
-const HOME_DIR = () => sharedPaths.HOME_DIR;
-const CONFIG_FILE = () => sharedPaths.CONFIG_FILE;
-const GLOBAL_HOOKS_DIR = () => sharedPaths.GLOBAL_HOOKS_DIR;
-const GLOBAL_ADAPTERS_DIR = () => sharedPaths.GLOBAL_ADAPTERS_DIR;
+const {
+  HOME_DIR,
+  CONFIG_FILE,
+  GLOBAL_HOOKS_DIR,
+  GLOBAL_ADAPTERS_DIR,
+  PKG_DIR,
+  DELPHI_ROLES,
+  MIN_DISTINCT_MODELS,
+} = require('./doctor-constants.js');
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash, detectInstalledPlatforms, getSkillsDirs } = require('./detect-deps.js');
 // Doctor's tool section is built from the shared audit, so the validity /
@@ -48,7 +53,6 @@ const {
 } = require('./doctor-tui.js');
 
 // npm package source dir (template hooks/adapters)
-const PKG_DIR = path.dirname(__dirname);
 
 /**
  * Read the package version from the installed package.json.
@@ -2444,8 +2448,6 @@ async function findStaleInvisibleTools(registry, refreshedPath) {
  * @param {{stale: string[], parts: string[], invisible: string[], checks: Array}} p
  *   `checks` and `parts` are mutated
  */
-/** A review needs three DISTINCT models; two of the same model is one opinion twice. */
-const MIN_DISTINCT_MODELS = 3;
 
 /** Three entries convey the pattern; a wall of paths gets skimmed. */
 const PREVIEW_ITEMS = 3;
@@ -3931,7 +3933,6 @@ function formatDoctorJson(checks, issues) {
  * @param {{projectDir?: string}} options
  */
 /** The three Delphi expert roles, in the order every report lists them. */
-const DELPHI_ROLES = ['architecture', 'technical', 'feasibility'];
 
 /**
  * Work out which Delphi agent directory applies, and whether the native path is
