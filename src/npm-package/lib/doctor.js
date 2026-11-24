@@ -959,6 +959,9 @@ function readPair(repoFile, installedFile) {
  * import the .ts module). Grandfathers everything before AUDIT_LEDGER_SINCE;
  * only NEW implausible durations or unattributed commits count as issues.
  */
+/** The runner gates on this; below it, a review exits 1 mid-run. */
+const MIN_NODE_MAJOR = 18;
+
 /** Windows reports a missing tool as exit 1, so a retry separates a real failure
  * from a transient one. */
 const WINDOWS_EXEC_ATTEMPTS = 3;
@@ -2073,7 +2076,15 @@ async function checkAdapters(checks, mode, gitDirPromise) {
     checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Missing' });
     return 1;
   }
-  const adapterFiles = fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh'));
+  let adapterFiles;
+  try {
+    adapterFiles = fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh'));
+  } catch (err) {
+    // An unreadable directory is not an EMPTY one; saying "Empty" would send the
+    // reader to reinstall when the problem is permissions.
+    checks.push({ name: 'Adapters directory', status: 'FAIL', detail: `Unreadable: ${err.message}` });
+    return 1;
+  }
   if (adapterFiles.length === 0) {
     checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Empty directory' });
     return 1;
@@ -2627,30 +2638,38 @@ async function getVersionAsync(execPath, isWindows, options = {}) {
  * Get local fallback paths for CLI tool (sync, no exec).
  * Mirrors getLocalFallbackPaths from detect-deps.js.
  */
+/**
+ * `<Python install>/Scripts/<tool>.exe` for every Python under LOCALAPPDATA.
+ *
+ * Windows installs put console scripts there rather than on PATH, which is why a tool
+ * that IS installed can still look missing. A Python tree that cannot be listed
+ * contributes nothing -- this is a fallback list, not a diagnostic.
+ */
+function windowsPythonScripts(toolName, home) {
+  const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const pythonBase = path.join(localAppData, 'Programs', 'Python');
+  try {
+    return fs.readdirSync(pythonBase)
+      .filter((entry) => entry.startsWith('Python'))
+      .map((entry) => path.join(pythonBase, entry, 'Scripts', `${toolName}.exe`));
+  } catch {
+    return [];
+  }
+}
+
 function getLocalFallbackPathsSync(toolName, isWindows) {
   const os = require('os');
   const home = os.homedir();
   const paths = [path.join(home, '.local', 'bin', toolName)];
 
-  if (isWindows) {
-    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-    paths.push(
-      path.join(appData, 'npm', `${toolName}.cmd`),
-      path.join(home, '.local', 'bin', `${toolName}.exe`),
-    );
-    const pythonBase = path.join(localAppData, 'Programs', 'Python');
-    if (fs.existsSync(pythonBase)) {
-      try {
-        for (const entry of fs.readdirSync(pythonBase)) {
-          if (entry.startsWith('Python')) {
-            paths.push(path.join(pythonBase, entry, 'Scripts', `${toolName}.exe`));
-          }
-        }
-      } catch { /* skip */ }
-    }
-  }
+  if (!isWindows) return paths;
 
+  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  paths.push(
+    path.join(appData, 'npm', `${toolName}.cmd`),
+    path.join(home, '.local', 'bin', `${toolName}.exe`),
+    ...windowsPythonScripts(toolName, home),
+  );
   return paths;
 }
 
@@ -2852,19 +2871,38 @@ function fixCoreHooksPath(globalHooksDir) {
  * @returns {boolean} Whether adapters were restored
  */
 function fixMissingAdapters(mode, srcDir, adaptersDir) {
-  if (adaptersDir && (!fs.existsSync(adaptersDir) || fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh')).length === 0)) {
-    const pkgAdaptersDir = path.join(srcDir, 'adapters');
-    if (fs.existsSync(pkgAdaptersDir)) {
-      fs.mkdirSync(adaptersDir, { recursive: true });
-      const adapterFiles = fs.readdirSync(pkgAdaptersDir).filter(f => f.endsWith('.sh'));
-      for (const f of adapterFiles) {
-        fs.copyFileSync(path.join(pkgAdaptersDir, f), path.join(adaptersDir, f));
-      }
-      console.log(`  ✓ Restored ${adapterFiles.length} adapter(s)`);
-      return true;
+  if (!adaptersDir || !needsAdapterRepair(adaptersDir)) return false;
+  const pkgAdaptersDir = path.join(srcDir, 'adapters');
+  if (!fs.existsSync(pkgAdaptersDir)) return false;
+  try {
+    fs.mkdirSync(adaptersDir, { recursive: true });
+    const adapterFiles = fs.readdirSync(pkgAdaptersDir).filter(f => f.endsWith('.sh'));
+    for (const f of adapterFiles) {
+      fs.copyFileSync(path.join(pkgAdaptersDir, f), path.join(adaptersDir, f));
     }
+    console.log(`  ✓ Restored ${adapterFiles.length} adapter(s)`);
+    return true;
+  } catch (err) {
+    // A partial restore leaves a half-installed adapter set; naming the failure is
+    // what stops the caller reporting a repair that did not finish.
+    console.log(`  ✗ Could not restore adapters to ${adaptersDir}: ${err.message}`);
+    return false;
   }
-  return false;
+}
+
+/**
+ * Whether the adapters directory is missing or holds no `.sh` files.
+ *
+ * An unreadable directory counts as needing repair: the copy would fail anyway, and
+ * reporting it as "already fine" would skip the only code that can say why.
+ */
+function needsAdapterRepair(adaptersDir) {
+  if (!fs.existsSync(adaptersDir)) return true;
+  try {
+    return fs.readdirSync(adaptersDir).filter((f) => f.endsWith('.sh')).length === 0;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -2875,7 +2913,14 @@ function fixMissingAdapters(mode, srcDir, adaptersDir) {
 function fixMissingGateScripts(srcDir, adaptersDir) {
   if (!adaptersDir || !fs.existsSync(adaptersDir)) return false;
 
-  const existingFiles = fs.readdirSync(adaptersDir);
+  let existingFiles;
+  try {
+    existingFiles = fs.readdirSync(adaptersDir);
+  } catch (err) {
+    // Unreadable is not empty: "no gate scripts missing" would skip the only repair.
+    console.log(`  ✗ Could not read ${adaptersDir}: ${err.message}`);
+    return false;
+  }
   const missingGates = EXPECTED_GATE_SCRIPTS.filter(g => !existingFiles.includes(g));
 
   if (missingGates.length === 0) return false;
@@ -2884,10 +2929,14 @@ function fixMissingGateScripts(srcDir, adaptersDir) {
   for (const gateScript of missingGates) {
     const srcFile = path.join(srcDir, gateScript);
     const destFile = path.join(adaptersDir, gateScript);
-    if (fs.existsSync(srcFile)) {
+    if (!fs.existsSync(srcFile)) continue;
+    try {
       fs.copyFileSync(srcFile, destFile);
       fs.chmodSync(destFile, 0o755);
       restored++;
+    } catch (err) {
+      // One unwritable gate script must not strand the others.
+      console.log(`  ✗ Could not restore ${gateScript}: ${err.message}`);
     }
   }
 
@@ -4183,46 +4232,63 @@ function checkDelphiVersionConsistency(add, options, npmLatest) {
  * @param {(name: string, status: string, detail?: string) => void} add
  */
 function checkDshChannelReadiness(add) {
-  // 7. DSH native-channel readiness (#443 REQ-6): only meaningful when a DSH
-  // home exists. The two-layer switch (preset capability + host setting)
-  // defaults to disabled, and a review that assumes native will silently run
-  // three same-model seats.
+  // 7. DSH native-channel readiness (#443 REQ-6): only meaningful when a DSH home
+  // exists. The two-layer switch (preset capability + host setting) defaults to
+  // disabled, and a review that assumes native will silently run three same-model
+  // seats.
+  const label = 'DSH subagent model selection';
   const dshHome = path.join(HOME_DIR(), '.dsh');
   if (!fs.existsSync(dshHome)) {
-    add('DSH subagent model selection', 'SKIP', `no ${dshHome} — not a DSH environment`);
-  } else {
-    const settingsCandidates = [
-      path.join(dshHome, 'settings.json'),
-      path.join(dshHome, 'settings', 'settings.json'),
-      path.join(dshHome, 'config.json'),
-    ];
-    const settingsFile = settingsCandidates.find((p) => fs.existsSync(p));
-    if (!settingsFile) {
-      add('DSH subagent model selection', 'FAIL',
-        `${dshHome} exists but no settings file found — subagent model selection defaults to disabled (#443)`);
-    } else {
-      try {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-        const selection = settings.subagentModelSelection;
-        const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
-        const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
-        if (selection && selection.enabled === true && new Set(ids).size >= MIN_DISTINCT_MODELS) {
-          add('DSH subagent model selection', 'PASS', `${settingsFile}: enabled, ${new Set(ids).size} distinct allowed models`);
-        } else if (selection && selection.enabled === true) {
-          add('DSH subagent model selection', 'FAIL',
-            `${settingsFile}: enabled but only ${new Set(ids).size} distinct allowedModels (need ≥3) — native channel unusable`);
-        } else {
-          // The switch shipping off is the platform default, not a defect:
-          // only an operator who explicitly enables it and under-provisions
-          // allowedModels has a real misconfiguration (#414 R1 FC-07).
-          add('DSH subagent model selection', 'SKIP',
-            `${settingsFile}: native model selection disabled (platform default) — the external channel is the contract path (#443)`);
-        }
-      } catch (err) {
-        add('DSH subagent model selection', 'SKIP', `${settingsFile} unparseable: ${err.message}`);
-      }
-    }
+    add(label, 'SKIP', `no ${dshHome} — not a DSH environment`);
+    return;
   }
+
+  const settingsCandidates = [
+    path.join(dshHome, 'settings.json'),
+    path.join(dshHome, 'settings', 'settings.json'),
+    path.join(dshHome, 'config.json'),
+  ];
+  const settingsFile = settingsCandidates.find((p) => fs.existsSync(p));
+  if (!settingsFile) {
+    add(label, 'FAIL',
+      `${dshHome} exists but no settings file found — subagent model selection defaults to disabled (#443)`);
+    return;
+  }
+
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  } catch (err) {
+    add(label, 'SKIP', `${settingsFile} unparseable: ${err.message}`);
+    return;
+  }
+  reportDshSelection(add, label, settingsFile, settings.subagentModelSelection);
+}
+
+/**
+ * Report whether the DSH switch is on AND properly provisioned.
+ *
+ * The switch shipping OFF is the platform default, not a defect: only an operator who
+ * explicitly enables it and under-provisions `allowedModels` has a real
+ * misconfiguration (#414 R1 FC-07). Collapsing those two into one FAIL is what told
+ * working setups they were broken.
+ */
+function reportDshSelection(add, label, settingsFile, selection) {
+  const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
+  const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
+  const distinct = new Set(ids).size;
+
+  if (!selection || selection.enabled !== true) {
+    add(label, 'SKIP',
+      `${settingsFile}: native model selection disabled (platform default) — the external channel is the contract path (#443)`);
+    return;
+  }
+  if (distinct >= MIN_DISTINCT_MODELS) {
+    add(label, 'PASS', `${settingsFile}: enabled, ${distinct} distinct allowed models`);
+    return;
+  }
+  add(label, 'FAIL',
+    `${settingsFile}: enabled but only ${distinct} distinct allowedModels (need >=${MIN_DISTINCT_MODELS}) — native channel unusable`);
 }
 
 /**
@@ -4397,7 +4463,7 @@ async function doctorDelphi(options = {}) {
 
   // 1. Node >= 18: the runner gates on it and exits 1 mid-review otherwise.
   const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
-  add('Node.js >= 18', nodeMajor >= 18 ? 'PASS' : 'FAIL',
+  add(`Node.js >= ${MIN_NODE_MAJOR}`, nodeMajor >= MIN_NODE_MAJOR ? 'PASS' : 'FAIL',
     `current: ${process.versions.node}`);
 
   // 2. Qoder agent bindings.
