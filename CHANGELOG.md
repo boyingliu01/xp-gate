@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.38.126.0] - 2026-11-24
+
+**三个门禁从未通过过，而它们看起来一切正常。**
+
+迁移到 WSL 后第一次能顺畅地测，测出来的第一个结论不是"哪里慢"，而是**门禁比看起来
+更不管用**。343 条审计记录：
+
+| 门禁 | PASS | SKIP/WARN | 真实原因 |
+|---|---:|---|---|
+| gate-1 代码质量 | **0** | 19 WARN | 全是 `PSSA module not installed` |
+| gate-5 测试+覆盖率 | **0** | 21 SKIP | 全是 `powershell: no Pester tests` |
+| gate-6 架构 | **0** | 14 SKIP | 全是 `not configured for iac` |
+
+**在一个有数千个 TypeScript 测试的仓库里，测试门禁一次都没执行过。**
+
+### 根因是顺序，不是缺失
+
+门禁按 `PROJECT_LANGS` 遍历，每次迭代**直接写** `GATE_N_STATUS`。没有东西可测的语言
+排在后面，覆盖了测出结果的那个——**最后写入者获胜**。
+
+修法是新增 `githooks/lib/gate-status.sh`，把规则收在一处：
+
+```
+BLOCK > WARN > SKIP > PASS
+```
+
+`PASS` 是"查了且干净"，任何其他状态都高于它——未完成的检查不得呈现为干净。
+`WARN` 高于 `SKIP`，因为"查了但不完美"比"什么都没发生"信息量大。
+
+- `xp_gate_status_escalate` 只升不降；未知状态返回 2，不静默当最弱
+- `xp_gate_detail_append` 追加而非替换（分段去重，片段内 `; ` 会被压平）
+
+### SKIP 必须带原因
+
+`gate-3` 的 `record_gate_audit` 只传了 `ccn_threshold=<n>`，跳过原因在
+`GATE_3_REASON` 里从未写入审计。26/34 条 SKIP 无法区分"文档项目"/"无 PowerShell
+文件"/"门禁坏了"。现在带 `skip_reason=`，无原因时写 `skip_reason=UNRECORDED`。
+
+`xp-gate audit --stats` 新增按原因汇总，`UNRECORDED` 单独标记为未解释。
+
+### 工具解析统一（#843 / #841）
+
+修复前 `PATH=/usr/bin:/bin check-tools` 报 gitleaks/lizard/semgrep 全部缺失，
+而三者都在 `~/.local/bin` 且可用。
+
+两个函数曾有**不同的搜索顺序**：`resolve_tool_path` 能找到
+`~/.local/bin/gitleaks`，`tool_is_available` 却在同一路径判"不可用"。现在共用一套。
+
+三个方向都验证过：PATH 无该目录时能找到并标注 `(not on PATH)`；PATH 含 Windows
+shim 时正确拒绝（`--version` 通过但 exec 失败）；正常环境全部可用。
+
+### 假阳性修复
+
+- **`npx tsc` 是占位程序**：未安装 TypeScript 时它打印
+  "This is not the tsc command you are looking for" 后 **exit 0**，Gate 10 因此判
+  pass 而非 skip。
+- **Gate 2 把构建镜像当重复代码**：`src/npm-package/**` 是 `githooks/**` 的字节级
+  镜像，报告它们"重复"是无人能行动的问题。28.4s → 8.3s。
+- **`psscriptanalyzer` 空输出被判可用**：探针 exit 0 但无输出，而
+  `Invoke-ScriptAnalyzer` 并不存在。
+
+### 未登记的门禁
+
+`pre-push` 的注释说 M2/ML/UI 已移除，实际只有 M2 移除；`run_gate_m3` 和 UI 块仍在
+被调用。**未登记的门禁仍会运行**，只是对 `gate-capability` 不可见。已登记：
+19 → 21 个门禁，push-only 3 → 5。
+
+### 测试
+
+vitest：**9 个失败文件 → 0**（375 files / 4122 tests）。接手时的失败都可追溯到
+上面这些根因，或独立的既有缺陷（AC 引用债务、warnings 基线过期）。
+
+### 已知未修
+
+同一次提交上仍有若干 `.bats` 套件失败。它们在本次改动**之前**就失败——通过 stash
+改动后重跑确认——而 `npm test` 先跑 vitest 再跑 bats，所以只看 vitest 从来看不到
+它们。**不要把"vitest 全绿"当作"全部通过"。**
+
 ## [0.38.125.0] - 2026-11-23
 
 **ABBA 对照证实 gate-5c 的 N+1 修复：中位省 3329 ms（17.2%）。**
