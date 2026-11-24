@@ -2616,49 +2616,116 @@ async function detectCliToolAsync(toolName, isWindows, options = {}) {
   const bashPath = options.bashPath || null;
   const env = options.env || undefined;
 
-  if (bashPath) {
-    const hookEnvPath = await probeToolInHookEnv(toolName, bashPath, env);
-    if (hookEnvPath) {
-      const version = await getVersionAsync(hookEnvPath, isWindows, { bashPath, env });
-      return { available: true, path: hookEnvPath, version };
-    }
-    return { available: false };
+  // Inside the hook environment there is exactly ONE answer: the path the gate would
+  // resolve. Falling through to a host probe would report a tool the hook cannot see.
+  if (bashPath) return probeInHookEnv(toolName, isWindows, bashPath, env);
+
+  // The steps are a LIST, tried in order: each returns null when it finds nothing.
+  // Written as `||` chaining it was three branches to say "first one wins".
+  const steps = [
+    () => probeViaLocator(toolName, isWindows, env),
+    () => probeViaDirectExec(toolName, isWindows, env),
+    () => probeViaLocalPaths(toolName, isWindows),
+  ];
+  return unwrapProbeHit(await firstProbeHit(steps));
+}
+
+/**
+ * Run each probe until one reports a hit.
+ *
+ * @param {Array<() => Promise<object|null>>} steps
+ * @returns {Promise<object|null>} the first non-null result, or null
+ */
+/**
+ * Normalise a probe result so the caller always gets an object.
+ *
+ * @param {object|null} hit
+ * @returns {{available: boolean}}
+ */
+function unwrapProbeHit(hit) {
+  return hit || { available: false };
+}
+
+async function firstProbeHit(steps) {
+  for (const step of steps) {
+    const hit = await step();
+    if (hit) return hit;
   }
+  return null;
+}
 
-  const shell = isWindows ? 'cmd.exe' : '/bin/sh';
-  const execOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], shell, timeout: EXEC_TIMEOUT_MS, env };
+/**
+ * Probe where the gate would look, and stop there either way.
+ *
+ * @param {string} toolName
+ * @param {boolean} isWindows
+ * @param {string} bashPath
+ * @param {object|undefined} env
+ * @returns {Promise<{available: boolean, path?: string, version?: string}>}
+ */
+async function probeInHookEnv(toolName, isWindows, bashPath, env) {
+  const hookEnvPath = await probeToolInHookEnv(toolName, bashPath, env);
+  if (!hookEnvPath) return { available: false };
+  const version = await getVersionAsync(hookEnvPath, isWindows, { bashPath, env });
+  return { available: true, path: hookEnvPath, version };
+}
 
-  // Step 1: Locate tool via which/where (async, 3s timeout)
+/** The exec options every host probe shares: a shell, a hard timeout, piped streams. */
+function hostExecOptions(isWindows) {
+  return {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: isWindows ? 'cmd.exe' : '/bin/sh',
+    timeout: EXEC_TIMEOUT_MS,
+  };
+}
+
+/**
+ * Step 1: `which` / `where`.
+ *
+ * @returns {Promise<{available: boolean, path?: string, version?: string}|null>} null
+ *   when the locator found nothing, so the caller can try the next step.
+ */
+async function probeViaLocator(toolName, isWindows, env) {
   const locator = isWindows ? 'where' : 'which';
-  const locatorResult = await execWithTimeout(`${locator} ${toolName}`, execOpts);
-  if (locatorResult && locatorResult.stdout) {
-    const resolvedPath = locatorResult.stdout.split('\n')[0].trim();
-    if (resolvedPath) {
-      const version = await getVersionAsync(resolvedPath, isWindows);
-      return { available: true, path: resolvedPath, version };
-    }
-  }
+  const result = await execWithTimeout(`${locator} ${toolName}`, { ...hostExecOptions(isWindows), env });
+  const resolvedPath = result && result.stdout ? result.stdout.split('\n')[0].trim() : '';
+  if (!resolvedPath) return null;
+  return { available: true, path: resolvedPath, version: await getVersionAsync(resolvedPath, isWindows) };
+}
 
-  // Step 2: Direct exec fallback (async, 3s timeout)
-  const fallbackCmd = isWindows
+/**
+ * Step 2: run the tool directly.
+ *
+ * The POSIX form tries `--version` then `-v`, because tools disagree about which one
+ * they answer and a silent failure here means "not installed" to the caller.
+ *
+ * @returns {Promise<{available: boolean, path?: string, version?: string}|null>}
+ */
+async function probeViaDirectExec(toolName, isWindows, env) {
+  const command = isWindows
     ? `${toolName} --version`
     : `${toolName} --version 2>/dev/null || ${toolName} -v 2>/dev/null`;
-  const fallbackResult = await execWithTimeout(fallbackCmd, execOpts);
-  if (fallbackResult && fallbackResult.stdout) {
-    return { available: true, path: toolName, version: fallbackResult.stdout.split('\n')[0] };
-  }
+  const result = await execWithTimeout(command, { ...hostExecOptions(isWindows), env });
+  if (!result || !result.stdout) return null;
+  return { available: true, path: toolName, version: result.stdout.split('\n')[0] };
+}
 
-  // Step 3: Check local fallback paths (sync fs, no exec)
-  const localPaths = getLocalFallbackPathsSync(toolName, isWindows);
-  for (const localPath of localPaths) {
+/**
+ * Step 3: the well-known install directories, with no exec at all.
+ *
+ * Last because it is the most expensive to be wrong about: a stale path here reports
+ * a tool as present that no shell would actually find.
+ *
+ * @returns {Promise<{available: boolean, path?: string, version?: string}|null>}
+ */
+async function probeViaLocalPaths(toolName, isWindows) {
+  for (const localPath of getLocalFallbackPathsSync(toolName, isWindows)) {
     if (!fs.existsSync(localPath)) continue;
     const version = await getVersionAsync(localPath, isWindows);
-    if (version) {
-      return { available: true, path: localPath, version };
-    }
+    if (version) return { available: true, path: localPath, version };
   }
-
-  return { available: false };
+  return null;
 }
 
 /**
