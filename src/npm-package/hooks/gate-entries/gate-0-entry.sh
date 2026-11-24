@@ -128,7 +128,27 @@ has_changelog_change=false
 #   - Gate 0's own hint fired as though nothing were staged.
 # A cache that is only warm on some branches is not a cache, it is a branch-wide
 # behaviour difference. Assign it before anything can branch.
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+# `core.quotepath` (default true) makes git print non-ASCII paths octal-escaped:
+# a staged "docs/验证.md" comes out as "docs/\351\252\214..." with surrounding
+# quotes. That string is not a path, so every scanner downstream receives a file
+# it cannot open. Gate 2 is where it surfaced -- jscpd exits 1 on the first
+# missing path and Gate 2 then reported "SKIPPED - jscpd run error", so a commit
+# touching good.js plus 验证.js had NEITHER file scanned (#870). Gates 0 and 1
+# read the same list; they just match with `grep -E '\.(ts|js)$'`, which never
+# matches an escaped name -- the same miss, with no error to notice.
+#
+# Fixed here, where the list is computed (see the #640 note above: this is the
+# one place; everything else reads $XP_STAGED_ACM). `-c core.quotepath=false` is
+# preferred over `-z`: `-z` switches to NUL separation and every `while IFS=
+# read -r` caller would have to change, while disabling quotepath keeps the
+# one-line-one-path contract intact. A filename containing a literal newline
+# still breaks that contract, but that is a separate problem from non-ASCII
+# names and would need `-z` end to end.
+#
+# NOTE: quoting this as one command substitution is fine -- git's own -c goes on
+# the inner command. Both this and the #640 cache must agree: if only the
+# consumers are fixed, the cache re-populates the escaped form and wins.
+STAGED_FILES=$(git -c core.quotepath=false diff --cached --name-only --diff-filter=ACM)
 export_staged_acm_cache "$STAGED_FILES"
 
 if [ "$is_protected" = "true" ]; then
@@ -563,7 +583,22 @@ echo ""
 # scope rationale as the mirror exclusion (#507 Delphi round-2 follow-up).
 MIRROR_PATH_FILTER='^src/npm-package/'
 DASHBOARD_PATH_FILTER='^dashboard/'
-RAW_CHANGED_FILES="${XP_STAGED_ACM:-$(git diff --cached --name-only --diff-filter=ACM)}"
+# `core.quotepath` (default true) makes git print non-ASCII paths octal-escaped:
+# a staged "docs/验证.md" comes out as "docs/\\351\\252\\214..." with quotes. That
+# string is not a path, so every scanner downstream receives a file it cannot
+# open. Gate 2 was where it surfaced -- jscpd exits 1 on the first missing path
+# and Gate 2 then reported "SKIPPED - jscpd run error", so a commit touching
+# "good.js" plus "验证.js" had NEITHER file scanned (#870). Gates 0 and 1 read
+# the same list; they just match with `grep -E '\.(ts|js)$'`, which silently
+# never matches an escaped name -- the same miss, with no error to notice.
+#
+# Fixed here, at the single place the list is built, so a scanner added tomorrow
+# inherits it. `-c core.quotepath=false` over `-z`: `-z` switches to NUL
+# separation and every `while IFS= read -r` caller would have to change, while
+# disabling quotepath keeps the one-line-one-path contract intact. A filename
+# containing a literal newline still breaks that contract, but that is a
+# separate problem from non-ASCII names and would need `-z` end to end.
+RAW_CHANGED_FILES="${XP_STAGED_ACM:-$(git -c core.quotepath=false diff --cached --name-only --diff-filter=ACM)}"
 
 # Dependencies and build output are not project code (#649).
 #
