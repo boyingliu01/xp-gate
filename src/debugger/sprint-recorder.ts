@@ -25,25 +25,38 @@ function buildPhaseTimeline(state: { phase_history?: { phase: number; phase_name
   return phases;
 }
 
+/** The metrics prefix that carries per-phase token counts. */
+const TOKEN_PHASE_PREFIX = 'tokens_phase_';
+
+/**
+ * Per-phase token counts, keyed by the phase number the metric name carries.
+ *
+ * Read from `metrics`, not from the timeline: a phase that ran and then had its history
+ * entry rewritten still spent its tokens, and the metric is the only place that
+ * survives the rewrite.
+ */
+function collectPhaseTokens(metrics: Record<string, unknown> | undefined): Record<string, number> {
+  const tokens: Record<string, number> = {};
+  for (const [key, value] of Object.entries(metrics ?? {})) {
+    if (!key.startsWith(TOKEN_PHASE_PREFIX) || typeof value !== 'number') continue;
+    tokens[key.replace(TOKEN_PHASE_PREFIX, '')] = value;
+  }
+  return tokens;
+}
+
+/**
+ * One snapshot per phase in the history, with its tokens.
+ *
+ * A phase with no recorded count reports 0 rather than being omitted: the timeline is
+ * the spine of the report, and dropping entries would make it silently disagree with
+ * the phase list.
+ */
 function buildTokenSnapshots(state: { metrics?: Record<string, unknown>; phase_history?: { phase: number; phase_name: string; status: string; timestamp?: string; started_at?: string }[] }): { phase: string; tokens: number }[] {
-  const tokenMap: Record<string, number> = {};
-  if (state.metrics && typeof state.metrics === 'object') {
-    for (const [key, val] of Object.entries(state.metrics)) {
-      if (key.startsWith('tokens_phase_') && typeof val === 'number') {
-        const phaseKey = key.replace('tokens_phase_', '');
-        tokenMap[phaseKey] = val;
-      }
-    }
-  }
-  const snapshots: { phase: string; tokens: number }[] = [];
-  for (const ph of state.phase_history || []) {
+  const tokenMap = collectPhaseTokens(state.metrics);
+  return (state.phase_history || []).map((ph) => {
     const phaseKey = String(ph.phase);
-    snapshots.push({
-      phase: phaseKey,
-      tokens: tokenMap[phaseKey] ?? 0,
-    });
-  }
-  return snapshots;
+    return { phase: phaseKey, tokens: tokenMap[phaseKey] ?? 0 };
+  });
 }
 
 /**

@@ -65,33 +65,48 @@ function urlIdentity(resolved) {
   }
 }
 
+/**
+ * Whether a metadata value is PRESENT.
+ *
+ * A present-but-non-string `resolved` is corruption, not absence: it is collected so
+ * the classifier reports it, instead of the entry being certified clean.
+ */
+function isPresent(meta) {
+  return meta !== undefined && meta !== null;
+}
+
+/**
+ * Every `resolved` entry in a lockfile, flattened to `name` + `resolved`.
+ *
+ * Both lockfile shapes carry the field, so the "worth reporting" rule is stated once
+ * here rather than twice with different names.
+ */
 function eachResolved(lock) {
   const entries = [];
-  // A present-but-non-string value is corruption, not absence: collect it so the
-  // classifier reports it instead of certifying the entry clean.
-  const isPresent = (meta) => meta !== undefined && meta !== null;
-
-  // Both lockfile shapes collect entries the same way; only the naming differs,
-  // so the "is this a resolved entry worth reporting" rule is stated once.
-  const collect = (name, meta) => {
-    if (isPresent(meta.resolved)) entries.push({ name, resolved: meta.resolved });
-  };
-
-  for (const [name, meta] of Object.entries(lock.packages || {})) {
-    if (meta) collect(name, meta);
-  }
-
-  // lockfileVersion 1/2 keep a legacy tree with the same field.
-  const walk = (deps, prefix) => {
-    for (const [name, meta] of Object.entries(deps || {})) {
-      const full = prefix ? `${prefix}/${name}` : name;
-      if (!meta || typeof meta !== 'object') continue;
-      collect(full, meta);
-      if (meta.dependencies) walk(meta.dependencies, full);
-    }
-  };
-  walk(lock.dependencies, '');
+  collectResolved(entries, lock.packages || {}, '');
+  collectResolved(entries, lock.dependencies, '');
   return entries;
+}
+
+/**
+ * Walk one dependency tree, pushing every present `resolved`.
+ *
+ * The tree is keyed by NAME at each level, so the reporting name is the PATH to the
+ * entry (`a/b/c`). Without the prefix, two packages sharing a name at different depths
+ * would collapse into one report line and the reader could not tell which carries a
+ * bad URL.
+ *
+ * @param {Array} entries mutated
+ * @param {object|undefined} deps the tree at this level
+ * @param {string} prefix path so far, '' at the root
+ */
+function collectResolved(entries, deps, prefix) {
+  for (const [name, meta] of Object.entries(deps || {})) {
+    if (!meta || typeof meta !== 'object') continue;
+    const full = prefix ? `${prefix}/${name}` : name;
+    if (isPresent(meta.resolved)) entries.push({ name: full, resolved: meta.resolved });
+    collectResolved(entries, meta.dependencies, full);
+  }
 }
 
 // The invariant is narrower than "the hostname looks right": a resolved entry
