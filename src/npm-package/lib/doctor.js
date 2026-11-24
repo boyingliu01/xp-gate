@@ -4520,6 +4520,7 @@ function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
 }
 
 module.exports = {
+  reportUnreadablePath, reportStalePath,
   doctor, doctorDelphi, isXpGateFile, diagnoseLanguageTools, diagnoseCliTools, SIGNATURES, getHookSignatures, isXpGateHookContent,
   fixVersionMismatch,
   fixTemplateDirMismatch,
