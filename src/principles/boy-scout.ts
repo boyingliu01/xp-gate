@@ -90,22 +90,33 @@ function pushRename(result: FileClassification, parts: string[]): boolean {
   if (parts.length >= RENAME_PARTS) result.renamed.push({ oldPath: parts[1], newPath: parts[2] });
   return true;
 }
+/**
+ * The fields of a status line, or null when it carries no path.
+ *
+ * Blank lines and single-token lines are skipped: `git status --porcelain` emits
+ * neither for a real change, and treating them as paths would invent entries.
+ */
+function statusParts(line: string): string[] | null {
+  if (!line.trim()) return null;
+  const parts = line.split(/\s+/).filter(Boolean);
+  return parts.length < 2 ? null : parts;
+}
+
+/** Record one status line, if it names a change worth classifying. */
+function recordStatusLine(result: FileClassification, parts: string[]): void {
+  if (pushRename(result, parts)) return;
+  const bucket = STATUS_BUCKETS[parts[0].trim().charAt(0)];
+  // The buckets hold different shapes (paths vs rename pairs), so the assignment is
+  // narrowed per key rather than through a generic push.
+  if (!bucket || bucket === 'renamed') return;
+  (result[bucket] as string[]).push(pathOf(parts));
+}
+
 export function classifyFiles(gitDiffLines: string[]): FileClassification {
   const result: FileClassification = { new: [], modified: [], deleted: [], renamed: [] };
-
   for (const line of gitDiffLines) {
-    if (!line.trim()) continue;
-    const parts = line.split(/\s+/).filter(Boolean);
-    if (parts.length < 2) continue;
-
-    const status = parts[0].trim();
-    if (pushRename(result, parts)) continue;
-    const bucket = STATUS_BUCKETS[status.charAt(0)];
-    if (!bucket) continue;
-    // The buckets hold different shapes (paths vs rename pairs), so the assignment is
-    // narrowed per key rather than through a generic push.
-    if (bucket === 'renamed') continue;
-    (result[bucket] as string[]).push(pathOf(parts));
+    const parts = statusParts(line);
+    if (parts) recordStatusLine(result, parts);
   }
   return result;
 }
@@ -682,22 +693,36 @@ function parseArgs(args: string[]): Record<string, unknown> {
   };
 
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--help' || arg === '-h' || arg === 'help') {
+    if (isHelpFlag(args[i])) {
       showHelp();
       process.exit(0);
     }
-    const handler = ARG_HANDLERS[arg];
-    if (handler && handler(parsed, args[i + 1])) {
-      i++;
-    }
+    if (applyArg(parsed, args, i)) i++;
   }
-
   return parsed;
 }
 
-function showHelp(): void {
-  console.log(`
+/** The spellings that ask for the usage text. */
+const HELP_FLAGS = new Set(['--help', '-h', 'help']);
+
+/** Whether this argument asks for help. */
+function isHelpFlag(arg: string): boolean {
+  return HELP_FLAGS.has(arg);
+}
+
+/**
+ * Apply the handler for one argument.
+ *
+ * @returns whether the handler CONSUMED the next token, so the caller advances past it
+ *   -- a flag that takes a value must not have that value parsed as another flag.
+ */
+function applyArg(parsed: Record<string, unknown>, args: string[], i: number): boolean {
+  const handler = ARG_HANDLERS[args[i]];
+  return handler ? handler(parsed, args[i + 1]) : false;
+}
+
+/** The usage text, kept as data so `showHelp` stays a single statement. */
+const USAGE_TEXT = `
 Usage: boy-scout <options>
 Options:
   --new-files <file1,file2,...>    Specify new files to analyze
@@ -714,7 +739,10 @@ Examples:
   npx tsx boy-scout.ts --modified-files src/changed-file.ts --baseline my-baseline.json
   npx tsx boy-scout.ts --init-baseline src/file1.ts,src/file2.ts
   npx tsx boy-scout.ts --prune-baseline --apply
-`);
+`;
+
+function showHelp(): void {
+  console.log(USAGE_TEXT);
 }
 
 /**
@@ -824,54 +852,66 @@ async function autoInitMissingEntries(
   console.log(`   auto-initialized ${noun}: ${missingBaselineEntries.join(', ')}`);
 }
 
-async function runEnforcement(newFiles: string[], modifiedFiles: string[], baselinePath: string): Promise<EnforcementResult> {
-  const allFiles = [...newFiles.filter(f => f.trim()), ...modifiedFiles.filter(f => f.trim())];
-  const currentWarnings = await analyzeWarningsForFiles(allFiles);
+/** The non-blank entries of a file list. */
+function presentFiles(files: string[]): string[] {
+  return files.filter((f) => f.trim());
+}
 
-  // Distinguishing "created" from "updated" is part of the auto-init contract
-  // (#452 REQ-2): a silently rewritten baseline is how unrelated entries used
-  // to vanish without anyone noticing.
-  let baselineExisted = false;
+/**
+ * Whether the baseline file already exists.
+ *
+ * Distinguishing "created" from "updated" is part of the auto-init contract
+ * (#452 REQ-2): a silently rewritten baseline is how unrelated entries used to vanish
+ * without anyone noticing.
+ */
+async function baselineExists(baselinePath: string): Promise<boolean> {
   try {
     await fs.access(baselinePath);
-    baselineExisted = true;
+    return true;
   } catch {
-    baselineExisted = false;
+    return false;
   }
+}
+
+/** Modified files with no baseline entry yet. */
+function filesMissingBudget(baseline: Record<string, BaselineEntry>, files: string[]): string[] {
+  return files.filter((file) => !baseline[file]);
+}
+
+/** The delta for one NEW file, which has no budget to compare against. */
+function newFileDelta(file: string, currentWarnings: Record<string, number>): DeltaResult {
+  const delta = calculateDelta(null, currentWarnings[file] || 0, 'NEW');
+  delta.file = file;
+  return delta;
+}
+
+/** The delta for one MODIFIED file, compared against its recorded budget. */
+function modifiedFileDelta(
+  file: string,
+  baseline: Record<string, BaselineEntry>,
+  currentWarnings: Record<string, number>,
+): DeltaResult {
+  const delta = calculateDelta(baseline[file] || null, currentWarnings[file] || 0, 'MODIFIED');
+  delta.file = file;
+  return delta;
+}
+
+async function runEnforcement(newFiles: string[], modifiedFiles: string[], baselinePath: string): Promise<EnforcementResult> {
+  const currentWarnings = await analyzeWarningsForFiles([...presentFiles(newFiles), ...presentFiles(modifiedFiles)]);
+  const existed = await baselineExists(baselinePath);
   const baseline = await loadBaseline(baselinePath);
 
-  // Check for missing baseline entries for modified files
-  const missingBaselineEntries: string[] = [];
-  for (const file of modifiedFiles) {
-    if (!baseline[file]) {
-      missingBaselineEntries.push(file);
-    }
+  // A file being modified for the first time gets its current count recorded, so the
+  // NEXT modification is compared against a real budget instead of nothing.
+  const missing = filesMissingBudget(baseline, modifiedFiles);
+  if (missing.length > 0) {
+    await autoInitMissingEntries(baseline, missing, currentWarnings, baselinePath, existed);
   }
 
-  // Files being modified for the first time get their current count recorded, so
-  // the next modification is compared against a real budget instead of nothing.
-  if (missingBaselineEntries.length > 0) {
-    await autoInitMissingEntries(baseline, missingBaselineEntries, currentWarnings, baselinePath, baselineExisted);
-  }
-  
-  const deltaResults: DeltaResult[] = [];
-
-  for (const file of newFiles) {
-    const warningCount = currentWarnings[file] || 0;
-    const delta = calculateDelta(null, warningCount, 'NEW');
-    delta.file = file;
-    deltaResults.push(delta);
-  }
-  
-  for (const file of modifiedFiles) {
-    const baselineEntry = baseline[file] || null;
-    const warningCount = currentWarnings[file] || 0;
-    const delta = calculateDelta(baselineEntry, warningCount, 'MODIFIED');
-    delta.file = file;
-    deltaResults.push(delta);
-  }
-  
-  return enforceBoyScoutRule(deltaResults);
+  return enforceBoyScoutRule([
+    ...newFiles.map((file) => newFileDelta(file, currentWarnings)),
+    ...modifiedFiles.map((file) => modifiedFileDelta(file, baseline, currentWarnings)),
+  ]);
 }
 
 // Fires only when this file IS the entry point. The previous check --
