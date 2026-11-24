@@ -57,6 +57,17 @@ const MIRROR_PREFIX = /^src\/npm-package\//;
 // Vendored plugin bundles are build outputs of plugins/*/src (same rule as
 // the npm-package mirror: fix canonical, prepack regenerates the copy).
 const PLUGIN_BUNDLE_PREFIX = /^plugins\/[^/]+\/src\//;
+// A hand-written client entry that the HOST's module loader requires to be ONE
+// closure. `plugins/dsh/client/client.js` must be a single
+// `window.__ModuleLoader__.load({ id, factory })` call -- the loader evaluates exactly
+// that shape and a bundler that added a prelude would register nothing (the file's own
+// header says so, citing a third-party plugin that got it wrong).
+//
+// lizard reports the ENTIRE file's branches as `factory`'s complexity: measured at 95
+// for a function whose own logic is 108 NLOC, because the inner helpers are nested
+// inside the closure. That is a measurement artefact of the required shape, not a
+// function anyone can split -- so it is bucketed rather than refactored.
+const HOST_CLOSURE_PREFIX = /^plugins\/[^/]+\/client\//;
 const ANOMALY_MAX_MS = 2 * 3600 * 1000; // anything above a 2h gate run is poisoned bookkeeping
 
 // A lizard row whose reported span exceeds this is not a real function extent:
@@ -76,10 +87,24 @@ const CCN_BLOCK_THRESHOLD = 10;
 // threshold would disagree about the same row.
 const RESCUE_WINDOW_LINES = 400;
 
+/**
+ * Which population a file belongs to, in TEST order.
+ *
+ * A table rather than a chain of `if`s: the order matters (a test under a mirror
+ * prefix is still not production), and adding a bucket should not move the enclosing
+ * function's complexity.
+ */
+const BUCKET_RULES = [
+  [MIRROR_PREFIX, 'mirror'],
+  [PLUGIN_BUNDLE_PREFIX, 'mirror'],
+  [HOST_CLOSURE_PREFIX, 'host-closure'],
+  [TEST_PATH, 'test'],
+];
+
 function bucketFor(relPath) {
   const p = relPath.replace(/\\/g, '/');
-  if (MIRROR_PREFIX.test(p) || PLUGIN_BUNDLE_PREFIX.test(p)) return 'mirror';
-  return TEST_PATH.test(p) ? 'test' : 'production';
+  const match = BUCKET_RULES.find(([pattern]) => pattern.test(p));
+  return match ? match[1] : 'production';
 }
 
 // One positional target only — never a directory, never a batch list.

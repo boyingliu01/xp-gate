@@ -573,10 +573,33 @@ const TYPE_TERMINATORS = new Set([';', '\n']);
  */
 function classifyTypeChar(body: string, i: number, braces: number, angles: number): TypeScanStep {
   const c = body[i];
-  if (c === '}') return braces === 0 ? 'stop' : 'close-brace';
-  if (c === '=' && body[i + 1] === '>' && braces === 0 && angles === 0) return 'stop';
-  if (braces === 0 && angles === 0 && TYPE_TERMINATORS.has(c)) return 'stop';
+  if (c === '}') return closingBraceStep(braces);
+  if (isFlatEnd(body, i, braces, angles)) return 'stop';
   return TYPE_STEPS[c] || 'skip';
+}
+
+/**
+ * What a `}` means to a type scan.
+ *
+ * At depth 0 it closes the block the scan is running INSIDE, so the type cannot extend
+ * past it -- that is the end of the scan, not a type brace closing.
+ */
+function closingBraceStep(braces: number): TypeScanStep {
+  return braces === 0 ? 'stop' : 'close-brace';
+}
+
+/**
+ * Whether the character at `i` ends the type at the OUTERMOST level.
+ *
+ * Only at the outermost level: `;` and a newline inside a type brace or a generic
+ * argument are part of the type (`{ a: number; b: string }`).
+ */
+function isFlatEnd(body: string, i: number, braces: number, angles: number): boolean {
+  const flat = braces === 0 && angles === 0;
+  if (!flat) return false;
+  const c = body[i];
+  if (c === '=' && body[i + 1] === '>') return true;
+  return TYPE_TERMINATORS.has(c);
 }
 
 /** Depth adjustment for one step of a type scan. */

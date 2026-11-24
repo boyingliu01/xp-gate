@@ -55,6 +55,11 @@ function printReport(report, get, deps) {
     production_functions_gt10: prodOver.length,
     test_functions_gt10: report.functions.filter((f) => f.bucket === 'test' && f.ccn > 10).length,
     mirror_functions_gt10: report.functions.filter((f) => f.bucket === 'mirror' && f.ccn > 10).length,
+    // Present so the number cannot vanish: these are reported by lizard as one huge
+    // function because the HOST's loader requires a single closure, not because the
+    // code is complex. Counting them as production would block every commit on a
+    // shape nobody can change; hiding them would make the report lie by omission.
+    host_closure_functions_gt10: report.functions.filter((f) => f.bucket === 'host-closure' && f.ccn > 10).length,
     worst_production: prodOver.sort((a, b) => b.ccn - a.ccn).slice(0, parseInt(get('--top') || '20', 10)),
     gate_timing: byGate,
   };
@@ -66,6 +71,7 @@ function printReport(report, get, deps) {
   console.log(`production funcs CCN>10:  ${summary.production_functions_gt10}   (canonical tree only)`);
   console.log(`test funcs CCN>10:        ${summary.test_functions_gt10}`);
   console.log(`mirror funcs CCN>10:      ${summary.mirror_functions_gt10}   (src/npm-package copies — fixed via canonical + prepack)`);
+  console.log(`host-closure funcs CCN>10: ${summary.host_closure_functions_gt10}   (single-closure client entries the host loader requires — measurement artefact, not complexity)`);
   console.log('\nworst production functions:');
   for (const f of summary.worst_production) {
     console.log(`  CCN=${String(f.ccn).padStart(4)}  ${f.file}:${f.line}  ${f.name}`);
