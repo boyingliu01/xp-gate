@@ -50,9 +50,14 @@ function detectBranch(cwd) {
 function generateSprintId() {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-  const seq = String(Math.floor(Math.random() * 99) + 1).padStart(2, '0');
+  const seq = String(Math.floor(Math.random() * MAX_SPRINT_SEQUENCE) + 1).padStart(2, '0');
   return `sprint-${dateStr}-${seq}`;
 }
+
+/** Sprint ids are `sprint-YYYYMMDD-NN`; the sequence is 1-99. */
+const MAX_SPRINT_SEQUENCE = 99;
+/** `YYYY-MM-DDTHH:MM:SS` is 19 characters once the separators are normalised. */
+const TIMESTAMP_SECONDS_LENGTH = 19;
 
 /**
  * Backup existing sprint state to .sprint-history/.
@@ -61,12 +66,18 @@ function generateSprintId() {
  */
 function backupSprintState(projectRoot, state) {
   const historyDir = path.join(projectRoot, '.sprint-history');
-  if (!fs.existsSync(historyDir)) {
-    fs.mkdirSync(historyDir, { recursive: true });
-  }
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, TIMESTAMP_SECONDS_LENGTH);
   const backupFile = path.join(historyDir, `sprint-state-${state.id || 'unknown'}-${timestamp}.json`);
-  fs.writeFileSync(backupFile, JSON.stringify(state, null, 2), 'utf8');
+  try {
+    if (!fs.existsSync(historyDir)) {
+      fs.mkdirSync(historyDir, { recursive: true });
+    }
+    fs.writeFileSync(backupFile, JSON.stringify(state, null, 2), 'utf8');
+  } catch (err) {
+    // A backup that silently fails is worse than none: `--force` then overwrites
+    // state the operator believed was preserved.
+    throw new Error(`cannot back up sprint state to ${backupFile}: ${err.message}`);
+  }
   return backupFile;
 }
 
@@ -124,8 +135,173 @@ function parseSprintInitArgs(args) {
   return { forceFlag, dryRunFlag, projectDir, issues, taskDescription };
 }
 
-async function handleSprintInit(args = []) {
-  if (args.includes('--help')) {
+/**
+ * Deal with a sprint that is already on disk: idempotent call, conflict, or
+ * forced override.
+ *
+ * The three outcomes are one decision because they share a single precondition
+ * (there IS existing state) and differ only in what the caller asked for. Split
+ * out of `handleSprintInit` (162 lines), which read as a sequence of unrelated
+ * blocks.
+ *
+ * The idempotent case is deliberately narrow: same task AND same branch AND not
+ * detached. A detached HEAD has no branch identity to compare, so treating it as
+ * a match would silently accept a second sprint on the same task.
+ *
+ * @param {object} manager SprintStateManager
+ * @param {string} projectDir
+ * @param {{taskDescription: string, branch: string, forceFlag: boolean, dryRunFlag: boolean}} opts
+ * @returns {{exitCode?: number, existingState: object|null}}
+ */
+function handleExistingSprint(manager, projectDir, opts) {
+  const { taskDescription, branch, forceFlag, dryRunFlag } = opts;
+
+  let existingState = null;
+  try {
+    existingState = manager.read();
+  } catch {
+    // Corrupted state -- treat as no state; overwriting it is the only way out.
+    existingState = null;
+  }
+  if (!existingState) return { existingState: null };
+
+  const normalizedExisting = (existingState.task_description || '').trim();
+  const normalizedNew = taskDescription.trim();
+  const existingBranch = existingState.isolation?.branch || '';
+
+  if (normalizedExisting === normalizedNew && existingBranch === branch && branch !== 'detached') {
+    console.log('ℹ️  Sprint already initialized (idempotent call). Current state:');
+    console.log('');
+    console.log(renderDashboard(existingState));
+    return { exitCode: 0, existingState };
+  }
+
+  if (!forceFlag) {
+    if (dryRunFlag) {
+      console.log(JSON.stringify({
+        decision: 'deny',
+        reason: `Active sprint "${existingState.id}" exists (task: "${normalizedExisting}")`,
+        hint: 'Use --force to override (backs up old state)',
+      }));
+      return { exitCode: 0, existingState };
+    }
+    console.error(`Error: Active sprint "${existingState.id}" already exists.`);
+    console.error(`  Task: "${normalizedExisting}"`);
+    console.error(`  Branch: ${existingBranch}`);
+    console.error('  Use --force to override (backs up old state to .sprint-history/)');
+    return { exitCode: 1, existingState };
+  }
+
+  const backupPath = backupSprintState(projectDir, existingState);
+  console.log(`📦 Backed up existing sprint to: ${backupPath}`);
+  return { existingState };
+}
+
+/**
+ * The most recent sprint's retro data, or null.
+ *
+ * Best effort by design: retro data only pre-populates fields, so a missing or
+ * unparseable file must not stop a sprint from starting. Only the newest
+ * `.sprint-history` entry is consulted -- carrying forward a retro from three
+ * sprints ago would be worse than carrying none.
+ *
+ * @param {string} projectDir
+ * @returns {object|null}
+ */
+function readPreviousRetro(projectDir) {
+  const historyDir = path.join(projectDir, '.sprint-history');
+  if (!fs.existsSync(historyDir)) return null;
+
+  const entries = fs.readdirSync(historyDir).filter((f) => f.startsWith('sprint-')).sort().reverse();
+  const newest = entries[0];
+  if (!newest) return null;
+  // `sprint-state-*.json` is a state snapshot, not a retro; only a retro file
+  // carries the fields this feeds.
+  if (newest.endsWith('.json') && !newest.includes('retro')) return null;
+
+  try {
+    return JSON.parse(fs.readFileSync(path.join(historyDir, newest), 'utf8'));
+  } catch {
+    // An unparseable retro carries nothing worth failing a sprint start over.
+    return null;
+  }
+}
+
+/**
+ * The initial state for a new sprint.
+ *
+ * `evidence_schema_version: 2` is what turns Gate 5c's warnings into BLOCKs for
+ * this sprint: a sprint created under the new rules is held to them. That is why
+ * it is set here rather than inherited -- an old sprint keeps its leniency, a new
+ * one gets none.
+ *
+ * Phase 6 / D7: the previous sprint's retro values are carried into `metrics`
+ * so the new sprint starts with last sprint's rework rate and duration visible.
+ *
+ * @param {{projectDir: string, branch: string, taskDescription: string, issues: string, previousRetro: object|null}} opts
+ * @returns {{sprintId: string, newState: object}}
+ */
+function buildSprintState(opts) {
+  const { projectDir, branch, taskDescription, issues, previousRetro } = opts;
+  const sprintId = generateSprintId();
+  const startedAt = new Date().toISOString();
+  const newState = {
+    _schema_version: 1,
+    evidence_schema_version: 2,
+    id: sprintId,
+    task_description: taskDescription.trim(),
+    phase: 1,
+    status: 'in_progress',
+    started_at: startedAt,
+    phase_history: [
+      {
+        phase: 1,
+        name: 'PREP',
+        status: 'in_progress',
+        started_at: startedAt,
+      },
+    ],
+    isolation: {
+      worktree_path: projectDir,
+      branch,
+    },
+    outputs: issues ? { issues } : {},
+    metrics: {},
+  };
+
+  applyPreviousRetro(newState, previousRetro);
+  return { sprintId, newState };
+}
+
+/**
+ * Copy the previous sprint's headline metrics into the new sprint.
+ *
+ * Only the three values that describe how the last sprint WENT -- not its task,
+ * branch or phase. Each is copied only when present, so a retro that predates a
+ * field does not write a null.
+ *
+ * @param {object} newState mutated in place
+ * @param {object|null} retro
+ */
+function applyPreviousRetro(newState, retro) {
+  if (!retro) return;
+  const carried = {
+    previous_rework_rate: retro.rework_rate,
+    previous_evidence_skips: retro.evidence_skips,
+    previous_duration_seconds: retro.duration_seconds,
+  };
+  for (const [key, value] of Object.entries(carried)) {
+    if (value != null) newState.metrics[key] = value;
+  }
+  if (Object.keys(newState.metrics).length === 0) return;
+  console.log('📊 Auto-populated from previous sprint retro data:');
+  for (const [key, value] of Object.entries(newState.metrics)) {
+    console.log(`   ${key}: ${value}`);
+  }
+}
+
+/** Print the sprint-init usage text. */
+function printSprintInitUsage() {
     console.log('Usage: xp-gate sprint-init "<task_description>" [options]');
     console.log('');
     console.log('Arguments:');
@@ -141,6 +317,12 @@ async function handleSprintInit(args = []) {
     console.log('  xp-gate sprint-init "Implement user auth"');
     console.log('  xp-gate sprint-init "Fix #366" --issues "#366" --force');
     return 0;
+}
+
+async function handleSprintInit(args = []) {
+  if (args.includes('--help')) {
+    printSprintInitUsage();
+    return 0;
   }
 
   // Parse arguments
@@ -154,125 +336,24 @@ async function handleSprintInit(args = []) {
   const manager = new SprintStateManager(projectDir);
   const branch = detectBranch(projectDir);
 
-  // Check existing sprint state
-  let existingState = null;
-  try {
-    existingState = manager.read();
-  } catch {
-    // Corrupted state — treat as no state (will be overwritten)
-    existingState = null;
-  }
-
-  if (existingState) {
-    // Idempotent check: same task_description + branch → output dashboard, exit 0
-    const normalizedExisting = (existingState.task_description || '').trim();
-    const normalizedNew = taskDescription.trim();
-    const existingBranch = existingState.isolation?.branch || '';
-
-    if (normalizedExisting === normalizedNew && existingBranch === branch && branch !== 'detached') {
-      console.log('ℹ️  Sprint already initialized (idempotent call). Current state:');
-      console.log('');
-      console.log(renderDashboard(existingState));
-      return 0;
-    }
-
-    // Conflict: existing active sprint
-    if (!forceFlag) {
-      if (dryRunFlag) {
-        console.log(JSON.stringify({
-          decision: 'deny',
-          reason: `Active sprint "${existingState.id}" exists (task: "${normalizedExisting}")`,
-          hint: 'Use --force to override (backs up old state)',
-        }));
-        return 0;
-      }
-      console.error(`Error: Active sprint "${existingState.id}" already exists.`);
-      console.error(`  Task: "${normalizedExisting}"`);
-      console.error(`  Branch: ${existingBranch}`);
-      console.error('  Use --force to override (backs up old state to .sprint-history/)');
-      return 1;
-    }
-
-    // --force: backup and override
-    const backupPath = backupSprintState(projectDir, existingState);
-    console.log(`📦 Backed up existing sprint to: ${backupPath}`);
-  }
+  const existing = handleExistingSprint(manager, projectDir, {
+    taskDescription, branch, forceFlag, dryRunFlag,
+  });
+  if (existing.exitCode !== undefined) return existing.exitCode;
 
   if (dryRunFlag) {
     console.log(JSON.stringify({
       decision: 'allow',
-      reason: existingState ? 'Would override existing sprint (--force)' : 'No existing sprint',
+      reason: existing.existingState ? 'Would override existing sprint (--force)' : 'No existing sprint',
       branch,
       task_description: taskDescription.trim(),
     }));
     return 0;
   }
 
-  // Read previous sprint retro data for auto-population (Phase 6 / D7)
-  const historyDir = path.join(projectDir, '.sprint-history');
-  let previousRetro = null;
-  if (fs.existsSync(historyDir)) {
-    const entries = fs.readdirSync(historyDir).filter(f => f.startsWith('sprint-')).sort().reverse();
-    for (const entry of entries) {
-      if (entry.endsWith('.json') && !entry.includes('retro')) continue;
-      const retroPath = path.join(historyDir, entry);
-      if (fs.existsSync(retroPath)) {
-        try {
-          const raw = fs.readFileSync(retroPath, 'utf8');
-          previousRetro = JSON.parse(raw);
-          break;
-        } catch {
-          // Skip unparseable files
-        }
-      }
-      break; // Only check the most recent sprint
-    }
-  }
+  const previousRetro = readPreviousRetro(projectDir);
 
-  // Create new sprint state
-  const sprintId = generateSprintId();
-  const newState = {
-    _schema_version: 1,
-    evidence_schema_version: 2,  // Phase 5: new sprints default to full BLOCK enforcement
-    id: sprintId,
-    task_description: taskDescription.trim(),
-    phase: 1,
-    status: 'in_progress',
-    started_at: new Date().toISOString(),
-    phase_history: [
-      {
-        phase: 1,
-        name: 'PREP',
-        status: 'in_progress',
-        started_at: new Date().toISOString(),
-      },
-    ],
-    isolation: {
-      worktree_path: projectDir,
-      branch,
-    },
-    outputs: issues ? { issues } : {},
-    metrics: {},
-  };
-
-  // Phase 6 / D7: Auto-populate from previous sprint retro data
-  if (previousRetro) {
-    if (previousRetro.rework_rate != null) {
-      newState.metrics.previous_rework_rate = previousRetro.rework_rate;
-    }
-    if (previousRetro.evidence_skips != null) {
-      newState.metrics.previous_evidence_skips = previousRetro.evidence_skips;
-    }
-    if (previousRetro.duration_seconds != null) {
-      newState.metrics.previous_duration_seconds = previousRetro.duration_seconds;
-    }
-    if (Object.keys(newState.metrics).length > 0) {
-      console.log('📊 Auto-populated from previous sprint retro data:');
-      for (const [key, value] of Object.entries(newState.metrics)) {
-        console.log(`   ${key}: ${value}`);
-      }
-    }
-  }
+  const { sprintId, newState } = buildSprintState({ projectDir, branch, taskDescription, issues, previousRetro });
 
   // Write state atomically
   manager.write(newState);
