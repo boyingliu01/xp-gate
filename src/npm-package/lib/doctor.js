@@ -3395,39 +3395,82 @@ const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--j
  * @param {{formatGiven: boolean, formatValue: string|null}} format
  * @returns {string[]}
  */
+/** `--format` accepts exactly these; anything else is a typo, not a mode. */
+const FORMAT_VALUES = ['json', 'text'];
+
+/**
+ * Reject flag combinations that would silently do nothing, or do the wrong thing.
+ *
+ * Each rule exists because the combination was accepted and misled someone. The
+ * recurring shape is a flag that only ONE code path reads: passing it alone was
+ * accepted, printed nothing, and changed nothing (#488 Round 4 found this for
+ * `--force`), which is indistinguishable from a repair that ran and found nothing
+ * to do.
+ *
+ * The rules are DATA -- `{ when, messages }` -- rather than an `if` ladder. Each rule
+ * is a sentence about a combination; the ladder made that five branches inside one
+ * function and buried the sentences in control flow.
+ *
+ * @param {object} f parsed flags
+ * @param {{formatGiven: boolean, formatValue: string|null}} format
+ * @returns {string[]}
+ */
+/** A JSON report is a read; the repair surface writes. They cannot share a run. */
+function isReadMixedWithRepair(f) {
+  return f.jsonMode && (f.fixMode || f.syncHooks);
+}
+
+/** `--force` is read only by `--sync-hooks`, so alone it changes nothing. */
+function isOrphanedForce(f) {
+  return f.force && !f.syncHooks;
+}
+
+/** `--install-tools` is read only by `--fix`. */
+function isOrphanedInstallTools(f) {
+  return f.installToolsFlag && !f.fixMode;
+}
+
+/** `--brief` is a read-only fact dump and cannot carry a write flag. */
+function isBriefWithWrite(f) {
+  return f.briefFlag && (f.fixMode || f.syncHooks || f.installToolsFlag || f.force);
+}
+
 function validateFlagCombinations(f, format) {
-  const errors = [];
+  const formatProblem = format.formatGiven && !FORMAT_VALUES.includes(format.formatValue)
+    ? [`Unknown --format value: ${format.formatValue || '(none)'} — expected ${FORMAT_VALUES.join(' or ')}`]
+    : [];
 
-  if (format.formatGiven && !['json', 'text'].includes(format.formatValue)) {
-    errors.push(`Unknown --format value: ${format.formatValue || '(none)'} — expected json or text`);
-  }
+  const rules = [
+    {
+      // A JSON report is a read; mixing it with the repair surface would put progress
+      // prose into the stream a script is parsing.
+      when: isReadMixedWithRepair(f),
+      messages: ['--json/--format json cannot be combined with --fix or --sync-hooks'],
+    },
+    {
+      when: isOrphanedForce(f),
+      messages: [
+        '--force is only read by --sync-hooks, where it overrides the divergence refusal and overwrites without a backup',
+        'Pass --sync-hooks --force, or drop --force',
+      ],
+    },
+    {
+      when: isOrphanedInstallTools(f),
+      messages: [
+        '--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine',
+        'Pass --fix --install-tools, or drop --install-tools',
+      ],
+    },
+    {
+      // #653: --brief collapses exploratory probes into one cheap read. Users call it
+      // often BECAUSE it is cheap, so a write smuggled in would compound state changes
+      // instead of only latency.
+      when: isBriefWithWrite(f),
+      messages: ['--brief is a read-only fact dump and cannot be combined with --fix, --sync-hooks, --install-tools or --force'],
+    },
+  ];
 
-  if (f.jsonMode && (f.fixMode || f.syncHooks)) {
-    // A JSON report is a read; mixing it with the repair surface would put progress
-    // prose into the stream a script is parsing.
-    errors.push('--json/--format json cannot be combined with --fix or --sync-hooks');
-  }
-
-  // `--force` is read only by the sync path.
-  if (f.force && !f.syncHooks) {
-    errors.push('--force is only read by --sync-hooks, where it overrides the divergence refusal and overwrites without a backup');
-    errors.push('Pass --sync-hooks --force, or drop --force');
-  }
-
-  // `--install-tools` installs only inside the --fix repair surface.
-  if (f.installToolsFlag && !f.fixMode) {
-    errors.push('--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine');
-    errors.push('Pass --fix --install-tools, or drop --install-tools');
-  }
-
-  // #653: --brief exists to collapse exploratory probes into one cheap read. Users
-  // call it often BECAUSE it is cheap, so a write smuggled in would compound state
-  // changes instead of only latency.
-  if (f.briefFlag && (f.fixMode || f.syncHooks || f.installToolsFlag || f.force)) {
-    errors.push('--brief is a read-only fact dump and cannot be combined with --fix, --sync-hooks, --install-tools or --force');
-  }
-
-  return errors;
+  return [...formatProblem, ...rules.filter((r) => r.when).flatMap((r) => r.messages)];
 }
 
 function doctorFlagContract(args) {
