@@ -685,26 +685,21 @@ const HOOK_SUPPORT_FILES = [
  * @param {{repoRoot?: string, repoHooks?: string, installedHooks?: string}} [ctx]
  * @returns {{checks: Array<{name: string, status: string, detail: string}>, issues: number}}
  */
-function diagnoseHookDrift(ctx = {}) {
-  const checks = [];
+/**
+ * Compare each tracked hook against its installed copy.
+ *
+ * The DIRECTION of the drift is reported, not just the fact: "githooks/ is newer"
+ * means sync, "installed is newer" means the installed copy has work the repo does
+ * not. Telling an operator which way it went is the difference between a fix and a
+ * guess.
+ *
+ * @param {string} repoHooks
+ * @param {string} installedHooks
+ * @param {Array} checks appended to
+ * @returns {number} issues found
+ */
+function compareHookCopies(repoHooks, installedHooks, checks) {
   let issues = 0;
-
-  // XP_GATE_REPO_ROOT lets a caller (or a test) name the canonical repo
-  // explicitly instead of inferring it from the process cwd.
-  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
-  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR();
-
-  // Nothing to compare when the project carries no canonical *hook* source, or
-  // when no global copy exists at all. Both must stay completely silent.
-  //
-  // A `githooks/` directory holding only `adapters/` is NOT a hook source of
-  // truth -- consumer projects get that layout from `xp-gate init`, and the
-  // adapters there are unrelated to which hook file executes.
-  if (!hasCanonicalHooks(repoHooks) || !fs.existsSync(installedHooks)) {
-    return { checks, issues };
-  }
-
   for (const name of DRIFT_COMPARED_HOOKS) {
     const repoFile = path.join(repoHooks, name);
     const installedFile = path.join(installedHooks, name);
@@ -735,43 +730,81 @@ function diagnoseHookDrift(ctx = {}) {
     });
     issues++;
   }
+  return issues;
+}
 
-  // lib/ shared libraries: pre-commit sources lib/*.sh at runtime, so a missing
-  // or stale installed lib/ copy breaks the hook entirely after a sync (#488).
+/**
+ * Compare the shared `lib/` copies that pre-commit sources at runtime.
+ *
+ * A missing or stale installed `lib/` breaks the hook ENTIRELY after a sync (#488),
+ * which is why these are compared separately from the hook files themselves.
+ *
+ * @param {string} repoHooks
+ * @param {string} installedHooks
+ * @param {Array} checks appended to
+ * @returns {number} issues found
+ */
+function compareLibCopies(repoHooks, installedHooks, checks) {
   const repoLib = path.join(repoHooks, 'lib');
   const installedLib = path.join(installedHooks, 'lib');
-  if (fs.existsSync(repoLib) && fs.statSync(repoLib).isDirectory()) {
-    let libEntries = [];
-    try {
-      libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
-    } catch {
-      libEntries = [];
-    }
-    for (const entry of libEntries) {
-      if (!entry.isFile()) continue;
-      const rel = `lib/${entry.name}`;
-      const repoFile = path.join(repoLib, entry.name);
-      const installedFile = path.join(installedLib, entry.name);
-      const label = `Hook drift: ${rel}`;
-      if (!fs.existsSync(installedFile)) {
-        checks.push({
-          name: label,
-          status: 'FAIL',
-          detail: 'installed lib/ copy is missing (hooks source lib/ at runtime)',
-        });
-        issues++;
-      } else if (!filesAreIdentical(repoFile, installedFile)) {
-        checks.push({
-          name: label,
-          status: 'FAIL',
-          detail: 'installed lib/ copy differs from githooks/lib/',
-        });
-        issues++;
-      } else {
-        checks.push({ name: label, status: 'PASS', detail: 'Installed copy matches githooks/' });
-      }
+  if (!fs.existsSync(repoLib) || !fs.statSync(repoLib).isDirectory()) return 0;
+
+  let issues = 0;
+  let libEntries = [];
+  try {
+    libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
+  } catch {
+    libEntries = [];
+  }
+  for (const entry of libEntries) {
+    if (!entry.isFile()) continue;
+    const rel = `lib/${entry.name}`;
+    const repoFile = path.join(repoLib, entry.name);
+    const installedFile = path.join(installedLib, entry.name);
+    const label = `Hook drift: ${rel}`;
+    if (!fs.existsSync(installedFile)) {
+      checks.push({
+        name: label,
+        status: 'FAIL',
+        detail: 'installed lib/ copy is missing (hooks source lib/ at runtime)',
+      });
+      issues++;
+    } else if (!filesAreIdentical(repoFile, installedFile)) {
+      checks.push({
+        name: label,
+        status: 'FAIL',
+        detail: 'installed lib/ copy differs from githooks/lib/',
+      });
+      issues++;
+    } else {
+      checks.push({ name: label, status: 'PASS', detail: 'Installed copy matches githooks/' });
     }
   }
+  return issues;
+}
+
+function diagnoseHookDrift(ctx = {}) {
+  const checks = [];
+  let issues = 0;
+
+  // XP_GATE_REPO_ROOT lets a caller (or a test) name the canonical repo
+  // explicitly instead of inferring it from the process cwd.
+  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
+  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
+  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR();
+
+  // Nothing to compare when the project carries no canonical *hook* source, or
+  // when no global copy exists at all. Both must stay completely silent.
+  //
+  // A `githooks/` directory holding only `adapters/` is NOT a hook source of
+  // truth -- consumer projects get that layout from `xp-gate init`, and the
+  // adapters there are unrelated to which hook file executes.
+  if (!hasCanonicalHooks(repoHooks) || !fs.existsSync(installedHooks)) {
+    return { checks, issues };
+  }
+
+  issues += compareHookCopies(repoHooks, installedHooks, checks);
+  issues += compareLibCopies(repoHooks, installedHooks, checks);
 
   return { checks, issues };
 }
@@ -1038,7 +1071,30 @@ function diagnoseModuleDrift(ctx = {}) {
   // how #500 reproduces: the next install order shift, or a move to project
   // mode, promotes one silently. Report with the absolute path so the developer
   // can judge; do not count, because no shipped command removes them (#495 R2).
-  const executedFor = new Map();
+/**
+ * Compare each module the hook ACTUALLY executes against the repo's copy.
+ *
+ * A module that is not installed has nothing to judge. A module whose executed copy
+ * IS the repo's own copy is not drift. Everything else is examined, with three
+ * verdicts rather than two:
+ *
+ *   - identical bytes            -> PASS
+ *   - same content, different
+ *     line endings/indentation   -> PASS (FAILing on a re-wrap teaches the reader
+ *                                  to distrust the check)
+ *   - genuinely different        -> FAIL, with the tier hint
+ *
+ * `executedFor` is filled in because the caller reports shadow copies against it
+ * (#500).
+ *
+ * @param {string} repoHooks
+ * @param {string[]} dirs resolution tiers
+ * @param {Array} checks appended to
+ * @param {Map<string, string|undefined>} executedFor filled in
+ * @returns {number} issues found
+ */
+function compareExecutedModules(repoHooks, dirs, checks, executedFor) {
+  let issues = 0;
   for (const name of repoModuleNames(repoHooks)) {
     const source = repoModuleSource(repoHooks, name);
     if (!source) continue;
@@ -1079,6 +1135,11 @@ function diagnoseModuleDrift(ctx = {}) {
     checks.push({ name: label, status: 'FAIL', detail: `${driftDetail}${hint}` });
     issues++;
   }
+  return issues;
+}
+
+  const executedFor = new Map();
+  issues += compareExecutedModules(repoHooks, dirs, checks, executedFor);
 
   for (const [name, file] of nonExecutedCopies(dirs, executedFor)) {
     checks.push({
