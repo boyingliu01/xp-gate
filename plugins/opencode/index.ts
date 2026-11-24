@@ -614,30 +614,52 @@ function sessionReloadModelTool() {
 
 // Boy Scout (#447): same treatment as reloadSessionModel — logic at module
 // scope, execute() is pure wiring.
+/** Longest title the OpenCode UI renders without truncating on its own terms. */
+const MAX_SESSION_TITLE = 120;
+
+/**
+ * Escape a value for a single-quoted SQL literal.
+ *
+ * Doubling the quote is what SQLite understands as an embedded quote; anything
+ * fancier would still have to agree with it.
+ */
+function sqlLiteral(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+/**
+ * The title to use for this rename.
+ *
+ * `||` rather than `??` on purpose: an explicitly EMPTY title falls back to
+ * auto-generation, matching the original if/else. Both "not given" and "given as
+ * nothing" mean the caller wants a generated one.
+ *
+ * @returns the trimmed title, or null when none could be produced
+ */
+function resolveSessionTitle(dbPath: string, sessionId: string, newTitle?: string): string | null {
+  const title = newTitle || generateSessionTitle(dbPath, sessionId)
+  if (!title || title.trim().length === 0) return null
+  return title.trim().substring(0, MAX_SESSION_TITLE)
+}
+
 function renameSession(sessionId: string, newTitle?: string): string {
   const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-
   if (!existsSync(dbPath)) {
     return "Session rename failed: OpenCode database not found at " + dbPath
   }
 
-  // `||` (not `??`): an explicitly empty title falls back to auto-generation,
-  // matching the original if/else.
-  const title = newTitle || generateSessionTitle(dbPath, sessionId)
-  if (!title || title.trim().length === 0) {
+  const trimmed = resolveSessionTitle(dbPath, sessionId, newTitle)
+  if (!trimmed) {
     return "Session rename failed: could not generate a title (no user messages found)"
   }
 
-  const trimmed = title.trim().substring(0, 120)
-  const escapedTitle = trimmed.replace(/'/g, "''")
-  const escapedId = sessionId.replace(/'/g, "''")
-  const sql = `UPDATE session SET title = '${escapedTitle}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
+  const sql = `UPDATE session SET title = '${sqlLiteral(trimmed)}', `
+    + `time_updated = ${Date.now()} WHERE id = '${sqlLiteral(sessionId)}'`
   try {
     execFileSync("sqlite3", [dbPath, sql], { timeout: SQLITE_TIMEOUT_MS })
     return `Session renamed to: "${trimmed}"`
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return `Session rename failed: ${msg}`
+    return `Session rename failed: ${err instanceof Error ? err.message : String(err)}`
   }
 }
 
