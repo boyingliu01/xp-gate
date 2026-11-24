@@ -1190,6 +1190,37 @@ function printAuditReport(rows, summary) {
  * }} [options]
  * @returns {Promise<number>} Exit code
  */
+/**
+ * Collect the tools the question covers, then audit each through the gate's resolver.
+ *
+ * Resolving through the SAME helper the gates use (#843) is the point: a binary in
+ * `~/.local/bin` IS installed even when the hook's PATH omits it, and reporting it
+ * missing sends the reader off to install what is already there.
+ *
+ * `--all` passes null languages, meaning "every registered tool" rather than "this
+ * project's".
+ */
+function auditRequestedTools(args, selection, options) {
+  const { languages, includeCrossLanguage } = selection;
+const tools = collectGateTools({
+  registry: LANGUAGE_REGISTRY,
+  cliTools: GATE_CLI_TOOLS,
+  // `--all` asks about every registered tool, not just this project's.
+  languages: args.includes('--all') ? null : (languages.length ? languages : null),
+}).filter((t) => includeCrossLanguage || (t.languages && t.languages.length > 0));
+
+const audit = options.audit || ((list, deps) => auditAllTools(list, deps));
+// Resolve tools through the SAME helper the gates use (#843): a binary in
+// ~/.local/bin is installed even when the hook's PATH omits it, and reporting
+// it missing sends the reader off to install what is already there.
+const rows = audit(tools, {
+  resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)),
+  resolveTool: options.resolveTool || ((name) => resolveToolViaShell(name)),
+});
+const summary = summarizeAudit(rows);
+  return { rows, summary };
+}
+
 async function handleCheckTools(args, options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
   const jsonOutput = args.includes('--json');
@@ -1214,22 +1245,7 @@ async function handleCheckTools(args, options = {}) {
   const includeCrossLanguage = !explicitSelection || explicitSelection.length === 0
     || args.includes('--all');
 
-  const tools = collectGateTools({
-    registry: LANGUAGE_REGISTRY,
-    cliTools: GATE_CLI_TOOLS,
-    // `--all` asks about every registered tool, not just this project's.
-    languages: args.includes('--all') ? null : (languages.length ? languages : null),
-  }).filter((t) => includeCrossLanguage || (t.languages && t.languages.length > 0));
-
-  const audit = options.audit || ((list, deps) => auditAllTools(list, deps));
-  // Resolve tools through the SAME helper the gates use (#843): a binary in
-  // ~/.local/bin is installed even when the hook's PATH omits it, and reporting
-  // it missing sends the reader off to install what is already there.
-  const rows = audit(tools, {
-    resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)),
-    resolveTool: options.resolveTool || ((name) => resolveToolViaShell(name)),
-  });
-  const summary = summarizeAudit(rows);
+  const { rows, summary } = auditRequestedTools(args, { languages, includeCrossLanguage }, options);
 
   if (jsonOutput) {
     // CONTRACT, preserved from #468: the top level is keyed by language name and
