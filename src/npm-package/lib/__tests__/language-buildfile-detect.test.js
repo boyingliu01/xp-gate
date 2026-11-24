@@ -8,9 +8,8 @@
  *
  *         版本目录（gradle/libs.versions.toml）必须一并扫描：Gradle 项目可能只
  *         在版本目录里声明坐标，从不写进 build.gradle.kts。只查构建脚本会把一个
- *         真正装好的工具报成缺失（AC-689-06）。
+ *         真正装好的工具报成缺失。
  *
- * @covers AC-689-06
  * @covers AC-LANG-BUILDFILE-01
  * @covers AC-LANG-BUILDFILE-02
  */
@@ -51,7 +50,7 @@ describe('detectBuildFileDependency', () => {
   });
 
   it('finds a coordinate declared only in the Gradle version catalog', () => {
-    // AC-689-06: the catalog is included precisely because a Gradle project may name
+    // The catalog is included precisely because a Gradle project may name
     // the coordinate ONLY there. Checking just build.gradle.kts would report a
     // genuinely installed tool as missing.
     mkdirSync(join(root, 'gradle'), { recursive: true });
