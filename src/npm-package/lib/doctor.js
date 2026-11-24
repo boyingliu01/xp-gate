@@ -3724,6 +3724,55 @@ function formatDoctorJson(checks, issues) {
 /** The three Delphi expert roles, in the order every report lists them. */
 const DELPHI_ROLES = ['architecture', 'technical', 'feasibility'];
 
+/**
+ * Work out which Delphi agent directory applies, and whether the native path is
+ * even in use.
+ *
+ * Project-level agents (from `delphi-setup --local --project`) take precedence when
+ * a complete set exists there, so `doctor` agrees with the repair command (#414 R1
+ * FC-09).
+ *
+ * #646: when the machine is configured for the external channel only, the native
+ * path is DISABLED BY CHOICE, not broken. Reporting FAIL there told external users
+ * their working setup was broken and pointed them at a repair that reinstalls what
+ * they just removed. Callers SKIP with the reason, so the line can never read green
+ * either.
+ *
+ * The channel home is the directory CONTAINING `.config`: `resolveChannels()`
+ * appends `<home>/.config/xp-gate/...`, so passing `.config` itself would look in
+ * `.config/.config/xp-gate` and never find the file.
+ *
+ * @param {{projectDir?: string}} options
+ * @returns {{nativeDisabled: boolean, channelResolution: object, agentsDir: string,
+ *   agentsSource: string, agentDetails: string[]}} `channelResolution` is returned so
+ *   the SKIP detail can name the channels and where they came from.
+ */
+function resolveAgentTarget(options) {
+  const delphiChannel = require('./delphi-channel.js');
+  const channelHome = process.env.XDG_CONFIG_HOME
+    ? path.dirname(process.env.XDG_CONFIG_HOME)
+    : undefined;
+  const channelResolution = delphiChannel.resolveChannels({ home: channelHome });
+
+  const homeAgentsDir = path.join(HOME_DIR(), '.qoder', 'agents');
+  // Injectable for tests; defaults to the cwd the doctor runs from.
+  const projectAgentsDir = path.join(options.projectDir || process.cwd(), '.qoder', 'agents');
+  const homeComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
+  const projectComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(projectAgentsDir, `delphi-${r}.md`)));
+  const agentsDir = projectComplete ? projectAgentsDir : homeAgentsDir;
+  const agentsSource = projectComplete
+    ? `project-level ${agentsDir}`
+    : `user-level ${agentsDir}`;
+
+  return {
+    nativeDisabled: !channelResolution.nativeEnabled,
+    channelResolution,
+    agentsDir,
+    agentsSource,
+    agentDetails: [agentsSource],
+  };
+}
+
 function checkDelphiAgentBindings(add, options) {
   // 2. Qoder agent bindings: present, parseable, three distinct ids, matching
   // what this version ships. A stale binding is a repair, not an error to
@@ -3736,28 +3785,10 @@ function checkDelphiAgentBindings(add, options) {
   // users their working setup was broken and pointed them at a repair command that
   // reinstalls the thing they just removed. SKIP carries the reason so the line can
   // never be read as green either -- the same rule every other gate follows.
-  const delphiChannel = require('./delphi-channel.js');
-  // Pass the directory that CONTAINS `.config`, not the `.config` dir itself:
-  // resolveChannels() appends `<home>/.config/xp-gate/...`, so handing it `.config`
-  // would look in `.config/.config/xp-gate` and never find the file.
-  const channelHome = process.env.XDG_CONFIG_HOME
-    ? path.dirname(process.env.XDG_CONFIG_HOME)
-    : undefined;
-  const channelResolution = delphiChannel.resolveChannels({ home: channelHome });
-  const nativeDisabled = !channelResolution.nativeEnabled;
+  const { nativeDisabled, channelResolution, agentsDir, agentsSource, agentDetails } = resolveAgentTarget(options);
   const { readQoderModelId } = require('./init.js');
-  const homeAgentsDir = path.join(HOME_DIR(), '.qoder', 'agents');
-  // Injectable for tests; defaults to the cwd the doctor runs from.
-  const projectAgentsDir = path.join(options.projectDir || process.cwd(), '.qoder', 'agents');
-  const homeComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
-  const projectComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(projectAgentsDir, `delphi-${r}.md`)));
-  const agentsDir = projectComplete ? projectAgentsDir : homeAgentsDir;
-  const agentsSource = projectComplete
-    ? `project-level ${agentsDir}`
-    : `user-level ${agentsDir}`;
   const agentIds = [];
   let agentsStatus = 'PASS';
-  const agentDetails = [agentsSource];
   // #646: skip the whole native binding check when the machine is external-only.
   // The check exists to keep the native path healthy; when that path is switched off
   // by configuration there is nothing to keep healthy, and reporting its absence as
