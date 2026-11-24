@@ -150,13 +150,36 @@ function declarationScanAction(masked: string, i: number, depth: number): ScanAc
   if (c === '(') return { kind: 'jump', to: readParenGroup(masked, i).end - 1 };
   if (HEADER_OPENERS.has(c)) return { kind: 'depth', delta: 1 };
   if (HEADER_CLOSERS.has(c)) return { kind: 'depth', delta: -1 };
-
-  if (c === '{') return depth === 0 ? { kind: 'body', at: i } : { kind: 'depth', delta: 1 };
-  if (c === '}') return { kind: 'depth', delta: -1 };
-
-  if (c === ';' && depth === 0) return { kind: 'no-body' };
-  if (c === '\n' && depth === 0 && startsNewDeclaration(masked, i)) return { kind: 'no-body' };
+  if (c === '{' || c === '}') return braceAction(c, i, depth);
+  if (isDeclarationTerminator(masked, i, c, depth)) return { kind: 'no-body' };
   return { kind: 'advance' };
+}
+
+/**
+ * What a brace means at this depth.
+ *
+ * A `{` at DEPTH 0 opens the body -- the thing the caller is looking for -- while at
+ * any deeper depth it is a generic argument (`class X extends Y<{a: number}>`). A `}`
+ * only ever closes one.
+ *
+ * @returns either a `body` action pointing at `i`, or a depth step
+ */
+function braceAction(c: string, i: number, depth: number): ScanAction {
+  if (c === '}') return { kind: 'depth', delta: -1 };
+  return depth === 0 ? { kind: 'body', at: i } : { kind: 'depth', delta: 1 };
+}
+
+/**
+ * Whether this character ends a declaration that has no body.
+ *
+ * A `;` at depth 0 ends it outright. A newline at depth 0 ends it only when the next
+ * line starts a NEW declaration -- otherwise a wrapped header
+ * (`class X\n  extends Y`) would be cut in half.
+ */
+function isDeclarationTerminator(masked: string, i: number, c: string, depth: number): boolean {
+  if (depth !== 0) return false;
+  if (c === ';') return true;
+  return c === '\n' && startsNewDeclaration(masked, i);
 }
 
 /**
@@ -524,34 +547,70 @@ function maskStringLiteral(src: string, out: string[], start: number): number {
  * the character through, so the loop's own branching stays flat (#602: split
  * from a single 36-CCN body into five routines the tests can pin separately).
  */
+/**
+ * The maskers, asked in order at each index.
+ *
+ * A comment opener must be tried before a regex: `/` starts both, and `//` after a
+ * paren is a comment rather than the beginning of one. A masker returns the next index
+ * to examine, or -1 when the construct it recognises is not actually there.
+ */
+const LITERAL_MASKERS: Array<(src: string, out: string[], i: number) => number> = [
+  maskCommentAt,
+  maskRegexAt,
+  maskStringAt,
+];
+
+/**
+ * Blank out every comment, regex and string body, keeping the source LENGTH.
+ *
+ * Positions have to survive masking: the caller maps offsets back onto the original
+ * text (to read a function's real extent, for instance), so a replacement that changed
+ * the length would shift everything after it.
+ */
 function maskLiterals(src: string): string {
   const out = src.split('');
   let i = 0;
   while (i < src.length) {
-    const c = src[i];
-    const next = src[i + 1];
-
-    if (c === '/' && next === '/') {
-      i = maskLineComment(src, out, i);
-      continue;
-    }
-    if (c === '/' && next === '*') {
-      i = maskBlockComment(src, out, i);
-      continue;
-    }
-    if (c === '/' && opensRegexLiteral(src, i)) {
-      const resumed = maskRegexLiteral(src, out, i);
-      // -1/findRegexClose failure keeps start, so `i` only advances on a match.
-      if (resumed !== i) { i = resumed; continue; }
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      i = maskStringLiteral(src, out, i);
-      continue;
-    }
-
-    i++;
+    const next = nextMaskedIndex(src, out, i);
+    i = next > i ? next : i + 1;
   }
   return out.join('');
+}
+
+/**
+ * The index a masker says to resume from, or `i` when none of them applies.
+ *
+ * Taking the first masker that ADVANCES (rather than the first that matches) is what
+ * keeps `i` moving: a masker that recognises the opening but cannot find the end
+ * returns -1, and the scan must then treat the character as ordinary code.
+ */
+function nextMaskedIndex(src: string, out: string[], i: number): number {
+  for (const mask of LITERAL_MASKERS) {
+    const resumed = mask(src, out, i);
+    if (resumed > i) return resumed;
+  }
+  return i;
+}
+
+/** `//` and block comments. */
+function maskCommentAt(src: string, out: string[], i: number): number {
+  if (src[i] !== '/') return -1;
+  if (src[i + 1] === '/') return maskLineComment(src, out, i);
+  if (src[i + 1] === '*') return maskBlockComment(src, out, i);
+  return -1;
+}
+
+/** A regex literal, only where an expression may start. */
+function maskRegexAt(src: string, out: string[], i: number): number {
+  if (src[i] !== '/' || !opensRegexLiteral(src, i)) return -1;
+  return maskRegexLiteral(src, out, i);
+}
+
+/** A single-, double- or back-quoted run. */
+function maskStringAt(src: string, out: string[], i: number): number {
+  const c = src[i];
+  if (c !== "'" && c !== '"' && c !== '`') return -1;
+  return maskStringLiteral(src, out, i);
 }
 
 /**
