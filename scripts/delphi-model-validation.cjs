@@ -12,6 +12,19 @@
  * The boundary was fixed before moving: five functions plus `isValidTimeoutMs`,
  * which `providerConfigError` calls and nothing else in the runner uses.
  */
+/**
+ * Whether `value` is a plain object (not null, an array, or a class instance).
+ *
+ * Defined here rather than imported from `delphi-seat-calibration.cjs`: that module
+ * requires THIS one, so importing back would close a cycle and hand out `undefined`
+ * at load time.
+ */
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 
 function isValidTimeoutMs(value) {
   return Number.isInteger(value) && value >= 1000 && value <= 600000;
@@ -102,4 +115,71 @@ function validateDistinctModels(experts, providers, consensus = {}) {
 }
 
 
-module.exports = { isNonEmptyString, collectModelAssignments, findDuplicateModel, providerConfigError, validateDistinctModels, isValidTimeoutMs };
+const EXPERT_VERDICTS = ['APPROVED', 'REQUEST_CHANGES', 'REJECTED'];
+
+/** Confidence is a 1-10 integer scale, not a percentage. */
+const MIN_CONFIDENCE = 1;
+const MAX_CONFIDENCE = 10;
+
+/** Every issue list an expert verdict must carry, as string arrays. */
+const ISSUE_FIELDS = ['critical_issues', 'major_concerns', 'minor_concerns'];
+
+/** Whether `value` is one of the documented verdicts. */
+function hasKnownVerdict(value) {
+  return EXPERT_VERDICTS.includes(value);
+}
+
+/** Whether `value` is a confidence inside the documented scale. */
+function hasValidConfidence(value) {
+  if (!Number.isFinite(value)) return false;
+  return value >= MIN_CONFIDENCE && value <= MAX_CONFIDENCE;
+}
+
+/**
+ * Whether every issue field is a list of STRINGS.
+ *
+ * A list holding a number or a nested object reaches the report and renders as
+ * "[object Object]" in the summary -- which is how a real finding gets lost.
+ */
+function hasIssueLists(value) {
+  return ISSUE_FIELDS.every(
+    (field) => Array.isArray(value[field]) && value[field].every((item) => typeof item === 'string'),
+  );
+}
+
+/** The verdict, when it passes every rule; null otherwise. */
+/** Whether the verdict object carries every field the report needs, validly. */
+function hasAllVerdictFields(value) {
+  if (!isPlainObject(value)) return false;
+  if (!hasKnownVerdict(value.verdict)) return false;
+  if (!hasValidConfidence(value.confidence)) return false;
+  if (!hasIssueLists(value)) return false;
+  return typeof value.summary === 'string';
+}
+
+function validExpertVerdict(value) {
+  if (!hasAllVerdictFields(value)) return null;
+  return {
+    verdict: value.verdict,
+    confidence: value.confidence,
+    critical_issues: value.critical_issues,
+    major_concerns: value.major_concerns,
+    minor_concerns: value.minor_concerns,
+    summary: value.summary,
+  };
+}
+
+/**
+ * Parse one expert's verdict.
+ *
+ * The rejection message is the SAME for every failure on purpose: this runs on model
+ * output, and telling a remote caller which field was wrong would invite a retry that
+ * games the validator instead of answering the review.
+ */
+function parseExpertVerdict(value) {
+  const verdict = validExpertVerdict(value);
+  if (!verdict) return { valid: false, message: 'Invalid expert verdict.' };
+  return { valid: true, verdict };
+}
+
+module.exports = { isNonEmptyString, collectModelAssignments, findDuplicateModel, providerConfigError, validateDistinctModels, isValidTimeoutMs, parseExpertVerdict };

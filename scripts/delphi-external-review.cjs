@@ -112,20 +112,36 @@ function parseArgs(argv) {
 // only surfaced at runtime (a bad timeout_ms fell back to the default). The
 // whole profile is checked here instead, at the system boundary, naming the
 // provider so the fix is obvious (#429).
+/**
+ * The field that makes this provider unusable, or null when it is fine.
+ *
+ * Returned rather than thrown so the caller decides how loud to be -- and so the list
+ * of rules reads as a list instead of as four side-effecting `fail()` calls.
+ */
+function providerProblem(provider) {
+  if (!isPlainObject(provider)) return 'must be an object.';
+  if (!isNonEmptyString(provider.base_url)) return 'must define a non-empty base_url.';
+  if (!isNonEmptyString(provider.api_key)) return 'must define a non-empty api_key.';
+  if (!hasValidTimeout(provider)) return 'timeout_ms must be an integer between 1000 and 600000.';
+  return null;
+}
+
+/**
+ * Whether an optional `timeout_ms` is usable when present.
+ *
+ * Absent is fine -- the caller falls back to the default; present-but-wrong is not,
+ * because a malformed timeout silently becomes NaN at the exec boundary.
+ */
+function hasValidTimeout(provider) {
+  return provider.timeout_ms === undefined || isValidTimeoutMs(provider.timeout_ms);
+}
+
 function validateProviders(providers, profileName) {
   for (const [name, provider] of Object.entries(providers)) {
-    const providerPath = `profiles.${profileName}.providers.${name}`;
-    const fail = (detail) => {
-      console.error(`[delphi-review] ERROR: ${providerPath} ${detail}`);
-      process.exit(1);
-    };
-
-    if (!isPlainObject(provider)) fail('must be an object.');
-    if (typeof provider.base_url !== 'string' || provider.base_url.trim() === '') fail('must define a non-empty base_url.');
-    if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') fail('must define a non-empty api_key.');
-    if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
-      fail('timeout_ms must be an integer between 1000 and 600000.');
-    }
+    const problem = providerProblem(provider);
+    if (!problem) continue;
+    console.error(`[delphi-review] ERROR: profiles.${profileName}.providers.${name} ${problem}`);
+    process.exit(1);
   }
 }
 
@@ -339,6 +355,7 @@ const {
   providerConfigError,
   validateDistinctModels,
   isValidTimeoutMs,
+  parseExpertVerdict,
 } = require('./delphi-model-validation.cjs');
 
 // ── JSON extraction (4-layer fallback) ─────────────────────────────────
@@ -711,31 +728,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
 }
 
 
-function parseExpertVerdict(value) {
-  if (!isPlainObject(value)) return { valid: false, message: 'Invalid expert verdict.' };
-  const verdicts = ['APPROVED', 'REQUEST_CHANGES', 'REJECTED'];
-  if (!verdicts.includes(value.verdict)) return { valid: false, message: 'Invalid expert verdict.' };
-  if (!Number.isFinite(value.confidence) || value.confidence < 1 || value.confidence > 10) {
-    return { valid: false, message: 'Invalid expert verdict.' };
-  }
-  for (const field of ['critical_issues', 'major_concerns', 'minor_concerns']) {
-    if (!Array.isArray(value[field]) || !value[field].every(item => typeof item === 'string')) {
-      return { valid: false, message: 'Invalid expert verdict.' };
-    }
-  }
-  if (typeof value.summary !== 'string') return { valid: false, message: 'Invalid expert verdict.' };
-  return {
-    valid: true,
-    verdict: {
-      verdict: value.verdict,
-      confidence: value.confidence,
-      critical_issues: value.critical_issues,
-      major_concerns: value.major_concerns,
-      minor_concerns: value.minor_concerns,
-      summary: value.summary,
-    },
-  };
-}
+/** The verdicts an expert may return. */
 
 function buildReviewOutput(verdict, args, provenance) {
   const parsed = parseExpertVerdict(verdict);
