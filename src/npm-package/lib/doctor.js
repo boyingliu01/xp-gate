@@ -4237,14 +4237,18 @@ function delphiModelProblems(profile) {
  * @param {object} options
  * @param {string|null|undefined} npmLatest
  */
-function checkDelphiVersionConsistency(add, options, npmLatest) {
+async function checkDelphiVersionConsistency(add, options, npmLatest) {
   const localVersion = getCliVersionSafe();
   let versionStatus = 'PASS';
   let versionDetail = `xp-gate ${localVersion}`;
 
   if (npmLatest === undefined && options.probeNpmLatest === true) {
     try {
-      versionDetail += `; npm latest probe: ${execWithTimeout('npm view @boyingliu01/xp-gate version', 8000).trim()}`;
+      // `execWithTimeout` is async; reading `.trim()` off the Promise threw, and the
+      // catch below swallowed it -- so a WORKING npm probe reported 'offline?' every
+      // time. Measured: `Promise.prototype.trim` is undefined.
+      const probed = await execWithTimeout('npm view @boyingliu01/xp-gate version', 8000);
+      versionDetail += `; npm latest probe: ${String(probed).trim()}`;
     } catch {
       versionStatus = 'SKIP';
       versionDetail += '; npm latest probe unavailable (offline?) — skipped';
@@ -4456,7 +4460,7 @@ function reportConfigFile(p) {
 
 }
 
-function checkDelphiConfigPing(add, options, globalConfigPath) {
+async function checkDelphiConfigPing(add, options, globalConfigPath) {
   const { configPath, npmLatest } = options;
   // 5. Config ping: parseable, three distinct callable models. A duplicate
   // model here is a review that will BLOCK later — say so now.
@@ -4481,7 +4485,7 @@ function checkDelphiConfigPing(add, options, globalConfigPath) {
   reportConfigFile({ add, cfgPath, cfgLabel, usingGlobalConfig, globalConfigPath });
 
   // 6. Version consistency.
-  checkDelphiVersionConsistency(add, options, npmLatest);
+  await checkDelphiVersionConsistency(add, options, npmLatest);
 
 
   // 7. DSH native-channel readiness.
@@ -4525,7 +4529,7 @@ async function doctorDelphi(options = {}) {
       : 'not found in package bundle, project, or installed skill');
 
   // 5. Config ping.
-  checkDelphiConfigPing(add, options, globalConfigPath);
+  await checkDelphiConfigPing(add, options, globalConfigPath);
 
   for (const check of checks) {
     const mark = check.status === 'PASS' ? '✓' : check.status === 'SKIP' ? '○' : check.status === 'WARN' ? '⚠' : '✗';
