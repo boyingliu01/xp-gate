@@ -1557,34 +1557,74 @@ function defaultRemoveFile(target) {
  * }} [options]
  * @returns {Promise<number>} Exit code
  */
+/**
+ * Build the repair plan for this project's toolchain.
+ *
+ * Installer commands come from the registry entry (a language tool) or the CLI entry,
+ * which is why `definitions` concatenates both: a tool reachable from either side must
+ * be installable, and `planToolRepairs` looks definitions up by name alone.
+ */
+function buildInstallPlan(args, options, projectRoot) {
+let languages = options.languages !== undefined ? options.languages : parseLanguageFlag(args);
+if (languages === undefined || languages === null) {
+  languages = detectProjectLanguages(projectRoot).detected;
+}
+
+const tools = collectGateTools({
+  registry: LANGUAGE_REGISTRY,
+  cliTools: GATE_CLI_TOOLS,
+  languages: args.includes('--all') || !languages.length ? null : languages,
+});
+
+const audit = options.audit || ((list, deps) => auditAllTools(list, deps));
+const rows = audit(tools, { resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)) });
+
+// Installer commands come from the registry entry (language) or the CLI entry.
+const definitions = options.definitions
+  || [
+    ...tools,
+    ...GATE_CLI_TOOLS.map((c) => ({ name: c.tool, install: c.install, optional: false })),
+  ];
+
+const plan = planToolRepairs(rows, { definitions });
+
+  return planToolRepairs(rows, { definitions });
+}
+
+/**
+ * Report a plan whose parts undo each other, and say whether it must be refused.
+ *
+ * A repair whose parts cancel is not a repair. Refusing -- rather than running it and
+ * watching a duplicate survive a "successful" run -- points the operator at the
+ * installer command, which is the thing that actually needs fixing.
+ *
+ * @param {{actions: Array}} plan
+ * @returns {boolean} true when the plan is self-cancelling
+ */
+function reportSelfCancellingPlan(plan) {
+// A repair whose parts undo each other is not a repair. Refuse to run it and
+// say which action conflicts, so the operator can fix the installer instead of
+// watching a duplicate survive a "successful" run.
+const conflicting = plan.actions.filter((a) => a.kind === 'upgrade' && a.writesToRemovedPath);
+if (conflicting.length) {
+  for (const a of conflicting) {
+    console.log(`CONFLICT ${a.tool}: its installer writes to ${(a.conflictsWith || []).join(', ')},`);
+    console.log('         which this same plan removes — the duplicate would come back.');
+  }
+  console.log('Refusing to apply a self-cancelling plan. Fix the installer command first.');
+  return 1;
+}
+
+  return false;
+}
+
 async function handleInstallTools(args, options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
   const autoYes = args.includes('--yes') || args.includes('-y');
   const run = options.run || defaultRunCommand;
   const removeFile = options.removeFile || defaultRemoveFile;
 
-  let languages = options.languages !== undefined ? options.languages : parseLanguageFlag(args);
-  if (languages === undefined || languages === null) {
-    languages = detectProjectLanguages(projectRoot).detected;
-  }
-
-  const tools = collectGateTools({
-    registry: LANGUAGE_REGISTRY,
-    cliTools: GATE_CLI_TOOLS,
-    languages: args.includes('--all') || !languages.length ? null : languages,
-  });
-
-  const audit = options.audit || ((list, deps) => auditAllTools(list, deps));
-  const rows = audit(tools, { resolveLatest: options.resolveLatest || ((n) => resolveLatestVersion(n)) });
-
-  // Installer commands come from the registry entry (language) or the CLI entry.
-  const definitions = options.definitions
-    || [
-      ...tools,
-      ...GATE_CLI_TOOLS.map((c) => ({ name: c.tool, install: c.install, optional: false })),
-    ];
-
-  const plan = planToolRepairs(rows, { definitions });
+  const plan = buildInstallPlan(args, options, projectRoot);
   if (plan.clean) {
     console.log('Toolchain is already up to date: nothing to install, upgrade or remove.');
     return 0;
@@ -1594,18 +1634,7 @@ async function handleInstallTools(args, options = {}) {
   for (const action of plan.actions) console.log(`  • ${describeAction(action)}`);
   console.log('');
 
-  // A repair whose parts undo each other is not a repair. Refuse to run it and
-  // say which action conflicts, so the operator can fix the installer instead of
-  // watching a duplicate survive a "successful" run.
-  const conflicting = plan.actions.filter((a) => a.kind === 'upgrade' && a.writesToRemovedPath);
-  if (conflicting.length) {
-    for (const a of conflicting) {
-      console.log(`CONFLICT ${a.tool}: its installer writes to ${(a.conflictsWith || []).join(', ')},`);
-      console.log('         which this same plan removes — the duplicate would come back.');
-    }
-    console.log('Refusing to apply a self-cancelling plan. Fix the installer command first.');
-    return 1;
-  }
+  if (reportSelfCancellingPlan(plan)) return 1;
 
   const mutating = plan.actions.filter((a) =>
     a.kind === 'install' || a.kind === 'upgrade' || a.kind === 'remove-duplicate');
