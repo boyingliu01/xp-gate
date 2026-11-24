@@ -559,13 +559,19 @@ function logEvidenceSkip(projectDir, phase, reason) {
  */
 function appendOutputsSection(lines, outputs) {
   if (!outputs || Object.keys(outputs).length === 0) return;
-  /** Three characters of left padding (`|  ` plus a space) sit before content. */
-  const width = FRAME_INNER_WIDTH - OUTPUT_ROW_INDENT;
-  lines.push(`|  输出物: ${' '.repeat(width - 5)}|`);
+  // Every row is `|` + FRAME_INNER_WIDTH + `|`. The content width therefore depends
+  // on that row's own lead-in, and computing both from `FRAME_INNER_WIDTH` is what
+  // keeps the frame square -- the previous version derived the heading from one
+  // subtraction and the rows from another, and produced three different widths.
+  const contentWidth = (leadIn) => FRAME_INNER_WIDTH - leadIn.length;
+  const heading = '  输出物: ';
+  lines.push(`|${heading}${' '.repeat(contentWidth(heading))}|`);
   for (const [key, val] of Object.entries(outputs)) {
-    lines.push(`|    ${(`${key}: ${val}`).slice(0, width).padEnd(width)}|`);
+    const leadIn = '    ';
+    const body = `${key}: ${val}`.slice(0, contentWidth(leadIn)).padEnd(contentWidth(leadIn));
+    lines.push(`|${leadIn}${body}|`);
   }
-  lines.push('+============================================================+');
+  lines.push(`+${'='.repeat(FRAME_INNER_WIDTH)}+`);
 }
 
 /**
@@ -644,18 +650,23 @@ function formatDuration(seconds) {
  * @param {{sprintId: string, taskDesc: string, branch: string, overallStatus: string, startedAt: string}} f
  */
 function appendFrameHeader(lines, f) {
-  const rule = `+${'='.repeat(FRAME_INNER_WIDTH + 2)}+`;
-  const blank = `|${' '.repeat(FRAME_INNER_WIDTH + 3)}|`;
-  const field = (label, value) => `|  ${label}: ${value.slice(0, FRAME_INNER_WIDTH - 5).padEnd(FRAME_INNER_WIDTH - 5)}|`;
+  // One width helper for every row. Each row hand-computing its own padding is how
+  // the frame went ragged: `rule`, `blank` and `field` each subtracted a different
+  // constant from FRAME_INNER_WIDTH and disagreed by several columns.
+  const row = (content) => `|${content.slice(0, FRAME_INNER_WIDTH).padEnd(FRAME_INNER_WIDTH)}|`;
+  const rule = `+${'='.repeat(FRAME_INNER_WIDTH)}+`;
 
   lines.push(rule);
-  lines.push(`|  SPRINT PROGRESS                      ${f.sprintId.padEnd(FRAME_INNER_WIDTH - 18)}|`);
+  // The sprint id is right-aligned in the title row; dropping it made a dashboard
+  // of several sprints indistinguishable.
+  const title = '  SPRINT PROGRESS';
+  lines.push(row(title + f.sprintId.padStart(FRAME_INNER_WIDTH - title.length)));
   lines.push(rule);
-  lines.push(field('需求', f.taskDesc));
-  lines.push(field('分支', f.branch));
-  lines.push(`|  状态: ${f.overallStatus.slice(0, 15).padEnd(15)}        启动: ${f.startedAt.slice(0, 19).padEnd(19)}|`);
+  lines.push(row(`  需求: ${f.taskDesc}`));
+  lines.push(row(`  分支: ${f.branch}`));
+  lines.push(row(`  状态: ${f.overallStatus}   启动: ${f.startedAt}`));
   lines.push(rule);
-  lines.push(blank);
+  lines.push(row(''));
 }
 
 function renderDashboard(state) {
@@ -1045,4 +1056,5 @@ const {
   loadWalkthroughFile, createRepositoryGitEnv, GIT_REPOSITORY_ENV_VARS,
 } = require('./prepush-evidence.js');
 
-module.exports = { handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence, checkEvidence, checkWalkthrough, checkBypassAudit };
+module.exports = { buildHistoryLookup, buildProgressBar, statusIcon, formatDuration, appendOutputsSection, appendFrameHeader,
+  handlePhaseTransition, renderDashboard, PHASE_NAMES, validateEvidence, checkEvidence, checkWalkthrough, checkBypassAudit };
