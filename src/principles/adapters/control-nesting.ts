@@ -180,55 +180,99 @@ function consumeStructure(
  * @returns the half-open range to scan at the deeper level.
  */
 function locateControlBody(body: string, from: number, to: number): { bodyStart: number; bodyEnd: number } {
+  const start = skipControlHeader(body, from, to);
+  const braced = bracedBody(body, start);
+  return braced || bareBody(body, start, to);
+}
+
+/**
+ * Step past the modifier and condition list: optional `await`, then `(...)`.
+ *
+ * `for await (...)` puts the modifier between the keyword and the condition. Without
+ * skipping it the loop body looked brace-less and was cut at the newline, losing a
+ * level.
+ *
+ * @returns the index of the first character after the header
+ */
+function skipControlHeader(body: string, from: number, to: number): number {
   let i = skipSpaces(body, from, to);
-  // `for await (...)` puts the `await` modifier between the keyword and the
-  // condition. Without skipping it the loop body looked brace-less and was cut
-  // at the newline, losing a level.
   if (body.startsWith('await', i) && !/[\w$]/.test(body[i + 5] ?? '')) {
     i = skipSpaces(body, i + 5, to);
   }
-  if (body[i] === '(') {
-    let parens = 0;
-    for (; i < to; i++) {
-      if (body[i] === '(') parens++;
-      else if (body[i] === ')') {
-        parens--;
-        if (parens === 0) { i++; break; }
-      }
-    }
-    i = skipSpaces(body, i, to);
-  }
-  if (body[i] === '{') {
-    return { bodyStart: i + 1, bodyEnd: skipBalancedBrace(body, i) - 1 };
-  }
-  // Brace-less body. When the body is itself a control structure, the region to
-  // scan starts at that structure's keyword and ends where its own body ends --
-  // each level then adds its own +1 as the scan descends, so `if (a)\n if (b)\n
-  // if (c) { }` nests three deep. Returning the innermost range directly would
-  // skip the intermediate levels. A trailing `else` belongs to that inner `if`
-  // (`if (a) if (b) { } else { }`), so it is included or the `else` body would be
-  // rescanned at the outer depth.
-  const head = readWord(body, i);
-  if (head && NESTING_KEYWORDS.has(head.word) && !isMemberAccess(body, i) && !isKeyOrLabel(body, head.end)) {
-    const inner = locateControlBody(body, head.end, to);
-    // `inner.bodyEnd` is inclusive of the closing `}`, so step past it before
-    // looking for a trailing `else`/`catch`/`finally`.
-    let afterInner = inner.bodyEnd;
-    if (body[afterInner] === '}') afterInner++;
-    afterInner = skipSpaces(body, afterInner, to);
-    const tail = readWord(body, afterInner);
-    if (tail && (tail.word === 'else' || tail.word === 'catch' || tail.word === 'finally')) {
-      return { bodyStart: i, bodyEnd: locateControlBody(body, tail.end, to).bodyEnd };
-    }
-    return { bodyStart: i, bodyEnd: inner.bodyEnd };
-  }
-  // Otherwise it ends at the statement end, which for JavaScript is a newline as
-  // much as a `;`. Stopping only at `;` would swallow every following statement
-  // and score sequential guard clauses as nesting.
-  let end = i;
+  if (body[i] !== '(') return i;
+  return skipSpaces(body, skipBalancedParen(body, i), to);
+}
+
+/**
+ * The region inside a `{ ... }` body, or null when the body is brace-less.
+ */
+function bracedBody(body: string, start: number): { bodyStart: number; bodyEnd: number } | null {
+  if (body[start] !== '{') return null;
+  return { bodyStart: start + 1, bodyEnd: skipBalancedBrace(body, start) - 1 };
+}
+
+/**
+ * The region of a brace-less body.
+ *
+ * When the body is itself a control structure, the region starts at that structure's
+ * keyword and ends where its own body ends -- each level adds its own +1 as the scan
+ * descends, so three nested single-statement `if`s nest three deep. Returning the
+ * innermost range directly would skip the intermediate levels.
+ */
+function bareBody(body: string, start: number, to: number): { bodyStart: number; bodyEnd: number } {
+  return nestedControlBody(body, start, to) || statementBody(body, start, to);
+}
+
+/**
+ * A nested control structure as the body, or null when this is not one.
+ *
+ * A trailing `else` belongs to the inner structure (`if (a) if (b) { } else { }`), so
+ * it is included -- otherwise the `else` body would be rescanned at the outer depth.
+ */
+function nestedControlBody(body: string, start: number, to: number): { bodyStart: number; bodyEnd: number } | null {
+  const head = readWord(body, start);
+  if (!head || !isNestingHead(body, head, start)) return null;
+
+  const inner = locateControlBody(body, head.end, to);
+  const tail = trailingClause(body, inner.bodyEnd, to);
+  if (!tail) return { bodyStart: start, bodyEnd: inner.bodyEnd };
+  return { bodyStart: start, bodyEnd: locateControlBody(body, tail.end, to).bodyEnd };
+}
+
+/**
+ * A statement body: ends at a semicolon or a newline, both of which terminate a
+ * JavaScript statement here. Stopping only at the semicolon would swallow every
+ * following statement and score sequential guard clauses as nesting.
+ */
+function statementBody(body: string, start: number, to: number): { bodyStart: number; bodyEnd: number } {
+  let end = start;
   while (end < to && body[end] !== ';' && body[end] !== '\n') end++;
   if (end < to && body[end] === ';') end++;
-  return { bodyStart: i, bodyEnd: end };
+  return { bodyStart: start, bodyEnd: end };
+}
+
+/**
+ * Whether this word opens a nested control structure worth descending into.
+ *
+ * A member access and a key or label read as keywords but are not nesting.
+ */
+function isNestingHead(body: string, head: { word: string; end: number }, at: number): boolean {
+  if (!NESTING_KEYWORDS.has(head.word)) return false;
+  return !isMemberAccess(body, at) && !isKeyOrLabel(body, head.end);
+}
+
+/**
+ * The `else` / `catch` / `finally` following a body, if any.
+ *
+ * The body end is inclusive of the closing brace, so the scan steps past it first.
+ */
+function trailingClause(body: string, after: number, to: number): { word: string; end: number } | null {
+  let i = after;
+  if (body[i] === '}') i++;
+  i = skipSpaces(body, i, to);
+  const tail = readWord(body, i);
+  if (!tail) return null;
+  return tail.word === 'else' || tail.word === 'catch' || tail.word === 'finally' ? tail : null;
 }
 
 /**
