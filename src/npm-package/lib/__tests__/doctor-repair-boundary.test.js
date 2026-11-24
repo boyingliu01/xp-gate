@@ -23,8 +23,17 @@ describe('doctor/install repair boundary (#502)', () => {
   it('AC-502-01: language tool auto-install requires an explicit opt-in flag', () => {
     expect(DOCTOR).toMatch(/KNOWN_FLAGS\s*=\s*\[[^\]]*'--install-tools'/);
     // The execSync-backed installer must be gated by the flag, not just by --fix.
-    expect(DOCTOR).toMatch(/if \(fixMode && installToolsFlag && langIssues > 0\)/);
-    expect(DOCTOR).not.toMatch(/if \(fixMode && langIssues > 0\)\s*\{/);
+    // The gate now lives in `reportLanguageToolRepairs`, so assert it there and
+    // check that `doctor` reaches that function -- pinning the old inline line
+    // would forbid extracting it.
+    expect(DOCTOR).toMatch(/reportLanguageToolRepairs\(\{ fixMode, installToolsFlag, langIssues \}\)/);
+    const repairFn = DOCTOR.slice(DOCTOR.indexOf('function reportLanguageToolRepairs('));
+    expect(repairFn).toMatch(/if \(!installToolsFlag\)/);
+    // And the install itself must sit AFTER that guard, never before it.
+    const guardAt = repairFn.indexOf('if (!installToolsFlag)');
+    const installAt = repairFn.indexOf('installTool(');
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(installAt).toBeGreaterThan(guardAt);
   });
 
   it('AC-502-02: xp-gate install reports doctor findings without adopting its exit code', () => {

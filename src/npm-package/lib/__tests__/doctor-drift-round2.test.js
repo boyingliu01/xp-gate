@@ -147,8 +147,13 @@ describe('doctor drift Round 2 (#495)', () => {
 
     // The race outcome must carry timedOut out of the destructuring...
     expect(source).toMatch(/const \{[^}]*timedOut[^}]*\} = await Promise\.race/);
-    // ...and branch on it, because a timeout discards every computed FAIL.
-    expect(source).toMatch(/if \(timedOut\)[\s\S]{0,200}issues\s*(\+\+|\+=|= Math\.max)/);
+    // ...and be handled, because a timeout discards every computed FAIL. The
+    // handling now lives in `coverIncompleteRun`, so this checks that the branch is
+    // REACHED from `doctor` and that the branch exists there -- asserting the old
+    // inline shape would forbid the extraction that made `doctor` readable.
+    expect(source).toMatch(/coverIncompleteRun\(timedOut/);
+    const coverFn = source.slice(source.indexOf('function coverIncompleteRun('));
+    expect(coverFn).toMatch(/if \(timedOut\)[\s\S]{0,300}diagnoseHookDrift\(\)/);
   });
 
   it('AC-495-13: a flat copy inside the project githooks/ is diagnosed when the project tier is what executes', () => {

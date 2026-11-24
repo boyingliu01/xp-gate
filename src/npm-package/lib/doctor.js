@@ -3381,20 +3381,164 @@ function runHookAndModuleSync(force) {
 }
 
 
-async function doctor(args) {
-  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
-  if (briefFlag && errors.length === 0) {
-    // Answers the whole "what is this machine set up like" question in one shot.
-    const { buildBriefReport } = require('./doctor-brief');
-    const report = buildBriefReport({ cwd: process.cwd() });
-    if (jsonMode) {
-      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-    } else {
-      process.stdout.write(`${report.summary}\n`);
-    }
-    process.exitCode = 0;
+/**
+ * The `--brief` answer: one cheap read of what this machine looks like.
+ *
+ * #653 designed `--brief` to replace a class of exploratory probes with a single
+ * call, so it must stay cheap -- it loads one module and prints one summary.
+ *
+ * @param {boolean} jsonMode
+ * @returns {Promise<void>} never returns a code; the caller sets the exit code
+ */
+function runBriefReport(jsonMode) {
+  const { buildBriefReport } = require('./doctor-brief');
+  const report = buildBriefReport({ cwd: process.cwd() });
+  if (jsonMode) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    process.stdout.write(`${report.summary}\n`);
+  }
+  process.exitCode = 0;
+}
+
+/**
+ * Report that xp-gate is not installed, in whichever shape the caller asked for.
+ *
+ * Not an error: an uninstalled machine is a valid state, and `doctor` is the command
+ * that tells you so.
+ *
+ * @param {boolean} jsonMode
+ * @returns {number} exit code (always 0)
+ */
+function reportUninstalled(jsonMode) {
+  if (jsonMode) {
+    const skip = [{ name: 'Install', status: 'SKIP', detail: 'xp-gate is not installed' }];
+    console.log(JSON.stringify(formatDoctorJson(skip, 0)));
+    return 0;
+  }
+  console.log('xp-gate is not installed.');
+  console.log('Run xp-gate init to install.');
+  return 0;
+}
+
+/**
+ * Fill in what a timed-out run could not reach, and check the flaky ledger.
+ *
+ * #495 Round 2: a timeout discards every check that had not reported yet,
+ * INCLUDING the drift surface, so a timed-out result must never read as clean --
+ * that is exactly the "stale modules, doctor green" outcome. The drift checks are
+ * re-run synchronously here and the issue count is floored at 1.
+ *
+ * The flaky-quarantine expiry (#603) is a WARN, not a FAIL: an overdue ledger breaks
+ * nothing at runtime, it only means an intentional gap outlived its intent.
+ *
+ * @param {boolean} timedOut
+ * @param {Array} checks appended to
+ * @param {number} issues current count
+ * @returns {number} the issues this function contributes
+ */
+function coverIncompleteRun(timedOut, checks, issues) {
+  let added = 0;
+
+  if (timedOut) {
+    const hookDrift = diagnoseHookDrift();
+    const moduleDrift = diagnoseModuleDrift();
+    checks.push(...hookDrift.checks, ...moduleDrift.checks);
+    added += hookDrift.issues + moduleDrift.issues;
+  }
+
+  try {
+    const flaky = diagnoseFlakyQuarantine({ repoRoot: process.cwd() });
+    checks.push(...flaky.checks);
+    added += flaky.issues;
+  } catch (err) {
+    // Surface the cause: a bare "could not be read" hid the real error and made this
+    // look like a missing file rather than a bug in the check itself.
+    const reason = err && err.message ? err.message : String(err);
+    checks.push({ name: 'Flaky quarantine', status: 'SKIP', detail: `ledger check failed: ${reason}` });
+  }
+
+  return added;
+}
+
+/**
+ * The checks that run after the report: upgrade, plugin and language tools.
+ *
+ * Kept as one function because a `--format json` run still has to execute all of it
+ * (#488) -- the machine-readable mode changes what is PRINTED, not what is checked.
+ * The upgrade probe is raced against a 3 s timeout and its failure is ignored: it
+ * reaches the network, and a doctor that blocks on a slow registry is worse than one
+ * that does not mention an available upgrade.
+ *
+ * @param {Array} checks appended to
+ * @returns {Promise<{issues: number, langIssues: number}>} `langIssues` is returned
+ *   separately because `--fix --install-tools` acts on it, and recomputing it
+ *   would probe the toolchain twice.
+ */
+async function collectTrailing(checks) {
+  try {
+    const upgradePromise = diagnoseUpgrade();
+    const upgradeTimeout = new Promise((resolve) => setTimeout(() => resolve(), UPGRADE_PROBE_TIMEOUT_MS));
+    await Promise.race([upgradePromise, upgradeTimeout]);
+  } catch {
+    // Non-blocking: the upgrade hint is a convenience, never a verdict.
+  }
+  const trailing = diagnoseOpenCodePlugin(checks);
+  const langIssues = diagnoseLanguageTools();
+  return { issues: trailing + langIssues, langIssues };
+}
+
+/**
+ * Report missing language tools, and install them only on explicit opt-in.
+ *
+ * #502: installing a toolchain changes the MACHINE, not the repository, so it is
+ * never a side effect of `--fix`. Without `--install-tools` this prints what is
+ * missing and names the flag; with it, the install runs and a project config is
+ * generated so the next run does not rediscover the same gaps.
+ *
+ * Failures are non-blocking: a package manager that cannot reach its registry must
+ * not turn a diagnosis into an error.
+ *
+ * @param {{fixMode: boolean, installToolsFlag: boolean, langIssues: number}} opts
+ */
+function reportLanguageToolRepairs(opts) {
+  const { fixMode, installToolsFlag, langIssues } = opts;
+  if (!fixMode || langIssues <= 0) return;
+
+  if (!installToolsFlag) {
+    console.log(`\n  ${langIssues} language tool(s) are missing. --fix did not install them —`);
+    console.log('  installing a toolchain changes the machine, so opt in with --install-tools (#502).');
     return;
   }
+
+  try {
+    const { detectProjectLanguages, getToolsForLanguages, installTool, generateProjectConfig } = require('./language-tools.js');
+    const projectRoot = process.cwd();
+    const { detected } = detectProjectLanguages(projectRoot);
+    if (detected.length === 0) return;
+
+    const toolStatus = getToolsForLanguages(detected);
+    let installed = 0;
+    for (const [lang, tools] of Object.entries(toolStatus)) {
+      for (const t of tools) {
+        if (t.status === 'missing' && installTool(t.tool).success) {
+          console.log(`  \u2713 ${t.tool.name} (${lang}) installed`);
+          installed++;
+        }
+      }
+    }
+    if (installed > 0) {
+      console.log(`  ${installed} language tool(s) installed.`);
+      generateProjectConfig(projectRoot, detected, toolStatus);
+    }
+  } catch {
+    // Non-blocking: a package manager failure is not a diagnosis failure.
+  }
+}
+
+async function doctor(args) {
+  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
+  if (briefFlag && errors.length === 0) return runBriefReport(jsonMode);
   if (errors.length > 0) {
     for (const error of errors) console.error(error);
     return 1;
@@ -3414,15 +3558,7 @@ async function doctor(args) {
   const config = getConfig();
 
   // §4.8: mode === "uninstalled" → print "xp-gate is not installed"
-  if (isUninstalledMode(config)) {
-    if (jsonMode) {
-      console.log(JSON.stringify(formatDoctorJson([{ name: 'Install', status: 'SKIP', detail: 'xp-gate is not installed' }], 0)));
-      return 0;
-    }
-    console.log('xp-gate is not installed.');
-    console.log('Run xp-gate init to install.');
-    return 0;
-  }
+  if (isUninstalledMode(config)) return reportUninstalled(jsonMode);
 
   // §4.13 (#451 REQ-2): explicit one-command sync from the repo's githooks/.
   if (syncHooks) {
@@ -3469,39 +3605,11 @@ async function doctor(args) {
   // A timeout discards every check that had not reported yet, including the
   // drift surface, so the raced result must never be allowed to read as clean
   // (#495 Round 2 -- this is the "stale modules, doctor green" outcome itself).
-  if (timedOut) {
-    issues = Math.max(issues, 1);
-    const hookDrift = diagnoseHookDrift();
-    const moduleDrift = diagnoseModuleDrift();
-    checks.push(...hookDrift.checks, ...moduleDrift.checks);
-    issues += hookDrift.issues + moduleDrift.issues;
-  }
+  issues += coverIncompleteRun(timedOut, checks, issues);
 
-  // Flaky-test quarantine expiry (#603). A WARN, not a FAIL: an overdue ledger
-  // breaks nothing at runtime, it only means an intentional gap outlived its
-  // intent -- doctor's business, not a gate's.
-  try {
-    const flaky = diagnoseFlakyQuarantine({ repoRoot: process.cwd() });
-    checks.push(...flaky.checks);
-    issues += flaky.issues;
-  } catch (err) {
-    // Surface the cause: a bare "could not be read" hid the real error and made
-    // this look like a missing file rather than a bug in the check itself.
-    checks.push({ name: 'Flaky quarantine', status: 'SKIP', detail: `ledger check failed: ${err && err.message ? err.message : String(err)}` });
-  }
-
-  let langIssues = 0;
-  // Upgrade + plugin + language-tool status, kept as one callable because a
-  // --format json run still has to execute all of it (#488).
   const collectTrailingChecks = async () => {
-    try {
-      const upgradePromise = diagnoseUpgrade();
-      const upgradeTimeout = new Promise((resolve) => setTimeout(() => resolve(), 3000));
-      await Promise.race([upgradePromise, upgradeTimeout]);
-    } catch { /* non-blocking */ }
-    const trailing = diagnoseOpenCodePlugin(checks);
-    langIssues = diagnoseLanguageTools();
-    return trailing + langIssues;
+    const { issues: trailing, langIssues } = await collectTrailing(checks);
+    return { trailing, langIssues };
   };
 
   if (jsonMode) {
@@ -3511,7 +3619,8 @@ async function doctor(args) {
     const say = console.log;
     console.log = () => {};
     try {
-      issues += await collectTrailingChecks();
+      // JSON mode is read-only by contract, so the language-tool count is discarded.
+      issues += (await collectTrailingChecks()).trailing;
     } finally {
       console.log = say;
     }
@@ -3521,41 +3630,13 @@ async function doctor(args) {
 
   printReport(checks);
 
-  issues += await collectTrailingChecks();
+  const trailing = await collectTrailingChecks();
+  issues += trailing.trailing;
+  const langIssues = trailing.langIssues;
 
-  // In --fix mode, auto-install missing language tools — only on explicit
-  // --install-tools (#502: a diagnosis command must not run package managers).
-  if (fixMode && installToolsFlag && langIssues > 0) {
-    try {
-      const { detectProjectLanguages, getToolsForLanguages, installTool, generateProjectConfig, LANGUAGE_REGISTRY } = require('./language-tools.js');
-      const projectRoot = process.cwd();
-      const { detected } = detectProjectLanguages(projectRoot);
-      if (detected.length > 0) {
-        const toolStatus = getToolsForLanguages(detected);
-        let installed = 0;
-        for (const [lang, tools] of Object.entries(toolStatus)) {
-          for (const t of tools) {
-            if (t.status === 'missing') {
-              const result = installTool(t.tool);
-              if (result.success) {
-                console.log(`  \u2713 ${t.tool.name} (${lang}) installed`);
-                installed++;
-              }
-            }
-          }
-        }
-        if (installed > 0) {
-          console.log(`  ${installed} language tool(s) installed.`);
-          generateProjectConfig(projectRoot, detected, toolStatus);
-        }
-      }
-    } catch { /* non-blocking */ }
-  }
+  reportLanguageToolRepairs({ fixMode, installToolsFlag, langIssues });
 
-  if (fixMode && !installToolsFlag && langIssues > 0) {
-    console.log(`\n  ${langIssues} language tool(s) are missing. --fix did not install them —`);
-    console.log('  installing a toolchain changes the machine, so opt in with --install-tools (#502).');
-  }
+
 
   if (issues === 0) {
     console.log('\n✓ All checks passed');
