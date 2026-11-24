@@ -145,6 +145,19 @@ function cacheStillDescribes(
   return cached.localVersion === localVersion
 }
 
+/**
+ * Whether this run has nothing to install.
+ *
+ * Two reasons, and both still RECORD "current": the version is already latest, or the
+ * user opted out of auto-upgrade. The opt-out is checked here rather than before the
+ * version comparison on purpose -- skipping the cache write would make the next run
+ * re-query the registry every time.
+ */
+function nothingToInstall(localVersion: string, remoteVersion: string): boolean {
+  const upToDate = !semverLt(localVersion, remoteVersion)
+  const optedOut = readXpGateConfig()?.autoUpgrade === false
+  return upToDate || optedOut
+}
 async function decideUpgrade(): Promise<UpgradeDecision> {
   const localVersion = getLocalXpGateVersion()
   const cached = readCache(XP_GATE_CACHE_FILE)
@@ -158,12 +171,7 @@ async function decideUpgrade(): Promise<UpgradeDecision> {
   const remoteVersion = await fetchNpmLatestVersion(XP_GATE_REGISTRY_URL)
   if (!remoteVersion) return { kind: "noop", localVersion, remoteVersion: null }
 
-  const upToDate = !semverLt(localVersion, remoteVersion)
-  // The opt-out is checked AFTER the version comparison so that recording
-  // "current" is still correct for an opted-out user; skipping it would make the
-  // next run re-query the registry every time.
-  const optedOut = readXpGateConfig()?.autoUpgrade === false
-  if (upToDate || optedOut) {
+  if (nothingToInstall(localVersion, remoteVersion)) {
     writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
     return { kind: "noop", localVersion, remoteVersion }
   }
@@ -617,35 +625,60 @@ type ReloadInputs =
   | { ok: true; dbPath: string; providerID: string; modelID: string }
   | { ok: false; reason: string }
 
+/** Whether `readSisyphusModel` returned a failure message rather than a model id. */
+function isReloadFailure(model: unknown): model is string {
+  return typeof model === "string" && model.startsWith("Session reload failed")
+}
+/**
+ * Split `provider/model` into its two halves, or null when it is not that shape.
+ *
+ * Split on the FIRST slash: model ids may themselves contain slashes
+ * (`openrouter/anthropic/claude`), so splitting on the last would report the wrong
+ * provider.
+ */
+function splitModelRef(model: string): { providerID: string; modelID: string } | null {
+  const at = model.indexOf("/")
+  if (at === -1) return null
+  return { providerID: model.substring(0, at), modelID: model.substring(at + 1) }
+}
+/**
+ * The prerequisite that is missing, or null when everything is in place.
+ *
+ * A reload needs BOTH the session database and the provider config; naming which one
+ * is absent is what turns "reload failed" into something the user can fix.
+ */
+function missingReloadInput(path: string, what: string): string | null {
+  if (existsSync(path)) return null
+  return `Session reload failed: ${what} not found at ${path}`
+}
+
 function readReloadInputs(): ReloadInputs {
   const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-  if (!existsSync(dbPath)) {
-    return { ok: false, reason: "Session reload failed: OpenCode database not found at " + dbPath }
-  }
+  const missingDb = missingReloadInput(dbPath, "OpenCode database")
+  if (missingDb) return { ok: false, reason: missingDb }
 
   const omoConfigPath = join(homedir(), ".config", "opencode", "oh-my-openagent.json")
-  if (!existsSync(omoConfigPath)) {
-    return { ok: false, reason: "Session reload failed: oh-my-openagent.json not found at " + omoConfigPath }
-  }
+  const missingConfig = missingReloadInput(omoConfigPath, "oh-my-openagent.json")
+  if (missingConfig) return { ok: false, reason: missingConfig }
 
   const parsed = parseOmoConfig(omoConfigPath)
   if (typeof parsed === "string") return { ok: false, reason: parsed }
 
   const model = readSisyphusModel(parsed)
-  if (typeof model === "string" && model.startsWith("Session reload failed")) {
-    return { ok: false, reason: model }
-  }
+  // `readSisyphusModel` reports its own failures as a message string; a string that
+  // does not start with the failure prefix is a model id.
+  if (isReloadFailure(model)) return { ok: false, reason: model }
 
-  const slashIdx = (model as string).indexOf("/")
-  if (slashIdx === -1) {
+  const split = splitModelRef(model as string)
+  if (!split) {
     return { ok: false, reason: `Session reload failed: model "${model}" is not in provider/model format` }
   }
 
   return {
     ok: true,
     dbPath,
-    providerID: (model as string).substring(0, slashIdx),
-    modelID: (model as string).substring(slashIdx + 1),
+    providerID: split.providerID,
+    modelID: split.modelID,
   }
 }
 
