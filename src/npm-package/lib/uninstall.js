@@ -380,6 +380,41 @@ function buildLocalPlanInto(plan, manifest) {
  * @param {Array<object>} plan
  * @param {object|null} manifest
  */
+/**
+ * Plan the files `setup-global` writes outside the hook/config entries.
+ *
+ * #663: setup-global also writes `modules/`, a `node_modules/` tree, `package.json`,
+ * `package-lock.json` and the `xp-gate.json` manifest. None were in the plan, so
+ * uninstall printed "Uninstall complete" over an installation still ~1000 files on
+ * disk. The residue is not cosmetic: a leftover `node_modules/` makes the NEXT
+ * setup-global skip its own install and reuse a stale dependency tree, and a leftover
+ * `xp-gate.json` carries the previous manifest into `doctor`, which reports it as the
+ * current installation.
+ */
+function planGlobalInstallResidue(plan) {
+  for (const item of GLOBAL_INSTALL_RESIDUE) {
+    const target = path.join(CONFIG_DIR, item.key);
+    // One stat, not exists-then-stat: the pair has a window in which the entry can
+    // vanish and the second call throws.
+    let isDir;
+    try {
+      isDir = fs.statSync(target).isDirectory();
+    } catch {
+      continue; // absent or unreadable: nothing to plan
+    }
+    plan.push({
+      type: isDir ? 'dir' : 'file',
+      path: target,
+      label: item.label,
+      critical: false,
+      // #714: a fixed-path file we install ourselves needs no content signature.
+      // Carrying the flag through the plan is what makes the delete happen instead
+      // of stopping at "does not contain xp-gate signature".
+      ownedByPath: item.ownedByPath === true,
+    });
+  }
+}
+
 function buildGlobalPlanInto(plan, manifest) {
     plan.push({
       type: 'gitconfig',
@@ -405,38 +440,13 @@ function buildGlobalPlanInto(plan, manifest) {
       });
     }
 
-    // #663: `setup-global` also writes modules/, a node_modules/ tree, a
-    // package.json + package-lock.json and the xp-gate.json manifest. None of them
-    // were in the plan, so uninstall printed "Uninstall complete" over an
-    // installation that was still ~1000 files on disk. The residue is not
-    // cosmetic: a leftover node_modules/ makes the NEXT setup-global skip its own
-    // install and reuse a stale dependency tree, and a leftover xp-gate.json
-    // carries the previous version's manifest/lastInit into `doctor`, which then
-    // reports it as the current installation.
-    const configDir = CONFIG_DIR;
-    for (const item of GLOBAL_INSTALL_RESIDUE) {
-      const target = path.join(configDir, item.key);
-      if (fs.existsSync(target)) {
-        const isDir = fs.statSync(target).isDirectory();
-        plan.push({
-          type: isDir ? 'dir' : 'file',
-          path: target,
-          label: `~/.config/xp-gate/${item.label}`,
-          critical: false,
-          // #714: a fixed-path file we install ourselves needs no content
-          // signature. Carrying the flag through the plan is what makes the
-          // delete actually happen instead of stopping at "does not contain
-          // xp-gate signature".
-          ownedByPath: item.ownedByPath === true
-        });
-      }
-    }
+    planGlobalInstallResidue(plan);
 
     // User data is deliberately NOT deleted. Reporting it is the second half of
     // the fix: leaving it behind silently is how a user ends up with a stray
     // config they cannot attribute.
     for (const item of GLOBAL_USER_DATA) {
-      const target = path.join(configDir, item.key);
+      const target = path.join(CONFIG_DIR, item.key);
       if (fs.existsSync(target)) {
         plan.push({
           type: 'retain',
