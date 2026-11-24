@@ -69,49 +69,100 @@ function findDuplicateModel(assignments) {
 
 // Everything an expert's provider must carry to be callable. Returns the
 // human-readable reason instead of throwing, so the caller keeps one shape.
+/**
+ * The checks a provider binding must pass, in the order they are reported.
+ *
+ * A table because each rule's message is different and each is a sentence about the
+ * config; as an if-ladder they were five early returns whose conditions all had to be
+ * read together to see there is an ordering at all.
+ *
+ * The order is by SPECIFICITY: "must define a provider" before "must be an object",
+ * before the fields inside it -- so a missing provider is never reported as a
+ * malformed one.
+ */
+const PROVIDER_RULES = [
+  {
+    fails: (expert) => !isNonEmptyString(expert.provider) || expert.provider === 'local',
+    message: (role) => `Expert ${role} must define a non-local callable provider.`,
+  },
+  {
+    fails: (_expert, provider) => !provider || typeof provider !== 'object' || Array.isArray(provider),
+    message: (role) => `Expert ${role} provider configuration must be an object.`,
+  },
+  {
+    fails: (_expert, provider) => !isNonEmptyString(provider?.base_url),
+    message: (role) => `Expert ${role} provider must define a non-empty base_url.`,
+  },
+  {
+    fails: (_expert, provider) => !isNonEmptyString(provider?.api_key),
+    message: (role) => `Expert ${role} provider must define a non-empty api_key.`,
+  },
+  {
+    fails: (_expert, provider) => provider?.timeout_ms !== undefined
+      && !isValidTimeoutMs(provider.timeout_ms),
+    message: (role, _provider, expert) => `Expert ${role} provider ${expert.provider} timeout_ms must be an integer between 1000 and 600000.`,
+  },
+];
+
+/** Why this expert's provider binding is unusable, or null when it is fine. */
 function providerConfigError(role, expert, providerMap) {
-  if (!isNonEmptyString(expert.provider) || expert.provider === 'local') {
-    return `Expert ${role} must define a non-local callable provider.`;
-  }
-  const provider = providerMap[expert.provider];
-  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
-    return `Expert ${role} provider configuration must be an object.`;
-  }
-  if (!isNonEmptyString(provider.base_url)) {
-    return `Expert ${role} provider must define a non-empty base_url.`;
-  }
-  if (!isNonEmptyString(provider.api_key)) {
-    return `Expert ${role} provider must define a non-empty api_key.`;
-  }
-  if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
-    return `Expert ${role} provider ${expert.provider} timeout_ms must be an integer between 1000 and 600000.`;
-  }
-  return null;
+  const provider = expert ? providerMap[expert.provider] : undefined;
+  const broken = PROVIDER_RULES.find((rule) => rule.fails(expert, provider));
+  return broken ? broken.message(role, provider, expert) : null;
+}
+
+/**
+ * Why the model assignments are unusable, or null when they are distinct.
+ *
+ * Both checks live here because they use the SAME collected list: re-collecting for
+ * the second check would let the two disagree about what the config says.
+ */
+function collectAndCheckDuplicates(expertMap) {
+  const collected = collectModelAssignments(expertMap);
+  if (collected.error) return collected.error;
+  return findDuplicateModel(collected.assignments);
+}
+
+/**
+ * Normalise the two maps a config may omit entirely.
+ *
+ * A config that names no experts is not a malformed map -- it is an empty one, and the
+ * required-role check below reports each missing seat.
+ */
+function asMap(value) {
+  return value && typeof value === 'object' ? value : {};
 }
 
 function validateDistinctModels(experts, providers, consensus = {}) {
-  const expertMap = experts && typeof experts === 'object' ? experts : {};
-  const providerMap = providers && typeof providers === 'object' ? providers : {};
+  const expertMap = asMap(experts);
+  const providerMap = asMap(providers);
 
-  const collected = collectModelAssignments(expertMap);
-  if (collected.error) return { valid: false, reason: collected.error };
+  const assignmentError = collectAndCheckDuplicates(expertMap);
+  if (assignmentError) return { valid: false, reason: assignmentError };
 
-  const duplicate = findDuplicateModel(collected.assignments);
-  if (duplicate) return { valid: false, reason: duplicate };
+  const providerError = firstProviderError(expertMap, providerMap);
+  if (providerError) return { valid: false, reason: providerError };
 
+  // `cross_provider_required` is IGNORED, not obeyed: the three seats must be distinct
+  // MODELS, and requiring distinct providers as well would reject configs that are
+  // already anonymous. Reported as a warning so the reader knows it had no effect.
+  if (consensus.cross_provider_required === true) {
+    return { valid: true, warning: 'cross_provider_required_ignored' };
+  }
+  return { valid: true };
+}
+/**
+ * The first required role whose provider binding is unusable, or null.
+ *
+ * Reported one at a time, in role order: the first broken binding is the one to fix,
+ * and listing all of them would bury it.
+ */
+function firstProviderError(expertMap, providerMap) {
   for (const role of REQUIRED_EXPERT_ROLES) {
     const error = providerConfigError(role, expertMap[role], providerMap);
-    if (error) return { valid: false, reason: error };
+    if (error) return error;
   }
-
-  if (consensus.cross_provider_required === true) {
-    return {
-      valid: true,
-      warning: 'cross_provider_required_ignored',
-    };
-  }
-
-  return { valid: true };
+  return null;
 }
 
 
