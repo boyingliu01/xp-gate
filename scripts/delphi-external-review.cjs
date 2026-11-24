@@ -38,19 +38,39 @@ const VALUE_FLAGS = {
 const BOOLEAN_FLAGS = { '--fallback-local': 'fallbackLocal' };
 const INTEGER_FLAGS = { '--round': (v) => parseInt(v) };
 
+/**
+ * Record one flag's value, advancing past it when it consumes the next token.
+ *
+ * Three shapes, in the order they are tried: `--timeout-ms` is held aside for its own
+ * validation, a BOOLEAN flag takes no value, and a VALUE flag takes the next token --
+ * converted when an integer parser is registered for it.
+ *
+ * @returns the index of the last token consumed
+ */
+function applyRawFlag(argv, i, args, state) {
+  const flag = argv[i];
+  if (flag === '--timeout-ms') {
+    state.timeoutMsRaw = argv[i + 1];
+    return i + 1;
+  }
+  if (BOOLEAN_FLAGS[flag]) {
+    args[BOOLEAN_FLAGS[flag]] = true;
+    return i;
+  }
+  const key = VALUE_FLAGS[flag];
+  if (!key) return i;
+  const value = argv[i + 1];
+  args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
+  return i + 1;
+}
+
 function collectRawArgs(argv) {
   const args = {};
-  let timeoutMsRaw;
+  const state = { timeoutMsRaw: undefined };
   for (let i = 0; i < argv.length; i++) {
-    const flag = argv[i];
-    if (flag === '--timeout-ms') { timeoutMsRaw = argv[++i]; continue; }
-    if (BOOLEAN_FLAGS[flag]) { args[BOOLEAN_FLAGS[flag]] = true; continue; }
-    const key = VALUE_FLAGS[flag];
-    if (!key) continue;
-    const value = argv[++i];
-    args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
+    i = applyRawFlag(argv, i, args, state);
   }
-  return { args, timeoutMsRaw };
+  return { args, timeoutMsRaw: state.timeoutMsRaw };
 }
 
 function fail(message) {
@@ -60,13 +80,24 @@ function fail(message) {
 
 // Every rejection path used to inline its own console.error + exit. Collected
 // here so the rules read as rules and each message stays verbatim.
+/**
+ * The arguments a review cannot start without, and how each is satisfied.
+ *
+ * A table so a new required argument is a row. `--input` has TWO acceptable spellings,
+ * which is why the requirement is a predicate rather than a key name: reporting
+ * "missing --input" when the caller passed `--input-file` would send them to fix the
+ * wrong thing.
+ */
+const REQUIRED_ARGS = [
+  { satisfied: (a) => Boolean(a.expert), label: '--expert' },
+  { satisfied: (a) => Boolean(a.input || a.inputFile), label: '--input or --input-file' },
+  { satisfied: (a) => Boolean(a.round), label: '--round' },
+  { satisfied: (a) => Boolean(a.config), label: '--config' },
+];
+
+/** The arguments that are absent, by the label to show the user. */
 function missingArgumentList(args) {
-  const missing = [];
-  if (!args.expert) missing.push('--expert');
-  if (!args.input && !args.inputFile) missing.push('--input or --input-file');
-  if (!args.round) missing.push('--round');
-  if (!args.config) missing.push('--config');
-  return missing;
+  return REQUIRED_ARGS.filter((req) => !req.satisfied(args)).map((req) => req.label);
 }
 
 function applyTimeoutFlag(args, timeoutMsRaw) {
@@ -112,99 +143,7 @@ function parseArgs(argv) {
 // only surfaced at runtime (a bad timeout_ms fell back to the default). The
 // whole profile is checked here instead, at the system boundary, naming the
 // provider so the fix is obvious (#429).
-/**
- * The field that makes this provider unusable, or null when it is fine.
- *
- * Returned rather than thrown so the caller decides how loud to be -- and so the list
- * of rules reads as a list instead of as four side-effecting `fail()` calls.
- */
-function providerProblem(provider) {
-  if (!isPlainObject(provider)) return 'must be an object.';
-  if (!isNonEmptyString(provider.base_url)) return 'must define a non-empty base_url.';
-  if (!isNonEmptyString(provider.api_key)) return 'must define a non-empty api_key.';
-  if (!hasValidTimeout(provider)) return 'timeout_ms must be an integer between 1000 and 600000.';
-  return null;
-}
 
-/**
- * Whether an optional `timeout_ms` is usable when present.
- *
- * Absent is fine -- the caller falls back to the default; present-but-wrong is not,
- * because a malformed timeout silently becomes NaN at the exec boundary.
- */
-function hasValidTimeout(provider) {
-  return provider.timeout_ms === undefined || isValidTimeoutMs(provider.timeout_ms);
-}
-
-function validateProviders(providers, profileName) {
-  for (const [name, provider] of Object.entries(providers)) {
-    const problem = providerProblem(provider);
-    if (!problem) continue;
-    console.error(`[delphi-review] ERROR: profiles.${profileName}.providers.${name} ${problem}`);
-    process.exit(1);
-  }
-}
-
-/**
- * Read a numeric consensus setting and clamp it into its allowed range.
- *
- * Two settings did this identically: coerce to a number, clamp to a floor and a
- * ceiling, fall back to the default when the value is not usable, and warn when
- * the configured value differs from the one actually used. The warning is the
- * point -- a silently clamped threshold changes what "consensus" means on that
- * machine.
- *
- * `clamped` means a CONFIGURED value was changed. An absent value uses the
- * default and reports no clamp: telling the operator a setting they never wrote
- * had been altered is a false alarm.
- *
- * @param {*} configured raw value from the config
- * @param {{min: number, max: number, fallback: number, clamp: (n: number) => number}} bounds
- * @returns {{value: number, clamped: boolean}}
- */
-function clampConsensusSetting(configured, bounds) {
-  const usable = typeof configured === 'number' && Number.isFinite(configured);
-  const value = usable ? bounds.clamp(configured) : bounds.fallback;
-  // "Clamped" covers BOTH ways a configured value stops applying: out of range
-  // (0 rounds -> 1) and unusable ('high' -> the default). The existing contract
-  // treats an unparseable value as a change worth reporting, and it is -- a
-  // setting the operator wrote is not the one in force either way.
-  return { value, clamped: configured !== undefined && configured !== value };
-}
-
-/**
- * Expand a `${VAR}` placeholder, or fail loudly.
- *
- * `api_key` and `base_url` each had their own copy, and the `base_url` one was
- * ADDED later for a reason worth keeping: without expansion the literal text
- * `${PG_GATEWAY}/v1/chat/completions` is a valid non-empty URL, so validation
- * passed and the failure surfaced at the network layer as a DNS error while the
- * config looked correct.
- *
- * Only a WHOLE `${NAME}` is a placeholder. `${A}${B}` is a template somebody may
- * be assembling, and refusing it would reject a config that needs no expansion.
- *
- * @param {*} value
- * @param {string} field 'api_key' | 'base_url'
- * @param {string} profileName
- * @param {string} providerName
- * @returns {*} the expanded value, or the original
- */
-function expandEnvPlaceholder(value, field, profileName, providerName) {
-  if (typeof value !== 'string') return value;
-  const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(value);
-  if (!match) return value;
-  const envName = match[1];
-  const envVal = process.env[envName];
-  if (envVal) return envVal;
-  console.error(
-    `[delphi-review] ERROR: Environment variable ${envName} is not set `
-    + `(profiles.${profileName}.providers.${providerName}.${field}). `
-    + 'Export it or point that provider at a literal value.',
-  );
-  process.exit(1);
-  return value;
-}
 
 /**
  * Resolve and parse the config file.
@@ -219,134 +158,6 @@ function expandEnvPlaceholder(value, field, profileName, providerName) {
  * @param {string} configPath
  * @returns {object} the parsed config
  */
-function loadConfigFile(configPath) {
-  // Global fallback: a relative --config that this cwd does not have resolves
-  // to the machine-wide ~/.config/xp-gate/.delphi-config.json. This is what
-  // makes `--config .delphi-config.json` work from ANY project without each
-  // repo carrying its own (drifting, differently-priced) copy — reading a
-  // foreign project's config used to route calls to expensive models
-  // (2026-10-03 quota incident). An existing local file always wins.
-  // Fallback fires ONLY when the project file is genuinely absent: statSync
-  // distinguishes ENOENT from EACCES/EISDIR, and any other error aborts here
-  // rather than silently routing this run to another config — matching the
-  // TS loader's ENOENT-only semantics (walkthrough R10 FC-01).
-  const missingHere = (() => {
-    try { fs.statSync(configPath); return false; } catch (e) { return e.code === 'ENOENT'; }
-  })();
-  if (missingHere && !path.isAbsolute(configPath)) {
-    // r16 MA-01 disposition: XDG_CONFIG_HOME is an accepted override for the
-    // global config location. The CLI lib (shared-paths/doctor) intentionally
-    // pins ~/.config/xp-gate — overriding only this loader would make the two
-    // disagree. On Linux, $HOME/.config IS the XDG default, so behaviour there
-    // is identical; the env var only matters for non-default setups.
-    // Extracted so all three resolution points share one definition (REQ-636).
-    const globalPath = globalConfigPath(process.env);
-    if (fs.existsSync(globalPath)) {
-      console.error(`[delphi-review] ${configPath} not found here — using global config ${globalPath}`);
-      configPath = globalPath;
-    }
-  }
-  if (!fs.existsSync(configPath)) {
-    console.error(`[delphi-review] ERROR: Config file not found: ${configPath}`);
-    console.error('[delphi-review] Copy .delphi-config.json.example to .delphi-config.json and fill in your API keys.');
-    process.exit(1);
-  }
-
-  let raw;
-  try {
-    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (err) {
-    console.error(`[delphi-review] ERROR: Failed to parse config: ${err.message}`);
-    process.exit(1);
-  }
-  return raw;
-}
-
-/**
- * Look up the named profile, or fail with the list of what IS available.
- *
- * Naming the alternatives is the whole value of the branch: "profile not found"
- * alone leaves the operator re-reading a file that may be perfectly valid under a
- * different key.
- *
- * @param {object} raw parsed config
- * @param {string} profileName
- * @returns {object}
- */
-function requireProfile(raw, profileName) {
-  const profile = raw.profiles?.[profileName];
-  if (profile) return profile;
-  console.error(`[delphi-review] ERROR: Profile "${profileName}" not found in config.`);
-  console.error(`[delphi-review] Available profiles: ${Object.keys(raw.profiles || {}).join(', ')}`);
-  process.exit(1);
-  return profile;
-}
-
-/**
- * Expand every provider's `${VAR}` placeholders in place, after validating shape.
- *
- * `validateProviders` runs FIRST so a structurally broken provider is reported as
- * such rather than as a missing environment variable.
- *
- * @param {object} profile
- * @param {string} profileName
- * @returns {object} the providers map, with placeholders resolved in place
- */
-function resolveProviderCredentials(profile, profileName) {
-  const providers = profile.providers || {};
-  validateProviders(providers, profileName);
-  for (const [name, prov] of Object.entries(providers)) {
-    prov.api_key = expandEnvPlaceholder(prov.api_key, 'api_key', profileName, name);
-    prov.base_url = expandEnvPlaceholder(prov.base_url, 'base_url', profileName, name);
-  }
-  return providers;
-}
-
-function readConfig(configPath, profileOverride) {
-  const raw = loadConfigFile(configPath);
-
-  const profileName = profileOverride || raw.active_profile || 'default';
-  const profile = requireProfile(raw, profileName);
-  const providers = resolveProviderCredentials(profile, profileName);
-
-  const experts = Object.fromEntries(Object.entries(profile.experts || {}).map(([role, expert]) => [
-    role,
-    {
-      ...expert,
-      model: typeof expert.model === 'string' ? expert.model.trim() : expert.model,
-    },
-  ]));
-  const warnings = [];
-  if (raw.consensus?.distinct_models_required === false) {
-    warnings.push('distinct_models_required_forced');
-  }
-  // The 90 floor is a policy, not a default: a config may raise the bar, never
-  // lower it. The 5-round cap bounds cost; the 1-round floor bounds meaning.
-  const threshold = clampConsensusSetting(raw.consensus?.threshold_percent, {
-    min: 90, max: Number.MAX_SAFE_INTEGER, fallback: 90, clamp: (n) => Math.max(90, n),
-  });
-  const thresholdPercent = threshold.value;
-  if (threshold.clamped) warnings.push('threshold_percent_clamped');
-
-  const rounds = clampConsensusSetting(raw.consensus?.max_review_rounds, {
-    min: 1, max: 5, fallback: 5, clamp: (n) => Math.min(5, Math.max(1, Math.trunc(n))),
-  });
-  const maxReviewRounds = rounds.value;
-  if (rounds.clamped) warnings.push('max_review_rounds_clamped');
-
-  return {
-    active_profile: profileName,
-    providers,
-    experts,
-    consensus: {
-      ...(raw.consensus || {}),
-      threshold_percent: thresholdPercent,
-      max_review_rounds: maxReviewRounds,
-      distinct_models_required: true,
-    },
-    warnings,
-  };
-}
 
 const {
   isNonEmptyString,
@@ -356,7 +167,10 @@ const {
   validateDistinctModels,
   isValidTimeoutMs,
   parseExpertVerdict,
+  clampConsensusSetting,
+  expandEnvPlaceholder,
 } = require('./delphi-model-validation.cjs');
+const { readConfig } = require('./delphi-config-read.cjs');
 
 // ── JSON extraction (4-layer fallback) ─────────────────────────────────
 const { extractJsonFromResponse } = require('./delphi-json-extract.cjs');
@@ -613,18 +427,41 @@ async function classifyServerErrorResponse(response) {
  * model count as a successful expert call (#423). Fail at the source instead,
  * so the evidence never records an unverifiable expert.
  */
+/**
+ * The text of the first choice, or null when the shape is not what a chat completion
+ * looks like.
+ *
+ * Read defensively at every level: this parses a GATEWAY's response, and a gateway
+ * that returns a different shape must produce "invalid response" rather than a
+ * TypeError deep in the caller.
+ */
+/** The `message` of a chat-completion choice, or null when it has none. */
+function choiceMessage(choice) {
+  return isPlainObject(choice) ? choice.message : null;
+}
+
+/** The non-empty text of a message, or null. */
+function messageText(message) {
+  const content = isPlainObject(message) ? message.content : null;
+  if (typeof content !== 'string') return null;
+  const trimmed = content.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function firstChoiceContent(data) {
+  if (!isPlainObject(data) || !Array.isArray(data.choices)) return null;
+  return messageText(choiceMessage(data.choices[0]));
+}
+
 async function readSuccessfulResponse(response) {
   const data = await response.json();
-  if (!isPlainObject(data) || !Array.isArray(data.choices)) {
-    return { error: true, message: 'Invalid response from model.' };
-  }
-  const firstChoice = data.choices[0];
-  const message = isPlainObject(firstChoice) ? firstChoice.message : null;
-  const content = isPlainObject(message) ? message.content : null;
-  if (typeof content !== 'string' || content.trim() === '') {
-    return { error: true, message: 'Invalid response from model.' };
-  }
+  const content = firstChoiceContent(data);
+  if (!content) return { error: true, message: 'Invalid response from model.' };
 
+  // The gateway must echo which model actually served the request. Writing `null` here
+  // used to be tolerated downstream, which let a run that never resolved a model count
+  // as a successful expert call (#423). Fail at the source so the evidence never
+  // records an unverifiable expert.
   const resolvedModel = typeof data.model === 'string' ? data.model.trim() : '';
   if (resolvedModel === '') {
     return {
@@ -632,12 +469,7 @@ async function readSuccessfulResponse(response) {
       message: 'Gateway response did not include a resolved model id; cannot prove which model ran.',
     };
   }
-
-  return {
-    success: true,
-    content: content.trim(),
-    resolved_model: resolvedModel,
-  };
+  return { success: true, content, resolved_model: resolvedModel };
 }
 
 /**

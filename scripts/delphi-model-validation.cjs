@@ -182,4 +182,65 @@ function parseExpertVerdict(value) {
   return { valid: true, verdict };
 }
 
-module.exports = { isNonEmptyString, collectModelAssignments, findDuplicateModel, providerConfigError, validateDistinctModels, isValidTimeoutMs, parseExpertVerdict };
+/**
+ * Read a numeric consensus setting and clamp it into its allowed range.
+ *
+ * Two settings did this identically: coerce to a number, clamp to a floor and a
+ * ceiling, fall back to the default when the value is not usable, and warn when
+ * the configured value differs from the one actually used. The warning is the
+ * point -- a silently clamped threshold changes what "consensus" means on that
+ * machine.
+ *
+ * `clamped` means a CONFIGURED value was changed. An absent value uses the
+ * default and reports no clamp: telling the operator a setting they never wrote
+ * had been altered is a false alarm.
+ *
+ * @param {*} configured raw value from the config
+ * @param {{min: number, max: number, fallback: number, clamp: (n: number) => number}} bounds
+ * @returns {{value: number, clamped: boolean}}
+ */
+function clampConsensusSetting(configured, bounds) {
+  const usable = typeof configured === 'number' && Number.isFinite(configured);
+  const value = usable ? bounds.clamp(configured) : bounds.fallback;
+  // "Clamped" covers BOTH ways a configured value stops applying: out of range
+  // (0 rounds -> 1) and unusable ('high' -> the default). The existing contract
+  // treats an unparseable value as a change worth reporting, and it is -- a
+  // setting the operator wrote is not the one in force either way.
+  return { value, clamped: configured !== undefined && configured !== value };
+}
+
+/**
+ * Expand a `${VAR}` placeholder, or fail loudly.
+ *
+ * `api_key` and `base_url` each had their own copy, and the `base_url` one was
+ * ADDED later for a reason worth keeping: without expansion the literal text
+ * `${PG_GATEWAY}/v1/chat/completions` is a valid non-empty URL, so validation
+ * passed and the failure surfaced at the network layer as a DNS error while the
+ * config looked correct.
+ *
+ * Only a WHOLE `${NAME}` is a placeholder. `${A}${B}` is a template somebody may
+ * be assembling, and refusing it would reject a config that needs no expansion.
+ *
+ * @param {*} value
+ * @param {string} field 'api_key' | 'base_url'
+ * @param {string} profileName
+ * @param {string} providerName
+ * @returns {*} the expanded value, or the original
+ */
+function expandEnvPlaceholder(value, field, profileName, providerName) {
+  if (typeof value !== 'string') return value;
+  const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(value);
+  if (!match) return value;
+  const envName = match[1];
+  const envVal = process.env[envName];
+  if (envVal) return envVal;
+  console.error(
+    `[delphi-review] ERROR: Environment variable ${envName} is not set `
+    + `(profiles.${profileName}.providers.${providerName}.${field}). `
+    + 'Export it or point that provider at a literal value.',
+  );
+  process.exit(1);
+  return value;
+}
+
+module.exports = { isPlainObject, isNonEmptyString, collectModelAssignments, findDuplicateModel, providerConfigError, validateDistinctModels, isValidTimeoutMs, parseExpertVerdict, clampConsensusSetting, expandEnvPlaceholder };
