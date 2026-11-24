@@ -1398,6 +1398,39 @@ const { SYSTEM_PATH_PREFIXES } = require('./tool-audit.js');
  * @param {{definitions?: Array, systemPrefixes?: string[], platform?: string}} [options]
  * @returns {{actions: Array, clean: boolean}}
  */
+/**
+ * Plan an upgrade, and detect the plan that cancels itself.
+ *
+ * MEASURED DEFECT (2026-11-23): hadolint was duplicated AND outdated. The plan removed
+ * `~/.local/bin/hadolint`, then ran an installer whose command writes to that exact
+ * path -- so the duplicate came straight back and the repair silently achieved
+ * nothing. `writesToRemovedPath` names that case instead of reporting a success that
+ * is not one.
+ */
+function planUpgrade(row, installCmd, actions) {
+  if (row.outdated === true) {
+    // MEASURED DEFECT (2026-11-23): hadolint was duplicated AND outdated. The
+    // plan removed ~/.local/bin/hadolint, then ran an installer whose command
+    // writes to that exact path — so the duplicate came straight back and the
+    // repair silently achieved nothing. Detect it and say so loudly instead of
+    // reporting a success that is not one.
+    const removedHere = actions
+      .filter((a) => a.kind === 'remove-duplicate' && a.tool === row.name)
+      .map((a) => a.path);
+    const writesToRemovedPath = Boolean(installCmd)
+      && removedHere.some((removedPath) => String(installCmd).includes(removedPath));
+    actions.push({
+      kind: 'upgrade',
+      tool: row.name,
+      command: installCmd,
+      from: row.installedVersion,
+      to: row.latestVersion,
+      writesToRemovedPath,
+      conflictsWith: writesToRemovedPath ? removedHere : undefined,
+    });
+  }
+}
+
 function planToolRepairs(rows, options = {}) {
   const definitions = options.definitions || [];
   const platform = options.platform || process.platform;
@@ -1456,27 +1489,7 @@ function planToolRepairs(rows, options = {}) {
       continue;
     }
 
-    if (row.outdated === true) {
-      // MEASURED DEFECT (2026-11-23): hadolint was duplicated AND outdated. The
-      // plan removed ~/.local/bin/hadolint, then ran an installer whose command
-      // writes to that exact path — so the duplicate came straight back and the
-      // repair silently achieved nothing. Detect it and say so loudly instead of
-      // reporting a success that is not one.
-      const removedHere = actions
-        .filter((a) => a.kind === 'remove-duplicate' && a.tool === row.name)
-        .map((a) => a.path);
-      const writesToRemovedPath = Boolean(installCmd)
-        && removedHere.some((removedPath) => String(installCmd).includes(removedPath));
-      actions.push({
-        kind: 'upgrade',
-        tool: row.name,
-        command: installCmd,
-        from: row.installedVersion,
-        to: row.latestVersion,
-        writesToRemovedPath,
-        conflictsWith: writesToRemovedPath ? removedHere : undefined,
-      });
-    }
+    planUpgrade(row, installCmd, actions);
   }
 
   return { actions, clean: actions.length === 0 };
