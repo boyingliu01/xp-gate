@@ -173,3 +173,78 @@ describe('check-tools auto-detection', () => {
     expect(explicit.length).toBeGreaterThan(0);
   });
 });
+
+describe('check-tools JSON contract (#468)', () => {
+  const { handleCheckTools } = require('../language-tools.js');
+
+  const langRow = {
+    name: 'typescript',
+    optional: false,
+    installedVersion: '5.0.0',
+    available: true,
+    npxInvoked: false,
+    resolution: 'path',
+    currency: 'current',
+    duplicated: false,
+    outdated: false,
+    languages: ['typescript'],
+    gates: ['Gate 1'],
+  };
+  const crossRow = {
+    name: 'gitleaks', optional: false, installedVersion: '8.30.1', available: true,
+    npxInvoked: false, resolution: 'path', currency: 'current', duplicated: false,
+    outdated: false, languages: [], gates: ['Gate 8'],
+  };
+
+  const runJson = async (args) => {
+    const out = await capture(() =>
+      handleCheckTools([...args, '--json'], { languages: ['typescript'], audit: () => [langRow, crossRow] }));
+    return JSON.parse(out.slice(out.indexOf('{')));
+  };
+
+  it('groups tools by language and keeps the historical shape', async () => {
+    const json = await runJson([]);
+    expect(json.typescript).toBeDefined();
+    expect(Array.isArray(json.typescript)).toBe(true);
+    expect(json.typescript[0].name).toBe('typescript');
+  });
+
+  it('emits a separate cross-language group rather than repeating the tool', async () => {
+    const json = await runJson([]);
+    // The cross-language tools are reported ONCE; an always-present empty group
+    // would add a key callers compare exactly.
+    expect(json['(cross-language)']).toBeDefined();
+    expect(json['(cross-language)'][0].name).toBe('gitleaks');
+    expect(json.typescript.some((t) => t.name === 'gitleaks')).toBe(false);
+  });
+
+  it('omits summary and tools unless asked, so old parsers stay byte-identical', async () => {
+    const json = await runJson([]);
+    expect(json.summary).toBeUndefined();
+    expect(json.tools).toBeUndefined();
+  });
+
+  it('adds the summary when --audit is given', async () => {
+    const json = await runJson(['--audit']);
+    expect(json.summary).toBeDefined();
+    expect(json.summary.total).toBeGreaterThan(0);
+  });
+
+  it('adds the flat view when --flat is given, with the same field names', async () => {
+    const json = await runJson(['--flat']);
+    expect(Array.isArray(json.tools)).toBe(true);
+    // Same names as the grouped view, so a consumer can switch without remapping.
+    const flat = json.tools[0];
+    // `version` is the audit's own field; `installedVersion` is the raw one.
+    for (const key of ['name', 'status', 'installedVersion', 'gates']) {
+      expect(flat[key], key).toBeDefined();
+    }
+  });
+
+  it('keeps an empty cross-language group out of the JSON entirely', async () => {
+    const out = await capture(() =>
+      handleCheckTools(['--json'], { languages: ['typescript'], audit: () => [langRow] }));
+    const json = JSON.parse(out.slice(out.indexOf('{')));
+    expect(json['(cross-language)']).toBeUndefined();
+  });
+});
