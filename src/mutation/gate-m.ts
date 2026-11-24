@@ -260,29 +260,40 @@ async function loadCriticalPaths(configPath: string): Promise<string[]> {
   }
 }
 
+/** Characters with regex meaning that a glob matches literally. */
+const REGEX_SPECIALS = '.[]{}()|^$+\\';
+
+/**
+ * The regex fragment for the glob token starting at `i`, and how much it consumed.
+ *
+ * `**` spans directories, `*` does not (`[^/]*`), and `?` is exactly one non-slash
+ * character. That distinction is the whole point of a glob: `src/*.ts` and
+ * `src/**.ts` must not match the same set.
+ */
+/** Single-character glob tokens and their regex equivalents. */
+const GLOB_TOKENS: Record<string, string> = {
+  '*': '[^/]*',
+  '?': '[^/]',
+};
+
+/** `**` spans directories; a bare `*` does not. */
+const GLOBSTAR = '.*';
+
+function globToken(pattern: string, i: number): { text: string; width: number } {
+  const c = pattern[i];
+  if (c === '*' && pattern[i + 1] === '*') return { text: GLOBSTAR, width: 2 };
+  const token = GLOB_TOKENS[c];
+  if (token) return { text: token, width: 1 };
+  // A regex-special character matches itself literally in a glob, so it is escaped.
+  return { text: REGEX_SPECIALS.includes(c) ? `\\${c}` : c, width: 1 };
+}
+
 function globToRegex(pattern: string): RegExp {
   let regexStr = '';
-  let i = 0;
-  while (i < pattern.length) {
-    const c = pattern[i];
-    if (c === '*') {
-      if (pattern[i + 1] === '*') {
-        regexStr += '.*';
-        i += 2;
-      } else {
-        regexStr += '[^/]*';
-        i++;
-      }
-    } else if (c === '?') {
-      regexStr += '[^/]';
-      i++;
-    } else if ('.[]{}()|^$+\\'.includes(c)) {
-      regexStr += '\\' + c;
-      i++;
-    } else {
-      regexStr += c;
-      i++;
-    }
+  for (let i = 0; i < pattern.length;) {
+    const token = globToken(pattern, i);
+    regexStr += token.text;
+    i += token.width;
   }
   return new RegExp(`^${regexStr}$`);
 }
@@ -490,50 +501,81 @@ function applyMutationResult(
   scores: Record<string, number | null>,
   counts: Record<string, MutantCounts>,
 ): void {
+  // A run that timed out or errored measured NOTHING: null, not 0, so the caller
+  // cannot mistake "not measured" for "scored zero".
   if (outcome.timedOut || outcome.error || !outcome.report) {
-    for (const f of files) scores[f] = null;
+    applyNullScores(files, scores);
     return;
   }
-
+  // Per-file reporting is the modern shape; without it the run's totals apply to every
+  // file, which is all the older reporters gave.
   if (outcome.report.files) {
-    for (const [fileKey, fileReport] of Object.entries(outcome.report.files)) {
-      scores[fileKey] = fileReport.mutationScore;
-      // #544: keep the outcome counts the reporter already gave us. Dropping
-      // them here is what forced buildMutationScores to invent zeros later.
-      counts[fileKey] = {
-        mutants: fileReport.nrOfMutants,
-        killed: fileReport.nrOfKilledMutants,
-        survived: fileReport.nrOfSurvivedMutants,
-      };
-    }
+    applyPerFileScores(outcome.report.files, scores, counts);
     return;
   }
+  applyTotalsToAll(files, outcome.report, scores, counts);
+}
 
+/**
+ * Record per-file scores and counts.
+ *
+ * #544: the outcome counts the reporter gave us are KEPT. Dropping them here is what
+ * forced `buildMutationScores` to invent zeros later -- and an invented zero is
+ * indistinguishable from a measured one downstream.
+ */
+function applyPerFileScores(
+  fileReports: Record<string, FileMutationReport>,
+  scores: Record<string, number | null>,
+  counts: Record<string, MutantCounts>,
+): void {
+  for (const [fileKey, report] of Object.entries(fileReports)) {
+    scores[fileKey] = report.mutationScore;
+    counts[fileKey] = {
+      mutants: report.nrOfMutants,
+      killed: report.nrOfKilledMutants,
+      survived: report.nrOfSurvivedMutants,
+    };
+  }
+}
+
+/** Apply a run's overall score and totals to every file it covered. */
+function applyTotalsToAll(
+  files: string[],
+  report: MutationRunReport,
+  scores: Record<string, number | null>,
+  counts: Record<string, MutantCounts>,
+): void {
   const totals: MutantCounts = {
-    mutants: outcome.report.nrOfMutants,
-    killed: outcome.report.nrOfKilledMutants,
-    survived: outcome.report.nrOfSurvivedMutants,
+    mutants: report.nrOfMutants,
+    killed: report.nrOfKilledMutants,
+    survived: report.nrOfSurvivedMutants,
   };
   for (const f of files) {
-    scores[f] = outcome.report.mutationScore;
+    scores[f] = report.mutationScore;
     counts[f] = totals;
   }
 }
 
 // ── Main gateway ──
 
+/**
+ * Where a file's threshold came from.
+ *
+ * Printed because the number alone does not tell the reader whether to change the
+ * annotation or the config -- and an explicit annotation outranks a critical-path one,
+ * so the order here is the precedence.
+ */
+function thresholdSource(ft: FileThreshold): string {
+  if (ft.explicitThreshold !== undefined) return 'explicit annotation';
+  return ft.isCriticalPath ? 'critical path config' : 'default';
+}
+
+/** One line per file, naming the threshold and where it came from. */
 function logThresholdDetails(thresholds: FileThreshold[], baseline: MutationBaseline | null): void {
-  if (baseline) {
-    console.log(`  Loaded baseline (${Object.keys(baseline.scores).length} files)`);
-  }
+  if (baseline) console.log(`  Loaded baseline (${Object.keys(baseline.scores).length} files)`);
   for (const ft of thresholds) {
     const level = ft.isCriticalPath ? 'critical path' : 'default';
-    const thresholdSource = ft.explicitThreshold !== undefined
-      ? 'explicit annotation'
-      : ft.isCriticalPath
-        ? 'critical path config'
-        : 'default';
-    console.log(`  ${ft.file}: threshold=${ft.threshold}% (${level}, ${thresholdSource})`);
+    console.log(`  ${ft.file}: threshold=${ft.threshold}% (${level}, ${thresholdSource(ft)})`);
   }
 }
 
@@ -796,4 +838,16 @@ if (typeof require !== 'undefined' && require.main === module) {
       console.error('Gate M failed:', err.message);
       process.exit(1);
     });
+}
+/** One file's entry in a mutation report, as much as this gateway reads. */
+interface FileMutationReport {
+  mutationScore: number | null;
+  nrOfMutants?: number;
+  nrOfKilledMutants?: number;
+  nrOfSurvivedMutants?: number;
+}
+
+/** A mutation run's overall report, for reporters that only give totals. */
+interface MutationRunReport extends FileMutationReport {
+  files?: Record<string, FileMutationReport>;
 }
