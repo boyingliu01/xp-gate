@@ -12,6 +12,8 @@
  */
 'use strict';
 
+const { handleCheckTools } = require('../language-tools.js');
+
 async function capture(run) {
   const out = [];
   const orig = console.log;
@@ -37,7 +39,6 @@ function row(over = {}) {
 }
 
 describe('check-tools report', () => {
-  const { handleCheckTools } = require('../language-tools.js');
 
   const run = (rows, args = []) =>
     capture(() => handleCheckTools(args, { audit: () => rows }));
@@ -97,7 +98,6 @@ describe('check-tools report', () => {
 });
 
 describe('check-tools --json', () => {
-  const { handleCheckTools } = require('../language-tools.js');
 
   const auditRows = [
     row({ name: 'gitleaks' }),

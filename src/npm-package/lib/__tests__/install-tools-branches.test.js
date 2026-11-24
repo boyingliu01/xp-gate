@@ -12,6 +12,8 @@
  */
 'use strict';
 
+const { handleInstallTools } = require('../language-tools.js');
+
 function capture(run) {
   const out = [];
   const orig = console.log;
@@ -38,7 +40,6 @@ function row(over = {}) {
 }
 
 describe('handleInstallTools', () => {
-  const { handleInstallTools } = require('../language-tools.js');
 
   const base = {
     projectRoot: '/tmp/fixture',
