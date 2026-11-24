@@ -519,6 +519,99 @@ function renderDashboard(state) {
  * @param {string[]} args - CLI arguments
  * @returns {Promise<number>} Exit code
  */
+/**
+ * Parse phase-transition arguments.
+ *
+ * Extracted from `handlePhaseTransition` (CCN 51), whose first 40 lines were
+ * argv parsing before any domain logic ran. Returns `{ error }` instead of
+ * printing and returning a code, so the caller keeps one exit path.
+ *
+ * @param {string[]} args
+ * @returns {{phase?: number, status?: string, projectDir?: string, renderFlag?: boolean,
+ *   outputs?: object, skipEvidence?: boolean, skipEvidenceReason?: string,
+ *   forceTransition?: boolean, error?: string}}
+ */
+function parseTransitionArgs(args) {
+  if (args.length < 2) {
+    return { error: 'Missing required arguments. Usage: xp-gate phase-transition <phase> <status>' };
+  }
+
+  const dirIdx = args.indexOf("--dir");
+  const outputsIdx = args.indexOf("--outputs");
+  let outputs = {};
+  if (outputsIdx >= 0 && args[outputsIdx + 1]) {
+    try {
+      outputs = JSON.parse(args[outputsIdx + 1]);
+    } catch (err) {
+      return { error: `Invalid JSON for --outputs: ${err.message}` };
+    }
+  }
+
+  const skipEvidenceIdx = args.indexOf("--skip-evidence");
+  let skipEvidence = false;
+  let skipEvidenceReason = "";
+  if (skipEvidenceIdx >= 0) {
+    skipEvidence = true;
+    const nextArg = args[skipEvidenceIdx + 1];
+    // The reason is the next arg when it exists and is not another flag.
+    if (nextArg && !nextArg.startsWith('--')) skipEvidenceReason = nextArg;
+  }
+
+  return {
+    phase: parseInt(args[0], 10),
+    status: args[1],
+    projectDir: dirIdx >= 0 ? args[dirIdx + 1] : process.cwd(),
+    renderFlag: args.includes("--render"),
+    outputs,
+    skipEvidence,
+    skipEvidenceReason,
+    forceTransition: args.includes("--force"),
+  };
+}
+
+/**
+ * Refuse to complete a phase whose predecessor was not completed or skipped.
+ *
+ * #519 Layer 0. `completed` on phase n requires phase n-1 to be finished first:
+ * #507 proved a missed transition is invisible in the state file (the pointer
+ * just looks "not yet advanced"), so out-of-order completion must be refused
+ * loudly rather than written silently. `--force` overrides for the rare
+ * legitimate case (retroactively recording a skipped phase).
+ *
+ * @param {object} manager SprintStateManager
+ * @param {number} phase
+ * @param {string} status
+ * @param {boolean} forceTransition
+ * @returns {boolean} true when the transition may proceed
+ */
+function passesSequenceGuard(manager, phase, status, forceTransition) {
+  if (status !== 'completed' || phase < 2) return true;
+  const seqState = manager.read();
+  if (!seqState || !Array.isArray(seqState.phase_history)) return true;
+
+  const prevPhase = phase - 1;
+  const prevEntry = seqState.phase_history.find((e) => e.phase === prevPhase);
+  const prevOk = prevEntry && (prevEntry.status === 'completed' || prevEntry.status === 'skipped');
+  if (prevOk) return true;
+
+  if (forceTransition) {
+    console.warn(`⚠️  [sprint-audit] Sequence guard overridden (--force): phase ${prevPhase} is not completed/skipped.`);
+    return true;
+  }
+
+  const summary = seqState.phase_history
+    .map((e) => `  ${e.phase}:${e.phase_name || PHASE_NAMES[e.phase] || '?'} = ${e.status}`)
+    .join('\n');
+  console.error(`❌ [sprint-audit] Cannot complete phase ${phase} (${PHASE_NAMES[phase]}):`);
+  console.error(`   phase ${prevPhase} (${PHASE_NAMES[prevPhase]}) is not completed/skipped.`);
+  console.error('   Current phase history:');
+  console.error(summary || '  (empty)');
+  console.error(`   Advance it first: xp-gate phase-transition ${prevPhase} completed`);
+  console.error('   Or override explicitly: --force');
+  return false;
+}
+
+
 async function handlePhaseTransition(args = []) {
   if (args.includes('--help')) {
     console.log('Usage: xp-gate phase-transition <phase> <status> [options]');
@@ -543,43 +636,13 @@ async function handlePhaseTransition(args = []) {
     return 0;
   }
 
-  if (args.length < 2) {
-    console.error('Error: Missing required arguments. Usage: xp-gate phase-transition <phase> <status>');
+  const parsed = parseTransitionArgs(args);
+  if (parsed.error) {
+    console.error(`Error: ${parsed.error}`);
     return 1;
   }
-
-  const phase = parseInt(args[0], 10);
-  const status = args[1];
-  const renderFlag = args.includes('--render');
-  const dirIdx = args.indexOf('--dir');
-  const projectDir = dirIdx >= 0 ? args[dirIdx + 1] : process.cwd();
-
-  const outputsIdx = args.indexOf('--outputs');
-  let outputs = {};
-  if (outputsIdx >= 0 && args[outputsIdx + 1]) {
-    try {
-      outputs = JSON.parse(args[outputsIdx + 1]);
-    } catch (err) {
-      console.error(`Error: Invalid JSON for --outputs: ${err.message}`);
-      return 1;
-    }
-  }
-
-  // Parse --skip-evidence flag
-  const skipEvidenceIdx = args.indexOf('--skip-evidence');
-  let skipEvidence = false;
-  let skipEvidenceReason = '';
-  if (skipEvidenceIdx >= 0) {
-    skipEvidence = true;
-    const nextArg = args[skipEvidenceIdx + 1];
-    // Reason is the next arg if it exists and doesn't start with '--'
-    if (nextArg && !nextArg.startsWith('--')) {
-      skipEvidenceReason = nextArg;
-    }
-  }
-
-  // #519: explicit override for the sequence guard below.
-  const forceTransition = args.includes('--force');
+  const { phase, status, projectDir, renderFlag, outputs,
+    skipEvidence, skipEvidenceReason, forceTransition } = parsed;
 
   // Validate inputs
   if (phase < 1 || phase > 6) {
@@ -598,35 +661,7 @@ async function handlePhaseTransition(args = []) {
     const manager = new SprintStateManager(projectDir);
 
     // ── #519 Layer 0: Sequence guard ──
-    // `completed` on phase n requires phase n-1 to be completed/skipped first.
-    // #507 proved that a missed transition is invisible in the state file (the
-    // pointer just looks "not yet advanced"), so out-of-order completion —
-    // skipping a phase, or completing from a stale pointer — must be refused
-    // loudly rather than written silently. `--force` overrides for the rare
-    // legitimate case (e.g. retroactively recording a skipped phase).
-    if (status === 'completed' && phase >= 2) {
-      const seqState = manager.read();
-      if (seqState && Array.isArray(seqState.phase_history)) {
-        const prevPhase = phase - 1;
-        const prevEntry = seqState.phase_history.find(e => e.phase === prevPhase);
-        const prevOk = prevEntry && (prevEntry.status === 'completed' || prevEntry.status === 'skipped');
-        if (!prevOk && !forceTransition) {
-          const summary = seqState.phase_history
-            .map(e => `  ${e.phase}:${e.phase_name || PHASE_NAMES[e.phase] || '?'} = ${e.status}`)
-            .join('\n');
-          console.error(`❌ [sprint-audit] Cannot complete phase ${phase} (${PHASE_NAMES[phase]}):`);
-          console.error(`   phase ${prevPhase} (${PHASE_NAMES[prevPhase]}) is not completed/skipped.`);
-          console.error('   Current phase history:');
-          console.error(summary || '  (empty)');
-          console.error(`   Advance it first: xp-gate phase-transition ${prevPhase} completed`);
-          console.error('   Or override explicitly: --force');
-          return 1;
-        }
-        if (!prevOk && forceTransition) {
-          console.warn(`⚠️  [sprint-audit] Sequence guard overridden (--force): phase ${prevPhase} is not completed/skipped.`);
-        }
-      }
-    }
+    if (!passesSequenceGuard(manager, phase, status, forceTransition)) return 1;
 
     // ── Layer 1: Pre-transition gate check ──
     // Check BEFORE transitionPhase() to validate previous phase completion.
