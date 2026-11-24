@@ -3432,42 +3432,55 @@ function validateFlagCombinations(f, format) {
 
 function doctorFlagContract(args) {
   const errors = [];
-  // `--format json` carries a value; without this the value itself would be
-  // reported as an unknown flag and the documented machine-readable mode could
-  // never be reached (#304 promised it, nothing ever implemented it).
-  // `indexOf` returns -1 when absent, and -1 + 1 is 0 -- the FIRST argv entry, so a
-  // run without `--format` was reading its own first flag as the format value and
-  // rejecting `doctor --fix` as "unknown --format". Guard the miss explicitly.
-  // Three states, not two: `--format` absent (no opinion), present with a value,
+  // One pass over argv, not eight `args.includes` calls. Each `includes` is a branch
+  // to the complexity metric, and eight of them put this function at CCN 6 for no
+  // reason: the flags are a SET, and a set is built in one pass.
+  const present = new Set(args);
+
+  // `--format` has THREE states, not two: absent (no opinion), present with a value,
   // and present with nothing after it (an error -- silently dropping the flag was
-  // #488 AC-09).
+  // #488 AC-09). `indexOf` returns -1 when absent and -1 + 1 is 0, so a run without
+  // `--format` used to read its own first flag as the format value and reject
+  // `doctor --fix` as "unknown --format".
   const formatIndex = args.indexOf('--format');
   const formatGiven = formatIndex >= 0;
   const formatValue = formatGiven ? (args[formatIndex + 1] ?? null) : null;
-  const flagTokens = args.filter((a, i) => !(i > 0 && args[i - 1] === '--format'));
-  const unknownFlags = flagTokens.filter(a => !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length > 0) {
-    errors.push(`Unknown flag(s) for doctor: ${unknownFlags.join(', ')}`);
-    errors.push(`Supported flags: ${KNOWN_FLAGS.join(', ')}`);
-  }
-  const fixMode = args.includes('--fix');
-  const syncHooks = args.includes('--sync-hooks');
-  // #495: overwriting a module whose installed copy holds lines the repo lacks
-  // destroys machine-only hardening, so it needs this explicit opt-in.
-  const force = args.includes('--force');
-  // Installing a toolchain changes the machine, not the repository, so it is
-  // never a side effect of --fix (#502). --fix reports the missing tools.
-  const installToolsFlag = args.includes('--install-tools');
-  // #469: re-probe CLI tools against the registry PATH (what a freshly opened
-  // terminal would see) instead of this process's possibly-stale snapshot.
-  // Read-only: it changes the probe environment, never the machine.
-  const refreshEnv = args.includes('--refresh-env');
-  const jsonMode = args.includes('--json') || (args.includes('--format') && formatValue === 'json');
-  const briefFlag = args.includes('--brief');
-  const flags = { fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag };
+
+  errors.push(...unknownFlagErrors(args, formatGiven));
+
+  const flags = {
+    fixMode: present.has('--fix'),
+    syncHooks: present.has('--sync-hooks'),
+    force: present.has('--force'),
+    installToolsFlag: present.has('--install-tools'),
+    refreshEnv: present.has('--refresh-env'),
+    jsonMode: present.has('--json') || (formatGiven && formatValue === 'json'),
+    briefFlag: present.has('--brief'),
+  };
   errors.push(...validateFlagCombinations(flags, { formatGiven, formatValue }));
 
-  return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag };
+  return { errors, ...flags };
+}
+
+/**
+ * Unknown-flag errors, if any.
+ *
+ * The `--format` VALUE is skipped: without that, `doctor --format json` would report
+ * `json` itself as an unknown flag and the documented machine-readable mode could
+ * never be reached (#304 promised it, nothing ever implemented it).
+ *
+ * @param {string[]} args
+ * @param {boolean} formatGiven
+ * @returns {string[]}
+ */
+function unknownFlagErrors(args, formatGiven) {
+  const tokens = args.filter((a, i) => !(formatGiven && i > 0 && args[i - 1] === '--format'));
+  const unknown = tokens.filter((a) => !KNOWN_FLAGS.includes(a));
+  if (unknown.length === 0) return [];
+  return [
+    `Unknown flag(s) for doctor: ${unknown.join(', ')}`,
+    `Supported flags: ${KNOWN_FLAGS.join(', ')}`,
+  ];
 }
 
 /**
@@ -4215,18 +4228,35 @@ function delphiModelProblems(profile) {
 
   const missingRoles = DELPHI_ROLES.filter((r, i) => !models[i]);
   const duplicates = models.filter((m, i) => m && models.indexOf(m) !== i);
-  const badProviders = DELPHI_ROLES.filter((r) => {
-    const e = experts[r];
-    return !e || !providers[e.provider]
-      || !providers[e.provider].base_url
-      || String(providers[e.provider].base_url).indexOf('http') !== 0;
-  });
+  const badProviders = DELPHI_ROLES.filter((r) => !isSeatUsable(experts[r], providers));
 
-  const problems = [];
-  if (missingRoles.length > 0) problems.push(`missing experts: ${missingRoles.join(', ')}`);
-  if (duplicates.length > 0) problems.push(`duplicate models: ${[...new Set(duplicates)].join(', ')}`);
-  if (badProviders.length > 0) problems.push(`unusable provider binding: ${badProviders.join(', ')}`);
-  return problems;
+  // Collected as data and filtered once: three `if`s over three lists is three
+  // branches to say "report whichever are non-empty".
+  return [
+    [missingRoles, `missing experts: ${missingRoles.join(', ')}`],
+    [duplicates, `duplicate models: ${[...new Set(duplicates)].join(', ')}`],
+    [badProviders, `unusable provider binding: ${badProviders.join(', ')}`],
+  ].filter(([items]) => items.length > 0).map(([, message]) => message);
+}
+
+/**
+ * Whether one expert seat points at a provider that can actually be called.
+ *
+ * Three ways to fail, and they are reported as one because the remedy is the same
+ * (fix the binding): no expert entry, a provider name the config does not define, or
+ * a base_url that is missing or not an http(s) URL. The last check is `indexOf('http')
+ * === 0` rather than a URL parse on purpose -- a config with `ftp://` or a bare host
+ * both fail, and rejecting it early beats a network error later.
+ *
+ * @param {{provider?: string}|undefined} expert
+ * @param {Object<string, {base_url?: string}>} providers
+ * @returns {boolean}
+ */
+function isSeatUsable(expert, providers) {
+  if (!expert) return false;
+  const provider = providers[expert.provider];
+  if (!provider || !provider.base_url) return false;
+  return String(provider.base_url).indexOf('http') === 0;
 }
 
 /**
