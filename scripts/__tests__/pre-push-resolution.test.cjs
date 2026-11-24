@@ -17,8 +17,18 @@ const { execFileSync } = require('node:child_process');
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const PRE_PUSH = path.join(REPO_ROOT, 'githooks', 'pre-push');
 
+/**
+ * Read the hook source, failing with the path when it cannot be read.
+ *
+ * A guard that swallows EACCES/ENOENT here would run every assertion against an
+ * empty string, and assertions of the form "must not match" would pass.
+ */
 function readPrePush() {
-  return fs.readFileSync(PRE_PUSH, 'utf8');
+  try {
+    return fs.readFileSync(PRE_PUSH, 'utf8');
+  } catch (err) {
+    throw new Error(`cannot read ${PRE_PUSH}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
@@ -242,11 +252,14 @@ describe('REQ-RESOLVE-001 pre-push 接入生成解析表', () => {
       const reasonCount = assign('GATE_M_SKIP_REASON');
       const kindCount = assign('GATE_M_SKIP_KIND');
 
-      // 实测：12 处 GATE_M_SKIP_REASON 赋值点（2 条新增的解析失败路径
-      // + 4 条其它 adapter 路径 + 6 条既有 Gate M 路径）。
-      expect(reasonCount).toBe(12);
-      // kind 比 reason 多 1：count 类断言之上还有一次 `GATE_M_SKIP_KIND=""` 初始化。
-      // 初始化是必要的——否则「未设置」和「设置为空」不可区分。
+      // 不再钉死赋值点的**数量**——那个数字会随每一条新增的跳过路径变化，于是
+      // 每加一条合理路径这条测试就红一次，而它想守的性质（「每一处 reason 都有
+      // kind」）与总数无关。实测 2026-11-24：赋值点从 12 增到 13，测试失败，但
+      // 没有任何一处缺 kind。
+      //
+      // 守的是配平关系：kind 比 reason 多 1，因为 count 类断言之上还有一次
+      // `GATE_M_SKIP_KIND=""` 初始化。「未设置」与「设置为空」必须可区分。
+      expect(reasonCount).toBeGreaterThanOrEqual(12);
       expect(kindCount).toBe(reasonCount + 1);
     });
 

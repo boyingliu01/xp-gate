@@ -7179,3 +7179,15 @@ specification:
         - id: AC-TOOLS-017-01
           criteria: auditAllToolsAsync 在探针为真异步（下一宏任务才完成）时，等待期间定时器能够触发，即事件循环未被阻塞
           test_type: unit
+    - id: REQ-TOOLS-018
+      description: doctor/check-tools 与门禁必须共用同一套工具解析。PATH 里没有 ~/.local/bin 时（git GUI、IDE 终端、从 Windows 拉起的
+        WSL 都是这种），pip --user / cargo / 手工放置的二进制就在那里；只信 PATH 会把装好的扫描器报成缺失，读者的自然反应（重装、或放弃检查）两个方向都错。#841 是同一件事的镜像：Windows
+        shim 能被 PATH 找到却跑不动。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-018-01
+          criteria: 工具位于 ~/.local/bin 而 PATH 未包含该目录时，仍然能被解析到并可执行；报告标注它不在 PATH 上
+          test_type: integration
+        - id: AC-TOOLS-018-02
+          criteria: 共享解析器找不到工具时返回 null，由调用方回落到普通探测，而不是判成缺失
+          test_type: unit

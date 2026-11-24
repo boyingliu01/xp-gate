@@ -27,9 +27,15 @@ _LE_CR=$(tr -cd '\r' < "$0" | wc -c | tr -d '[:space:]'); test "${_LE_CR:-0}" -e
 # Pre-push Hook: Gate 10 (Build Integrity) + M/M-Python/M-Go/M-Java/M-Kotlin (Mutation)
 # + MW (Code Walkthrough) + S (Sprint Flow)
 #
-# M2 (mock density), ML (mock layering) and UI (UI sprint gates) were removed
-# 2026-11-20: they had a registry row and a report row but no implementation, so
-# they printed SKIP with no reason on every push and could never do otherwise.
+# M2 (mock density) was removed 2026-11-20: it had a registry row and a report
+# row but no implementation, so it printed SKIP with no reason on every push and
+# could never do otherwise.
+#
+# ML (mock layering) and UI (UI sprint gates) were NOT removed -- this note had
+# them wrong. Both are still defined AND called below (`run_gate_m3` for ML, the
+# UI block after it), so they run on every push. They are now registered in
+# githooks/gate-registry.sh, because an unregistered gate still runs while being
+# invisible to `gate-capability` and to anything else that reads the registry.
 #
 # DESIGN: Hook validates result/executes checks, Skill executes AI review
 # No CLI skill invocation - avoids OpenCode architecture mismatch
@@ -874,7 +880,10 @@ else
 
       if [[ -z "$MUTATION_SCRIPT" ]]; then
         echo "⚠️ Gate M script not found. SKIP — Gate M."
-        GATE_M_SKIP_REASON="mutation_script_not_found"
+        # One assignment, not two: the first was immediately overwritten by the
+        # second and never reached the report, so it read like two distinct skip
+        # paths that both existed. The surviving string is the descriptive one --
+        # `skip_kind` already carries the machine-readable category.
         GATE_M_SKIP_REASON="gate-m.ts not found in .xp-gate/modules, src/mutation, or global modules"
         GATE_M_SKIP_KIND="module_missing"
       else
