@@ -355,6 +355,70 @@ function findShellScripts() {
  * Create baseline: scan all source files with available lint tools.
  * Called by: xp-gate baseline create|reset
  */
+/**
+ * Run one linter over its files and account for every batch that failed.
+ *
+ * Each language section opened with the same three lines:
+ *
+ *     const { results, errors, failedFiles } = runLintInBatches(...)
+ *     recordFailures('<tool>', errors);
+ *     failedFiles.forEach(f => unevaluated.add(f));
+ *
+ * Three lines does not look like duplication, but the CONSISTENCY is the point:
+ * every tool must add its unevaluated files to the same set, or the restore step
+ * at the end puts back the wrong entries and a file the linter could not read
+ * gets recorded as clean. One call site means a new language cannot forget.
+ *
+ * @param {string} tool name used in the warning
+ * @param {string[]} files
+ * @param {(batch: string[]) => string} buildCmd
+ * @param {string} jsonFlag
+ * @param {Set<string>} unevaluated collected across all tools
+ * @returns {{results: Array}} the parsed per-file results
+ */
+function lintAndAccount(tool, files, buildCmd, jsonFlag, unevaluated) {
+  const { results, errors, failedFiles } = runLintInBatches(files, buildCmd, jsonFlag);
+  recordFailures(tool, errors);
+  failedFiles.forEach((f) => unevaluated.add(f));
+  return { results };
+}
+
+/**
+ * Put back the entries for files no linter could evaluate this run.
+ *
+ * The ratchet's load-bearing half. A rebuild starts from `{}`, which is correct
+ * only for files that were actually examined: a batch whose linter did not run
+ * taught us nothing, and recording its files as "no entry" silently lowers the
+ * bar for every one of them. Measured recurrence -- a run in which every tool
+ * failed replaced a good baseline with `{}`, presenting as
+ * "BLOCKED - 50 NEW shellcheck issue(s) (baseline: 0, current: 50)" on an
+ * unchanged tree.
+ *
+ * Files that WERE evaluated still shrink: `baseline[file]` is already set for
+ * them, so the guard below leaves them alone. That is the ratchet working.
+ *
+ * @param {object} baseline mutated in place
+ * @param {object} previous what was on disk before this run
+ * @param {Set<string>} unevaluated
+ * @returns {number} how many entries were carried forward
+ */
+function carryUnevaluated(baseline, previous, unevaluated) {
+  let carried = 0;
+  for (const file of unevaluated) {
+    if (baseline[file]) continue;
+    if (!Object.prototype.hasOwnProperty.call(previous, file)) continue;
+    baseline[file] = previous[file];
+    carried++;
+  }
+  if (carried > 0) {
+    console.log(
+      `Kept ${carried} baseline entry/entries for files no linter could evaluate `
+      + `(${unevaluated.size} file(s) affected) -- not evaluated is not clean.`,
+    );
+  }
+  return carried;
+}
+
 async function createBaseline() {
   ensureDir(getXpGateDir());
 
@@ -390,13 +454,7 @@ async function createBaseline() {
 
     if (eslintConfigExists && eslintAvailable) {
       const eslintCmd = eslintBin ? quoteBin(eslintBin) : 'npx eslint';
-      const { results, errors, failedFiles } = runLintInBatches(
-        tsFiles,
-        batch => `${eslintCmd} ${batch.map(f => `"${f}"`).join(' ')}`,
-        '-f json --no-warn-ignored'
-      );
-      recordFailures('eslint', errors);
-      failedFiles.forEach(f => unevaluated.add(f));
+      const { results } = lintAndAccount('eslint', tsFiles, batch => `${eslintCmd} ${batch.map(f => `"${f}"`).join(' ')}`, '-f json --no-warn-ignored', unevaluated);
       const eslintCounts = {};
       for (const fileResult of results) {
         const fileName = matchResultToFile(fileResult.filePath, tsFiles);
@@ -423,13 +481,7 @@ async function createBaseline() {
     const ruffAvailable = probeTool('ruff --version');
 
     if (ruffAvailable) {
-      const { results, errors, failedFiles } = runLintInBatches(
-        pyFiles,
-        batch => `ruff check ${batch.map(f => `"${f}"`).join(' ')}`,
-        '--output-format json'
-      );
-      recordFailures('ruff', errors);
-      failedFiles.forEach(f => unevaluated.add(f));
+      const { results } = lintAndAccount('ruff', pyFiles, batch => `ruff check ${batch.map(f => `"${f}"`).join(' ')}`, '--output-format json', unevaluated);
       const ruffCounts = {};
       for (const fileResult of results) {
         // A result that names no file cannot be recorded against one. Skipping it
@@ -479,13 +531,7 @@ async function createBaseline() {
       // Same batching as the other tools: one argv for every shell script in the
       // repo is the same platform-limit hazard, even though this repo happens to
       // sit under the threshold today.
-      const { results, errors, failedFiles } = runLintInBatches(
-        shFiles,
-        batch => `shellcheck -f json ${batch.map(f => `"${f}"`).join(' ')}`,
-        ''
-      );
-      recordFailures('shellcheck', errors);
-      failedFiles.forEach(f => unevaluated.add(f));
+      const { results } = lintAndAccount('shellcheck', shFiles, batch => `shellcheck -f json ${batch.map(f => `"${f}"`).join(' ')}`, '', unevaluated);
       const warningsByFile = {};
       for (const item of results) {
         const matchedFile = matchResultToFile(item.file, shFiles);
@@ -507,19 +553,7 @@ async function createBaseline() {
   // rewrite known-bad files as clean. `baseline[file]` being set means some tool
   // did evaluate it this run, and the fresh value wins -- that is the ratchet
   // shrinking, not data loss.
-  let carried = 0;
-  for (const file of unevaluated) {
-    if (baseline[file]) continue;
-    if (!Object.prototype.hasOwnProperty.call(previous, file)) continue;
-    baseline[file] = previous[file];
-    carried++;
-  }
-  if (carried > 0) {
-    console.log(
-      `Kept ${carried} baseline entry/entries for files no linter could evaluate ` +
-      `(${unevaluated.size} file(s) affected) -- not evaluated is not clean.`
-    );
-  }
+  carryUnevaluated(baseline, previous, unevaluated);
 
   fs.writeFileSync(getBaselineFile(), JSON.stringify(baseline, null, 2));
   return baseline;
@@ -721,4 +755,4 @@ Examples:
   }
 }
 
-module.exports = { handleBaseline, createBaseline, showBaseline, resetBaseline, diffBaseline, countBaselineByTool, compareBaselines, findShellScripts, resolveLocalBin };
+module.exports = { handleBaseline, createBaseline, carryUnevaluated, lintAndAccount, showBaseline, resetBaseline, diffBaseline, countBaselineByTool, compareBaselines, findShellScripts, resolveLocalBin };
