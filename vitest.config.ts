@@ -48,23 +48,24 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],
-      // MEASUREMENT LIMIT — read before trusting a per-file number.
+      // TWO MEASUREMENT HAZARDS, both cost real time here.
       //
-      // v8 attribution degrades on large files in this repo, and the degradation
-      // is not a test gap. Measured 2026-11-24:
+      // 1. A single-file run (`vitest run path/x.test.js --coverage`) OVERWRITES
+      //    coverage/ with a report naming only the files that test loaded. Always
+      //    regenerate with a full run before quoting a number.
       //
-      //   files < 200 lines   86 files, mean coverage 96.4%
-      //   files > 600 lines   20 files, mean coverage 82.7%
+      // 2. At least one large file reports code its tests demonstrably execute as
+      //    uncovered. Measured 2026-11-24 on language-tools.js: a stderr write
+      //    compiled into planToolRepairs fired in 3 workers of a full run, while
+      //    coverage-final.json reported 0 of its 77 statements. The cause was not
+      //    found; what was ruled out: duplicate module instances (one entry
+      //    path), stale data (regenerated from an empty directory), and unloaded
+      //    files (every file has non-zero coverage).
       //
-      // and, decisively, an instrumented run: adding a stderr write to
-      // planToolRepairs produced 26 executions in one full run while
-      // coverage-final.json recorded 6 of its 84 statements. doctor.js has 25
-      // dedicated test files and its diagnoseCliTools still reports 0/37 after
-      // being proven to execute 3 times.
-      //
-      // The aggregate 87.6% therefore UNDERSTATES the truth; the error is
-      // one-directional. Do not use a per-file low number as evidence that a
-      // large file lacks tests -- check for tests, and instrument if in doubt.
+      //    So do not read a per-file number on a large file as evidence about its
+      //    tests. Check whether tests exist, and instrument if it matters. The
+      //    aggregate moves in the right direction; individual large files are not
+      //    trustworthy.
       //
       // NOTE for anyone reading coverage numbers: a single-file run
       // (`vitest run path/to/x.test.js --coverage`) OVERWRITES
