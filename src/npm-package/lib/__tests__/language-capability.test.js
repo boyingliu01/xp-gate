@@ -201,7 +201,7 @@ describe('不得误报：已接线的面必须读成 checked', () => {
       'githooks/adapters/gate-13-compiler-strictness.sh': 'gate13_run_php_analysis() { return 0; }\n',
       'githooks/gate-entries/gate-13-entry.sh': 'gate13_run_php_analysis; _g13_rc=$?\n',
       'src/principles/analyzer.ts': "const adapterMap = { '.php': PhpAdapter };\n",
-      'src/npm-package/lib/language-tools.js': '  php: {\n    name: "PHP",\n  },\n',
+      'src/npm-package/lib/language-registry.js': '  php: {\n    name: "PHP",\n  },\n',
       '.github/workflows/quality-gates.yml': "      echo 'php' > project_language.txt\n",
     });
     try {

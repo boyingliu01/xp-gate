@@ -26,6 +26,14 @@ const { LANGUAGE_REGISTRY } = require('./language-registry.js');
 const TOOL_PROBE_TIMEOUT_MS = 10000;
 
 /**
+ * How long an installer may run before it is abandoned.
+ *
+ * Two orders of magnitude above a probe: a package manager legitimately downloads and
+ * compiles.
+ */
+const INSTALL_TIMEOUT_MS = 120000;
+
+/**
  * The outer bound on one installer invocation.
  *
  * Two orders of magnitude above a probe: a package manager legitimately downloads and
