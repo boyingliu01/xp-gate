@@ -218,7 +218,7 @@ function jsonMode(state) {
 }
 
 // #369: fix commit matching — conventional commits + keyword boundary
-const FIX_RE = /^(fix(\(.+\))?:)|\b(fix|bugfix|hotfix|patch|修复)\b/i;
+const FIX_RE = /^(fix(\(.+\))?:)|\b(fix|bugfix|hotfix|patch)\b|修复/i;
 
 /**
  * Git env with every repo-redirecting variable stripped, so `cwd` is the only
@@ -614,4 +614,6 @@ module.exports = {
   buildMetricsLine,
   formatReqLines,
   formatPhaseLine,
+  getWindowCommitCounts,
+  measureSprint,
 };
