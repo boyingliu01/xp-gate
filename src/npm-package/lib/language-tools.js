@@ -1350,7 +1350,12 @@ function planToolRepairs(rows, options = {}) {
     // coexistence (jq from apt vs a newer ~/.local/bin/jq), and removing either
     // is not a fix: the distro one can drag dependencies with it, the user one is
     // what the reader installed on purpose.
-    const userCopies = (row.userCopies || row.distinctRealPaths.filter((p) => !isSystemOwned(p)));
+    // `distinctRealPaths` is only present on rows that were actually located on
+    // disk; a row can be flagged `duplicated` by another producer (or by a
+    // caller assembling rows by hand) without that list. Defaulting to [] keeps
+    // the plan honest -- no copies means no duplicate to remove -- instead of
+    // throwing out of a planning function.
+    const userCopies = (row.userCopies || (row.distinctRealPaths || []).filter((p) => !isSystemOwned(p)));
     if (row.duplicated && userCopies.length > 1) {
       const [keep, ...rest] = userCopies;
       actions.push({ kind: 'keep', tool: row.name, path: keep });

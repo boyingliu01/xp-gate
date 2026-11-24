@@ -1,0 +1,97 @@
+/**
+ * @test REQ-TOOLS-AUDIT-REPORT
+ * @intent `xp-gate check-tools` 的输出面——每个工具一行（可选标记、版本、
+ *         限定词）加一行汇总——此前完全没有断言：`printAuditReport` 的 68 条
+ *         语句零覆盖。
+ *
+ *         这里通过 `handleCheckTools` 驱动，而不是直接调那个打印函数：它没有
+ *         导出，而驱动命令额外覆盖了"哪些行会到达打印器"这段接线。
+ *
+ * @covers AC-TOOLS-AUDIT-REPORT-01
+ * @covers AC-TOOLS-AUDIT-REPORT-02
+ */
+'use strict';
+
+async function capture(run) {
+  const out = [];
+  const orig = console.log;
+  console.log = (...a) => out.push(a.join(' '));
+  try {
+    await run();
+  } finally {
+    console.log = orig;
+  }
+  return out.join('\n');
+}
+
+function row(over = {}) {
+  return {
+    name: 'gitleaks',
+    optional: false,
+    installedVersion: '8.30.1',
+    available: true,
+    npxInvoked: false,
+    resolution: 'path',
+    ...over,
+  };
+}
+
+describe('check-tools report', () => {
+  const { handleCheckTools } = require('../language-tools.js');
+
+  const run = (rows, args = []) =>
+    capture(() => handleCheckTools(args, { audit: () => rows }));
+
+  it('prints one line per tool and a summary', async () => {
+    const out = await run([row(), row({ name: 'lizard' })]);
+    expect(out).toContain('gitleaks');
+    expect(out).toContain('lizard');
+    expect(out).toMatch(/Summary: 2 tools/);
+  });
+
+  it('marks optional tools so a reader does not chase them', async () => {
+    expect(await run([row({ optional: true })])).toContain('(optional)');
+  });
+
+  it('shows the version, or N/A when there is none', async () => {
+    expect(await run([row()])).toContain('8.30.1');
+    const noVersion = await run([row({ installedVersion: null, available: false })]);
+    expect(noVersion).toContain('N/A');
+  });
+
+  it('says when a tool was run through npx', async () => {
+    expect(await run([row({ npxInvoked: true })])).toContain('(via npx)');
+  });
+
+  it('surfaces a fallback resolution so the reader knows it is off PATH', async () => {
+    const out = await run([
+      row({ resolution: 'fallback', resolvedPath: '/home/u/.local/bin/gitleaks' }),
+    ]);
+    expect(out).toContain('/home/u/.local/bin/gitleaks');
+    expect(out).toContain('not on PATH');
+  });
+
+  it('suggests install-tools only when something is incomplete', async () => {
+    expect(await run([row()])).not.toContain('install-tools');
+    // A missing tool makes the summary incomplete; `complete` requires ALL four
+    // counters to be zero (tool-audit.js summarizeAudit), so this row alone is
+    // enough to trigger the hint.
+    const incomplete = await run([
+      row({ name: 'terraform', available: false, installedVersion: null, currency: 'missing' }),
+    ]);
+    expect(incomplete).toMatch(/\d+ missing/);
+    expect(incomplete).toContain('install-tools');
+  });
+
+  it('reports every counter in the summary line', async () => {
+    const out = await run([
+      row({ name: 'a', duplicated: true, distinctRealPaths: ['/x/a', '/y/a'] }),
+      row({ name: 'b', outdated: true, installedVersion: '1.0.0', latestVersion: '2.0.0' }),
+      row({ name: 'c', currency: 'unknown' }),
+      row({ name: 'd', available: false, installedVersion: null, currency: 'missing' }),
+    ]);
+    for (const fragment of ['missing', 'duplicated', 'outdated', 'unknown']) {
+      expect(out).toContain(fragment);
+    }
+  });
+});
