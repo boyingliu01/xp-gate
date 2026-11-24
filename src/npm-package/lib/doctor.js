@@ -2993,12 +2993,22 @@ function diagnoseOpenCodePlugin(checks) {
 
 /**
  * Diagnose language-specific tool availability.
+ *
+ * Takes its inputs as options so the loop below is reachable from a test: it used
+ * to read `process.cwd()` and call the real detection + probing chain directly,
+ * which made 34 lines of output logic untestable except by running a whole
+ * `doctor` against a real project (and vitest workers cannot chdir).
+ *
+ * @param {{detect?: Function, getTools?: Function, registry?: object, projectRoot?: string}} [options]
  * @returns {number} Number of issues found (missing required tools)
  */
-function diagnoseLanguageTools() {
+function diagnoseLanguageTools(options = {}) {
   try {
-    const { detectProjectLanguages, getToolsForLanguages, LANGUAGE_REGISTRY } = require('./language-tools.js');
-    const projectRoot = process.cwd();
+    const lt = require('./language-tools.js');
+    const detectProjectLanguages = options.detect || lt.detectProjectLanguages;
+    const getToolsForLanguages = options.getTools || lt.getToolsForLanguages;
+    const LANGUAGE_REGISTRY = options.registry || lt.LANGUAGE_REGISTRY;
+    const projectRoot = options.projectRoot || process.cwd();
     const { detected } = detectProjectLanguages(projectRoot);
 
     if (detected.length === 0) return 0;
@@ -3959,7 +3969,7 @@ function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
 }
 
 module.exports = {
-  doctor, doctorDelphi, isXpGateFile, SIGNATURES, getHookSignatures, isXpGateHookContent,
+  doctor, doctorDelphi, isXpGateFile, diagnoseLanguageTools, SIGNATURES, getHookSignatures, isXpGateHookContent,
   fixVersionMismatch,
   fixTemplateDirMismatch,
   fixMissingHooks,
