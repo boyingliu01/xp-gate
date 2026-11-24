@@ -617,6 +617,8 @@ module.exports = {
     projectScanContext,
     quoteForShell,
     stripExtendedPrefix,
+    archlintInvocation,
+    reportLaunchFailure,
     BLOCKING_SEVERITIES,
     BASELINE_FILE,
   },
