@@ -613,6 +613,49 @@ function executePlanItem(item, config) {
  * @param {string[]} args CLI arguments
  * @returns {number} exit code (0 = success, 1 = error)
  */
+/**
+ * Print what is about to happen, with removal and retention stated separately.
+ *
+ * #724: 'retain' entries used to be printed under "The following will be removed"
+ * and then kept, with no further mention anywhere in the output. A user scripting
+ * cleanup from this preview would delete a directory they had been told was already
+ * gone. The two groups are separate now, and the retained list is echoed again at the
+ * end of the run.
+ *
+ * @param {string} mode
+ * @param {Array} plan
+ * @param {Array} purgeDirs
+ * @param {{purge?: boolean}} options
+ * @returns {Array} the retained entries, which the caller restates at the end
+ */
+function printUninstallPlan(mode, plan, purgeDirs, options) {
+  console.log(`XP-Gate Uninstall (${mode} mode)`);
+  console.log('=======================\n');
+
+  const removable = plan.filter((item) => item.retain !== true);
+  const retained = plan.filter((item) => item.retain === true);
+
+  console.log('The following will be removed:\n');
+  for (const item of removable) {
+    console.log(`  • ${item.label}`);
+  }
+
+  if (retained.length > 0) {
+    console.log('\nThe following will be KEPT (your data):\n');
+    for (const item of retained) {
+      console.log(`  • ${item.label}`);
+    }
+  }
+
+  if (options.purge) {
+    console.log('\nPurge mode — additional cleanup:');
+    for (const d of purgeDirs) {
+      console.log(`  • ${d.label}`);
+    }
+  }
+  return retained;
+}
+
 async function uninstall(args) {
   const options = {
     dryRun: args.includes('--dry-run'),
@@ -673,36 +716,7 @@ async function uninstall(args) {
     return 0;
   }
 
-  // §4.3 Step 4: Print plan
-  console.log(`XP-Gate Uninstall (${mode} mode)`);
-  console.log('=======================\n');
-
-  // #724: 'retain' entries used to be printed under "The following will be
-  // removed" and then kept, with no further mention anywhere in the output.
-  // A user scripting cleanup from this preview would delete a directory they
-  // had been told was gone. The two groups are now stated separately, and the
-  // retained list is echoed again at the end.
-  const removable = plan.filter((item) => item.retain !== true);
-  const retained = plan.filter((item) => item.retain === true);
-
-  console.log('The following will be removed:\n');
-  for (const item of removable) {
-    console.log(`  • ${item.label}`);
-  }
-
-  if (retained.length > 0) {
-    console.log('\nThe following will be KEPT (your data):\n');
-    for (const item of retained) {
-      console.log(`  • ${item.label}`);
-    }
-  }
-
-  if (options.purge) {
-    console.log('\nPurge mode — additional cleanup:');
-    for (const d of purgeDirs) {
-      console.log(`  • ${d.label}`);
-    }
-  }
+  const retained = printUninstallPlan(mode, plan, purgeDirs, options);
 
   // §4.3 Step 5: Dry-run → exit
   if (options.dryRun) {
