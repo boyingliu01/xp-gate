@@ -656,6 +656,77 @@ function printUninstallPlan(mode, plan, purgeDirs, options) {
   return retained;
 }
 
+/**
+ * Run the plan: state machine, backup, removals, purge, final state write.
+ *
+ * The ORDER is the safety property. The state moves to `uninstalling` BEFORE anything
+ * is removed, so a crash halfway leaves a config saying "do not trust this
+ * installation" rather than one claiming to be active. The backup is taken before the
+ * destructive loop for the same reason.
+ *
+ * Errors do not stop the run: one unwritable file must not strand the rest. They are
+ * collected into the return value, which decides whether the backup is cleaned up.
+ *
+ * @returns {{hadErrors: boolean, backupMeta: object}} `backupMeta` is returned so the
+ *   caller can decide whether to keep or discard the snapshot.
+ */
+function executeUninstallPlan(plan, config, purgeDirs, options) {
+// §4.8 State machine: active → uninstalling
+saveConfig({ ...config, mode: 'uninstalling' });
+
+// §4.12 Step 4: Create backup snapshot before destructive operations
+const backupMeta = createBackupSnapshot(plan);
+
+// §4.12 Execute operations in order (non-destructive first, then destructive)
+let hadErrors = false;
+
+for (const item of plan) {
+  try {
+    hadErrors = !executePlanItem(item, config) || hadErrors;
+  } catch (e) {
+    console.warn(`  Warning: Could not remove ${item.label}: ${e.message}`);
+    hadErrors = true;
+  }
+}
+
+if (options.purge) {
+  for (const d of purgeDirs) {
+    if (options.dryRun) {
+      console.log(`  • ${d.label}`);
+      continue;
+    }
+    if (!fs.existsSync(d.path)) continue;
+    try {
+      fs.rmSync(d.path, { recursive: true, force: true });
+      console.log(`  Removed ${d.label}`);
+    } catch (e) {
+      console.warn(`  Warning: Could not remove ${d.label}: ${e.message}`);
+      hadErrors = true;
+    }
+  }
+}
+
+// §4.8 State machine: uninstalling → uninstalled
+try {
+  saveConfig({
+    ...getConfig() || config,
+    mode: 'uninstalled',
+    uninstalled: new Date().toISOString(),
+    manifest: undefined,
+  });
+} catch (e) {
+  // purge mode: config dir has been deleted, save is non-critical
+  if (!options.purge) throw e;
+  console.warn(`  Warning: Could not save config: ${e.message}`);
+}
+
+// §4.12 Step 11: Clean up backup on success
+if (!hadErrors) {
+  cleanupBackup(backupMeta);
+}
+  return { hadErrors, backupMeta };
+}
+
 async function uninstall(args) {
   const options = {
     dryRun: args.includes('--dry-run'),
@@ -728,59 +799,7 @@ async function uninstall(args) {
   // Skipped in test environment since we use --force or non-interactive
   // In real usage with TTY, would prompt here
 
-  // §4.8 State machine: active → uninstalling
-  saveConfig({ ...config, mode: 'uninstalling' });
-
-  // §4.12 Step 4: Create backup snapshot before destructive operations
-  const backupMeta = createBackupSnapshot(plan);
-
-  // §4.12 Execute operations in order (non-destructive first, then destructive)
-  let hadErrors = false;
-
-  for (const item of plan) {
-    try {
-      hadErrors = !executePlanItem(item, config) || hadErrors;
-    } catch (e) {
-      console.warn(`  Warning: Could not remove ${item.label}: ${e.message}`);
-      hadErrors = true;
-    }
-  }
-
-  if (options.purge) {
-    for (const d of purgeDirs) {
-      if (options.dryRun) {
-        console.log(`  • ${d.label}`);
-        continue;
-      }
-      if (!fs.existsSync(d.path)) continue;
-      try {
-        fs.rmSync(d.path, { recursive: true, force: true });
-        console.log(`  Removed ${d.label}`);
-      } catch (e) {
-        console.warn(`  Warning: Could not remove ${d.label}: ${e.message}`);
-        hadErrors = true;
-      }
-    }
-  }
-
-  // §4.8 State machine: uninstalling → uninstalled
-  try {
-    saveConfig({
-      ...getConfig() || config,
-      mode: 'uninstalled',
-      uninstalled: new Date().toISOString(),
-      manifest: undefined,
-    });
-  } catch (e) {
-    // purge mode: config dir has been deleted, save is non-critical
-    if (!options.purge) throw e;
-    console.warn(`  Warning: Could not save config: ${e.message}`);
-  }
-
-  // §4.12 Step 11: Clean up backup on success
-  if (!hadErrors) {
-    cleanupBackup(backupMeta);
-  }
+  const { hadErrors, backupMeta } = executeUninstallPlan(plan, config, purgeDirs, options);
 
   // Print summary
   console.log('\nUninstall complete');
