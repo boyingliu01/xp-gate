@@ -791,6 +791,51 @@ function prepareUninstallPlan(config, options) {
   return { mode, plan, purgeDirs };
 }
 
+/**
+ * Whether there is nothing to uninstall.
+ *
+ * Two conditions, one message: no config at all, and a config that already records
+ * the uninstalled state. Both are the AC-09 idempotency case -- running `uninstall`
+ * twice is not an error, and the second run has nothing to report beyond that.
+ *
+ * @param {object|null} config
+ * @returns {boolean}
+ */
+function isAlreadyGone(config) {
+  if (!config || config.mode === 'uninstalled') {
+    console.log('No xp-gate installation found');
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Record that the plan was empty.
+ *
+ * The config is still moved to `uninstalled`: the installation may consist only of
+ * entries the guard refused to touch, and leaving the mode `active` would make the
+ * next run repeat the same no-op. Saying "nothing to uninstall" is a result, not a
+ * failure.
+ *
+ * @param {object} config
+ * @returns {number} exit code
+ */
+function recordNothingToDo(config) {
+  console.log('Nothing to uninstall');
+  saveConfig({ ...config, mode: 'uninstalled', uninstalled: new Date().toISOString() });
+  return 0;
+}
+
+/**
+ * Say that a dry run changed nothing.
+ *
+ * @returns {number} exit code
+ */
+function reportDryRun() {
+  console.log('\nDry-run mode — no files were modified');
+  return 0;
+}
+
 async function uninstall(args) {
   const options = {
     dryRun: args.includes('--dry-run'),
@@ -803,36 +848,17 @@ async function uninstall(args) {
   // §4.3 Step 1: Read config
   const config = getConfig();
 
-  // §4.3 Step 1: No config → exit cleanly (AC-09 idempotency)
-  if (!config) {
-    console.log('No xp-gate installation found');
-    return 0;
-  }
-
-  // §4.3 Step 1: Already uninstalled → exit cleanly (AC-09 idempotency)
-  if (config.mode === 'uninstalled') {
-    console.log('No xp-gate installation found');
-    return 0;
-  }
+  // §4.3 Step 1: nothing installed, or already uninstalled → clean exit (AC-09)
+  if (isAlreadyGone(config)) return 0;
 
   const prepared = prepareUninstallPlan(config, options);
   if (prepared.mode === null) return 0;
   const { mode, plan, purgeDirs } = prepared;
 
-  if (plan.length === 0 && purgeDirs.length === 0) {
-    console.log('Nothing to uninstall');
-    // Still update config to uninstalled
-    saveConfig({ ...config, mode: 'uninstalled', uninstalled: new Date().toISOString() });
-    return 0;
-  }
+  if (plan.length === 0 && purgeDirs.length === 0) return recordNothingToDo(config);
 
   const retained = printUninstallPlan(mode, plan, purgeDirs, options);
-
-  // §4.3 Step 5: Dry-run → exit
-  if (options.dryRun) {
-    console.log('\nDry-run mode — no files were modified');
-    return 0;
-  }
+  if (options.dryRun) return reportDryRun();
 
   // §4.3 Step 6: Confirm
   // Skipped in test environment since we use --force or non-interactive
