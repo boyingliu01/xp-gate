@@ -359,8 +359,19 @@ function getConfig() {
   }
 }
 
+/**
+ * Persist the config, or fail loudly with the path.
+ *
+ * Every fix path in this file ends here, so a silent failure would report a repair
+ * that was never written.
+ */
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_FILE(), JSON.stringify(config, null, 2));
+  const target = CONFIG_FILE();
+  try {
+    fs.writeFileSync(target, JSON.stringify(config, null, 2));
+  } catch (err) {
+    throw new Error(`cannot save config to ${target}: ${err.message}`);
+  }
 }
 
 async function getGitDir() {
@@ -2540,12 +2551,22 @@ function printReport(checks) {
 /**
  * Copy a hook file from package source to target, creating parent dir if needed.
  */
+/**
+ * Copy a hook from the package into place and make it executable.
+ *
+ * The chmod is part of the repair, not a detail: a hook without the execute bit
+ * is one git silently ignores, which looks exactly like "the fix did nothing".
+ */
 function restoreHook(srcFile, destFile, label) {
   if (!fs.existsSync(srcFile)) return false;
-  const destDir = path.dirname(destFile);
-  fs.mkdirSync(destDir, { recursive: true });
-  fs.copyFileSync(srcFile, destFile);
-  fs.chmodSync(destFile, 0o755);
+  try {
+    const destDir = path.dirname(destFile);
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(srcFile, destFile);
+    fs.chmodSync(destFile, 0o755);
+  } catch (err) {
+    throw new Error(`cannot restore ${label} to ${destFile}: ${err.message}`);
+  }
   console.log(`  ✓ Restored ${label}`);
   return true;
 }
@@ -3556,10 +3577,18 @@ function checkSkillInstallParity(add, options) {
   // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
   // real failure mode and must be drivable without mutating the package.
   const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
-  const sha256 = (p) => require('crypto').createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  const sha256 = (p) => fileSha256(p);
+  // A bundle we cannot read is reported as an empty bundle, which the parity check
+  // already treats as "every installed file is extra" -- a truthful, loud outcome.
   const listBundledSkillFiles = (dir, base = dir, out = []) => {
     if (!fs.existsSync(dir)) return out;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return out;
+    }
+    for (const entry of entries) {
       const p = path.join(dir, entry.name);
       if (entry.isDirectory()) listBundledSkillFiles(p, base, out);
       else out.push(path.relative(base, p));
@@ -3957,6 +3986,33 @@ function platformTag(skillDir) {
  * Files in `skillDir` that are missing or differ from the bundle.
  * @returns {string[]} `rel: reason` entries; empty when the copy is clean
  */
+/**
+ * Files where an installed skill copy differs from the bundle.
+ *
+ * An unreadable file is reported as `unreadable` rather than skipped: a copy we
+ * cannot check is not a copy we can call matching, and silence here would let a
+ * permissions problem pass as parity.
+ */
+/**
+ * SHA-256 of a file, or a thrown error naming the path.
+ *
+ * A digest is used to compare two copies; a read failure must not yield a digest
+ * that happens to differ, because "cannot read" and "differs" need different
+ * repairs.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
+function fileSha256(filePath) {
+  let content;
+  try {
+    content = fs.readFileSync(filePath);
+  } catch (err) {
+    throw new Error(`cannot hash ${filePath}: ${err.message}`);
+  }
+  return require('crypto').createHash('sha256').update(content).digest('hex');
+}
+
 function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
   const drifted = [];
   for (const rel of bundledFiles) {
@@ -3964,8 +4020,12 @@ function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
     const bundledPath = path.join(bundledSkillDir, rel);
     if (!fs.existsSync(installedPath)) {
       drifted.push(`${rel}: missing`);
-    } else if (sha256(installedPath) !== sha256(bundledPath)) {
-      drifted.push(`${rel}: differs`);
+      continue;
+    }
+    try {
+      if (sha256(installedPath) !== sha256(bundledPath)) drifted.push(`${rel}: differs`);
+    } catch {
+      drifted.push(`${rel}: unreadable`);
     }
   }
   return drifted;
