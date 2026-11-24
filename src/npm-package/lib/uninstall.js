@@ -129,8 +129,18 @@ function getConfig() {
   }
 }
 
+/**
+ * Persist the config, or throw with the path.
+ *
+ * Uninstall edits this file to drop what it removed; a silent failure would leave the
+ * config pointing at things that no longer exist.
+ */
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  } catch (err) {
+    throw new Error(`cannot save config to ${CONFIG_FILE}: ${err.message}`);
+  }
 }
 
 function getGitDir() {
@@ -249,9 +259,20 @@ function isDirEmpty(dir) {
   }
 }
 
+/**
+ * Copy a directory tree.
+ *
+ * An unreadable source aborts with the path named: a partial backup is worse than
+ * none, because it looks like a backup.
+ */
 function copyDirSync(src, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
+  let entries;
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    entries = fs.readdirSync(src, { withFileTypes: true });
+  } catch (err) {
+    throw new Error(`cannot copy ${src} to ${dest}: ${err.message}`);
+  }
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
@@ -481,7 +502,14 @@ function removeFile(item, config) {
   // stayed.
   if (item.ownedByPath === true) {
     if (!fs.existsSync(item.path)) return false;
-    fs.unlinkSync(item.path);
+    try {
+      fs.unlinkSync(item.path);
+    } catch (err) {
+      // Report a failure AS a failure: printing "Removed" for a file still on disk
+      // is the residue problem this command exists to end.
+      console.error(`  ✗ Could not remove ${item.label}: ${err.message}`);
+      return false;
+    }
     console.log(`  Removed ${item.label}`);
     return true;
   }
