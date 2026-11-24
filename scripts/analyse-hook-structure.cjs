@@ -33,8 +33,6 @@ for (let i = 0; i < starts.length; i++) {
   const k = keyOf(starts[i].text);
   if (k) sections.push({ key: k, start: s, end: e, text: starts[i].text });
 }
-// Gate 13's banner carries no marker line.
-locateGate13(lines, sections);
 
 /**
  * Add Gate 13's section, which has a banner but no `# GATE 13:` title.
@@ -46,22 +44,51 @@ locateGate13(lines, sections);
  * @param {string[]} lines
  * @param {Array<{key: string, start: number, end: number}>} sections mutated in place
  */
+/** The line that marks Gate 13's section, which has no banner of its own. */
+const GATE13_MARKER = /^GATE_13_STATUS="SKIP"$/;
+
+/** Whether a section is already the Gate 13 one. */
+function isGate13Section(section) {
+  return section.key === '13';
+}
+
+/**
+ * Add Gate 13's section, which has a banner but no `# GATE 13:` title.
+ *
+ * The marker lives in the gate's BODY, so the section is found by walking UP from that
+ * line to the nearest rule. Without this Gate 13 had no section at all and every line
+ * in it was attributed to the gate before it.
+ *
+ * Three guards, all of them "nothing to do": no marker, already present, no rule above.
+ * Written as early returns so the happy path is the last statement and needs no nesting.
+ */
 function locateGate13(lines, sections) {
-  const marker = lines.findIndex((l) => /^GATE_13_STATUS="SKIP"$/.test(l));
-  if (marker < 0 || sections.some((sec) => sec.key === '13')) return;
+  const marker = lines.findIndex((l) => GATE13_MARKER.test(l));
+  if (marker < 0) return;
+  if (sections.some(isGate13Section)) return;
+
   const banner = findRuleAbove(lines, marker);
   if (banner < 0) return;
 
   const next = sections.find((sec) => sec.start > banner);
   if (next) next.start = Math.max(next.start, banner + 1);
-  sections.push({
-    key: '13',
-    start: banner,
-    end: (next ? next.start : lines.length) - 1,
-    text: '# GATE 13',
-  });
+  sections.push({ key: '13', start: banner, end: sectionEnd(next, lines), text: '# GATE 13' });
   resequenceSections(sections);
 }
+
+/**
+ * Where Gate 13's section ends.
+ *
+ * It ends where the NEXT section begins, or at the end of the file -- minus one,
+ * because `start` is inclusive on both ends.
+ */
+function sectionEnd(next, lines) {
+  return (next ? next.start : lines.length) - 1;
+}
+
+// Gate 13's banner carries no marker line, so its section is located from the
+// status assignment in its body. Done here, after the definitions it uses.
+locateGate13(lines, sections);
 
 /**
  * The nearest rule line at or above `from`, within 200 lines.

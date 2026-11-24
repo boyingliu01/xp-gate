@@ -34,6 +34,21 @@ function collectGateTimings(report, deps) {
 }
 
 /** Production functions above the report's display threshold. */
+/**
+ * How many functions in one bucket exceed `threshold`.
+ *
+ * One helper for the four counters because the predicate was written out four times --
+ * and each copy is an arrow whose `&&` and comparison land as branches, so the report
+ * function carried four spurious CCN points for arithmetic it does not do.
+ *
+ * @param {Array<{bucket: string, ccn: number}>} functions
+ * @param {string} bucket
+ * @param {number} threshold
+ * @returns {number}
+ */
+function countOverByBucket(functions, bucket, threshold) {
+  return functions.filter((f) => f.bucket === bucket && f.ccn > threshold).length;
+}
 function productionOverThreshold(functions) {
   return functions.filter((f) => f.bucket === 'production' && f.ccn > 10);
 }
@@ -53,13 +68,13 @@ function printReport(report, get, deps) {
   const summary = {
     files_scanned: report.filesScanned,
     production_functions_gt10: prodOver.length,
-    test_functions_gt10: report.functions.filter((f) => f.bucket === 'test' && f.ccn > 10).length,
-    mirror_functions_gt10: report.functions.filter((f) => f.bucket === 'mirror' && f.ccn > 10).length,
+    test_functions_gt10: countOverByBucket(report.functions, 'test', 10),
+    mirror_functions_gt10: countOverByBucket(report.functions, 'mirror', 10),
     // Present so the number cannot vanish: these are reported by lizard as one huge
     // function because the HOST's loader requires a single closure, not because the
     // code is complex. Counting them as production would block every commit on a
     // shape nobody can change; hiding them would make the report lie by omission.
-    host_closure_functions_gt10: report.functions.filter((f) => f.bucket === 'host-closure' && f.ccn > 10).length,
+    host_closure_functions_gt10: countOverByBucket(report.functions, 'host-closure', 10),
     worst_production: prodOver.sort((a, b) => b.ccn - a.ccn).slice(0, parseInt(get('--top') || '20', 10)),
     gate_timing: byGate,
   };
