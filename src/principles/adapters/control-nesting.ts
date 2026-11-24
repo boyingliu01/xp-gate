@@ -328,25 +328,53 @@ function isNestedFunctionIntro(body: string, wordStart: number, wordEnd: number)
  * `x = async () => {`, where the value assigned at `wordEnd` is a function.
  */
 function isAssignedFunctionIntro(body: string, current: string, wordEnd: number): boolean {
+  const rhs = indexOfAssignedValue(body, current, wordEnd);
+  if (rhs < 0) return false;
+  const start = skipAsyncModifier(body, rhs);
+  if (body.startsWith('function', start)) return true;
+  if (body[start] !== '(') return false;
+  const close = skipBalancedParen(body, start);
+  return body.startsWith('=>', skipArrowReturnType(body, close, body.length));
+}
+
+/**
+ * Where the value assigned by `current` starts, or -1 when this is not an assignment.
+ *
+ * `current` is either a DECLARATION keyword, where the value follows a name
+ * (`const name = ...`), or an identifier being assigned directly (`name = ...`).
+ */
+function indexOfAssignedValue(body: string, current: string, wordEnd: number): number {
   let k = wordEnd;
-  if (current === 'const' || current === 'let' || current === 'var') {
+  if (isDeclarationKeyword(current)) {
     const name = readWord(body, skipSpaces(body, k, body.length));
-    if (!name) return false;
+    if (!name) return -1;
     k = name.end;
-  } else if (!/^[A-Za-z_$][\w$]*$/.test(current)) {
-    return false;
+  } else if (!IDENTIFIER.test(current)) {
+    return -1;
   }
   k = skipSpaces(body, k, body.length);
-  if (body[k] !== '=') return false;
-  k = skipSpaces(body, k + 1, body.length);
-  // `const name = async (...) => {` -- the async modifier precedes the params.
-  if (body.startsWith('async', k) && !/[\w$]/.test(body[k + 5] ?? '')) {
-    k = skipSpaces(body, k + 5, body.length);
-  }
-  if (body.startsWith('function', k)) return true;
-  if (body[k] !== '(') return false;
-  const close = skipBalancedParen(body, k);
-  return body.startsWith('=>', skipArrowReturnType(body, close, body.length));
+  if (body[k] !== '=') return -1;
+  return skipSpaces(body, k + 1, body.length);
+}
+
+/** A JavaScript identifier: what a bare assignment target must be. */
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/** `const` / `let` / `var`: the value sits after a name. */
+function isDeclarationKeyword(word: string): boolean {
+  return word === 'const' || word === 'let' || word === 'var';
+}
+
+/**
+ * Step past an `async` modifier, when there is one.
+ *
+ * `const name = async (...) => {` is an arrow too, and the modifier sits between the
+ * `=` and the parameter list.
+ */
+function skipAsyncModifier(body: string, from: number): number {
+  if (!body.startsWith('async', from)) return from;
+  if (/[\w$]/.test(body[from + 5] ?? '')) return from;
+  return skipSpaces(body, from + 5, body.length);
 }
 
 /**
@@ -441,45 +469,93 @@ function findBraceAfterReturnType(body: string, from: number, to: number): numbe
   let i = skipSpaces(body, from, to);
   if (body[i] !== ':') return i;
   i = skipSpaces(body, i + 1, to);
+
   let angles = 0;
   for (; i < to; i++) {
     const c = body[i];
     if (c === ';' || c === '\n') return -1;
-    if (c === '<') { angles++; continue; }
-    if (c === '>' && angles > 0) { angles--; continue; }
+    angles = adjustAngleDepth(c, angles);
     if (c !== '{') continue;
-    const afterBrace = skipBalancedBrace(body, i);
-    // Inside `<>` the braces are type arguments (`Promise<{ok:boolean}>`).
-    if (angles > 0) { i = afterBrace - 1; continue; }
-    const rest = skipSpaces(body, afterBrace, to);
-    if (rest >= to) return i;
-    // A `|`/`&`/`[` continues the type; another `{` means this brace was an
-    // object type and the real body follows (`m(): {a:number} { ... }`).
-    if ('|&'.includes(body[rest]) || body[rest] === '[') { i = afterBrace - 1; continue; }
-    return body[rest] === '{' ? rest : i;
+
+    const brace = classifyReturnBrace(body, i, angles, to);
+    if (brace.kind === 'type') { i = brace.next - 1; continue; }
+    return brace.kind === 'body-after' ? brace.next : i;
   }
   return -1;
+}
+
+/**
+ * Track `<` / `>` depth, which tells type arguments from comparison operators.
+ *
+ * @param {string} c the character
+ * @param {number} angles current depth
+ * @returns {number} the new depth
+ */
+function adjustAngleDepth(c: string, angles: number): number {
+  if (c === '<') return angles + 1;
+  if (c === '>' && angles > 0) return angles - 1;
+  return angles;
+}
+
+/**
+ * What the `{` at `i` is, when scanning a return type.
+ *
+ * Inside `<>` a brace belongs to a type argument (`Promise<{ok:boolean}>`) and the
+ * scan simply continues. At depth 0 it is either the function BODY -- what the caller
+ * wants -- or an object TYPE, in which case the real body follows it
+ * (`m(): {a:number} { ... }`), recognised by a `|`/`&`/`[` continuing the type or by
+ * another `{` after it.
+ *
+ * @returns {{kind: 'type'|'body'|'body-after', next: number}} `next` is the index to
+ *   resume from; for 'body-after' it is the real body's `{`
+ */
+function classifyReturnBrace(body: string, i: number, angles: number, to: number) {
+  const afterBrace = skipBalancedBrace(body, i);
+  if (angles > 0) return { kind: 'type', next: afterBrace };
+
+  const rest = skipSpaces(body, afterBrace, to);
+  if (rest >= to) return { kind: 'body', next: i };
+  const continues = '|&'.includes(body[rest]) || body[rest] === '[';
+  if (continues) return { kind: 'type', next: afterBrace };
+  return body[rest] === '{' ? { kind: 'body-after', next: rest } : { kind: 'body', next: i };
 }
 
 /** One classified step of an arrow return-type scan. */
 type TypeScanStep = 'stop' | 'open-brace' | 'close-brace' | 'open-angle' | 'close-angle' | 'skip';
 
 /**
- * Classify one character of an arrow's return type. An arrow's return type may
- * itself be an object literal (`(x): { ok: boolean } =>`), so a `{` opens a type
- * brace.
+ * Characters that open a type-level brace or angle, and the step each reports.
+ *
+ * A lookup because the classification is per CHARACTER; the two cases that depend on
+ * depth (`}` and flat-only terminators) are handled before this is consulted and must
+ * not be moved into it.
+ */
+const TYPE_STEPS: Record<string, TypeScanStep> = {
+  '{': 'open-brace',
+  '<': 'open-angle',
+};
+
+/** Characters that end a type scan at depth 0: the arrow, or the statement end. */
+const TYPE_TERMINATORS = new Set([';', '\n']);
+
+/**
+ * Classify one character of an arrow's return type.
+ *
+ * An arrow's return type may itself be an object literal (`(x): { ok: boolean } =>`),
+ * so a `{` opens a TYPE brace rather than ending the scan -- which is why this cannot
+ * simply stop at the first brace it sees.
+ *
+ * `}` needs the depth to be read before it can be classified: at depth 0 it closes the
+ * ENCLOSING block, so the type cannot extend past it.
+ *
+ * @returns the step
  */
 function classifyTypeChar(body: string, i: number, braces: number, angles: number): TypeScanStep {
   const c = body[i];
-  if (c === '{') return 'open-brace';
-  // A `}` at depth 0 closes the enclosing block, so the type cannot extend past it.
   if (c === '}') return braces === 0 ? 'stop' : 'close-brace';
-  if (c === '<') return 'open-angle';
-  if (c === '>' && angles > 0) return 'close-angle';
-  const flat = braces === 0 && angles === 0;
-  if (flat && c === '=' && body[i + 1] === '>') return 'stop';
-  if (flat && (c === ';' || c === '\n')) return 'stop';
-  return 'skip';
+  if (c === '=' && body[i + 1] === '>' && braces === 0 && angles === 0) return 'stop';
+  if (braces === 0 && angles === 0 && TYPE_TERMINATORS.has(c)) return 'stop';
+  return TYPE_STEPS[c] || 'skip';
 }
 
 /** Depth adjustment for one step of a type scan. */
