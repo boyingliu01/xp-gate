@@ -52,16 +52,40 @@ interface ShellcheckResult {
  * Parse ESLint JSON output into BaselineEntry format.
  * ESLint -f json output: Array<{filePath, errorCount, warningCount, messages}>
  */
+/**
+ * Build a matcher from a reported path to the project-relative file it belongs to.
+ *
+ * The three parsers each did this inline, with slightly different rules, and the
+ * differences were accidents rather than decisions: ESLint compares BOTH directions
+ * because it reports absolute paths and the caller passes relative ones, while
+ * golangci and shellcheck only need one direction.
+ *
+ * Matching both directions is the safe superset: a path that ends with a known file, OR
+ * a known file that ends with the reported path, names the same file. The membership
+ * check afterwards is what stops a path from matching a file the caller never asked
+ * about.
+ *
+ * @param files project-relative paths the caller asked for
+ * @param bidirectional compare both directions (absolute reporters need this)
+ * @returns a function from a reported path to the matched file, or null
+ */
+function makeFileMatcher(files: string[], bidirectional: boolean) {
+  const fileSet = new Set(files);
+  return (reported: string): string | null => {
+    const matched = files.find((f) => f.endsWith(reported) || (bidirectional && reported.endsWith(f)));
+    return matched && fileSet.has(matched) ? matched : null;
+  };
+}
+
 function parseESLint(parsed: ESLintFileResult[], files: string[]): Record<string, BaselineEntry> {
   const result: Record<string, BaselineEntry> = {};
-  const fileSet = new Set(files);
+  // ESLint reports absolute paths and the caller passes relative ones, so both
+  // directions are compared.
+  const matchFile = makeFileMatcher(files, true);
 
   for (const fileResult of parsed) {
-    // Try to find a match in the files list
-    const matchedFile = files.find(f =>
-      fileResult.filePath.endsWith(f) || f.endsWith(fileResult.filePath)
-    );
-    if (!matchedFile || !fileSet.has(matchedFile)) continue;
+    const matchedFile = matchFile(fileResult.filePath);
+    if (!matchedFile) continue;
 
     result[matchedFile] = {
       eslint: {
@@ -141,12 +165,12 @@ function parseGolangci(parsed: GolangciOutput, files: string[]): Record<string, 
  */
 function parseShellcheck(parsed: ShellcheckResult[], files: string[]): Record<string, BaselineEntry> {
   const result: Record<string, BaselineEntry> = {};
-  const fileSet = new Set(files);
+  const matchFile = makeFileMatcher(files, false);
   const warningsByFile: Record<string, { warnings: number; errors: number }> = {};
 
   for (const item of parsed) {
-    const matchedFile = files.find(f => item.file.endsWith(f));
-    if (!matchedFile || !fileSet.has(matchedFile)) continue;
+    const matchedFile = matchFile(item.file);
+    if (!matchedFile) continue;
 
     if (!warningsByFile[matchedFile]) {
       warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
@@ -233,13 +257,12 @@ export function diffBaselines(
   oldBaseline: Record<string, BaselineEntry>,
   newBaseline: Record<string, BaselineEntry>,
 ): LintDiffResult {
-  const filesAdded: LintDiffFileResult[] = [];
-  const filesRemoved: LintDiffFileResult[] = [];
-  const filesIncreased: LintDiffFileResult[] = [];
-  const filesDecreased: LintDiffFileResult[] = [];
-  const filesUnchanged: LintDiffFileResult[] = [];
+  // One list per outcome, addressed by name instead of by an if/else ladder: the five
+  // outcomes are mutually exclusive and each is a sentence.
+  const buckets: Record<string, LintDiffFileResult[]> = {
+    filesAdded: [], filesRemoved: [], filesIncreased: [], filesDecreased: [], filesUnchanged: [],
+  };
   let totalWarningsDelta = 0;
-
   const allFiles = new Set([...Object.keys(oldBaseline), ...Object.keys(newBaseline)]);
 
   for (const file of allFiles) {
@@ -250,30 +273,31 @@ export function diffBaselines(
     const delta = newW - oldW;
 
     totalWarningsDelta += delta;
-
-    const result: LintDiffFileResult = { file, oldWarnings: oldW, newWarnings: newW, warningsDelta: delta };
-
-    if (!oldEntry && newEntry) {
-      filesAdded.push(result);
-    } else if (oldEntry && !newEntry) {
-      filesRemoved.push(result);
-    } else if (delta > 0) {
-      filesIncreased.push(result);
-    } else if (delta < 0) {
-      filesDecreased.push(result);
-    } else {
-      filesUnchanged.push(result);
-    }
+    const bucket = classifyDiff(oldEntry, newEntry, delta);
+    buckets[bucket].push({ file, oldWarnings: oldW, newWarnings: newW, warningsDelta: delta });
   }
 
-  return {
-    totalWarningsDelta,
-    filesAdded,
-    filesRemoved,
-    filesIncreased,
-    filesDecreased,
-    filesUnchanged,
-  };
+  return { totalWarningsDelta, ...buckets } as LintDiffResult;
+}
+
+/**
+ * Which bucket one file's change belongs to.
+ *
+ * PRESENCE is tested before the delta: a file that appeared is "added" even when its
+ * previous count of zero makes the delta look like an increase, and one that vanished
+ * is "removed" even though the delta is negative. Reading the delta first reported
+ * both of those as ordinary increases and decreases.
+ */
+function classifyDiff(
+  oldEntry: BaselineEntry | undefined,
+  newEntry: BaselineEntry | undefined,
+  delta: number,
+): keyof LintDiffResult {
+  if (!oldEntry && newEntry) return 'filesAdded';
+  if (oldEntry && !newEntry) return 'filesRemoved';
+  if (delta > 0) return 'filesIncreased';
+  if (delta < 0) return 'filesDecreased';
+  return 'filesUnchanged';
 }
 
 // ── Delta (per-commit enforcement) ───────────────────────
