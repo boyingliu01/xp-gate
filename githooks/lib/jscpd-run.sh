@@ -35,10 +35,18 @@
 # More findings about its own output than about the code it was asked to check,
 # in a report nobody can act on. Every other build-output directory was already
 # listed; the one this tool writes itself was the omission.
+# `src/npm-package` joins for the same reason, and it was the largest remaining
+# offender in that measurement (1923 files). It is a BYTE-IDENTICAL mirror of
+# githooks/, plugins/ and skills/, regenerated at prepack -- two files that must
+# be identical are not duplicated code, and a finding nobody can act on costs
+# 28 s per run (measured 2026-11-24: `check 2` took 28.4 s and FAILED on exactly
+# these pairs). Mirror drift is a real defect with its own gate (12b); Gate 2
+# re-deriving it from line similarity is both wrong and slow.
+#
 # *.md joins the set for the same reason *.yaml did: duplicate detection is
 # about CODE, and a prose document mirrored into several plugin directories is
 # duplicate by design. Measured before: 581 of 1410 findings were skill docs
-JSCPD_DEFAULT_IGNORE_PATTERNS='(^|/)(node_modules|dist|build|target|coverage|out|\.next|\.nuxt|vendor|\.xp-gate)/|\.log$|\.txt$|\.(ya?ml)$|golden|baseline\.json$|evidence|\.md$'
+JSCPD_DEFAULT_IGNORE_PATTERNS='(^|/)(node_modules|dist|build|target|coverage|out|\.next|\.nuxt|vendor|\.xp-gate|src/npm-package)/|\.log$|\.txt$|\.(ya?ml)$|golden|baseline\.json$|evidence|\.md$'
 
 # The BUILD-OUTPUT half of the set above, alone (#649).
 #

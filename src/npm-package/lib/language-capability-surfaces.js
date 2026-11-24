@@ -89,6 +89,46 @@ function inspectGate2(deps, lang, exts, ctx) {
  * into the state -- it would otherwise make every language absent from this
  * repo report NOT WIRED, which is a fact about the repo, not about the wiring.
  */
+/**
+ * Read a gate family's extension set from the ONE place that defines it.
+ *
+ * `gate-3.sh` and `gate-4.sh` do not carry literal extension lists: they build
+ * their filter from `xp_gate_source_exts ccn|principles`, whose values live in
+ * `githooks/lib/file-classifier.sh` as `XP_GATE_*_EXTS`. Scanning only the gate
+ * scripts therefore saw no `cs` anywhere and reported csharp's Gate 3 and Gate 4
+ * as NOT WIRED -- permanently, for a language whose `.cs` the filter really does
+ * accept (verified by feeding `A.cs` through the real regex).
+ *
+ * A reader that looks in the wrong file reports "not wired" for wired code,
+ * which is the false-alarm direction that gets a check switched off.
+ *
+ * @param {object} ctx reader with `read(rel)`
+ * @param {'ccn'|'principles'} family
+ * @returns {string[]} alternation bodies from the classifier, empty when absent
+ */
+function classifierExtensionAlternations(ctx, family) {
+  const src = ctx.read('githooks/lib/file-classifier.sh');
+  if (src === null) return [];
+  const varName = family === 'ccn' ? 'XP_GATE_CCN_EXTS' : 'XP_GATE_PRINCIPLES_EXTS';
+  const out = [];
+  for (const line of src.split('\n')) {
+    if (!line.includes(`${varName}=`)) continue;
+    // The value is `"${XP_GATE_JS_TS_EXTS}|py|go|...|cs|php"`. The JS/TS part is
+    // another variable, so it stays unresolved; an extension that is spelled out
+    // here is what `hasExtensionToken` can recognise.
+    const m = line.match(/XP_GATE_[A-Z_]+_EXTS="([^"]*)"/);
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
+/** Does any alternation -- literal in the gate, or declared in the classifier -- name `ext`? */
+function wiredInGate(deps, gateText, exts, ctx, family) {
+  if (deps.anyAlternationHas(gateText, exts)) return true;
+  return exts.some((ext) =>
+    classifierExtensionAlternations(ctx, family).some((alt) => deps.hasExtensionToken(alt, ext)));
+}
+
 function inspectGate3(deps, lang, exts, ctx) {
   const gate3 = ctx.read('githooks/adapters/gate-3.sh');
   if (gate3 === null) {
@@ -96,7 +136,7 @@ function inspectGate3(deps, lang, exts, ctx) {
   }
   // Scan the WHOLE file: the extension has been listed in more than one
   // alternation over time and a name-bound reader went silently blank once.
-  const wired = deps.anyAlternationHas(gate3, exts);
+  const wired = wiredInGate(deps, gate3, exts, ctx, 'ccn');
   if (!wired) {
     return deps.row(
       'gate-3',
@@ -137,7 +177,7 @@ function inspectGate4(deps, lang, exts, ctx) {
     return deps.row('gate-4', lang, deps.STATE.UNKNOWN, 'src/principles/analyzer.ts unreadable');
   }
   const filterLine = gate.split('\n').find((l) => l.includes('PRINCIPLES_FILES=')) || '';
-  const inFilter = deps.anyAlternationHas(filterLine, exts);
+  const inFilter = wiredInGate(deps, filterLine, exts, ctx, 'principles');
   const inMap = exts.some((e) => analyzer.includes(`'.${e}':`));
   if (inFilter && inMap) {
     return deps.row('gate-4', lang, deps.STATE.CHECKED, 'filter + analyzer.ts adapterMap both present');
@@ -186,13 +226,37 @@ function inspectGate6(deps, lang, exts, ctx) {
     : deps.row('gate-6', lang, deps.STATE.NOT_IMPLEMENTED, `no "${lang})" arm: falls to the no-detector branch`);
 }
 
-/** Gate 9: build integrity arm. */
+/**
+ * Gate 9: build integrity arm.
+ *
+ * Only TypeScript and Java have a real half. Every OTHER language appears in a
+ * `case` whose whole purpose is to MARK ITSELF AS MISSING: it sets
+ * `_g9_rx` so the gate can report `<lang>:no_build_integrity_half` when the
+ * change set touches that language. The word "csharp" therefore occurs in
+ * `gate-9-entry.sh` while no build step for C# exists.
+ *
+ * A key-presence test cannot tell those apart, and read the marker as an
+ * implementation -- exactly the mistake that makes a declared gap look closed.
+ * The arm is recognised by the two languages that actually run something, and a
+ * language whose only mention is inside the missing-half report is NOT IMPLEMENTED.
+ */
 function inspectGate9(deps, lang, exts, ctx) {
   const src = ctx.read('githooks/gate-entries/gate-9-entry.sh');
   if (src === null) return deps.row('gate-9', lang, deps.STATE.UNKNOWN, 'gate-9-entry.sh unreadable');
-  return deps.hasLanguageKey(src, lang)
-    ? deps.row('gate-9', lang, deps.STATE.CHECKED, `"${lang})" arm present`)
-    : deps.row('gate-9', lang, deps.STATE.NOT_IMPLEMENTED, 'no build arm: this language is SKIPped with no verdict');
+
+  // A language has a build half only when the script has a `case` arm that
+  // actually DOES something for it. The MISSING-HALF reporter also carries the
+  // language name (`csharp)  _g9_rx='\.cs$'`), whose entire job is to record
+  // "<lang>:no_build_integrity_half" — counting that as an implementation is how
+  // a declared gap reads as closed. So the arm must be a real statement line,
+  // not the `_g9_rx` selector.
+  const armRe = new RegExp(`^\\s*${lang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)\\s*(.+)$`, 'm');
+  const arm = src.match(armRe);
+  const isRealArm = Boolean(arm) && !/^_g9_rx\s*=/.test(arm[1].trim());
+  if (isRealArm) {
+    return deps.row('gate-9', lang, deps.STATE.CHECKED, `"${lang})" arm present`);
+  }
+  return deps.row('gate-9', lang, deps.STATE.NOT_IMPLEMENTED, 'no build arm: this language is SKIPped with no verdict');
 }
 
 /**

@@ -50,6 +50,54 @@ native_path_applies() {
 #
 # @param {string} path path to convert
 # @returns {string} native form, or the input unchanged
+#
+# A NATIVE Linux binary must not be handed a converted path (#WSL).
+#
+# The original implementation converted on ANY host where wslpath exists, without
+# asking what the consumer is. On WSL that is always -- so a Linux node/tsx was
+# given `\\wsl.localhost\Ubuntu-22.04\home\...`, which node rejects outright:
+#
+#   TypeError [ERR_INVALID_MODULE_SPECIFIER]: Invalid module
+#   "/…/llmveto/%5C%5Cwsl.localhost%5C…%5Cgate-10.ts" must not include encoded "/"
+#
+# Measured on this host (single-variable A/B, same file, same tsx, only the path form
+# differs): POSIX arg -> "Overall: PASS" (exit 0); wslpath-converted arg -> the error
+# above (exit 1). Gate 9 therefore blocked EVERY commit with advice to fix type errors
+# in a repository whose tsc passes.
+#
+# wslpath existing means "this is WSL", not "the consumer is Windows". Only the latter
+# needs conversion, and the evidence is the consumer's own file header: a natively
+# compiled Linux binary is ELF (7f 45 4c 46), a Windows one is PE (MZ). So conversion is
+# skipped whenever the consumer is ELF — which on this host means node/tsx.
+# NATIVE_PATH_CONSUMER=<name-or-path> names the consumer explicitly; unset or unknown
+# falls through to the original "host needs conversion" rule, so no call site changes
+# behaviour on hosts this patch does not cover (git-bash, real Windows).
+#
+# Same defect class as #581, which moved the failure from "path not found" to
+# "invalid module specifier" without fixing either: on this host the conversion
+# itself is what corrupts the path. The consumer's file header is the only
+# evidence that distinguishes the two cases — wslpath existing means "this is
+# WSL", never "this consumer is Windows".
+_to_native_path_needs_conversion() {
+  local _bin="${1:-}" _head=""
+  case "$_bin" in
+    ""|node|tsx|npm|npx|nodejs)
+      # Known native-on-WSL interpreters: never convert when the binary on this
+      # host is a Linux ELF. A Windows node.exe is caught by the ELF check below.
+      _bin="$(command -v node 2>/dev/null || true)"
+      ;;
+  esac
+  if [ -n "$_bin" ] && [ -f "$_bin" ]; then
+    _head=$(head -c 4 "$_bin" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    # 7f454c46 = ELF (Linux/macOS native) -> needs no conversion. 4d5a = MZ (PE) -> needs it.
+    case "$_head" in
+      7f454c46*) return 1 ;;
+      4d5a*) return 0 ;;
+    esac
+  fi
+  native_path_applies
+}
+
 to_native_path() {
   local _p="${1:-}"
   [ -n "$_p" ] || return 0
@@ -59,6 +107,12 @@ to_native_path() {
     /*) ;;
     *) printf '%s' "$_p"; return 0 ;;
   esac
+
+  # A native binary must receive the POSIX path unchanged: conversion is the bug.
+  if ! _to_native_path_needs_conversion "${NATIVE_PATH_CONSUMER:-}"; then
+    printf '%s' "$_p"
+    return 0
+  fi
 
   local _converted=""
   if [ -n "${WSL_DISTRO_NAME:-}" ] && command -v wslpath >/dev/null 2>&1; then

@@ -43,10 +43,30 @@ const EXEMPT = [];
 // The tradeoff is that the exclusion now lives in one place (here) and must track
 // SKIP_DIRS. What the guard is for is unchanged: a canonical edit that was never
 // re-copied still fails, which is the PR #438 incident.
-const SKIP_DIRS = new Set(['__tests__']);
+//
+// `reinstall-xp-gate` is excluded on a different ground: it is NOT a shipped
+// skill. It uninstalls and reinstalls xp-gate, so a copy living inside the
+// package would delete itself mid-run; it is distributed to agent skill roots by
+// its own installer instead. Demanding that every mirror carry it would force it
+// back into the release chain.
+const SKIP_DIRS = new Set(['__tests__', 'reinstall-xp-gate']);
 
+/**
+ * Walk a tree, returning forward-slash relative paths.
+ *
+ * An unreadable directory throws WITH THE PATH: returning an empty list instead
+ * would make "this mirror is missing every file" and "this guard could not look"
+ * produce the same diff, and the guard would report drift for a tree it never
+ * actually read.
+ */
 function walkFiles(dir, base = dir, out = []) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    throw new Error(`cannot read ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  for (const e of entries) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
       if (SKIP_DIRS.has(e.name)) continue;
@@ -56,9 +76,16 @@ function walkFiles(dir, base = dir, out = []) {
   return out;
 }
 
+/** Content digest, naming the file when it cannot be read. */
 function digest(p) {
   const crypto = require('crypto');
-  return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  let buf;
+  try {
+    buf = fs.readFileSync(p);
+  } catch (err) {
+    throw new Error(`cannot read ${p}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
 describe('AC-485: the six skill mirror trees are byte-copies of skills/ (#485)', () => {

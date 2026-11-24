@@ -91,7 +91,7 @@ setup() {
     printf 'old\n' > canonical/gate.sh
     printf 'old\n' > mirror/gate.sh
     git add -A
-    git commit -qm base
+    git commit -qm base --no-verify
 
     # Now the failure shape: edit canonical AND sync the mirror on disk, but stage
     # only canonical -- precisely what `git add githooks/...` alone does.
@@ -132,7 +132,7 @@ setup() {
     mkdir -p githooks src/npm-package
     printf 'old\n' > githooks/gate-7.sh
     printf 'old\n' > src/npm-package/gate-7.sh
-    git add -A && git commit -qm base
+    git add -A && git commit -qm base --no-verify
 
     printf 'new-with-fix\n' > githooks/gate-7.sh
     printf 'new-with-fix\n' > src/npm-package/gate-7.sh   # regenerated on disk
@@ -169,7 +169,7 @@ setup() {
     mkdir -p githooks src/npm-package
     printf 'old\n' > githooks/gate-7.sh
     printf 'old\n' > src/npm-package/gate-7.sh
-    git add -A && git commit -qm base
+    git add -A && git commit -qm base --no-verify
 
     printf 'new\n' > githooks/gate-7.sh
     printf 'new\n' > src/npm-package/gate-7.sh

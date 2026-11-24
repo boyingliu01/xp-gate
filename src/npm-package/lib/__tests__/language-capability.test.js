@@ -281,6 +281,33 @@ describe('real repository invariants', () => {
     }
   });
 
+  /**
+   * @test REQ-LANG-CAPABILITY
+   * @intent gate-3/gate-4 的扩展名白名单不是字面量，而是从
+   *         githooks/lib/file-classifier.sh 的 XP_GATE_CCN_EXTS /
+   *         XP_GATE_PRINCIPLES_EXTS 变量展开的。只在 gate-*.sh 里 grep 字面量
+   *         会把一处真实的接线读成"未接线"——csharp 因此在 gate-3/gate-4 上
+   *         永久红着，而 `cs` 明明已在两个变量里，`\.(…)$` filter 也确实收 .cs。
+   * @covers AC-LANG-CAP-05
+   */
+  it('derives gate-3/gate-4 extension sets from the classifier, not just literals', () => {
+    const { readFileSync } = require('node:fs');
+    const classifier = readFileSync(
+      path.join(REPO_ROOT, 'githooks/lib/file-classifier.sh'),
+      'utf8',
+    );
+    // Precondition: the authority really does declare cs, so the assertion
+    // below cannot pass by accident when the classifier is later edited.
+    expect(classifier).toMatch(/XP_GATE_CCN_EXTS=.*\bcs\b/);
+    expect(classifier).toMatch(/XP_GATE_PRINCIPLES_EXTS=.*\bcs\b/);
+
+    const rows = inspectAll({ root: REPO_ROOT }).filter((r) => r.language === 'csharp');
+    for (const surface of ['gate-3', 'gate-4']) {
+      const row = rows.find((r) => r.surface === surface);
+      expect(row.state, `${surface} should see cs via the classifier`).toBe(STATE.CHECKED);
+    }
+  });
+
   it('csharp is fully wired except Gate 9, which is a declared gap', () => {
     const rows = inspectAll({ root: REPO_ROOT }).filter((r) => r.language === 'csharp');
     const sum = summarise(rows);

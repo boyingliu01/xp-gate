@@ -193,7 +193,13 @@ describe('resolveArchlint', () => {
     expect(fs.existsSync(resolved.script)).toBe(true);
     const pkgDir = path.dirname(path.dirname(resolved.script));
     const version = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')).version;
-    expect(version).toMatch(/^0\.16\./);
+    // Assert against the REPO'S OWN DECLARATION rather than a literal: the
+    // invariant under test is "the pinned dependency wins over the registry",
+    // and a hardcoded range turned a routine dependency bump into a red test
+    // while saying nothing about that invariant.
+    const declared = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'))
+      .devDependencies['@archlinter/cli'];
+    expect(version).toMatch(new RegExp(`^${declared.replace(/^[\^~]/, '').replace(/\./g, '\\.')}`));
   });
 
   it('falls back to the project\'s local node_modules when the own dependency is skipped', () => {

@@ -137,7 +137,11 @@ it('REQ-D2-01: the CLI publishes what each path can execute, derived from the re
   // Every pre-push gate is push-only, NOT hook-only: it runs, just not via a
   // subcommand. This is the distinction the review rejected the first version for.
   const pushOnly = parsed.gates.filter((g) => g.capability === 'push-only').map((g) => String(g.gate));
-  for (const expected of ['M', 'M2', 'ML', 'UI', 'MW', 'S']) {
+  // M2 was removed 2026-11-20 (a registry row with no implementation). ML and
+  // UI are still defined AND called in pre-push, so they must appear here -- they
+  // were missing from the registry until 2026-11-24, which made two gates that
+  // run on every push invisible to `gate-capability`.
+  for (const expected of ['M', 'ML', 'UI', 'MW', 'S']) {
     assert.ok(pushOnly.includes(expected),
       `pre-push gate ${expected} runs on git push and must be push-only, got ${JSON.stringify(pushOnly)}`);
   }

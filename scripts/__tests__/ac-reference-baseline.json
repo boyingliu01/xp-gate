@@ -1,5 +1,15 @@
 {
   "files": {
+    "githooks/__tests__/a2-only-gate-selection.test.bats": [
+      "AC-GATESEL-05"
+    ],
+    "githooks/__tests__/adapter-tool-missing.test.bats": [
+      "AC-ANT-01",
+      "AC-ANT-02",
+      "AC-ANT-03",
+      "AC-ANT-04",
+      "AC-ANT-05"
+    ],
     "githooks/__tests__/gate-0-staged-env-oversize.test.bats": [
       "AC-809-01",
       "AC-809-02",
@@ -140,8 +150,21 @@
       "AC-TDD-001-13",
       "AC-TDD-001-14"
     ],
+    "githooks/__tests__/gate-732-source-extensions.test.bats": [
+      "AC-732-01",
+      "AC-732-02",
+      "AC-732-03",
+      "AC-732-04",
+      "AC-732-05",
+      "AC-732-06"
+    ],
     "githooks/__tests__/gate-8-staged-scan.test.bats": [
       "AC-SEC-001-01"
+    ],
+    "githooks/__tests__/gate-availability-matrix.test.bats": [
+      "AC-806-01",
+      "AC-806-02",
+      "AC-806-03"
     ],
     "githooks/__tests__/gate-cjs-source-detection.test.bats": [
       "AC-TDD-002-11"
@@ -157,6 +180,12 @@
       "AC-TDD-002-08",
       "AC-TDD-002-09",
       "AC-TDD-002-10"
+    ],
+    "githooks/__tests__/gate-report-not-reached.test.bats": [
+      "AC-NR-01",
+      "AC-NR-02",
+      "AC-NR-03",
+      "AC-NR-04"
     ],
     "githooks/__tests__/issue-404-gate-m-journal.test.bats": [
       "AC-404-01",
@@ -293,6 +322,12 @@
     "githooks/__tests__/issue-559-semgrep-timeout.test.bats": [
       "AC-559-01"
     ],
+    "githooks/__tests__/issue-594-coverage-nan-pass.test.bats": [
+      "AC-821-01",
+      "AC-821-02",
+      "AC-823-01",
+      "AC-823-02"
+    ],
     "githooks/__tests__/issue-787-singular-test-dir.test.bats": [
       "AC-787-01",
       "AC-787-02",
@@ -328,11 +363,33 @@
       "AC-TDD-015-04",
       "AC-TDD-015-05"
     ],
+    "githooks/__tests__/prelude-gate-honest-skip.test.bats": [
+      "AC-PH-01",
+      "AC-PH-02",
+      "AC-PH-03",
+      "AC-PH-04"
+    ],
+    "githooks/__tests__/report-persisted-fields.test.bats": [
+      "AC-PF-01",
+      "AC-PF-02",
+      "AC-PF-03"
+    ],
     "scripts/__tests__/ac-reference-guard.test.cjs": [
       "AC-483-01",
       "AC-483-02",
       "AC-DSH-001",
       "AC-GATEID-002"
+    ],
+    "scripts/__tests__/adr-0003-pins.test.cjs": [
+      "AC-ADR-0003-01",
+      "AC-ADR-0003-02",
+      "AC-ADR-0003-03"
+    ],
+    "scripts/__tests__/arch-doc-counts.test.cjs": [
+      "AC-ADR-0003-04",
+      "AC-ADR-0003-05",
+      "AC-ADR-0003-06",
+      "AC-ADR-0003-10"
     ],
     "scripts/__tests__/archlint-config.test.cjs": [
       "AC-006-01"
@@ -345,6 +402,10 @@
       "AC-544-02",
       "AC-CCNRPT-001",
       "AC-CCNRPT-002",
+      "AC-CCNRPT-003",
+      "AC-CCNRPT-004",
+      "AC-CCNRPT-731",
+      "AC-CCNRPT-902",
       "AC-COMPLEXITY-001",
       "AC-RATCHET-001",
       "AC-RATCHET-002",
@@ -370,6 +431,9 @@
     "scripts/__tests__/gate-1-biome-noop.test.ts": [
       "AC-458-01",
       "AC-458-02"
+    ],
+    "scripts/__tests__/gate-5-runner-error.test.ts": [
+      "AC-454-09"
     ],
     "scripts/__tests__/gate-identity-cross-surface.test.cjs": [
       "AC-002-04",
@@ -426,6 +490,12 @@
       "AC-485-01",
       "AC-485-03"
     ],
+    "scripts/__tests__/sprint-flow-adr-trigger.test.cjs": [
+      "AC-ADR-0003-07",
+      "AC-ADR-0003-08",
+      "AC-ADR-0003-09",
+      "AC-ADR-0003-11"
+    ],
     "scripts/__tests__/vitest-config.test.ts": [
       "AC-005-01",
       "AC-005-02"
@@ -469,6 +539,19 @@
       "AC-003-01",
       "AC-003-02",
       "AC-003-03"
+    ],
+    "src/npm-package/lib/__tests__/crap.test.js": [
+      "AC-858-01",
+      "AC-858-02",
+      "AC-858-03",
+      "AC-858-04",
+      "AC-858-05",
+      "AC-858-06",
+      "AC-858-07",
+      "AC-858-08",
+      "AC-858-09",
+      "AC-858-10",
+      "AC-858-11"
     ],
     "src/npm-package/lib/__tests__/deploy-manifest-completeness.test.js": [
       "AC-002-02",
@@ -563,6 +646,18 @@
       "AC-004-03",
       "AC-488-08",
       "AC-488-09"
+    ],
+    "src/npm-package/lib/__tests__/gate2-verdict.test.js": [
+      "AC-855-01",
+      "AC-855-02",
+      "AC-855-03",
+      "AC-855-04"
+    ],
+    "src/npm-package/lib/__tests__/language-tools-detect.test.js": [
+      "AC-846-01",
+      "AC-846-02",
+      "AC-846-03",
+      "AC-846-04"
     ],
     "src/npm-package/lib/__tests__/phase-transition.test.js": [
       "AC-338-01",
@@ -710,23 +805,6 @@
       "AC-002-06",
       "AC-002-07",
       "AC-002-08"
-    ],
-    "scripts/__tests__/gate-5-runner-error.test.ts": [
-      "AC-454-09"
-    ],
-    "githooks/__tests__/a2-only-gate-selection.test.bats": [
-      "AC-GATESEL-05"
-    ],
-    "githooks/__tests__/issue-594-coverage-nan-pass.test.bats": [
-      "AC-821-01",
-      "AC-821-02",
-      "AC-823-01",
-      "AC-823-02"
-    ],
-    "githooks/__tests__/gate-availability-matrix.test.bats": [
-      "AC-806-01",
-      "AC-806-02",
-      "AC-806-03"
     ]
   }
 }

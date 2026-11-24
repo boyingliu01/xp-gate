@@ -320,6 +320,9 @@ function inspectLanguage(lang, ctx) {
     STATE,
     hasLanguageKey,
     anyAlternationHas,
+    // Exposed so the surfaces can recognise an extension declared in
+    // `file-classifier.sh` rather than spelled out inside the gate script.
+    hasExtensionToken,
     definitionAndCall,
     SAST_BASELINE_LANGUAGES,
     SURFACES,

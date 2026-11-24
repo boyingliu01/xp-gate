@@ -6919,3 +6919,275 @@ specification:
             linter 正常作答时旧计数仍被新值替换（含降为 0）——"保留一切"的修法会让基线
             永久无法收紧，因此与 -05 成对存在
           test_type: unit
+
+    # ============================================================
+    # 工具审计：check-tools / install-tools / doctor 委托
+    #
+    # 背景：check-tools 只检查当前项目语言的工具，doctor 只检查自己的 8 个
+    # 跨语言 CLI 工具，两者并集从未被检查；且探针只判退出码，无法区分"不存在"
+    # 与"静默"。以下 REQ 把完备性、有效性、唯一性、时效性登记为可验证需求。
+    # ============================================================
+    - id: REQ-TOOLS-001
+      description: 探针有效性契约。探针的退出码不能单独构成"可用"的判定：一个成功退出但没有任何输出的探针，与一个"模块不存在但命令仍返回 0"的探针无法区分。本仓库实测：psscriptanalyzer
+        的探针 `pwsh -Command "Get-Module -ListAvailable PSScriptAnalyzer"` 在模块缺失时仍 exit 0 且输出为空，被旧实现判为 available，而
+        Invoke-ScriptAnalyzer 并不存在。判定改为：非零退出或输出为空即不可用，且必须附原因。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-001-01
+          criteria: exit 0 但 stdout/stderr 全空的探针判为 available=false，且 validityReason 说明"无输出"
+          test_type: unit
+        - id: AC-TOOLS-001-02
+          criteria: exit 0 且有输出的探针判为 available=true，version 为其首行
+          test_type: unit
+        - id: AC-TOOLS-001-03
+          criteria: 非零退出的探针即使有输出也判为 available=false
+          test_type: unit
+        - id: AC-TOOLS-001-04
+          criteria: 探针抛异常（超时/ENOENT）记 available=false，且原因中包含异常消息原文
+          test_type: unit
+    - id: REQ-TOOLS-002
+      description: 唯一性判定。同一工具在 PATH 中出现多处时须被发现并保留全部路径；但通过软链指向同一实体不算重复安装——重复指"装了两份实体"，不是"起了两个名字"。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-002-01
+          criteria: 同一工具解析出多个不同实体时 duplicated=true，paths 保留全部解析路径
+          test_type: unit
+        - id: AC-TOOLS-002-02
+          criteria: 多个路径 realpath 后收敛为同一实体时 duplicated=false
+          test_type: unit
+        - id: AC-TOOLS-002-03
+          criteria: 只有一处安装时 duplicated=false
+          test_type: unit
+    - id: REQ-TOOLS-003
+      description: 版本时效判定。需要从各家工具五花八门的版本输出中抽出可比版本，并按数值（而非字符串）比较。关键：无法判定最新版时必须报 unknown，绝不能默认为"已是最新"——"未知"与"当前"是两个状态，混同等于把未检查报成通过。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-003-01
+          criteria: 已安装版本低于已知最新版时 outdated=true，并分别给出 installedVersion 与 latestVersion
+          test_type: unit
+        - id: AC-TOOLS-003-02
+          criteria: 已安装版本等于最新版时 outdated=false
+          test_type: unit
+        - id: AC-TOOLS-003-03
+          criteria: 最新版无法确定时 outdated=null 且 currency 为 'unknown'
+          test_type: unit
+        - id: AC-TOOLS-003-04
+          criteria: parseVersion 能从真实横幅中取出 x.y.z：'Haskell Dockerfile Linter 2.14.0'、'gitleaks version 8.30.1'、'jq-1.8.2'、'v10.15.0'
+            及带 'version:' 前缀的多行输出
+          test_type: unit
+        - id: AC-TOOLS-003-05
+          criteria: compareVersions 按数值比较，'1.10.0' 大于 '1.9.0'
+          test_type: unit
+    - id: REQ-TOOLS-004
+      description: 审计汇总。四类问题（缺失/重复/过期/未知）必须分别计数，缺一类都等于漏报；complete 只在四类全清时为真。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-004-01
+          criteria: summarizeAudit 同时给出 total/missing/duplicated/outdated/unknown 且各自计数正确；存在任一问题时 complete=false
+          test_type: unit
+        - id: AC-TOOLS-004-02
+          criteria: 全部工具正常时 complete=true
+          test_type: unit
+    - id: REQ-TOOLS-005
+      description: 完备性：工具清单必须是"跨语言 CLI 工具 ∪ 语言工具"。只取其中一半时，另一半里的破损工具不可见——实测 check-tools 与 doctor 各报 8 项且内容不同，并集从未被检查。同一工具出现在两处时只算一个，门禁标签合并。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-005-01
+          criteria: 清单同时包含跨语言 CLI 工具与项目语言工具
+          test_type: unit
+        - id: AC-TOOLS-005-02
+          criteria: 同一工具在两处出现时清单中只有一条，且 gates 合并了两边的标签
+          test_type: unit
+        - id: AC-TOOLS-005-03
+          criteria: 指定语言时该语言之外的专属工具被排除，但跨语言 CLI 工具仍然包含
+          test_type: unit
+        - id: AC-TOOLS-005-04
+          criteria: 不指定语言时可列出全部注册工具（完备性判定前提）
+          test_type: unit
+    - id: REQ-TOOLS-006
+      description: 审计的容错性。单个工具不可探测不能中断整份报告：不能审计本身就是一个发现，丢掉其余行会把其他问题一起藏起来。版本查询失败同理，记为 unknown 而非抛错。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-006-01
+          criteria: 某个探针抛异常时仍为每个工具产出一条记录，该工具带失败原因
+          test_type: unit
+        - id: AC-TOOLS-006-02
+          criteria: resolveLatest 抛异常时该工具 currency 为 'unknown'，审计不抛错
+          test_type: unit
+    - id: REQ-TOOLS-007
+      description: 经 npx 探测的工具（archlint、dependency-cruiser）没有独立可执行文件，`which -a` 找不到是正常的，不能据此判为缺失；报告须标明该工具经
+        npx 调用，否则读者会误以为定位失败。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-007-01
+          criteria: 探针成功但 PATH 无条目时 available=true，currency 不为 'missing'，duplicated=false，npxInvoked=true
+          test_type: unit
+        - id: AC-TOOLS-007-02
+          criteria: checkCmd 含 npx 的工具，审计结果 npxInvoked=true，且时效判定仍正常
+          test_type: unit
+    - id: REQ-TOOLS-008
+      description: 最新版解析渠道。按工具名决定查询方式：npm 分发的走 npm registry，其余走离线已知版本表（这些工具的更新需要 GitHub API 或资产下载，在本机实测不可靠）。查阅失败必须返回
+        null 即 unknown，绝不能回落成已安装版本，否则会把过期工具静默判为最新。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-008-01
+          criteria: registryFor 将 jscpd/eslint/@archlinter/cli 归为 npm，将 shellcheck/hadolint/gitleaks 归为 table
+          test_type: unit
+        - id: AC-TOOLS-008-02
+          criteria: npm 查询抛异常时 resolveLatestVersion 返回 null
+          test_type: unit
+        - id: AC-TOOLS-008-03
+          criteria: npm 查询成功时返回净版本号（去掉换行等）
+          test_type: unit
+        - id: AC-TOOLS-008-04
+          criteria: 渠道为 table 且表中无该工具时返回 null，不猜测
+          test_type: unit
+        - id: AC-TOOLS-008-05
+          criteria: 表中有的工具直接取表值，且不触发任何网络调用
+          test_type: unit
+    - id: REQ-TOOLS-009
+      description: 收集器必须把 install 字段随工具一起传递。实测：collectGateTools 丢弃 install 后，install-tools 对 shellcheck 这类有明确安装命令的工具报
+        "no installer known"。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-009-01
+          criteria: 语言注册表中的 install 字段在收集后仍然保留
+          test_type: unit
+        - id: AC-TOOLS-009-02
+          criteria: 跨语言 CLI 条目的 install 字段同样保留
+          test_type: unit
+    - id: REQ-TOOLS-010
+      description: check-tools 命令契约。一份清单同时回答完备性、有效性、唯一性与时效性；人类可读输出与 JSON 输出都必须能看出缺失/重复/过期三类问题。既有 --json 契约（顶层按语言名分组）必须保持，#468
+        的调用方不受影响；新增事实通过 summary 与 --flat 附加。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-010-01
+          criteria: 即使检测到的语言不使用某些跨语言 CLI 工具，清单中仍列出它们
+          test_type: integration
+        - id: AC-TOOLS-010-02
+          criteria: 探针无输出时该工具 status 为 'missing'，且 reason 说明无输出
+          test_type: integration
+        - id: AC-TOOLS-010-03
+          criteria: 重复安装的工具 duplicated=true 且 paths 列出全部副本
+          test_type: integration
+        - id: AC-TOOLS-010-04
+          criteria: summary 同时给出 missing/duplicated/outdated/unknown 计数，存在任一问题时 complete=false
+          test_type: integration
+        - id: AC-TOOLS-010-05
+          criteria: 非 JSON 输出同时呈现已安装版本、最新版本与重复标记
+          test_type: integration
+        - id: AC-TOOLS-010-06
+          criteria: 缺失的 OPTIONAL 工具使命令仍以 0 退出，但必须被列出
+          test_type: integration
+    - id: REQ-TOOLS-011
+      description: install-tools 修复计划。计划是纯函数：不读写磁盘、不执行命令。口径（用户确认 2026-11-23）：只清理同一工具的重复用户实体，不动系统包——/usr/bin/jq
+        与 ~/.local/bin/jq 并存、nvm 与系统 node 各带一份 npx 都属于设计状态，删除任一都可能是破坏。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-011-01
+          criteria: 重复实体产出删除动作，且保留 PATH 首个（门禁实际执行的那份）；其余副本逐一列出
+          test_type: unit
+        - id: AC-TOOLS-011-02
+          criteria: 缺失的必需工具产出 install 动作，命令来自该工具的安装定义
+          test_type: unit
+        - id: AC-TOOLS-011-03
+          criteria: 缺失的可选工具不产生 install 动作，而是产出 skip-optional
+          test_type: unit
+        - id: AC-TOOLS-011-04
+          criteria: 过期的必需工具产出 upgrade 动作，命令来自安装定义
+          test_type: unit
+        - id: AC-TOOLS-011-05
+          criteria: 系统路径下的副本永不产生删除动作，且整个计划为空
+          test_type: unit
+        - id: AC-TOOLS-011-06
+          criteria: npx 调用且无 PATH 实体的工具不产生任何动作
+          test_type: unit
+        - id: AC-TOOLS-011-07
+          criteria: 一切正常的工具不产生任何动作，clean=true
+          test_type: unit
+    - id: REQ-TOOLS-012
+      description: install-tools 命令契约。默认（无 --yes）只报告不修改，并明确说明未做改动——静默会让"计划已算出但未执行"与"无需执行"无法区分。单条动作失败不得中断其余动作，最后如实报告失败数并以非零退出。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-012-01
+          criteria: 无 --yes 时不执行任何命令，输出明确说明未做改动或提示 --yes
+          test_type: integration
+        - id: AC-TOOLS-012-02
+          criteria: 带 --yes 时执行计划中的安装命令
+          test_type: integration
+        - id: AC-TOOLS-012-03
+          criteria: 一条动作失败后其余动作继续执行，命令以非零退出并报告失败
+          test_type: integration
+        - id: AC-TOOLS-012-04
+          criteria: 工具链已干净时不做任何事并以 0 退出，输出说明已是最新
+          test_type: integration
+    - id: REQ-TOOLS-013
+      description: 'doctor 的 CLI 工具段委托给审计结果，不再自己探测。必须保持既有报告契约（名称形如 "CLI tool: <tool> (<gates>)"，状态 PASS/WARN），同时让重复安装与过期版本在
+        doctor 中可见——旧实现两样都看不到。'
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-013-01
+          criteria: '检查名称保持 ''CLI tool: <tool> (<gates>)'' 形式，健康的工具状态为 PASS'
+          test_type: unit
+        - id: AC-TOOLS-013-02
+          criteria: 不可用的工具状态为 WARN，detail 含失败原因与 xp-gate install-tools 提示
+          test_type: unit
+        - id: AC-TOOLS-013-03
+          criteria: 重复安装的工具 detail 中标出 duplicate 并列出多余副本路径
+          test_type: unit
+        - id: AC-TOOLS-013-04
+          criteria: 过期工具 detail 同时给出当前版本与目标版本
+          test_type: unit
+        - id: AC-TOOLS-013-05
+          criteria: 完全健康的工具 detail 就是版本号本身，保持旧输出可读
+          test_type: unit
+    - id: REQ-TOOLS-014
+      description: 自相矛盾的修复计划必须被拒绝。实测 2026-11-23：hadolint 既重复又过期，计划先删 ~/.local/bin/hadolint，再执行恰好写到该路径的安装命令，重复立刻回来——修复等于没做，却会报告成功。计划须标出这种冲突并拒绝执行。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-014-01
+          criteria: 同一工具既重复又过期、且安装命令写入被删路径时，upgrade 动作 writesToRemovedPath=true 并给出冲突路径，install-tools 拒绝执行且非零退出
+          test_type: unit
+    - id: REQ-TOOLS-015
+      description: 区分"重复安装"与"并存"。系统包与用户副本并存、不同运行时各带一份同名工具，都是设计状态而非缺陷；把它们算作重复会诱导人删除系统包或删除一个运行时，两者都是破坏而非修复。只有同一工具存在多份用户自有实体才算重复。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-015-01
+          criteria: /usr/bin 下的系统副本与用户副本并存时 duplicated=false，coexistingCopies=true，systemCopies 列出系统副本
+          test_type: unit
+        - id: AC-TOOLS-015-02
+          criteria: 用户目录下的两份实体仍判 duplicated=true，systemCopies 为空
+          test_type: unit
+        - id: AC-TOOLS-015-03
+          criteria: nvm 与系统 node 各带的 npx 判 coexistingCopies=true 而非 duplicated
+          test_type: unit
+    - id: REQ-TOOLS-016
+      description: doctor 的审计不得做版本查询，且探测必须并行。实测：同步 npm view 每次阻塞事件循环约 5 秒，使同轮 checkEnv 的 node --version（正常
+        5 毫秒）超时并被判为 Not found——一个慢工具让一个快工具"消失"。doctor 只回答"能不能用"，"是不是最新"由 check-tools 负责。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-016-01
+          criteria: doctor 的审计在未注入解析器时不做任何版本查询，所有行 currency 为 'unknown'
+          test_type: unit
+        - id: AC-TOOLS-016-02
+          criteria: 审计并行探测，两个工具的探针在任一完成前都已启动
+          test_type: unit
+    - id: REQ-TOOLS-017
+      description: 审计须提供不阻塞事件循环的异步路径。同步探测（execFileSync）在串行执行慢工具时堵死进程内其他探针；异步版本须真正让出事件循环，使并发审计交错进行。同步与异步两条路径共用同一套有效性判定，避免二者结论不一致。
+      priority: high
+      acceptance_criteria:
+        - id: AC-TOOLS-017-01
+          criteria: auditAllToolsAsync 在探针为真异步（下一宏任务才完成）时，等待期间定时器能够触发，即事件循环未被阻塞
+          test_type: unit
+    - id: REQ-TOOLS-018
+      description: doctor/check-tools 与门禁必须共用同一套工具解析。PATH 里没有 ~/.local/bin 时（git GUI、IDE 终端、从 Windows 拉起的
+        WSL 都是这种），pip --user / cargo / 手工放置的二进制就在那里；只信 PATH 会把装好的扫描器报成缺失，读者的自然反应（重装、或放弃检查）两个方向都错。#841 是同一件事的镜像：Windows
+        shim 能被 PATH 找到却跑不动。
+      priority: critical
+      acceptance_criteria:
+        - id: AC-TOOLS-018-01
+          criteria: 工具位于 ~/.local/bin 而 PATH 未包含该目录时，仍然能被解析到并可执行；报告标注它不在 PATH 上
+          test_type: integration
+        - id: AC-TOOLS-018-02
+          criteria: 共享解析器找不到工具时返回 null，由调用方回落到普通探测，而不是判成缺失
+          test_type: unit

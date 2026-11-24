@@ -78,8 +78,10 @@ setup() {
   local branch
   branch=$(sed -n "${start},${end}p" "$GATE")
 
-  # The branch records the fact ...
-  echo "$branch" | grep -q 'GATE_5_DETAIL='
+  # The branch records the fact. The assignment may be an append
+  # (xp_gate_detail_append): a gate walking several languages must not let the
+  # last one replace an earlier one's reason.
+  echo "$branch" | grep -qE '(GATE_5_DETAIL=|xp_gate_detail_append GATE_5_DETAIL)'
   # ... and does not touch DELEGATED_LANGS.
   ! echo "$branch" | grep -q 'DELEGATED_LANGS='
 }

@@ -150,6 +150,23 @@ tool_is_available() {
     # run.
     _hit=$(find_tool_in_original_path "$_tool")
   fi
+  if [ -z "$_hit" ]; then
+    # #843: the same user-bin tier `resolve_tool_path` searches.
+    #
+    # These two functions must agree on WHERE a tool may live, or the platform
+    # contradicts itself: `resolve_tool_path` finds ~/.local/bin/gitleaks and
+    # returns it, then `tool_is_available` fails to see the same file and the
+    # caller is told the tool is unusable. Measured 2026-11-24 with
+    # PATH=/usr/bin:/bin: gitleaks and lizard were resolved and then rejected.
+    local _user_bin
+    for _user_bin in "${HOME:-}/.local/bin" "${HOME:-}/bin"; do
+      [ -n "${HOME:-}" ] || continue
+      if [ -x "$_user_bin/$_tool" ]; then
+        _hit="$_user_bin/$_tool"
+        break
+      fi
+    done
+  fi
   [ -n "$_hit" ] || return 1
 
   # Found — now prove it is not a shim pointing at an unreachable interpreter.
@@ -271,6 +288,27 @@ resolve_tool_path() {
   # find would cost more than it returns.
   for _d in "$_base/node_modules/.bin/$_tool" "$_base"/*/node_modules/.bin/"$_tool"; do
     if [ -x "$_d" ]; then
+      printf '%s\n' "$_d"
+      return 0
+    fi
+  done
+
+  # The user install directory (#843).
+  #
+  # `pip install --user`, `cargo install`, and most "download the release binary
+  # and put it somewhere" recipes land in ~/.local/bin. Whether it happens to be
+  # in PATH depends on the shell that started the hook, NOT on whether the tool
+  # is installed -- and the two diverge precisely in the environments that matter
+  # most: a git GUI, an IDE-spawned terminal, or a WSL session launched from
+  # Windows (measured: PATH=/usr/bin:/bin resolves none of gitleaks / lizard /
+  # semgrep, while all three are present and working in ~/.local/bin).
+  #
+  # Trusting PATH alone therefore reports an installed scanner as missing, and
+  # the reader's natural response -- install it again, or give up on the check --
+  # is wrong in both directions. #841 is the mirror image: a Windows shim can be
+  # FOUND through PATH while being unable to run.
+  for _d in "${HOME:-}/.local/bin/$_tool" "${HOME:-}/bin/$_tool"; do
+    if [ -n "${HOME:-}" ] && [ -x "$_d" ]; then
       printf '%s\n' "$_d"
       return 0
     fi

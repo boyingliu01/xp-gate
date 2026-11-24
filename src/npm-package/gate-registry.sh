@@ -54,7 +54,7 @@
 # already reads.
 #
 # Numbers are POSITIONAL LABELS, never identities, and nothing here orders them
-# numerically — pre-push numbers are strings (M, M2, ML, UI, MW, S). Do not add
+# numerically — pre-push numbers are strings (M, ML, UI, MW, S). Do not add
 # `-gt`/`-lt`/`$((` logic against this field;
 # scripts/__tests__/gate-identity-cross-surface.test.cjs greps for it.
 #
@@ -94,6 +94,8 @@ GATE_REGISTRY_ROWS=(
   # deciding its own execution order and skip semantics. Before this the
   # registry knew nothing about half the gates this project runs (#769).
   "mutation|M|inline|YES|pre-push"
+  "mock-layering|ML|inline|YES|pre-push"
+  "ui-sprint|UI|inline|YES|pre-push"
   "code-walkthrough|MW|inline|YES|pre-push"
   "prepush-sprint|S|sprint-gate.sh|YES|pre-push"
 )

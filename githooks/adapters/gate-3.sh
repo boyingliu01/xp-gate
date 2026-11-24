@@ -822,4 +822,37 @@ fi
 # Reading only CC_WARNINGS meant every ratchet block recorded issues_found=0 —
 # the gate failed while the journal claimed nothing was found.
 CC_ISSUES="${CC_VIOLATIONS:-${CC_WARNINGS:-0}}"
-record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "$CC_ISSUES" "$GATE_3_START" "ccn_threshold=${CCN_THRESHOLD:-5}${GATE_3_DETAIL:+ $GATE_3_DETAIL}"
+# Shared verdict helpers (append-with-de-duplication, strongest-verdict rule).
+_GATE_STATUS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)/gate-status.sh"
+if [ -r "$_GATE_STATUS_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$_GATE_STATUS_LIB"
+fi
+unset _GATE_STATUS_LIB
+
+# The audit detail must say WHY when the gate skipped.
+#
+# This used to record only `ccn_threshold=<n>` plus whatever GATE_3_DETAIL held.
+# GATE_3_DETAIL carries configuration and mode facts (mode=ratchet, verifier=
+# MISSING), never a skip reason -- those live in GATE_3_REASON. Measured
+# 2026-11-24: 26 of 34 gate-3 rows were SKIP and every one of them recorded
+# "ccn_threshold=5", which is not a reason. A reader could not tell "no added
+# PowerShell files" from "documentation project" from "the gate is broken".
+#
+# A SKIP with no reason is the exact defect githooks/AGENTS.md names, so the
+# reason is now appended when the gate did not run.
+_g3_audit_detail="ccn_threshold=${CCN_THRESHOLD:-5}"
+if [ -n "${GATE_3_DETAIL:-}" ]; then
+  xp_gate_detail_append _g3_audit_detail "$GATE_3_DETAIL"
+fi
+if [ "$GATE_3_STATUS" = "SKIP" ]; then
+  if [ -n "${GATE_3_REASON:-}" ]; then
+    xp_gate_detail_append _g3_audit_detail "skip_reason=${GATE_3_REASON}"
+  else
+    # Fail loudly in the record rather than leaving a blank: an unexplained skip
+    # must be visible as a defect, not read as a normal run.
+    xp_gate_detail_append _g3_audit_detail "skip_reason=UNRECORDED"
+  fi
+fi
+record_gate_audit "gate-3" "complexity" "$GATE_3_STATUS" "$CC_ISSUES" "$GATE_3_START" "$_g3_audit_detail"
+unset _g3_audit_detail

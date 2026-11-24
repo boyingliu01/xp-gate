@@ -10,6 +10,7 @@
     "**/.worktrees/**",
     "**/.perf-measure/**",
     "**/.xp-gate/**",
-    "**/*.md"
+    "**/*.md",
+    "**/src/npm-package/**"
   ]
 }

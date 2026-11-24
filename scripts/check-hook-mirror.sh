@@ -51,7 +51,7 @@ is_interactive_mirror_run() {
 # install.sh is repo-side tooling rather than a published hook, but Gate 12b
 # (pre-commit) requires a package mirror for every githooks/* file a diff
 # touches, so syncHooks() now copies it and this list must expect it (REQ-DEPLOY-001).
-HOOK_MIRROR_FILES="adapter-common.sh hook-module-resolution.sh gate-driver.sh gate-entries/gate-0-entry.sh gate-entries/gate-1-entry.sh gate-entries/gate-2-entry.sh gate-entries/gate-3-entry.sh gate-entries/gate-4-entry.sh gate-entries/gate-5-entry.sh gate-entries/gate-6-entry.sh gate-entries/gate-7-entry.sh gate-entries/gate-8-entry.sh gate-entries/gate-9-entry.sh gate-entries/gate-10-entry.sh gate-entries/gate-11-entry.sh gate-entries/gate-12-entry.sh gate-entries/gate-12b-entry.sh gate-entries/gate-12c-entry.sh gate-entries/gate-13-entry.sh gate-entries/subdir-restore.sh install.sh deploy-manifest.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-10.sh gate-12-file-hygiene.sh gate-13-compiler-strictness.sh gate-6-layers.sh gate-registry.sh post-merge post-commit pre-commit pre-push sprint-gate.sh lib/layer-baseline.cjs lib/coverage-total.sh lib/gate-5c-alignment.sh lib/toolchain-path.sh lib/native-path.sh lib/python-test-selection.sh lib/java-test-selection.sh lib/python-incremental-typecheck.sh lib/now-ms.sh lib/audit-sanitize.sh lib/jscpd-run.sh lib/sprint-gate-report.sh lib/test-failure.sh lib/assertion-quality.sh lib/typecheck.sh lib/diff-coverage.sh lib/ccn-ratchet.sh lib/docs-only.sh lib/file-classifier.sh lib/validate-code-walkthrough.cjs lib/prepush-score.py lib/Measure-PowerShellComplexity.ps1 lib/gate-12-blob-scan.awk"
+HOOK_MIRROR_FILES="adapter-common.sh hook-module-resolution.sh gate-driver.sh gate-entries/gate-0-entry.sh gate-entries/gate-1-entry.sh gate-entries/gate-2-entry.sh gate-entries/gate-3-entry.sh gate-entries/gate-4-entry.sh gate-entries/gate-5-entry.sh gate-entries/gate-6-entry.sh gate-entries/gate-7-entry.sh gate-entries/gate-8-entry.sh gate-entries/gate-9-entry.sh gate-entries/gate-10-entry.sh gate-entries/gate-11-entry.sh gate-entries/gate-12-entry.sh gate-entries/gate-12b-entry.sh gate-entries/gate-12c-entry.sh gate-entries/gate-13-entry.sh gate-entries/subdir-restore.sh install.sh deploy-manifest.sh gate-3.sh gate-4.sh gate-7.sh gate-8.sh gate-10.sh gate-12-file-hygiene.sh gate-13-compiler-strictness.sh gate-6-layers.sh gate-registry.sh post-merge post-commit pre-commit pre-push sprint-gate.sh lib/layer-baseline.cjs lib/coverage-total.sh lib/gate-5c-alignment.sh lib/gate-status.sh lib/toolchain-path.sh lib/native-path.sh lib/python-test-selection.sh lib/java-test-selection.sh lib/python-incremental-typecheck.sh lib/now-ms.sh lib/audit-sanitize.sh lib/jscpd-run.sh lib/sprint-gate-report.sh lib/test-failure.sh lib/assertion-quality.sh lib/typecheck.sh lib/diff-coverage.sh lib/ccn-ratchet.sh lib/docs-only.sh lib/file-classifier.sh lib/validate-code-walkthrough.cjs lib/prepush-score.py lib/Measure-PowerShellComplexity.ps1 lib/gate-12-blob-scan.awk"
 
 # Root-level shell copies (githooks/<f> -> src/npm-package/<f>). Same set as
 # the hooks/ copies minus hook-only entry points (post-merge/post-commit/
@@ -504,7 +504,12 @@ for mirror_tree in src/npm-package/build-integrity src/npm-package/skills; do
   [ -n "$canonical_tree" ] || continue
   [ -d "$mirror_tree" ] || continue
 
-  tree_diff=$(diff -rq -x '__tests__' "$canonical_tree" "$mirror_tree" 2>&1 || true)
+  # `reinstall-xp-gate` is deliberately NOT shipped in the npm package: it is the
+  # skill that uninstalls and reinstalls xp-gate, so a version living inside the
+  # package would delete itself mid-run. It is distributed to agent skill roots
+  # by its own installer and mirrored there, not here. Excluding it by name (not
+  # by glob) keeps the check honest about every other skill.
+  tree_diff=$(diff -rq -x '__tests__' -x 'reinstall-xp-gate' "$canonical_tree" "$mirror_tree" 2>&1 || true)
   [ -z "$tree_diff" ] || fail "mirror tree drift ($canonical_tree vs $mirror_tree):
 $tree_diff
 Fix: node src/npm-package/scripts/sync-package-content.js --fix"

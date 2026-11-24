@@ -152,7 +152,12 @@ describe('runTscCheck', () => {
       try {
         const result = await runTscCheck(isolatedDir, 30000);
         expect(result.status).toBe('skip');
-        expect(result.message).toContain('tsc');
+        // The reason matters as much as the status: `npx tsc` with nothing
+        // installed runs npm's PLACEHOLDER, which prints "This is not the tsc
+        // command you are looking for" and exits 0. A probe that only reads the
+        // exit code therefore reports a working compiler whose own output says
+        // it is the wrong program, and the gate answers `pass`.
+        expect(result.message).toMatch(/tsc/);
       } finally {
         process.env.PATH = originalPath;
         process.cwd = originalCwd;
