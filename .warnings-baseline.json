@@ -38,9 +38,5 @@
   "src/npm-package/scripts/sync-package-content.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
     "totalWarnings": 14
-  },
-  "scripts/check_delphi_local_models.py": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-11-25T01:34:47.110Z"
   }
 }
