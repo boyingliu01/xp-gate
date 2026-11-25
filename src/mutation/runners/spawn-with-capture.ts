@@ -229,8 +229,24 @@ export async function runMutationCommand(
   // stderr is carried as an `error` so the caller can show WHY without discarding
   // the report the run produced.
   return {
-    report: parse(),
+    report: safeParse(parse),
     timedOut: false,
     error: result.code !== 0 ? result.stderr || result.stdout : undefined,
   };
+}
+
+/**
+ * Run the caller's parser, converting a THROW into a null report.
+ *
+ * Rejecting this async function instead would let a caller's `catch` swallow the
+ * exception into "the tool found nothing" -- a clean pass produced by a parse bug. A null
+ * report is the honest answer: nothing was read, so nothing is claimed.
+ */
+function safeParse(parse: () => MutationRunResult | null): MutationRunResult | null {
+  try {
+    return parse();
+  } catch (err) {
+    console.error(`[mutation] could not read the report: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
 }

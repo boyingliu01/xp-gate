@@ -11,7 +11,7 @@
  * @covers AC-MUTATION-SPAWN-02
  */
 import { describe, it, expect, vi } from 'vitest';
-import { spawnWithCapture } from '../spawn-with-capture';
+import { spawnWithCapture, runMutationCommand } from '../spawn-with-capture';
 
 describe('spawnWithCapture', () => {
   it('collects stdout, stderr and the exit code', async () => {
@@ -94,4 +94,18 @@ describe('spawnWithCapture', () => {
     expect(result.timedOut).toBe(true);
     expect(result.code).toBeNull();
   }, 15_000);
+
+  it('reports a throwing parser as an absent report, not a rejection', async () => {
+    // If this REJECTED, the caller's catch would turn a parse bug into "the tool found
+    // nothing" -- a clean pass produced by an exception. A null report is the honest
+    // answer: nothing was read, so nothing is claimed.
+    const outcome = await runMutationCommand(
+      process.execPath,
+      ['-e', 'process.exit(0);'],
+      { timeoutMs: 10_000, cwd: process.cwd() },
+      () => { throw new Error('bad report'); },
+    );
+    expect(outcome.report).toBeNull();
+    expect(outcome.timedOut).toBe(false);
+  });
 });
