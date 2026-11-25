@@ -258,21 +258,36 @@ function planShards(files, shardCount) {
     throw new Error(`shardCount must be a positive integer, got ${shardCount}`);
   }
   const shards = Array.from({ length: shardCount }, () => ({ files: [], cost: 0 }));
-  const ordered = [...files].sort((a, b) => {
-    const d = suiteCost(b) - suiteCost(a);
-    return d !== 0 ? d : a.localeCompare(b);
-  });
-  for (const file of ordered) {
-    // Cheapest shard wins; ties go to the lowest index so the plan is stable.
-    let target = shards[0];
-    for (const shard of shards) {
-      if (shard.cost < target.cost) target = shard;
-    }
-    target.files.push(file);
-    target.cost += suiteCost(file);
-  }
+  for (const file of byDescendingCost(files)) assignToCheapest(shards, file);
   for (const shard of shards) shard.files.sort();
   return shards;
+}
+
+/**
+ * The files, costliest first, ties broken by NAME.
+ *
+ * Cost ordering is what makes the greedy assignment below approximate a balanced plan;
+ * the name tiebreak is what makes the plan STABLE -- two suites of equal cost must always
+ * land in the same order, or the shard contents change between runs and every cache key
+ * with them.
+ */
+function byDescendingCost(files) {
+  return [...files].sort((a, b) => {
+    const delta = suiteCost(b) - suiteCost(a);
+    return delta !== 0 ? delta : a.localeCompare(b);
+  });
+}
+
+/**
+ * Put one file in the cheapest shard.
+ *
+ * Ties go to the LOWEST index, which `find` gives for free and which keeps the plan
+ * deterministic: any other rule would make the same input produce different shards.
+ */
+function assignToCheapest(shards, file) {
+  const cheapest = shards.reduce((best, shard) => (shard.cost < best.cost ? shard : best), shards[0]);
+  cheapest.files.push(file);
+  cheapest.cost += suiteCost(file);
 }
 
 /** Parse `--shard <index>/<total>` (1-based index, as GitHub matrix reads it). */
@@ -416,22 +431,38 @@ function runShard(files, jobs) {
  * @returns {number} exit code
  */
 function interpretShardResult(result, timeoutMs) {
-  const timedOut = result.error?.code === 'ETIMEDOUT'
-    || (result.signal === 'SIGTERM' && (result.status === null || result.status !== 0));
-  if (timedOut) {
-    console.error(
-      `❌ bats did not finish within ${Math.round(timeoutMs / 1000)}s (XP_GATE_BATS_TIMEOUT_MS). `
-        + 'A suite is hung rather than slow: the slowest measured suite takes 880s. '
-        + 'Re-run the shard with --print-only to see which files it contains, then '
-        + 'run them one at a time.'
-    );
-    return 1;
-  }
-  if (result.error) {
-    console.error(`❌ could not start the bats runner: ${result.error.message}`);
-    return 1;
-  }
+  if (didTimeOut(result)) return reportTimeout(timeoutMs);
+  if (result.error) return reportStartFailure(result.error);
   return result.status === 0 ? 0 : 1;
+}
+
+/**
+ * Whether bats was KILLED rather than failing.
+ *
+ * `SIGTERM` with a null status is how a timeout surfaces on some platforms; the
+ * `ETIMEDOUT` code is how it surfaces on others. Both mean the same thing, and a signal
+ * WITH a zero status is not a timeout -- the run completed.
+ */
+function didTimeOut(result) {
+  if (result.error?.code === 'ETIMEDOUT') return true;
+  return result.signal === 'SIGTERM' && (result.status === null || result.status !== 0);
+}
+
+/** Explain the timeout with the ONE action that helps, and fail. */
+function reportTimeout(timeoutMs) {
+  console.error(
+    `❌ bats did not finish within ${Math.round(timeoutMs / 1000)}s (XP_GATE_BATS_TIMEOUT_MS). `
+      + 'A suite is hung rather than slow: the slowest measured suite takes 880s. '
+      + 'Re-run the shard with --print-only to see which files it contains, then '
+      + 'run them one at a time.'
+  );
+  return 1;
+}
+
+/** Report a runner that could not start, which is a DIFFERENT failure from a red suite. */
+function reportStartFailure(error) {
+  console.error(`❌ could not start the bats runner: ${error.message}`);
+  return 1;
 }
 
 /**
