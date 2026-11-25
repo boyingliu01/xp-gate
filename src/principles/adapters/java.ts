@@ -190,38 +190,60 @@ function isStatementKeyword(name: string): boolean {
  */
 function parseMemberDeclarations(body: string): string[] {
   const declRe = new RegExp(JAVA_MEMBER_DECL_SOURCE, 'gm');
-  // Brace depth at each character offset, computed once. NaN marks "not yet seen".
-  const depthAt: number[] = new Array(body.length);
+  const depths = braceDepths(body);
+
+  const members: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(body)) !== null) {
+    if (!isMemberDeclaration(m[1], m[2], depths[m.index] ?? 0)) continue;
+    members.push(m[2]);
+  }
+  return members;
+}
+
+/**
+ * The brace depth at every character offset, computed once.
+ *
+ * One pass instead of re-scanning the prefix per candidate: a class body of ten members
+ * would otherwise be walked ten times.
+ *
+ * @returns depth[i] is the depth BEFORE the character at `i` is applied, except for `{`
+ *   which counts as inside the block it opens
+ */
+function braceDepths(body: string): number[] {
+  const depths: number[] = new Array(body.length);
   let depth = 0;
   for (let i = 0; i < body.length; i += 1) {
     const ch = body[i];
     if (ch === '{') {
       depth += 1;
-      depthAt[i] = depth;
+      depths[i] = depth;
     } else if (ch === '}') {
-      depthAt[i] = depth;
+      depths[i] = depth;
       depth -= 1;
     } else {
-      depthAt[i] = depth;
+      depths[i] = depth;
     }
   }
+  return depths;
+}
 
-  const members: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = declRe.exec(body)) !== null) {
-    const returnType = m[1];
-    const name = m[2];
-    // A statement keyword in either the type or the name position means the regex
-    // latched onto a control statement or an expression; never a member.
-    if (isStatementKeyword(name) || isStatementKeyword(returnType)) continue;
-    if (JAVA_MODIFIERS.has(name)) continue;
-    // Only the class body itself. At depth 0 we are outside the class; at depth 2+ the
-    // declaration belongs to a nested or anonymous class.
-    const declarationDepth = depthAt[m.index] ?? 0;
-    if (declarationDepth !== 1) continue;
-    members.push(name);
-  }
-  return members;
+/**
+ * Whether this regex match is a real MEMBER declaration.
+ *
+ * Three ways it is not, and each is a different false positive:
+ *
+ *  - a statement keyword in either position means the regex latched onto a control
+ *    statement or an expression;
+ *  - a modifier is part of the declaration, not a member name;
+ *  - only the CLASS BODY itself counts. At depth 0 we are outside the class; at depth 2+
+ *    the declaration belongs to a nested or anonymous class, which is not this type's
+ *    member list.
+ */
+function isMemberDeclaration(returnType: string, name: string, depth: number): boolean {
+  if (isStatementKeyword(name) || isStatementKeyword(returnType)) return false;
+  if (JAVA_MODIFIERS.has(name)) return false;
+  return depth === 1;
 }
 
 /**
@@ -231,7 +253,42 @@ function parseMemberDeclarations(body: string): string[] {
  * method, and dip flags every bare `new X(` as direct instantiation -- dotted
  * namespace calls keep both scanners blind to implementation helpers.
  */
-export const javaParse = {
+export /**
+ * Whether this character separates two parameters.
+ *
+ * Only a comma at depth ZERO: `Map<String, List<Integer>>` is one parameter, so the
+ * commas inside its arguments must not be counted.
+ */
+function isSeparator(ch: string, depth: number): boolean {
+  return ch === ',' && depth === 0;
+}
+
+/** The brace-tracking state one block scan carries. */
+interface BraceScan {
+  inBlock: boolean;
+  depth: number;
+}
+
+/**
+ * Apply one character to the scan.
+ *
+ * A `}` before any `{` is ignored rather than taking the depth negative: the scan may
+ * START inside a body, and a stray closer would otherwise end the block immediately.
+ *
+ * @returns whether the block just CLOSED, making `i` its final character
+ */
+function stepBrace(ch: string, state: BraceScan): boolean {
+  if (ch === '{') {
+    state.inBlock = true;
+    state.depth += 1;
+    return false;
+  }
+  if (ch !== '}' || !state.inBlock) return false;
+  state.depth -= 1;
+  return state.depth === 0;
+}
+
+const javaParse = {
   /** Top-level brace depth of a method body (deep-nesting rule). */
   braceDepth(body: string): number {
     let depth = 0;
@@ -265,7 +322,7 @@ export const javaParse = {
     let depth = 0;
     let count = 1;
     for (const ch of trimmed) {
-      if (ch === ',' && depth === 0) count += 1;
+      if (isSeparator(ch, depth)) count += 1;
       depth += PARAM_NESTING[ch] || 0;
     }
     return count;
@@ -326,20 +383,16 @@ export const javaParse = {
    * (callers decide the fallback; base.extractCodeBlock's 100-char
    * truncation fallback would silently hand back garbage structure).
    */
+  /**
+   * The balanced `{...}` block starting at or after `startPos`, or null.
+   *
+   * Returned only when the braces BALANCE; an unbalanced tail means the scan ran off
+   * the end of the file, and a partial block would be attributed to this member.
+   */
   extractBracedBlock(content: string, startPos: number): string | null {
-    let inBlock = false;
-    let depth = 0;
+    const state = { inBlock: false, depth: 0 };
     for (let i = startPos; i < content.length; i += 1) {
-      const ch = content[i];
-      if (ch === '{') {
-        inBlock = true;
-        depth += 1;
-      } else if (ch === '}' && inBlock) {
-        depth -= 1;
-        if (depth === 0) {
-          return content.substring(startPos, i + 1);
-        }
-      }
+      if (stepBrace(content[i], state)) return content.substring(startPos, i + 1);
     }
     return null;
   },
@@ -349,6 +402,113 @@ export const javaParse = {
     return new RegExp(`\\b${simpleName.replace(/\$/g, '\\$')}\\b`);
   },
 };
+
+/** A whole-line `import` (optionally `static`), capturing the qualified name. */
+const JAVA_IMPORT_LINE = /^\s*import\s+(?:static\s+)?([\w.]+)\s*;\s*$/;
+
+/**
+ * The file's imports, and the line indexes they occupy.
+ *
+ * The indexes are returned because the usage scan must look at the body WITHOUT them --
+ * an import line contains its own name, which would mark every import as used.
+ */
+function scanImportLines(lines: string[]): { imports: JavaImportInfo[]; importLines: Set<number> } {
+  const imports: JavaImportInfo[] = [];
+  const importLines = new Set<number>();
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = JAVA_IMPORT_LINE.exec(lines[i]);
+    if (!m) continue;
+    imports.push({ name: m[1], line: i + 1, used: false, type: 'import' });
+    importLines.add(i);
+  }
+  return { imports, importLines };
+}
+
+/** Whether a line continues a block comment started on an earlier line. */
+interface CommentScan {
+  inBlockComment: boolean;
+}
+
+/** String literals, whose contents are not code. */
+const JAVA_STRING_LITERALS = [
+  [/"(?:[^"\\]|\\.)*"/g, '""'],
+  [/'(?:[^'\\]|\\.)'/g, "''"],
+  [/\/\/.*$/, ''],
+] as const;
+
+/** A `static final` declaration: the language's named-constant form. */
+const JAVA_CONSTANT_DECL = /^\s*(?:public|private|protected)?\s*static\s+final\s/;
+
+/**
+ * Strip strings and comments from one line, or return null when no code remains.
+ *
+ * Two kinds of state cross lines and both matter: a block comment that opened earlier,
+ * and one that opens here and closes later. A literal number inside a comment or a
+ * string is not a magic number, so leaving either in would report the file's own prose
+ * as debt.
+ *
+ * @returns the code on this line, or null when the line holds no code at all
+ */
+function stripJavaComments(rawLine: string, state: CommentScan): string | null {
+  let line = rawLine;
+  if (state.inBlockComment) {
+    const end = line.indexOf('*/');
+    if (end === -1) return null;
+    line = line.slice(end + 2);
+    state.inBlockComment = false;
+  }
+  for (const [pattern, replacement] of JAVA_STRING_LITERALS) {
+    line = line.replace(pattern, replacement);
+  }
+  return closeInlineComments(line, state);
+}
+
+/**
+ * Close or open inline block comments, reporting whether the line ran into one.
+ *
+ * A comment that opens and does not close here switches the state, and the code before
+ * it still counts -- so the prefix is returned rather than discarded.
+ */
+function closeInlineComments(line: string, state: CommentScan): string | null {
+  let rest = line;
+  while (rest.includes('/*')) {
+    const start = rest.indexOf('/*');
+    const end = rest.indexOf('*/', start + 2);
+    if (end === -1) {
+      state.inBlockComment = true;
+      return rest.slice(0, start);
+    }
+    rest = rest.slice(0, start) + ' ' + rest.slice(end + 2);
+  }
+  return rest;
+}
+
+/** Whether this line declares a `static final` constant, whose number is named. */
+function isConstantDeclaration(line: string): boolean {
+  return JAVA_CONSTANT_DECL.test(line);
+}
+
+/** What one magic-number scan carries between lines. */
+interface MagicScan {
+  numRegex: RegExp;
+  state: CommentScan;
+  out: Array<{ value: number; line: number }>;
+}
+
+/**
+ * Collect the magic numbers on one line.
+ *
+ * Three filters, in order, and each removes a way the file's own prose or its named
+ * constants would be reported as debt: strip comments and strings, skip `static final`
+ * declarations, then match.
+ */
+function collectMagicNumbers(rawLine: string, lineNumber: number, scan: MagicScan): void {
+  const line = stripJavaComments(rawLine, scan.state);
+  if (line === null || isConstantDeclaration(line)) return;
+  for (const value of line.match(scan.numRegex) ?? []) {
+    scan.out.push({ value: Number(value), line: lineNumber });
+  }
+}
 
 export class JavaAdapter extends BaseAdapter implements Adapter {
   /**
@@ -493,32 +653,9 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
     const out: Array<{ value: number; line: number }> = [];
     const lines = this.fileContent.split('\n');
     const numRegex = javaParse.magicNumberRegex();
-    let inBlockComment = false;
+    const state: CommentScan = { inBlockComment: false };
     for (let i = 0; i < lines.length; i += 1) {
-      let line = lines[i];
-      if (inBlockComment) {
-        const end = line.indexOf('*/');
-        if (end === -1) continue;
-        line = line.slice(end + 2);
-        inBlockComment = false;
-      }
-      line = line
-        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-        .replace(/'(?:[^'\\]|\\.)'/g, "''")
-        .replace(/\/\/.*$/, '');
-      while (line.includes('/*')) {
-        const start = line.indexOf('/*');
-        const end = line.indexOf('*/', start + 2);
-        if (end === -1) {
-          line = line.slice(0, start);
-          inBlockComment = true;
-          break;
-        }
-        line = line.slice(0, start) + ' ' + line.slice(end + 2);
-      }
-      if (/^\s*(?:public|private|protected)?\s*static\s+final\s/.test(line)) continue;
-      const matches = line.match(numRegex) ?? [];
-      for (const value of matches) out.push({ value: Number(value), line: i + 1 });
+      collectMagicNumbers(lines[i], i + 1, { numRegex, state, out });
     }
     return out;
   }
@@ -528,18 +665,10 @@ export class JavaAdapter extends BaseAdapter implements Adapter {
    * is a conservative check: the imported simple name must appear somewhere
    * outside the import block itself.
    */
+
   get imports(): JavaImportInfo[] {
     const lines = this.fileContent.split('\n');
-    const imports: JavaImportInfo[] = [];
-    const importRegex = /^\s*import\s+(?:static\s+)?([\w.]+)\s*;\s*$/;
-    const importLines = new Set<number>();
-    for (let i = 0; i < lines.length; i += 1) {
-      const m = importRegex.exec(lines[i]);
-      if (m) {
-        imports.push({ name: m[1], line: i + 1, used: false, type: 'import' });
-        importLines.add(i);
-      }
-    }
+    const { imports, importLines } = scanImportLines(lines);
     if (imports.length === 0) return imports;
     const body = lines.filter((_, idx) => !importLines.has(idx)).join('\n');
     for (const imp of imports) {
