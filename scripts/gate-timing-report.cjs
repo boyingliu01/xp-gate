@@ -125,7 +125,7 @@ function byMedianDescending(a, b) {
 }
 
 function summarise(rows) {
-  const byGate = groupDurations(rows, () => ({}));
+  const byGate = groupDurations(rows, gateIdOf);
   const out = [];
   for (const [gate, durations] of byGate) {
     const sorted = [...durations].sort((a, b) => a - b);
