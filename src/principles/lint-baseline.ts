@@ -77,6 +77,27 @@ function makeFileMatcher(files: string[], bidirectional: boolean) {
   };
 }
 
+/** A tool's warning/error counts for one file. */
+interface ToolCounts {
+  warnings: number;
+  errors: number;
+}
+
+/**
+ * A baseline entry for one file.
+ *
+ * `totalWarnings` is DERIVED from the tool counts rather than passed separately: the
+ * two were written independently at four call sites, and a mismatch between them would
+ * make the baseline's own number disagree with the per-tool breakdown beside it.
+ */
+function entryFor(tool: string, counts: ToolCounts): BaselineEntry {
+  return {
+    [tool]: counts,
+    totalWarnings: counts.warnings,
+    lastAnalyzed: new Date().toISOString(),
+  };
+}
+
 function parseESLint(parsed: ESLintFileResult[], files: string[]): Record<string, BaselineEntry> {
   const result: Record<string, BaselineEntry> = {};
   // ESLint reports absolute paths and the caller passes relative ones, so both
@@ -87,14 +108,10 @@ function parseESLint(parsed: ESLintFileResult[], files: string[]): Record<string
     const matchedFile = matchFile(fileResult.filePath);
     if (!matchedFile) continue;
 
-    result[matchedFile] = {
-      eslint: {
-        warnings: fileResult.warningCount || 0,
-        errors: fileResult.errorCount || 0,
-      },
-      totalWarnings: fileResult.warningCount || 0,
-      lastAnalyzed: new Date().toISOString(),
-    };
+    result[matchedFile] = entryFor('eslint', {
+      warnings: fileResult.warningCount || 0,
+      errors: fileResult.errorCount || 0,
+    });
   }
 
   return result;
@@ -127,33 +144,51 @@ function parseRuff(parsed: RuffFileResult[], files: string[]): Record<string, Ba
  * Parse golangci-lint JSON output into BaselineEntry format.
  * golangci-lint --out-format json: {Issues: [{file, line, severity, text}]}
  */
-function parseGolangci(parsed: GolangciOutput, files: string[]): Record<string, BaselineEntry> {
-  const result: Record<string, BaselineEntry> = {};
+/**
+ * Tally one issue against its file, creating the entry on first sight.
+ *
+ * Everything that is not severity `error` counts as a warning: the linter's own severity
+ * vocabulary is open-ended, and folding the rest into "warning" is what the baseline's
+ * budget compares against.
+ */
+function addIssueCount(
+  byFile: Record<string, ToolCounts>,
+  file: string,
+  severity: string,
+): void {
+  byFile[file] ??= { warnings: 0, errors: 0 };
+  if (severity === "error") byFile[file].errors++;
+  else byFile[file].warnings++;
+}
+
+/**
+ * Tally golangci issues per file.
+ *
+ * Issues carry ABSOLUTE paths, so each is matched by suffix against the relative list --
+ * and the match must then be IN the set: the suffix test alone would also accept a file
+ * that merely ends with the same name.
+ */
+function tallyIssues(
+  issues: Array<{ file: string; severity?: string }>,
+  files: string[],
+): Record<string, ToolCounts> {
+  const byFile: Record<string, ToolCounts> = {};
   const fileSet = new Set(files);
-  const warningsByFile: Record<string, { warnings: number; errors: number }> = {};
-
-  for (const issue of parsed.Issues || []) {
-    // Issues have absolute paths; match against files list
-    const matchedFile = files.find(f => issue.file.endsWith(f));
+  for (const issue of issues) {
+    const matchedFile = files.find((f) => issue.file.endsWith(f));
     if (!matchedFile || !fileSet.has(matchedFile)) continue;
-
-    if (!warningsByFile[matchedFile]) {
-      warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-    }
-
-    if (issue.severity === 'error') {
-      warningsByFile[matchedFile].errors++;
-    } else {
-      warningsByFile[matchedFile].warnings++;
-    }
+    // An issue with no declared severity is not an ERROR; it counts as a warning.
+    addIssueCount(byFile, matchedFile, issue.severity ?? '');
   }
+  return byFile;
+}
 
+function parseGolangci(parsed: GolangciOutput, files: string[]): Record<string, BaselineEntry> {
+  const warningsByFile = tallyIssues(parsed.Issues || [], files);
+
+  const result: Record<string, BaselineEntry> = {};
   for (const [file, counts] of Object.entries(warningsByFile)) {
-    result[file] = {
-      golangci: counts,
-      totalWarnings: counts.warnings,
-      lastAnalyzed: new Date().toISOString(),
-    };
+    result[file] = entryFor('golangci', counts);
   }
 
   return result;
@@ -170,17 +205,8 @@ function parseShellcheck(parsed: ShellcheckResult[], files: string[]): Record<st
 
   for (const item of parsed) {
     const matchedFile = matchFile(item.file);
-    if (!matchedFile) continue;
-
-    if (!warningsByFile[matchedFile]) {
-      warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-    }
-
-    if (item.level === 'error') {
-      warningsByFile[matchedFile].errors++;
-    } else {
-      warningsByFile[matchedFile].warnings++;
-    }
+    // A missing level is not an ERROR; it counts as a warning.
+    if (matchedFile) addIssueCount(warningsByFile, matchedFile, item.level ?? '');
   }
 
   for (const [file, counts] of Object.entries(warningsByFile)) {
@@ -309,12 +335,22 @@ function classifyDiff(
   newEntry: BaselineEntry | undefined,
   delta: number,
 ): keyof LintDiffResult {
-  if (!oldEntry && newEntry) return 'filesAdded';
-  if (oldEntry && !newEntry) return 'filesRemoved';
-  if (delta > 0) return 'filesIncreased';
-  if (delta < 0) return 'filesDecreased';
-  return 'filesUnchanged';
+  if (!oldEntry) return newEntry ? 'filesAdded' : 'filesUnchanged';
+  if (!newEntry) return 'filesRemoved';
+  return DELTA_BUCKETS[Math.sign(delta)];
 }
+
+/**
+ * The bucket a signed delta falls into.
+ *
+ * `Math.sign` gives exactly -1, 0, +1, so the table answers for every input -- there is
+ * no "unreachable" arm to keep in sync.
+ */
+const DELTA_BUCKETS: Record<number, keyof LintDiffResult> = {
+  [-1]: 'filesDecreased',
+  0: 'filesUnchanged',
+  1: 'filesIncreased',
+};
 
 // ── Delta (per-commit enforcement) ───────────────────────
 
