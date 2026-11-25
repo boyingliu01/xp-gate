@@ -95,18 +95,23 @@ function findBodyBrace(masked: string, parenIndex: number): number {
   let i = end;
   while (i < masked.length) {
     const c = masked[i];
-    // A brace at depth 0 IS the body; deeper it is a generic argument
-    // (`<{a: number}>`), so the scan keeps going.
-    if (c === '{' && depth === 0) return i;
-    // A line break or semicolon before any brace means this header has no braced
-    // body -- an interface member or an overload signature.
+    if (isBodyBraceAt(c, depth)) return i;
     if (isHeaderTerminator(c, depth)) return -1;
-
     const stepped = stepDepth(masked, c, i, depth);
     depth = stepped.depth;
     i = stepped.resume + 1;
   }
   return -1;
+}
+
+/**
+ * Whether this character IS the function's body brace.
+ *
+ * A brace at depth 0 is the body; deeper it is a generic argument (`<{a: number}>`), and
+ * stopping there would measure a type as the function.
+ */
+function isBodyBraceAt(c: string, depth: number): boolean {
+  return c === '{' && depth === 0;
 }
 
 // Index just past the matching closing brace for the block opened at open.
@@ -160,17 +165,42 @@ const HEADER_CLOSERS = new Set(['>', ']']);
  * "this character means something", and a per-character decision keeps that list
  * readable and each rule independently testable.
  */
+/**
+ * How each header bracket changes DEPTH.
+ *
+ * Angle brackets nest in generic arguments, so a brace inside them is a TYPE
+ * (`class X extends Y<{a: number}>`) and not the body. A table because every arm is the
+ * same one-field answer.
+ */
+const HEADER_DEPTH_DELTA: Record<string, 1 | -1> = {};
+for (const c of HEADER_OPENERS) HEADER_DEPTH_DELTA[c] = 1;
+for (const c of HEADER_CLOSERS) HEADER_DEPTH_DELTA[c] = -1;
+
 function declarationScanAction(masked: string, i: number, depth: number): ScanAction {
   const c = masked[i];
 
-  // A parenthesised group is skipped whole: parens only ever appear inside a
-  // header (`class X extends Y<() => void>`), never as body structure.
-  if (c === '(') return { kind: 'jump', to: readParenGroup(masked, i).end - 1 };
-  if (HEADER_OPENERS.has(c)) return { kind: 'depth', delta: 1 };
-  if (HEADER_CLOSERS.has(c)) return { kind: 'depth', delta: -1 };
-  if (c === '{' || c === '}') return braceAction(c, i, depth);
+  if (c === '(') return skipParenGroup(masked, i);
+  const delta = HEADER_DEPTH_DELTA[c];
+  if (delta !== undefined) return { kind: 'depth', delta };
+  if (isBraceChar(c)) return braceAction(c, i, depth);
   if (isDeclarationTerminator(masked, i, c, depth)) return { kind: 'no-body' };
   return { kind: 'advance' };
+}
+
+/** Whether this character is a brace. */
+function isBraceChar(c: string): boolean {
+  return c === '{' || c === '}';
+}
+
+/**
+ * Jump over a parenthesised group.
+ *
+ * Skipped whole because parens only ever appear inside a header
+ * (`class X extends Y<() => void>`), never as body structure -- so stepping into one
+ * could only misread its contents as braces.
+ */
+function skipParenGroup(masked: string, i: number): ScanAction {
+  return { kind: 'jump', to: readParenGroup(masked, i).end - 1 };
 }
 
 /**
@@ -209,19 +239,23 @@ function findDeclarationBrace(masked: string, from: number): number {
   let depth = 0;
   for (let i = from; i < masked.length; i++) {
     const action = declarationScanAction(masked, i, depth);
-    switch (action.kind) {
-      case 'body': return action.at;
-      case 'no-body': return -1;
-      case 'jump': i = action.to; break;
-      case 'depth':
-        // Depth never goes negative: a stray closing bracket in a header must
-        // not look like the start of a new group.
-        depth = Math.max(0, depth + action.delta);
-        break;
-      case 'advance': break;
-    }
+    if (action.kind === 'body') return action.at;
+    if (action.kind === 'no-body') return -1;
+    if (action.kind === 'jump') i = action.to;
+    depth = nextDepth(depth, action);
   }
   return -1;
+}
+
+/**
+ * The depth after this action.
+ *
+ * Depth never goes NEGATIVE: a stray closing bracket in a header must not look like the
+ * start of a new group, which would make the next `{` appear to be at depth 0 and be
+ * taken for the body.
+ */
+function nextDepth(depth: number, action: ScanAction): number {
+  return action.kind === 'depth' ? Math.max(0, depth + action.delta) : depth;
 }
 
 function lineOf(src: string, index: number): number {
@@ -490,6 +524,45 @@ interface FunctionMetrics {
   code: string;
 }
 
+/** Sentinel for "this arrow has a bare parameter, not a parenthesised list". */
+const PAREN_MISSING = -1;
+
+/** A single-identifier parameter followed by `=>`. */
+const BARE_PARAM_ARROW = /^\s*(\w+)\s*=>/;
+
+/** The bare parameter itself, for measuring where it ends. */
+const BARE_PARAM = /^\s*(\w+)/;
+
+/** What follows a parameter list: an optional return type, then `=>`. */
+const ARROW_HEAD = /^\s*(?::[^=]+)?=>/;
+
+/**
+ * The index of an arrow's `{` block body, or -1 for a concise body.
+ *
+ * The brace is accepted only when it comes straight after `=>`: a `{` appearing later
+ * belongs to the expression the arrow returns (an object literal is `=> ({ ... })`),
+ * and treating it as a block would measure a body that does not exist.
+ */
+function blockBodyOpen(masked: string, afterParams: number): number {
+  const braceAfter = masked.indexOf('{', afterParams);
+  if (braceAfter === -1) return -1;
+  const isBlockBody = /^\s*(?::[^=]+)?=>\s*\{/.test(masked.substring(afterParams, braceAfter + 1));
+  return isBlockBody ? braceAfter : -1;
+}
+
+/**
+ * The index of an arrow's parameter-list `(`, or PAREN_MISSING for a bare parameter.
+ *
+ * Both shapes are legal: `(x) => ...` and `x => ...`. A parenthesised group is preferred
+ * when present, because that is the common form.
+ *
+ * Module-level rather than a method: the adapter class is already at its method-count
+ * ceiling, and this needs nothing from `this`.
+ */
+function arrowParenIndex(rest: string, scanFrom: number): number {
+  return /^\s*\(/.test(rest) ? scanFrom + rest.indexOf('(') : PAREN_MISSING;
+}
+
 export class TypeScriptAdapter extends BaseAdapter implements Adapter {
   /**
    * This adapter implements rules of its own, so the gate may report its files
@@ -710,25 +783,17 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
   ): { parenIndex: number; afterParams: number; bodyOpen: number } | null {
     const masked = this.maskedSource;
     const rest = masked.substring(scanFrom);
-    const parenOffset = /^\s*\(/.test(rest) ? rest.indexOf('(') : -1;
-    let parenIndex: number;
-    if (parenOffset !== -1) {
-      parenIndex = scanFrom + parenOffset;
-    } else {
-      // Single-identifier param: `x => ...`
-      if (!/^\s*(\w+)\s*=>/.test(rest)) return null;
-      parenIndex = -1;
-    }
-    const afterParams = parenIndex === -1
-      ? scanFrom + (/^\s*(\w+)/.exec(rest) as RegExpExecArray)[0].length
-      : readParenGroup(this.fileContent, parenIndex).end;
-    if (!/^\s*(?::[^=]+)?=>/.test(masked.substring(afterParams))) return null;
+    const parenIndex = arrowParenIndex(rest, scanFrom);
+    if (parenIndex === PAREN_MISSING && !BARE_PARAM_ARROW.test(rest)) return null;
 
-    const braceAfter = masked.indexOf('{', afterParams);
-    const isBlockBody = braceAfter !== -1 &&
-      /^\s*(?::[^=]+)?=>\s*\{/.test(masked.substring(afterParams, braceAfter + 1));
-    return { parenIndex, afterParams, bodyOpen: isBlockBody ? braceAfter : -1 };
+    const afterParams = parenIndex === PAREN_MISSING
+      ? scanFrom + (BARE_PARAM.exec(rest) as RegExpExecArray)[0].length
+      : readParenGroup(this.fileContent, parenIndex).end;
+    if (!ARROW_HEAD.test(masked.substring(afterParams))) return null;
+
+    return { parenIndex, afterParams, bodyOpen: blockBodyOpen(masked, afterParams) };
   }
+
 
   /** Derive the metrics for one arrow function, whether or not it has a block body. */
   private buildArrowMetrics(
