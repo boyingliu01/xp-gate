@@ -50,6 +50,39 @@ async function makeContext(dshRoot, SkillRegistry) {
   return { ctx, tools }
 }
 
+/**
+ * Load one skill through the registry and check what a CONSUMER would see.
+ *
+ * The problems are ordered by how wrong they are: unloadable, then empty, then a wrong
+ * resource base. A skill that cannot load has no content to check, so the first failure
+ * is the only one reported -- listing all three for one skill would bury the cause.
+ *
+ * @returns `{ bytes }` when usable, `{ problem }` otherwise
+ */
+async function checkSkill(ctx, pluginDir, name) {
+  const definition = await ctx.skills.get(name, { cwd: pluginDir })
+  if (!definition) return { problem: `${name}: not loadable through the registry` }
+  if (!definition.content || definition.content.trim().length === 0) {
+    return { problem: `${name}: empty body` }
+  }
+  if (definition.resourceBase?.kind !== "directory") {
+    return { problem: `${name}: resourceBase is ${JSON.stringify(definition.resourceBase)}` }
+  }
+  return { bytes: definition.content.length }
+}
+
+/**
+ * A problem description when the plugin does not declare the `skills` injection, or null.
+ *
+ * The CHECK exists because a plugin that never injects `skills` can still pass every
+ * registry assertion below -- the registry would be empty for a reason unrelated to what
+ * this script is verifying.
+ */
+function injectDeclaresSkills(inject) {
+  if (Array.isArray(inject) && inject.includes("skills")) return null
+  return `inject does not declare skills: ${JSON.stringify(inject)}`
+}
+
 export async function verifySkillProvider(pluginDir, dshRoot) {
   const skillModule = await import(
     pathToFileURL(join(dshRoot, "@deepseek-ai", "dsh-skill", "lib", "index.js")).href
@@ -60,9 +93,8 @@ export async function verifySkillProvider(pluginDir, dshRoot) {
   const { ctx, tools } = await makeContext(dshRoot, SkillRegistry)
 
   const failures = []
-  if (!Array.isArray(plugin.inject) || !plugin.inject.includes("skills")) {
-    failures.push(`inject does not declare skills: ${JSON.stringify(plugin.inject)}`)
-  }
+  const injectProblem = injectDeclaresSkills(plugin.inject)
+  if (injectProblem) failures.push(injectProblem)
 
   plugin.apply(ctx)
 
@@ -75,19 +107,12 @@ export async function verifySkillProvider(pluginDir, dshRoot) {
 
   const loaded = []
   for (const summary of ours) {
-    const definition = await ctx.skills.get(summary.name, { cwd: pluginDir })
-    if (!definition) {
-      failures.push(`${summary.name}: not loadable through the registry`)
+    const checked = await checkSkill(ctx, pluginDir, summary.name)
+    if (checked.problem) {
+      failures.push(checked.problem)
       continue
     }
-    if (!definition.content || definition.content.trim().length === 0) {
-      failures.push(`${summary.name}: empty body`)
-      continue
-    }
-    if (definition.resourceBase?.kind !== "directory") {
-      failures.push(`${summary.name}: resourceBase is ${JSON.stringify(definition.resourceBase)}`)
-    }
-    loaded.push({ name: summary.name, bytes: definition.content.length })
+    loaded.push({ name: summary.name, bytes: checked.bytes })
   }
 
   return {

@@ -80,15 +80,53 @@ function parsePorcelain(text) {
   const entries = [];
   for (const line of String(text).split('\n')) {
     if (!line.trim()) continue;
-    const xy = line.slice(0, 2);
-    let file = line.slice(3);
-    const renameArrow = file.indexOf(' -> ');
-    if (renameArrow !== -1) file = file.slice(renameArrow + 4);
-    // An unmerged path carries a first-column state; anything dirty is dirty.
-    const sigil = (xy[1] || '').trim() || (xy[0] || '').trim() || '?';
-    entries.push({ status: xy.includes('M') ? 'M' : sigil, file: file.trim() });
+    entries.push(parseEntry(line));
   }
   return entries;
+}
+
+/** The separator `git status --porcelain` puts between a rename's two paths. */
+const RENAME_ARROW = ' -> ';
+
+/**
+ * The path a porcelain line names.
+ *
+ * A rename reads `R  old -> new`, and the NEW path is the one that exists now -- using
+ * the old one would make a rename look like a deletion plus an addition.
+ */
+function pathOf(line) {
+  const file = line.slice(3);
+  const arrow = file.indexOf(RENAME_ARROW);
+  return (arrow === -1 ? file : file.slice(arrow + RENAME_ARROW.length)).trim();
+}
+
+/**
+ * The status sigil for a porcelain line.
+ *
+ * A staged modification is still a modification, and an unmerged path carries its state
+ * in the FIRST column -- so the second column is preferred, the first is the fallback,
+ * and `?` covers an untracked path that reports neither.
+ */
+function sigilOf(xy) {
+  if (xy.includes('M')) return 'M';
+  return firstSigil(xy);
+}
+
+/**
+ * The first non-empty column, or `?`.
+ *
+ * Written as a reduce over the two columns so there is no chain of `||` defaults, and so
+ * "which column wins" is stated once: the SECOND (worktree) first, then the first
+ * (index) -- a path moved in the index but untouched in the tree is still dirty.
+ */
+function firstSigil(xy) {
+  const columns = [xy[1], xy[0]].map((c) => (c || '').trim());
+  return columns.find(Boolean) ?? '?';
+}
+
+/** One parsed porcelain line. */
+function parseEntry(line) {
+  return { status: sigilOf(line.slice(0, 2)), file: pathOf(line) };
 }
 
 function snapshotStatus(cwd) {
