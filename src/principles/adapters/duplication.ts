@@ -31,14 +31,31 @@ function normaliseLine(line: string): string {
  * those reports near-100% duplication for perfectly ordinary code, which is how
  * a duplication gate gets switched off.
  */
+/** Lines that carry no signal on their own: a lone brace closing a block. */
+const BRACE_ONLY = new Set(['{', '}', '};', '});']);
+
+/** The comment prefixes whose continuation lines say nothing about the code. */
+const COMMENT_PREFIXES = ['//', '/*', '*'];
+
+/**
+ * Whether a normalised line carries signal worth comparing.
+ *
+ * A blank line, a lone brace and a comment are all duplicates of their counterparts
+ * everywhere in the file -- counting them would make any two functions look alike. This
+ * is the single definition of "significant", used by both the window scan and the block
+ * report so the two cannot disagree about what was compared.
+ */
+function isSignificant(normalised: string): boolean {
+  if (normalised.length === 0) return false;
+  if (BRACE_ONLY.has(normalised)) return false;
+  return !COMMENT_PREFIXES.some((prefix) => normalised.startsWith(prefix));
+}
+
+/** The indexes of the lines worth comparing. */
 function significantLineIndexes(lines: string[]): number[] {
   const indexes: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const text = normaliseLine(lines[i]);
-    if (text.length === 0) continue;
-    if (text === '{' || text === '}' || text === '};' || text === '});') continue;
-    if (text.startsWith('//') || text.startsWith('/*') || text.startsWith('*')) continue;
-    indexes.push(i);
+    if (isSignificant(normaliseLine(lines[i]))) indexes.push(i);
   }
   return indexes;
 }
