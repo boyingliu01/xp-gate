@@ -180,36 +180,43 @@ async function findKotlinTestFile(dir: string, baseName: string): Promise<string
   return null;
 }
 
+/**
+ * A sibling test file by suffix convention (`x.py` -> `x_test.py`), or null.
+ *
+ * Preferred over a directory search because the suffix form is unambiguous: if it
+ * exists, it IS the test for this source, and searching first could find a different
+ * file that merely shares the basename.
+ */
+async function siblingTestFile(sourceFile: string, from: RegExp, to: string): Promise<string | null> {
+  const candidate = sourceFile.replace(from, to);
+  return (await fileExists(candidate)) ? candidate : null;
+}
+
+/** Directories searched for a source's tests, keyed by extension. */
+const TEST_FILE_FINDERS: Record<string, (sourceFile: string, dir: string, baseName: string) => Promise<string | null>> = {
+  '.ts': (sourceFile, dir, baseName) => findTsTestFile(sourceFile, dir, baseName),
+  '.tsx': (sourceFile, dir, baseName) => findTsTestFile(sourceFile, dir, baseName),
+  '.py': async (sourceFile, dir, baseName) => (await siblingTestFile(sourceFile, /\.py$/, '_test.py'))
+    ?? findPyTestFile(dir, baseName),
+  '.go': (sourceFile) => siblingTestFile(sourceFile, /\.go$/, '_test.go'),
+  '.java': (_sourceFile, dir, baseName) => findJavaTestFile(dir, baseName),
+  '.kt': (_sourceFile, dir, baseName) => findKotlinTestFile(dir, baseName),
+  '.kts': (_sourceFile, dir, baseName) => findKotlinTestFile(dir, baseName),
+};
+
+/**
+ * Locate the test file for a source file, or null when this language's test
+ * convention does not apply.
+ *
+ * A table because the mapping IS the rule: each language names its tests differently,
+ * and the order inside each arm (sibling suffix before directory search) is part of
+ * that rule rather than an implementation detail.
+ */
 async function findTestFileForSource(sourceFile: string): Promise<string | null> {
+  const finder = TEST_FILE_FINDERS[path.extname(sourceFile)];
+  if (!finder) return null;
   const ext = path.extname(sourceFile);
-  const baseName = path.basename(sourceFile, ext);
-  const dir = path.dirname(sourceFile);
-
-  if (ext === '.ts' || ext === '.tsx') {
-    return findTsTestFile(sourceFile, dir, baseName);
-  }
-
-  if (ext === '.py') {
-    const pyTest = sourceFile.replace(/\.py$/, '_test.py');
-    if (await fileExists(pyTest)) return pyTest;
-    return findPyTestFile(dir, baseName);
-  }
-
-  if (ext === '.go') {
-    const goTest = sourceFile.replace(/\.go$/, '_test.go');
-    if (await fileExists(goTest)) return goTest;
-    return null;
-  }
-
-  if (ext === '.java') {
-    return findJavaTestFile(dir, baseName);
-  }
-
-  if (ext === '.kt' || ext === '.kts') {
-    return findKotlinTestFile(dir, baseName);
-  }
-
-  return null;
+  return finder(sourceFile, path.dirname(sourceFile), path.basename(sourceFile, ext));
 }
 
 interface TestIntentCheckResult {
@@ -451,6 +458,33 @@ function buildResult(
   };
 }
 
+/**
+ * Run one extension group, recording its scores and counts.
+ *
+ * #410 fallback: walk ALL runners for the extension in priority order and use the first
+ * one that is actually AVAILABLE. A pure-mutmut environment (no pytest-gremlins) thus
+ * still gets mutation testing instead of a silent SKIP -- the design contract
+ * "gremlins when available, else mutmut" is honoured here, not by registration order
+ * alone.
+ */
+async function runOneGroup(
+  files: string[],
+  timeoutMs: number,
+  cwd: string,
+  fileScores: Record<string, number | null>,
+  counts: Record<string, MutantCounts>,
+): Promise<void> {
+  const runner = await resolveFirstAvailable(path.extname(files[0]));
+  if (!runner) {
+    // Null, not 0: this run did not score these files, and a zero would be
+    // indistinguishable from a measured failure.
+    for (const f of files) fileScores[f] = null;
+    return;
+  }
+  const result = await runner.run({ files, timeoutMs, cwd });
+  applyMutationResult(result, files, fileScores, counts);
+}
+
 async function runAllRunners(
   groups: Map<string, string[]>,
   timeoutMs: number,
@@ -458,24 +492,9 @@ async function runAllRunners(
 ): Promise<{ scores: Record<string, number | null>; counts: Record<string, MutantCounts> }> {
   const fileScores: Record<string, number | null> = {};
   const counts: Record<string, MutantCounts> = {};
-
   for (const [, files] of Array.from(groups.entries())) {
-    const ext = path.extname(files[0]);
-    // #410 fallback: walk ALL runners for the extension in priority order and
-    // use the first one that is actually available. A pure-mutmut environment
-    // (no pytest-gremlins) thus still gets mutation testing instead of a
-    // silent SKIP — the design contract "gremlins 可用→GremlinsRunner，否则
-    // MutmutRunner" is honored here, not by registration order alone.
-    const runner = await resolveFirstAvailable(ext);
-    if (!runner) {
-      applyNullScores(files, fileScores);
-      continue;
-    }
-
-    const result = await runner.run({ files, timeoutMs, cwd });
-    applyMutationResult(result, files, fileScores, counts);
+    await runOneGroup(files, timeoutMs, cwd, fileScores, counts);
   }
-
   return { scores: fileScores, counts };
 }
 
@@ -491,9 +510,6 @@ async function resolveFirstAvailable(ext: string): Promise<MutationRunner | unde
   return undefined;
 }
 
-function applyNullScores(files: string[], scores: Record<string, number | null>): void {
-  for (const f of files) scores[f] = null;
-}
 
 function applyMutationResult(
   outcome: MutationRunOutcome,
@@ -504,7 +520,8 @@ function applyMutationResult(
   // A run that timed out or errored measured NOTHING: null, not 0, so the caller
   // cannot mistake "not measured" for "scored zero".
   if (outcome.timedOut || outcome.error || !outcome.report) {
-    applyNullScores(files, scores);
+    // Null, not 0: a timed-out or errored run measured nothing here.
+    for (const f of files) scores[f] = null;
     return;
   }
   // Per-file reporting is the modern shape; without it the run's totals apply to every
