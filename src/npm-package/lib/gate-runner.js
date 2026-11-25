@@ -543,6 +543,12 @@ function runTsGate(gateModule, targetPath, opts = {}) {
       stdio: 'inherit',
       cwd: targetCwd,
       timeout: TS_GATE_TIMEOUT_MS,
+      // #820: the TS gates are a SEPARATE PROCESS, so the `GATE_SCOPE="all"`
+      // prefix built for the shell adapters never reached them. They kept
+      // calling `git diff --cached` and reported a clean tree on a clean index.
+      // Passing the scope in the environment is the smallest fix that makes the
+      // modules read the same signal the shell fragments already read.
+      env: { ...process.env, GATE_SCOPE: opts.scope === 'all' ? 'all' : 'diff' },
     });
     if (result.error) {
       console.error(`Gate ${gateModule}: failed to run tsx (${viaNpx ? 'npx fallback' : 'local cli'}): ${result.error.message}`);
@@ -655,16 +661,16 @@ const GATE_REGISTRY = {
     name: 'IaC Security',
     description: 'Infrastructure-as-Code security scanning (checkov, hadolint, kube-score, tflint)',
     aliases: ['iac', 'infra', '7'],
-    run: (targetPath) => {
-      return runTsGate('gate-7', targetPath);
+    run: (targetPath, opts) => {
+      return runTsGate('gate-7', targetPath, opts);
     },
   },
   '8': {
     name: 'Secret Scanning',
     description: 'gitleaks secret and credential detection',
     aliases: ['secrets', 'secret', '8'],
-    run: (targetPath) => {
-      return runTsGate('gate-8', targetPath);
+    run: (targetPath, opts) => {
+      return runTsGate('gate-8', targetPath, opts);
     },
   },
   // Numbering follows the HOOK, which is where gates actually execute (#677).
@@ -685,8 +691,8 @@ const GATE_REGISTRY = {
     name: 'SAST Security',
     description: 'semgrep static application security testing',
     aliases: ['sast', 'semgrep', '10'],
-    run: (targetPath) => {
-      return runTsGate('gate-9', targetPath);
+    run: (targetPath, opts) => {
+      return runTsGate('gate-9', targetPath, opts);
     },
   },
   '11': {
@@ -734,24 +740,24 @@ const GATE_REGISTRY = {
     name: 'Python Environment Health',
     description: 'Comprehensive Python environment diagnostics',
     aliases: ['python-health', 'py-health'],
-    run: (targetPath) => {
-      return runTsGate('python-health', targetPath);
+    run: (targetPath, opts) => {
+      return runTsGate('python-health', targetPath, opts);
     },
   },
   'test-layers': {
     name: 'Test Layer Analytics',
     description: 'Report test distribution across unit/integration/e2e layers',
     aliases: ['test-layers', 'layers', 'test-analytics'],
-    run: (targetPath) => {
-      return runTsGate('test-layers', targetPath);
+    run: (targetPath, opts) => {
+      return runTsGate('test-layers', targetPath, opts);
     },
   },
   'pbt': {
     name: 'Property-Based Testing Detection',
     description: 'Detect PBT framework usage and report coverage',
     aliases: ['pbt', 'pbt-detect', 'property-based-testing'],
-    run: (targetPath) => {
-      return runTsGate('pbt-detect', targetPath);
+    run: (targetPath, opts) => {
+      return runTsGate('pbt-detect', targetPath, opts);
     },
   },
 };

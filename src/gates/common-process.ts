@@ -190,6 +190,45 @@ function gitListArgs(): string[] {
  * "no supported language files changed" while semgrep over the same sources
  * returned 5 findings — the fail-open shape #589 fixed one layer up.
  */
+/**
+ * Whether the file list for this run could be resolved at all.
+ *
+ * `getChangedFiles` returns `[]` both when a repository genuinely has nothing
+ * to inspect and when `git` failed. A gate cannot tell those apart, so it folds
+ * "could not check" into "nothing to check" — the fail-open shape this repo has
+ * removed from four other gates. Callers that care (SAST) use this to refuse.
+ */
+export interface ScopedFiles {
+  readonly files: readonly string[];
+  /** false when `git` failed, was missing, or exited non-zero. */
+  readonly resolved: boolean;
+}
+
+/**
+ * Resolve this run's file list together with whether resolution succeeded.
+ *
+ * Same commands as `getChangedFiles`, but keeps the distinction the bare array
+ * throws away. `--all` on a non-repo (CI container without a checkout, a tarball
+ * install) must report NOT_CHECKED, not "clean".
+ */
+export function resolveScopedFiles(cwd?: string): ScopedFiles {
+  try {
+    const result = spawnSync('git', gitListArgs(), {
+      encoding: 'utf-8',
+      cwd: cwd || process.cwd(),
+      timeout: 10000,
+    });
+    if (result.status !== 0) return { files: [], resolved: false };
+    const files = result.stdout
+      .split('\n')
+      .map(f => f.trim())
+      .filter(Boolean);
+    return { files, resolved: true };
+  } catch {
+    return { files: [], resolved: false };
+  }
+}
+
 export function getChangedFiles(cwd?: string): string[] {
   try {
     const result = spawnSync('git', gitListArgs(), {
