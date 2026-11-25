@@ -57,15 +57,58 @@ function pyprojectBackupPath(pyprojectPath: string): string {
  */
 function restorePyproject(pyprojectPath: string, hadExisting: boolean): void {
   const backupPath = pyprojectBackupPath(pyprojectPath);
+  restoreFromBackup({ pyprojectPath, backupPath, hadExisting });
+}
+
+/**
+ * Put `pyproject.toml` back the way it was.
+ *
+ * Two cases, because the file may not have EXISTED before: restoring a backup that was
+ * never taken would leave an empty file, and deleting a file we did not create would
+ * destroy the project's own configuration.
+ */
+/** What a restore needs: the file, its backup, and whether the file pre-existed. */
+interface RestoreTarget {
+  pyprojectPath: string;
+  backupPath: string;
+  hadExisting: boolean;
+}
+
+/** The two paths a backup restore needs. */
+type BackupPair = Omit<RestoreTarget, 'hadExisting'>;
+
+function restoreFromBackup({ pyprojectPath, backupPath, hadExisting }: RestoreTarget): void {
   try {
-    if (hadExisting && existsSync(backupPath)) {
-      writeFileSync(pyprojectPath, readFileSync(backupPath, 'utf-8'), { encoding: 'utf-8' });
-      unlinkSync(backupPath);
-    } else if (!hadExisting && existsSync(pyprojectPath)) {
-      unlinkSync(pyprojectPath);
-    }
+    if (hadExisting) restoreExisting({ pyprojectPath, backupPath });
+    else removeCreated(pyprojectPath);
   } catch {
-    // Best effort cleanup
+    // Best-effort cleanup: a restore failure leaves the workspace as mutmut left it, and
+    // throwing here would turn a mutation RESULT into a crash.
+  }
+}
+
+/**
+ * Restore the backed-up content, then drop the backup.
+ *
+ * Best-effort: the workspace is left as mutmut left it, and throwing here would turn a
+ * mutation RESULT into a crash.
+ */
+function restoreExisting({ pyprojectPath, backupPath }: BackupPair): void {
+  try {
+    if (!existsSync(backupPath)) return;
+    writeFileSync(pyprojectPath, readFileSync(backupPath, 'utf-8'), { encoding: 'utf-8' });
+    unlinkSync(backupPath);
+  } catch {
+    // Best effort -- see above.
+  }
+}
+
+/** Delete the file this run created, if it is still there. */
+function removeCreated(pyprojectPath: string): void {
+  try {
+    if (existsSync(pyprojectPath)) unlinkSync(pyprojectPath);
+  } catch {
+    // Best effort -- see `restoreExisting`.
   }
 }
 

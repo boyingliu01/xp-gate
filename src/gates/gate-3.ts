@@ -27,6 +27,19 @@ function warnLizardMissing(startMs: number, messages: string[]): GateOutput {
   return { status: 'WARN', messages, exitCode: 0 };
 }
 
+/**
+ * The verdict a project TYPE settles before any tool is probed.
+ *
+ * Documentation-only projects have no code to measure, and a PowerShell project uses
+ * PSScriptAnalyzer instead of lizard. Both are decided from the language alone, which is
+ * why they run before the (expensive) tool probe.
+ */
+function earlyVerdict(input: GateInput, startMs: number, messages: string[]): GateOutput | null {
+  if (input.projectLang === 'documentation-only') return skipDocumentationProject(startMs, messages);
+  if (isPowerShellProject(input.projectLang)) return runPowerShellComplexity(input, startMs, messages);
+  return null;
+}
+
 export function runGate3(input: GateInput): GateOutput {
   const startMs = Date.now();
   const messages: string[] = [];
@@ -34,8 +47,8 @@ export function runGate3(input: GateInput): GateOutput {
   messages.push('');
   messages.push('→ Gate 3: Cyclomatic complexity...');
 
-  // Documentation-only projects: skip
-  if (input.projectLang === 'documentation-only') return skipDocumentationProject(startMs, messages);
+  const early = earlyVerdict(input, startMs, messages);
+  if (early) return early;
 
   // PowerShell project: use PSScriptAnalyzer as alternative
   if (isPowerShellProject(input.projectLang)) {
@@ -43,6 +56,16 @@ export function runGate3(input: GateInput): GateOutput {
   }
 
   // Standard path: lizard
+  return runLizardPath(input, startMs, messages);
+}
+
+/**
+ * The default path: measure every source file with lizard.
+ *
+ * The `ccFiles` check precedes the tool probe deliberately -- "is there anything to
+ * check?" is free and "is the tool installed?" is not (#782 ordering).
+ */
+function runLizardPath(input: GateInput, startMs: number, messages: string[]): GateOutput {
   const tool = isToolAvailable('lizard', input.cwd);
   if (!tool.available) return warnLizardMissing(startMs, messages);
 
