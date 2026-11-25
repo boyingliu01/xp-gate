@@ -86,14 +86,46 @@ function percentile(sorted, p) {
   return sorted[idx];
 }
 
-function summarise(rows) {
-  const byGate = new Map();
-  for (const r of rows) {
-    if (typeof r.duration_ms !== 'number') continue;
-    const id = r.gate_id || '(unknown)';
-    if (!byGate.has(id)) byGate.set(id, []);
-    byGate.get(id).push(r.duration_ms);
+/** Rows that carry a MEASURED duration; anything else cannot contribute to a statistic. */
+function measuredRows(rows, keyOf) {
+  return rows
+    .filter((r) => typeof r.duration_ms === 'number')
+    .map((r) => ({ key: keyOf(r), duration: r.duration_ms }));
+}
+
+/**
+ * Group durations by a key.
+ *
+ * A row without a numeric `duration_ms` is dropped, never defaulted to zero: an
+ * unmeasured gate would otherwise drag every median toward zero, and "instant" and
+ * "not measured" must not look alike in a timing report.
+ */
+function groupDurations(rows, keyOf) {
+  const groups = new Map();
+  for (const { key, duration } of measuredRows(rows, keyOf)) {
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(duration);
   }
+  return groups;
+}
+
+/** The gate a row belongs to, with a placeholder for rows that name none. */
+function gateIdOf(row) {
+  return row.gate_id || '(unknown)';
+}
+
+/** The total of a sorted duration list. */
+function sumOf(values) {
+  return values.reduce((a, b) => a + b, 0);
+}
+
+/** Descending by median, so the slowest gate comes first. */
+function byMedianDescending(a, b) {
+  return b.median - a.median;
+}
+
+function summarise(rows) {
+  const byGate = groupDurations(rows, () => ({}));
   const out = [];
   for (const [gate, durations] of byGate) {
     const sorted = [...durations].sort((a, b) => a - b);
@@ -103,10 +135,11 @@ function summarise(rows) {
       median: percentile(sorted, 0.5),
       p90: percentile(sorted, 0.9),
       max: sorted[sorted.length - 1],
-      sum: sorted.reduce((a, b) => a + b, 0),
+      sum: sumOf(sorted),
     });
   }
-  out.sort((a, b) => b.median - a.median);
+  // Descending by median: the slowest gate is the one worth investigating.
+  out.sort(byMedianDescending);
   return out;
 }
 
@@ -123,29 +156,53 @@ function summarise(rows) {
  * Splitting by verdict makes the two populations visible instead of leaving the
  * reader to infer them from a p90/median ratio.
  */
+/** The verdict a row records, with a placeholder for rows that name none. */
+function statusOf(row) {
+  return row.gate_status || '(none)';
+}
+
+/** The grouping key of a row: one population per gate AND verdict. */
+function gateStatusKey(row) {
+  return `${gateIdOf(row)}|${statusOf(row)}`;
+}
+
+/** One row's sample entry, adding it to the map if this is its first appearance. */
+function collectStatusSample(byKey, row) {
+  const key = gateStatusKey(row);
+  if (!byKey.has(key)) {
+    byKey.set(key, { gate: gateIdOf(row), status: statusOf(row), durations: [] });
+  }
+  byKey.get(key).durations.push(row.duration_ms);
+}
+
+/** The statistics for one gate-and-verdict population. */
+function statusSummary(entry) {
+  const sorted = [...entry.durations].sort((a, b) => a - b);
+  return {
+    gate: entry.gate,
+    status: entry.status,
+    samples: sorted.length,
+    median: percentile(sorted, 0.5),
+    max: sorted[sorted.length - 1],
+  };
+}
+
+/**
+ * Compare two populations: same gate first, then slowest verdict first.
+ *
+ * Keeping one gate's rows TOGETHER is what lets the reader compare its SKIP cost with
+ * its real-work cost -- the whole point of splitting them.
+ */
+function byGateThenMedian(a, b) {
+  return a.gate === b.gate ? b.median - a.median : a.gate.localeCompare(b.gate);
+}
+
 function summariseByStatus(rows) {
   const byKey = new Map();
-  for (const r of rows) {
-    if (typeof r.duration_ms !== 'number') continue;
-    const id = r.gate_id || '(unknown)';
-    const status = r.gate_status || '(none)';
-    const key = `${id}|${status}`;
-    if (!byKey.has(key)) byKey.set(key, { gate: id, status, durations: [] });
-    byKey.get(key).durations.push(r.duration_ms);
+  for (const row of rows.filter((r) => typeof r.duration_ms === 'number')) {
+    collectStatusSample(byKey, row);
   }
-  const out = [];
-  for (const entry of byKey.values()) {
-    const sorted = [...entry.durations].sort((a, b) => a - b);
-    out.push({
-      gate: entry.gate,
-      status: entry.status,
-      samples: sorted.length,
-      median: percentile(sorted, 0.5),
-      max: sorted[sorted.length - 1],
-    });
-  }
-  out.sort((a, b) => (a.gate === b.gate ? b.median - a.median : a.gate.localeCompare(b.gate)));
-  return out;
+  return [...byKey.values()].map(statusSummary).sort(byGateThenMedian);
 }
 
 function pad(s, n) {
