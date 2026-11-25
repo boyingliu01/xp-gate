@@ -1686,7 +1686,7 @@
     "src/sastd/sastd.py::_clean_check_ids": 7,
     "src/sastd/sastd.py::_config_prefix": 2,
     "src/sastd/sastd.py::_emit": 1,
-    "src/sastd/sastd.py::_flag_unmatched_prefixes": 4,
+    "src/sastd/sastd.py::_flag_unmatched_prefixes": 5,
     "src/sastd/sastd.py::_handle": 4,
     "src/sastd/sastd.py::_handle_scan": 3,
     "src/sastd/sastd.py::_render_rules": 3,
