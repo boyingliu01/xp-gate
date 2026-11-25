@@ -36,6 +36,7 @@ const {
   rescueBodyLines,
 } = require('./ccn-verify.cjs');
 const path = require('path');
+const { requireEmptyOutputIsReal, requireNotTruncated } = require('./ccn-report-guards.cjs');
 const fs = require('fs');
 
 // Test-file classification. Keep equivalent to the exclusion regex in
@@ -173,6 +174,7 @@ function parseLongName(fields) {
 // execFile callback so the failure rules live in one place instead of nesting
 // four conditions inside it (which the ratchet caught as CCN 9 for a callback
 // that used to be 7).
+
 function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
   const out = stdout || '';
   const withStderr = stderr ? `: ${String(stderr).trim().slice(0, 200)}` : '';
@@ -184,10 +186,7 @@ function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
   // is not a usable signal here, so confirm the file exists and is readable
   // before believing an empty result.
   if (out.trim() === '') {
-    if (err) throw new Error(`no measurable output for ${relPath} (lizard exited ${err.code || 'with an error'})${withStderr}`);
-    if (!isReadableFile(path.join(root, relPath))) {
-      throw new Error(`lizard reported nothing for ${relPath}, which is not a readable file — treating as measurement failure, not a zero-function file`);
-    }
+    requireEmptyOutputIsReal({ err, root, relPath, withStderr });
     return out;
   }
 
@@ -196,9 +195,7 @@ function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
   // warnings come with complete output, so a kill/timeout signal is the signal to
   // distrust the rows: accepting them would silently drop every function lizard
   // had not reached yet.
-  if (err && (err.killed || err.signal)) {
-    throw new Error(`lizard was killed while measuring ${relPath} (${err.signal || 'timeout'}); output is truncated`);
-  }
+  requireNotTruncated({ err, relPath });
   return out;
 }
 
