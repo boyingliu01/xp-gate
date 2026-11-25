@@ -229,11 +229,14 @@ function resolveTimeoutMs(args, providerConfig) {
 // the ceiling is a property of the model behind the seat, not of the runner.
 // Values that cannot be honoured fall back to the default rather than disabling
 // the guard -- `max_prompt_bytes: 0` reads as "no limit" and is not.
+/** Whether a configured prompt budget can be honoured. */
+function isUsableBudget(configured) {
+  return typeof configured === 'number' && Number.isFinite(configured) && configured > 0;
+}
+
 function resolvePromptBudgetBytes(expertConfig) {
   const configured = expertConfig && expertConfig.max_prompt_bytes;
-  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-    return Math.trunc(configured);
-  }
+  if (isUsableBudget(configured)) return Math.trunc(configured);
   if (configured !== undefined) {
     // Silently falling back is how a raised ceiling looks like a still-broken
     // guard: the operator edits the config, the run still refuses, and nothing
@@ -659,18 +662,27 @@ function readOptionalFile(filePath) {
  * @param {string} expertName
  * @returns {{expertConfig: object, provider: object}}
  */
-function resolveSeat(config, expertName) {
+/**
+ * Validate the config and report its warnings, exiting on an invalid one.
+ *
+ * Warnings are printed even when the config is valid: they record decisions the operator
+ * should see (a raised ceiling that could not be honoured, a setting that was ignored),
+ * and swallowing them would make those decisions invisible.
+ */
+function assertConfigValid(config) {
   const validation = validateDistinctModels(config.experts, config.providers, config.consensus);
   if (!validation.valid) {
     console.error(`[delphi-review] ERROR: ${validation.reason}`);
     process.exit(1);
   }
-  if (validation.warning) {
-    console.error(`[delphi-review] WARNING: ${validation.warning}`);
-  }
+  if (validation.warning) console.error(`[delphi-review] WARNING: ${validation.warning}`);
   for (const warning of config.warnings) {
     console.error(`[delphi-review] WARNING: ${warning}`);
   }
+}
+
+function resolveSeat(config, expertName) {
+  assertConfigValid(config);
 
   const expertConfig = config.experts[expertName];
   if (!expertConfig) {

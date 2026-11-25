@@ -479,6 +479,28 @@ const SQLITE_TIMEOUT_MS = 5_000
 // Boy Scout (#447): XpGatePlugin used to inline five tool({...}) definitions
 // (191 lines, 7-8 brace levels). Each tool now lives in its own factory;
 // XpGatePlugin is pure wiring.
+/** Resolve a user-supplied path against the workspace root. */
+function resolveTarget(path: string, cwd: string): string {
+  return path.startsWith("/") ? path : `${cwd}/${path}`
+}
+
+/**
+ * Prefer the GLOBAL CLI's answer; run the in-repo source only when it gave none.
+ *
+ * The fallback is what makes the tool work before `xp-gate` is installed, and the
+ * upgrade suggestion is appended to whichever answer wins -- a stale global install must
+ * be visible in the same output as the result it produced.
+ */
+async function withUpgradeSuggestion(
+  cwd: string,
+  result: string | null,
+  fallback: () => Promise<string>,
+): Promise<string> {
+  if (!result) return fallback()
+  const upgrade = await getUpgradeSuggestion(cwd)
+  return upgrade ? `${result}\n${upgrade}` : result
+}
+
 function gateCheckTool(directory: string) {
   return tool({
     description: "Run xp-gate quality gates (Gate 4 + Gate 6) on a file or directory. Prefers global xp-gate CLI; falls back to direct checker source.",
@@ -488,15 +510,10 @@ function gateCheckTool(directory: string) {
     },
     async execute(args, ctx) {
       const cwd = ctx.directory || directory
-      const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
+      const target = resolveTarget(args.path, cwd)
       const gatesFlag = args.gates?.length ? ` --gates ${args.gates.join(",")}` : ""
-      const result = await runXpGate(`check "${target}"${gatesFlag}`, cwd)
-      if (result) {
-        const upgrade = await getUpgradeSuggestion(cwd)
-        return upgrade ? `${result}\n${upgrade}` : result
-      }
-      const cmd = `node ${directory}/src/npm-package/bin/xp-gate.js check "${target}"${gatesFlag}`
-      return runCmd(cmd, cwd)
+      return withUpgradeSuggestion(cwd, await runXpGate(`check "${target}"${gatesFlag}`, cwd),
+        () => runCmd(`node ${directory}/src/npm-package/bin/xp-gate.js check "${target}"${gatesFlag}`, cwd))
     },
   })
 }
@@ -509,14 +526,9 @@ function gatePrinciplesTool(directory: string) {
     },
     async execute(args, ctx) {
       const cwd = ctx.directory || directory
-      const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
-      const result = await runXpGate(`principles "${target}"`, cwd)
-      if (result) {
-        const upgrade = await getUpgradeSuggestion(cwd)
-        return upgrade ? `${result}\n${upgrade}` : result
-      }
-      const cmd = `npx -y tsx ${directory}/src/principles/index.ts --files "${target}" --format console`
-      return runCmd(cmd, cwd)
+      const target = resolveTarget(args.path, cwd)
+      return withUpgradeSuggestion(cwd, await runXpGate(`principles "${target}"`, cwd),
+        () => runCmd(`npx -y tsx ${directory}/src/principles/index.ts --files "${target}" --format console`, cwd))
     },
   })
 }
@@ -538,15 +550,10 @@ function gateArchTool(directory: string) {
       // #447: default to the built-in-rules path — no --config. Forcing
       // `--config architecture.yaml` hit the pre-0.16 schema archlint rejects.
       const archArgs = args.config ? `arch --use-config ${args.config}` : "arch"
-      const result = await runXpGate(archArgs, cwd)
-      if (result) {
-        const upgrade = await getUpgradeSuggestion(cwd)
-        return upgrade ? `${result}\n${upgrade}` : result
-      }
-      const fallback = args.config
+      const direct = args.config
         ? `npx -y @archlinter/cli scan . --config ${args.config}`
-        : `npx -y @archlinter/cli scan .`
-      return runCmd(fallback, cwd)
+        : "npx -y @archlinter/cli scan ."
+      return withUpgradeSuggestion(cwd, await runXpGate(archArgs, cwd), () => runCmd(direct, cwd))
     },
   })
 }
@@ -664,22 +671,25 @@ function readReloadInputs(): ReloadInputs {
   const parsed = parseOmoConfig(omoConfigPath)
   if (typeof parsed === "string") return { ok: false, reason: parsed }
 
+  const model = resolveReloadModel(parsed)
+  if (typeof model === "string") return { ok: false, reason: model }
+  return { ok: true, dbPath, providerID: model.providerID, modelID: model.modelID }
+}
+
+/**
+ * The provider/model pair to reload onto, or the REASON it cannot be resolved.
+ *
+ * Two failure shapes are collapsed into the string return: `readSisyphusModel` reports its
+ * own failures as a message, and a model ref that is not `provider/model` cannot be split.
+ * Both are "tell the user why" with no partial result to salvage.
+ */
+function resolveReloadModel(parsed: unknown): { providerID: string; modelID: string } | string {
   const model = readSisyphusModel(parsed)
-  // `readSisyphusModel` reports its own failures as a message string; a string that
-  // does not start with the failure prefix is a model id.
-  if (isReloadFailure(model)) return { ok: false, reason: model }
-
+  // A string that does not start with the failure prefix is a model id.
+  if (isReloadFailure(model)) return model as string
   const split = splitModelRef(model as string)
-  if (!split) {
-    return { ok: false, reason: `Session reload failed: model "${model}" is not in provider/model format` }
-  }
-
-  return {
-    ok: true,
-    dbPath,
-    providerID: split.providerID,
-    modelID: split.modelID,
-  }
+  if (split) return split
+  return `Session reload failed: model "${model}" is not in provider/model format`
 }
 
 /** The parsed config object, or the failure message. */
