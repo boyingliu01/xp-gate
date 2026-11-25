@@ -437,14 +437,61 @@ function findSourcePathsValue(
   bodyStart: number,
   bodyEnd: number,
 ): { start: number; end: number } | null | typeof UNCLOSED {
-  const key = /^[^\S\n]*source_paths[^\S\n]*=/m.exec(doc.slice(bodyStart, bodyEnd));
-  if (!key) return null;
-  const start = bodyStart + key.index;
-  const open = doc.indexOf('[', start);
+  const key = findKeyOutsideStrings(doc, bodyStart, bodyEnd);
+  if (key === -1) return null;
+  const open = doc.indexOf('[', key);
   if (open === -1 || open >= bodyEnd) return null;
   const close = matchingBracket(doc, open, bodyEnd);
-  return close === -1 ? UNCLOSED : { start, end: close + 1 };
+  return close === -1 ? UNCLOSED : { start: key, end: close + 1 };
 }
+
+/** A line that assigns `source_paths`. */
+const KEY_LINE = /^[^\S\n]*source_paths[^\S\n]*=/;
+
+/**
+ * Index where a REAL `source_paths =` key starts, or -1.
+ *
+ * Line-by-line with a string state machine, not `^.../m`: a MULTI-LINE string can hold
+ * a line that looks exactly like the key. Measured -- a
+ * `description = """` containing `source_paths = ["fake"]` inside `[tool.mutmut]` was
+ * rewritten while the REAL key below it was left alone.
+ *
+ * All four TOML string forms are tracked: `"..."`, `'...'`, `"""..."""` and
+ * `'''...'''`. The multi-line forms are why a single-line regex cannot work here --
+ * they legitimately span the newlines the regex would anchor on.
+ */
+function findKeyOutsideStrings(doc: string, from: number, to: number): number {
+  let quote: string | null = null;
+  let offset = from;
+  for (const line of doc.slice(from, to).split('\n')) {
+    const isKey = quote === null && KEY_LINE.test(line);
+    quote = scanLineForQuote(line, quote);
+    if (isKey && quote === null) return offset;
+    offset += line.length + 1;
+  }
+  return -1;
+}
+
+/** The string delimiter still open after this line, or null when outside one. */
+function scanLineForQuote(line: string, quote: string | null): string | null {
+  let open = quote;
+  for (let i = 0; i < line.length; i += 1) {
+    const hit = QUOTE_TOKENS.find((token) => line.startsWith(token.delimiter, i));
+    if (!hit) continue;
+    if (open === null) open = hit.delimiter;
+    else if (open === hit.delimiter) open = null;
+    i += hit.delimiter.length - 1;
+  }
+  return open;
+}
+
+/** The TOML string delimiters, longest first so `"""` wins over `"`. */
+const QUOTE_TOKENS = [
+  { delimiter: '"""' },
+  { delimiter: "'''" },
+  { delimiter: '"' },
+  { delimiter: "'" },
+];
 
 /** Marks a `source_paths` whose array never closes, so the caller can leave it alone. */
 const UNCLOSED = Symbol('unclosed array');

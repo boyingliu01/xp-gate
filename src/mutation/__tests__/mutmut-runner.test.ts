@@ -935,6 +935,18 @@ describe('MutmutRunner', () => {
       expect(out).toContain('source_paths = ["new"]');
     });
 
+    it('ignores a fake key inside a MULTI-LINE string', async () => {
+      // A `description = """` body can hold a line that looks exactly like the key.
+      // Anchoring on `^` matched it and rewrote the STRING while the real key below was
+      // left alone (measured). The scan tracks string state across lines instead.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const existing = '[tool.mutmut]\ndescription = """\nsource_paths = ["fake"]\n"""\nsource_paths = ["real"]\n';
+      const out = mutmutConfigContent(existing, 'source_paths = ["new"]');
+      expect(out).toContain('source_paths = ["fake"]');
+      expect(out).toContain('source_paths = ["new"]');
+      expect(out).not.toContain('"real"');
+    });
+
     it('leaves an UNCLOSED array alone instead of adding a second key', async () => {
       // The file is already invalid. Appending `source_paths` again compounds it into two
       // keys in one table (measured). Returning the text unchanged leaves a single, still
