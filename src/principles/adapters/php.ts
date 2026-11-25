@@ -28,29 +28,53 @@ interface BraceScan {
 }
 
 /**
- * Find the LAST index at which brace depth returned to zero, scanning `code` from
- * `startPos`.
+ * Find the FIRST index at which brace depth returned to zero, scanning `code`
+ * from `startPos`.
  *
- * The last crossing is the declaration's real closing brace: a nested class or
- * closure sits INSIDE the declaration and so cannot be the last one at depth zero.
- * The first crossing is deliberately not used -- measured, an unterminated heredoc
- * leaves unmatched `{` in the text, so the first zero-crossing lands mid-body and
- * reported a five-level `if` chain as depth 4.
+ * The first crossing is the declaration's own closing brace: from the
+ * declaration's start the depth goes up at its `{` and back to zero exactly at
+ * its `}`, so the first zero-crossing cannot belong to an enclosing scope.
+ *
+ * ## Why not the last crossing (the original implementation)
+ *
+ * It took the LAST zero-crossing of the whole file, on the reasoning that a
+ * nested class or closure sits INSIDE the declaration and therefore cannot be
+ * the last crossing. That reasoning only holds for the declaration that ends
+ * the file. For a method inside a class the last zero-crossing is the CLASS's
+ * closing brace, so the extracted block ran from the method's first line to the
+ * end of the file. `length` is derived from that block, so every method reported
+ * "distance to EOF":
+ *
+ *     public function first() { return 1; }   // 1 line -> reported 74 lines
+ *
+ * Measured on a real 475-line file: a 33-line constructor was reported as 423
+ * lines, a 5-line helper as 93. Every PHP file longer than the 50-line threshold
+ * consequently produced unfixable `clean-code.long-function` warnings -- 89 of
+ * them across 6 files, while an independent measurement found zero functions
+ * actually over 50 lines.
+ *
+ * ## Why the "first crossing" was believed unsafe
+ *
+ * The earlier comment recorded that an unterminated heredoc leaves unmatched
+ * `{` in the text, so the first zero-crossing lands mid-body. That hazard is
+ * handled upstream: `extractCodeBlock` scans a `stripPhpLiterals()` view, where
+ * heredoc/nowdoc bodies are blanked, so their braces never reach `stepDepth`.
+ * A test in php.test.ts pins this ("is not confused by a heredoc containing
+ * braces").
  *
  * `balanced` is false when the scan never returns to zero, the signal that the
  * input is malformed and no crossing is trustworthy.
  */
-function lastBalancedEnd(code: string, startPos: number): BraceScan {
+function firstBalancedEnd(code: string, startPos: number): BraceScan {
   let depth = 0;
   let seenBrace = false;
-  let endPos = -1;
   for (let i = startPos; i < code.length; i++) {
     const step = stepDepth(code[i], depth, seenBrace);
     depth = step.depth;
     seenBrace = step.seenBrace;
-    if (step.closedAtEnd) endPos = i + 1;
+    if (step.closedAtEnd) return { endPos: i + 1, balanced: true };
   }
-  return { endPos, balanced: depth === 0 };
+  return { endPos: -1, balanced: depth === 0 };
 }
 
 export class PhpAdapter extends BaseAdapter implements Adapter {
@@ -102,7 +126,7 @@ export class PhpAdapter extends BaseAdapter implements Adapter {
    */
   protected extractCodeBlock(startPos: number, maxFallback: number = 100): string {
     const blanked = stripPhpLiterals(this.fileContent);
-    const scan = lastBalancedEnd(blanked, startPos);
+    const scan = firstBalancedEnd(blanked, startPos);
 
     // Unterminated heredoc: the text never rebalances, so no crossing is a real
     // boundary. Fall back to the last `}` in the file rather than a boundary that
@@ -225,7 +249,8 @@ function blankLineComment(code: string, start: number): { emit: string; last: nu
 }
 
 /** Blank one block comment, including its delimiters. */
-function blankBlockComment(code: string, start: number): { emit: string; last: number } {  let i = start + 2;
+function blankBlockComment(code: string, start: number): { emit: string; last: number } {
+  let i = start + 2;
   let emit = '  ';
   while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
     emit += ' ';
@@ -233,7 +258,19 @@ function blankBlockComment(code: string, start: number): { emit: string; last: n
   }
   if (i < code.length) {
     emit += '  ';
-    i++;
+    // Advance PAST the closing `*` and `/` (two characters, two blanks).
+    //
+    // `last` is the STOP index, and the caller resumes at `last` — the same
+    // contract as blankLineComment. Incrementing once here made the helper
+    // consume `*` but stop on `/`, so `stripPhpLiterals` then swallowed the
+    // character after `*/` as well. Each block comment therefore shortened the
+    // output by one character, and because `stripPhpLiterals` promises
+    // "preserving length so brace positions stay meaningful", every position
+    // AFTER the first block comment drifted. Measured: a 30,587-byte file came
+    // back 181 bytes short, and `extractCodeBlock` — which re-uses the raw
+    // match index against the blanked view — cut a 9-line method into the
+    // 113-line span up to the next balanced brace.
+    i += 2;
   }
   return { emit, last: i };
 }
@@ -332,9 +369,17 @@ function blankHeredoc(code: string, start: number): { emit: string; last: number
     const lineEnd = nextLineEnd(code, i);
     const line = code.slice(i, lineEnd);
     const closes = closesHeredoc(line, terminator);
-    emit += ' '.repeat(line.length);
+    // Cover the line AND the newline that ends it. Advancing to nextLineStart
+    // without emitting the newline shortened the output by one character per
+    // heredoc line, which broke the length contract `stripPhpLiterals` promises
+    // and shifted every brace position after the heredoc.
+    const span = nextLineStart(code, lineEnd) - i;
+    emit += ' '.repeat(span);
     i = nextLineStart(code, lineEnd);
-    if (closes) return { emit, last: lineEnd };
+    // `last` is the STOP index (exclusive): the caller resumes there, and its
+    // own `i++` moves one further. The terminating line's newline is already in
+    // `emit`, so stop at nextLineStart, not at lineEnd, or it is emitted twice.
+    if (closes) return { emit, last: nextLineStart(code, lineEnd) };
   }
   return unterminatedHeredoc(code, start, opener[0].length);
 }
@@ -413,7 +458,7 @@ function blankLessThanAt(code: string, index: number) {
  * CCN 23: seven branch points sharing one index variable read as deeply nested
  * even though each branch is trivial.
  */
-function stripPhpLiterals(code: string): string {
+export function stripPhpLiterals(code: string): string {
   let out = '';
   for (let i = 0; i < code.length; i++) {
     const slice = blankLiteralAt(code, i);
@@ -422,10 +467,17 @@ function stripPhpLiterals(code: string): string {
       continue;
     }
     out += slice.emit;
-    // `last` is the index the helper stopped AT (the terminating newline or
-    // closing delimiter, already emitted). Resume just past it; the loop's own
-    // `i++` would otherwise consume one character twice.
-    i = slice.last;
+    // `last` is the index the helper stopped AT, already past everything it
+    // emitted. The loop's own `i++` supplies the final step, so resume at
+    // `last - 1`; assigning `last` directly skipped one source character per
+    // literal.
+    //
+    // That off-by-one broke the length contract this function exists to keep
+    // ("preserving length so brace positions stay meaningful"). Measured on a
+    // 30,587-byte PHP file: 181 bytes short, and `extractCodeBlock` — which
+    // reuses the raw match index against this blanked view — cut a 9-line method
+    // into a 113-line span reaching the next balanced brace.
+    i = slice.last - 1;
   }
   return out;
 }
