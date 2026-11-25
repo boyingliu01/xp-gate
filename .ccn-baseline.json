@@ -1559,7 +1559,7 @@
     "src/principles/config.ts::resolveSeverityForFile": 9,
     "src/principles/config.ts::setActiveConfig": 2,
     "src/principles/config.ts::usableOverrideRank": 4,
-    "src/principles/config.ts::warn": 2,
+    "src/principles/config.ts::warn": 3,
     "src/principles/direct-execution.ts::canonical": 2,
     "src/principles/direct-execution.ts::isDirectExecution": 6,
     "src/principles/index.ts::(anonymous)@242": 2,

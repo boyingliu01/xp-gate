@@ -214,31 +214,53 @@ export function getDefaultConfig(): PrinciplesConfig {
  * misconfiguration, and answering it with built-in thresholds re-creates exactly
  * the fail-open gate this module exists to close (#457, walkthrough FC-08).
  */
+/**
+ * The config path to read, or null when the built-in defaults apply.
+ *
+ * An EXPLICIT path that does not exist THROWS: the caller named a file, and silently
+ * using defaults would hide a typo behind a passing gate. A default path that does not
+ * exist is simply "no config", which is the normal case for a new project.
+ */
+function locateConfig(configPath?: string): string | null {
+  const resolvedPath = configPath ? resolve(configPath) : resolveDefaultConfigPath();
+  if (isReadable(resolvedPath)) return resolvedPath as string;
+  if (configPath) throw new Error(`config file not found: ${resolvedPath}`);
+  return null;
+}
+
+/** Whether this path names a config file that exists. */
+function isReadable(resolvedPath: string | null): boolean {
+  return Boolean(resolvedPath) && existsSync(resolvedPath as string);
+}
+
 export async function loadConfig(configPath?: string): Promise<PrinciplesConfig> {
   const defaults = getDefaultConfig();
-  const resolvedPath = configPath ? resolve(configPath) : resolveDefaultConfigPath();
+  const resolvedPath = locateConfig(configPath);
+  if (!resolvedPath) return defaults;
 
-  if (!resolvedPath || !existsSync(resolvedPath)) {
-    if (configPath) {
-      throw new Error(`config file not found: ${resolvedPath}`);
-    }
-    return defaults;
-  }
+  const parsed = readConfigObject(resolvedPath);
+  return parsed ? mergeConfig(defaults, parsed) : defaults;
+}
 
+/**
+ * The config object at this path, or null when it is unusable.
+ *
+ * An EXPLICIT path that fails is still a warning, not a throw: the caller asked for a
+ * config, got an unusable one, and the built-in defaults are a working answer -- while an
+ * exception here would take down every rule that reads a config.
+ */
+function readConfigObject(resolvedPath: string): Partial<PrinciplesConfig> | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(resolvedPath, 'utf-8'));
   } catch (error) {
     warn(`could not parse ${resolvedPath}: ${describeError(error)} — using built-in defaults`);
-    return defaults;
+    return null;
   }
-
-  if (!isPlainObject(parsed)) {
-    warn(`${resolvedPath} must contain a JSON object — using built-in defaults`);
-    return defaults;
-  }
-
-  return mergeConfig(defaults, parsed as Partial<PrinciplesConfig>);
+  if (isPlainObject(parsed)) return parsed as Partial<PrinciplesConfig>;
+  // A `.principlesrc` holding an array or a string is a shape error, not a parse error.
+  warn(`${resolvedPath} must contain a JSON object — using built-in defaults`);
+  return null;
 }
 
 /** Resolve the default config path: git toplevel first, then cwd. */
@@ -674,14 +696,36 @@ function applyOverride(
   effective: string,
   ruleId: string,
   filePath: string,
-  entry: { rules?: Record<string, string>; paths?: string[] },
+  entry: OverrideEntry,
   declaredRank: number,
 ): string {
   const targetRank = usableOverrideRank(entry?.rules?.[ruleId], declaredRank);
-  if (targetRank === undefined) return effective;
-  if (!(entry.paths ?? []).some((p) => matchesGlob(filePath, p))) return effective;
-  if (targetRank >= (SEVERITY_RANK[effective] ?? 0)) return effective;
+  if (!appliesTo(targetRank, entry, filePath, effective)) return effective;
   return entry.rules?.[ruleId] ?? effective;
+}
+
+/** One `overrides[]` entry, as the config declares it. */
+interface OverrideEntry {
+  rules?: Record<string, string>;
+  paths?: string[];
+}
+
+/**
+ * Whether this entry should take effect.
+ *
+ * Three gates, and the third is the RELAX-ONLY rule: a later override may lower the
+ * severity further, never raise it back. That direction is what keeps a path-scoped entry
+ * from becoming a second, invisible gate policy.
+ */
+function appliesTo(
+  targetRank: number | undefined,
+  entry: OverrideEntry,
+  filePath: string,
+  effective: string,
+): boolean {
+  if (targetRank === undefined) return false;
+  if (!(entry.paths ?? []).some((p) => matchesGlob(filePath, p))) return false;
+  return targetRank < (SEVERITY_RANK[effective] ?? 0);
 }
 
 /**
@@ -705,19 +749,31 @@ function parseOverrideRules(
 ): Record<string, string> {
   const cleanRules: Record<string, string> = {};
   for (const [ruleId, severity] of Object.entries(rules)) {
-    if (typeof severity !== 'string' || !(SEVERITIES as readonly string[]).includes(severity)) {
-      warn(
-        `overrides[${index}].rules["${ruleId}"] in ${source} must be one of ${SEVERITIES.join('|')} — ignored`
-      );
+    const problem = ruleOverrideProblem(ruleId, severity);
+    if (problem) {
+      warn(`overrides[${index}].rules["${ruleId}"] in ${source} ${problem} — ignored`);
       continue;
     }
-    if (!ruleId.includes('.')) {
-      warn(`overrides[${index}].rules["${ruleId}"] in ${source} must be "<group>.<rule>" — ignored`);
-      continue;
-    }
-    cleanRules[ruleId] = severity;
+    cleanRules[ruleId] = severity as string;
   }
   return cleanRules;
+}
+
+/** The rule ID prefix that marks a namespaced rule (`clean-code.long-function`). */
+const RULE_ID_SEPARATOR = '.';
+
+/**
+ * Why this override pair is unusable, or null when it is fine.
+ *
+ * The rule ID must be NAMESPACED: an entry keyed `long-function` would match nothing,
+ * and a silently non-matching override is the failure mode this module exists to remove.
+ */
+function ruleOverrideProblem(ruleId: string, severity: unknown): string | null {
+  if (typeof severity !== 'string' || !(SEVERITIES as readonly string[]).includes(severity)) {
+    return `must be one of ${SEVERITIES.join('|')}`;
+  }
+  if (ruleId.includes(RULE_ID_SEPARATOR)) return null;
+  return 'must be "<group>.<rule>"';
 }
 
 /**
