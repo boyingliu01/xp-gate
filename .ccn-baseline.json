@@ -876,7 +876,7 @@
     "src/debugger/token-delta.ts::getTotalTokens": 3,
     "src/debugger/token-delta.ts::readTokenHistory": 3,
     "src/debugger/token-delta.ts::recordTokenDelta": 9,
-    "src/debugger/token-delta.ts::writeTokenHistory": 1,
+    "src/debugger/token-delta.ts::writeTokenHistory": 2,
     "src/debugger/trace-collector.ts::(anonymous)@107": 1,
     "src/debugger/trace-collector.ts::(anonymous)@35": 4,
     "src/debugger/trace-collector.ts::(anonymous)@36": 4,

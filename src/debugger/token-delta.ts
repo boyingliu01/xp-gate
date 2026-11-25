@@ -50,7 +50,13 @@ function readTokenHistory(root: string): TokenRecord[] {
 
 function writeTokenHistory(root: string, records: TokenRecord[]): void {
   const historyFile = path.join(root, '.sprint-state', 'token-history.json');
-  fs.writeFileSync(historyFile, JSON.stringify(records, null, 2), 'utf8');
+  try {
+    fs.writeFileSync(historyFile, JSON.stringify(records, null, 2), 'utf8');
+  } catch (err) {
+    // Token accounting is a REPORT, not a gate input: a failed write must not take down
+    // the run that was being measured.
+    console.warn(`token history not written (${historyFile}): ${String(err)}`);
+  }
 }
 
 /**
@@ -61,36 +67,75 @@ function writeTokenHistory(root: string, records: TokenRecord[]): void {
  * @intent 追踪每次 LLM 调用的 token 消耗
  * @covers AC-002-01, AC-002-02, AC-002-03, AC-002-04
  */
-export function recordTokenDelta(options: RecordTokenDeltaOptions): void {
-  const state = readSprintState(options.projectRoot);
-  if (!state?.id) return;
+/** The deltas and totals one record carries. */
+interface TokenTotals {
+  deltaInput: number;
+  deltaOutput: number;
+  deltaTotal: number;
+  totalTokens: number;
+}
 
-  const history = readTokenHistory(options.projectRoot);
-
-  // Find the last record for this sprint (boundary reset)
-  const sprintRecords = history.filter(r => r.sprint_id === state.id);
-  const lastRecord = sprintRecords.length > 0 ? sprintRecords[sprintRecords.length - 1] : null;
-
-  // Calculate deltas
-  const deltaInput = lastRecord ? options.inputTokens - lastRecord.input_tokens : options.inputTokens;
-  const deltaOutput = lastRecord ? options.outputTokens - lastRecord.output_tokens : options.outputTokens;
-  const deltaTotal = deltaInput + deltaOutput;
-
-  const totalTokens = options.inputTokens + options.outputTokens;
-
-  const record: TokenRecord = {
-    sprint_id: state.id,
+/**
+ * Build the record to append.
+ *
+ * A pure function of the sprint id, the options and the computed totals, so the shape of
+ * what lands in the history reads in one place instead of interleaved with the reads and
+ * writes around it.
+ */
+function buildTokenRecord(
+  sprintId: string,
+  options: RecordTokenDeltaOptions,
+  totals: TokenTotals,
+): TokenRecord {
+  return {
+    sprint_id: sprintId,
     timestamp: new Date().toISOString(),
     input_tokens: options.inputTokens,
     output_tokens: options.outputTokens,
     cache_read_tokens: options.cacheReadTokens ?? 0,
     cache_write_tokens: options.cacheWriteTokens ?? 0,
-    total_tokens: totalTokens,
-    delta_input: deltaInput,
-    delta_output: deltaOutput,
-    delta_total: deltaTotal,
+    total_tokens: totals.totalTokens,
+    delta_input: totals.deltaInput,
+    delta_output: totals.deltaOutput,
+    delta_total: totals.deltaTotal,
     phase: options.phase,
   };
+}
+
+/**
+ * The last token record of this sprint, or null.
+ *
+ * Scoped to the sprint because the history spans sprints: measuring against a previous
+ * sprint's record would report one sprint's whole usage as another's delta.
+ */
+function lastRecordFor(history: TokenRecord[], sprintId: string): TokenRecord | null {
+  const forSprint = history.filter((r) => r.sprint_id === sprintId);
+  return forSprint.length > 0 ? forSprint[forSprint.length - 1] : null;
+}
+
+/**
+ * The deltas since the last record, or the totals when there is none.
+ *
+ * With no previous record the runner's cumulative counters ARE the delta: they reset at
+ * a sprint boundary, so their whole value happened in this sprint.
+ */
+function deltasFrom(lastRecord: TokenRecord | null, options: RecordTokenDeltaOptions) {
+  const input = lastRecord ? options.inputTokens - lastRecord.input_tokens : options.inputTokens;
+  const output = lastRecord ? options.outputTokens - lastRecord.output_tokens : options.outputTokens;
+  return { deltaInput: input, deltaOutput: output, deltaTotal: input + output };
+}
+
+export function recordTokenDelta(options: RecordTokenDeltaOptions): void {
+  const state = readSprintState(options.projectRoot);
+  if (!state?.id) return;
+
+  const history = readTokenHistory(options.projectRoot);
+  const lastRecord = lastRecordFor(history, state.id);
+  const { deltaInput, deltaOutput, deltaTotal } = deltasFrom(lastRecord, options);
+
+  const totalTokens = options.inputTokens + options.outputTokens;
+
+  const record = buildTokenRecord(state.id, options, { deltaInput, deltaOutput, deltaTotal, totalTokens });
 
   history.push(record);
   writeTokenHistory(options.projectRoot, history);
