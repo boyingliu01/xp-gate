@@ -74,30 +74,49 @@ function shellFiles() {
 /** shellcheck's structured output, or [] when it is absent or found nothing. */
 function shellcheckFindings(files) {
   if (files.length === 0) return [];
-  let raw;
+  return parseShellcheckJson(runShellcheck(files));
+}
+
+/**
+ * Exit code for "the tool did not measure anything".
+ *
+ * Never 0 and never 1: a zero baseline would claim the project is clean, and a caller
+ * seeing 1 would look for a lint problem instead of a missing tool.
+ */
+const NOT_MEASURED = 2;
+
+/**
+ * Run shellcheck and return its raw JSON text, or '' when it printed none.
+ *
+ * shellcheck exits NON-ZERO precisely when it HAS findings, and stdout carries the JSON
+ * in that case too -- so a thrown status is the normal path, not a failure. ENOENT is
+ * different: the tool is absent, which is "not measured" rather than "clean".
+ */
+function runShellcheck(files) {
   try {
-    raw = execFileSync('shellcheck', ['-f', 'json', ...files], {
+    return execFileSync('shellcheck', ['-f', 'json', ...files], {
       cwd: ROOT,
       encoding: 'utf-8',
       maxBuffer: 64 * 1024 * 1024,
     });
   } catch (err) {
-    // shellcheck exits non-zero precisely when it HAS findings, and stdout carries
-    // the JSON in that case too. An ENOENT means the tool is not installed: that is
-    // "not measured", not "clean", so say so rather than writing a zero baseline.
     if (err.code === 'ENOENT') {
       console.error('shellcheck not found -- nothing measured, baseline NOT written.');
-      process.exit(2);
+      process.exit(NOT_MEASURED);
     }
-    raw = err.stdout;
+    return err.stdout || '';
   }
+}
+
+/** Parse shellcheck's JSON, exiting when it is not usable. */
+function parseShellcheckJson(raw) {
   if (!raw || !raw.trim()) return [];
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     console.error('shellcheck output was not JSON -- nothing measured, baseline NOT written.');
-    process.exit(2);
+    process.exit(NOT_MEASURED);
   }
 }
 
@@ -111,6 +130,41 @@ function buildBaseline(findings) {
   return out;
 }
 
+/**
+ * The baseline on disk, or null when there is none or it is unusable.
+ *
+ * Null rather than a throw: a missing baseline is a first run, and an unreadable one is
+ * overwritten by the very command that noticed it.
+ */
+function readPreviousBaseline() {
+  try {
+    return JSON.parse(fs.readFileSync(BASELINE, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+/** The finding total recorded in a baseline, or 0 when there is none. */
+function totalWarningsOf(baseline) {
+  if (!baseline) return 0;
+  return Object.values(baseline).reduce((n, e) => n + (e.totalWarnings || 0), 0);
+}
+
+/**
+ * Compare the measurement against the recording, exiting 1 on drift.
+ *
+ * `process.exitCode` rather than `process.exit()`: the caller may have queued output, and
+ * killing the process would lose it.
+ */
+function checkAgainstPrevious(total, previousTotal, fileCount) {
+  if (total === previousTotal) {
+    console.log(`baseline matches: ${total} finding(s) across ${fileCount} file(s)`);
+    return;
+  }
+  console.log(`baseline drift: recorded ${previousTotal}, measured ${total}`);
+  process.exitCode = 1;
+}
+
 function main() {
   const checkOnly = process.argv.includes('--check');
   const files = shellFiles();
@@ -120,28 +174,23 @@ function main() {
   const total = Object.values(baseline).reduce((n, e) => n + e.totalWarnings, 0);
   const fileCount = Object.keys(baseline).length;
 
-  let previous = null;
-  try {
-    previous = JSON.parse(fs.readFileSync(BASELINE, 'utf-8'));
-  } catch {
-    previous = null;
-  }
-  const previousTotal = previous
-    ? Object.values(previous).reduce((n, e) => n + (e.totalWarnings || 0), 0)
-    : 0;
+  const previous = readPreviousBaseline();
+  const previousTotal = totalWarningsOf(previous);
 
   if (checkOnly) {
-    if (total === previousTotal) {
-      console.log(`baseline matches: ${total} finding(s) across ${fileCount} file(s)`);
-      return;
-    }
-    console.log(`baseline drift: recorded ${previousTotal}, measured ${total}`);
-    process.exitCode = 1;
+    checkAgainstPrevious(total, previousTotal, fileCount);
     return;
   }
 
-  fs.mkdirSync(path.dirname(BASELINE), { recursive: true });
-  fs.writeFileSync(BASELINE, JSON.stringify(baseline, null, 2) + '\n');
+  try {
+    fs.mkdirSync(path.dirname(BASELINE), { recursive: true });
+    fs.writeFileSync(BASELINE, JSON.stringify(baseline, null, 2) + '\n');
+  } catch (err) {
+    // A write that fails must not print the success line that follows it: the baseline
+    // would look written while the file on disk is unchanged or absent.
+    console.error(`cannot write ${BASELINE}: ${String(err)}`);
+    process.exit(NOT_MEASURED);
+  }
   console.log(
     `wrote ${path.relative(ROOT, BASELINE)}: ${total} finding(s) across ${fileCount} file(s)` +
       (previous === null ? ' (no previous baseline)' : ` (previously ${previousTotal})`)
