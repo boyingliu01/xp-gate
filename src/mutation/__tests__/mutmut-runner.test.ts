@@ -935,6 +935,26 @@ describe('MutmutRunner', () => {
       expect(out).toContain('source_paths = ["new"]');
     });
 
+    it('ignores a COMMENTED-OUT [tool.mutmut] header', async () => {
+      // `includes('[tool.mutmut]')` matched a comment, so the fallback inserted the key
+      // into a commented-out header and left a DUPLICATE `source_paths` (measured). A
+      // commented header means there is no table, so a real one is appended.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const out = mutmutConfigContent('# [tool.mutmut]\nsource_paths = ["a"]\n', 'source_paths = ["new"]');
+      expect(out.match(/^\[tool\.mutmut\]/gm)).toHaveLength(1);
+    });
+
+    it('leaves ANOTHER table\'s source_paths alone', async () => {
+      // `source_paths` is a plausible key in any tool's table. An unscoped regex rewrote
+      // `[tool.other]`'s value while leaving mutmut's untouched -- the exact inverse of
+      // the intent (measured).
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const existing = '[tool.other]\nsource_paths = ["other_a"]\n\n[tool.mutmut]\nsource_paths = ["mut_a"]\n';
+      const out = mutmutConfigContent(existing, 'source_paths = ["new"]');
+      expect(out).toContain('source_paths = ["other_a"]');
+      expect(out).not.toContain('mut_a');
+    });
+
     it('replaces a single-line source_paths', async () => {
       const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const out = mutmutConfigContent('[tool.mutmut]\nsource_paths = ["old"]\n', 'source_paths = ["new"]');

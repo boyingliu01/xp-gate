@@ -378,13 +378,36 @@ export class MutmutRunner implements MutationRunner {
  */
 export function mutmutConfigContent(existing: string | null, sourcePathsLine: string): string {
   if (existing === null) return `[tool.mutmut]\n${sourcePathsLine}\n`;
-  if (!existing.includes('[tool.mutmut]')) {
-    return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
-  }
-  // The `s` flag is REQUIRED: TOML allows the array to span lines, and without dotAll
-  // `.*?` stops at the newline, so a multi-line `source_paths` is never matched -- the
-  // key is then APPENDED a second time and mutmut reads a duplicate. Measured.
-  const sourcePathsRegex = /source_paths\s*=\s*\[.*?\]/s;
-  if (sourcePathsRegex.test(existing)) return existing.replace(sourcePathsRegex, sourcePathsLine);
-  return existing.replace('[tool.mutmut]', `[tool.mutmut]\n${sourcePathsLine}`);
+  const body = mutmutTableBody(existing);
+  if (body === null) return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
+  const keyed = /source_paths\s*=\s*\[[\s\S]*?\]/;
+  const rewritten = keyed.test(body)
+    ? body.replace(keyed, () => sourcePathsLine)
+    : `\n${sourcePathsLine}${body}`;
+  return existing.replace(body, () => rewritten);
+}
+
+/**
+ * The body of the `[tool.mutmut]` table, or null when there is no such TABLE.
+ *
+ * Three things this deliberately does NOT treat as the table:
+ *
+ *   - a COMMENT (`# [tool.mutmut]`) -- `includes()` matched it, so the old fallback
+ *     inserted the key into a commented-out header and produced a DUPLICATE
+ *     `source_paths` in a file that had one (measured);
+ *   - a string value that happens to contain the text;
+ *   - a table with a DOTTED or quoted name (`[tool."mutmut"]`), which TOML treats
+ *     differently from what mutmut reads.
+ *
+ * The body stops at the next TABLE header, so a later table's `source_paths` is never
+ * rewritten -- `source_paths` is a plausible key in any tool's table, and an unscoped
+ * replacement changed `[tool.other]`'s value while leaving mutmut's alone.
+ */
+function mutmutTableBody(existing: string): string | null {
+  const header = /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m;
+  const found = header.exec(existing);
+  if (!found) return null;
+  const rest = existing.slice(found.index + found[0].length);
+  const nextTable = /^[^\S\n]*\[/m.exec(rest);
+  return nextTable ? rest.slice(0, nextTable.index) : rest;
 }
