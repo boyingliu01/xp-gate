@@ -209,13 +209,9 @@
     "plugins/dsh/client/client.js::validationError": 6,
     "plugins/dsh/client/client.js::withSeatEdit": 1,
     "plugins/dsh/scripts/copy-client.cjs::rel": 1,
-    "plugins/dsh/scripts/prepack.cjs::(anonymous)@35": 1,
-    "plugins/dsh/scripts/prepack.cjs::(anonymous)@36": 1,
-    "plugins/dsh/scripts/prepack.cjs::(anonymous)@37": 1,
-    "plugins/dsh/scripts/prepack.cjs::(anonymous)@42": 1,
     "plugins/dsh/scripts/prepack.cjs::copyDir": 7,
-    "plugins/dsh/scripts/prepack.cjs::discoverSkills": 2,
-    "plugins/dsh/scripts/prepack.cjs::main": 4,
+    "plugins/dsh/scripts/prepack.cjs::discoverSkills": 3,
+    "plugins/dsh/scripts/prepack.cjs::main": 5,
     "plugins/dsh/scripts/prepack.cjs::shouldSkipFile": 1,
     "plugins/dsh/scripts/verify-skill-provider.mjs::(anonymous)@71": 1,
     "plugins/dsh/scripts/verify-skill-provider.mjs::(anonymous)@96": 5,
@@ -272,9 +268,8 @@
     "plugins/opencode/index.ts::writeCache": 4,
     "plugins/opencode/index.ts::writeSessionModel": 2,
     "plugins/opencode/index.ts::writeUpgradeNotice": 1,
-    "plugins/opencode/scripts/prepack.cjs::(anonymous)@34": 2,
     "plugins/opencode/scripts/prepack.cjs::copyDir": 7,
-    "plugins/opencode/scripts/prepack.cjs::main": 5,
+    "plugins/opencode/scripts/prepack.cjs::main": 4,
     "plugins/opencode/scripts/prepack.cjs::shouldSkipFile": 2,
     "scripts/analyse-hook-structure.cjs::(anonymous)@182": 3,
     "scripts/analyse-hook-structure.cjs::(anonymous)@58": 3,
@@ -1709,7 +1704,8 @@
     "src/sastd/sastd.py::_resolve_config": 4,
     "src/sastd/sastd.py::_verify_coverage": 7,
     "src/sastd/sastd.py::main": 4,
-    "scripts/record-hook-behaviour.cjs::writeProjectFixture": 2
+    "scripts/record-hook-behaviour.cjs::writeProjectFixture": 2,
+    "plugins/opencode/scripts/prepack.cjs::discoverSkills": 3
   },
   "population": {
     "extensions": [

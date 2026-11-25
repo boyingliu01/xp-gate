@@ -30,16 +30,37 @@ function discoverSkills() {
     console.error(`[prepack] ERROR: skills directory not found at ${root}`);
     process.exit(1);
   }
-  return fs
-    .readdirSync(root, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
-    .filter((name) => fs.existsSync(path.join(root, name, 'SKILL.md')))
-    .sort();
+  try {
+    return fs
+      .readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .filter((name) => fs.existsSync(path.join(root, name, 'SKILL.md')))
+      .sort();
+  } catch (err) {
+    // Packaging with NO skills would produce a plugin that loads but offers nothing.
+    console.error(`[prepack] ERROR: cannot read ${root}: ${err.message}`);
+    process.exit(1);
+  }
 }
 
 function shouldSkipFile(name) {
   return SKIP_FILE_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
+/**
+ * Copy one directory entry.
+ *
+ * A directory is descended into, a file is copied unless its suffix is skipped, and
+ * anything else (a symlink, a socket) is left alone -- `copyFileSync` on those would
+ * either fail or copy something the package must not contain.
+ */
+function copyEntry(entry, src, dest) {
+  if (SKIP_DIRS.has(entry.name)) return;
+  const srcPath = path.join(src, entry.name);
+  const destPath = path.join(dest, entry.name);
+  if (entry.isDirectory()) copyDir(srcPath, destPath);
+  else if (entry.isFile() && !shouldSkipFile(entry.name)) fs.copyFileSync(srcPath, destPath);
 }
 
 function copyDir(src, dest) {
@@ -47,25 +68,29 @@ function copyDir(src, dest) {
     console.error(`[prepack] SKIP (missing): ${src}`);
     return false;
   }
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    if (SKIP_DIRS.has(entry.name)) continue;
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      copyDir(srcPath, destPath);
-    } else if (entry.isFile()) {
-      if (shouldSkipFile(entry.name)) continue;
-      fs.copyFileSync(srcPath, destPath);
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+      copyEntry(entry, src, dest);
     }
+  } catch (err) {
+    // A partial copy is WORSE than none: the package would ship a plugin with some of
+    // its skills, and the missing ones only surface at load time.
+    console.error(`[prepack] FAILED to copy ${src} -> ${dest}: ${err.message}`);
+    return false;
   }
   return true;
 }
 
 function main() {
   const skillsDest = path.join(PLUGIN_ROOT, 'skills');
-  fs.rmSync(skillsDest, { recursive: true, force: true });
-  fs.mkdirSync(skillsDest, { recursive: true });
+  try {
+    fs.rmSync(skillsDest, { recursive: true, force: true });
+    fs.mkdirSync(skillsDest, { recursive: true });
+  } catch (err) {
+    console.error(`[prepack] ERROR: cannot prepare ${skillsDest}: ${err.message}`);
+    process.exit(1);
+  }
 
   const skills = discoverSkills();
   let copied = 0;
