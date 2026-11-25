@@ -607,10 +607,10 @@
     "scripts/normalize-secrets-baseline.cjs::requireEntryArray": 2,
     "scripts/normalize-secrets-baseline.cjs::serialize": 1,
     "scripts/record-hook-behaviour.cjs::(anonymous)@285": 2,
-    "scripts/record-hook-behaviour.cjs::copyHookSet": 3,
-    "scripts/record-hook-behaviour.cjs::copyNamed": 3,
-    "scripts/record-hook-behaviour.cjs::copyShDir": 4,
-    "scripts/record-hook-behaviour.cjs::makeFixture": 1,
+    "scripts/record-hook-behaviour.cjs::copyHookSet": 5,
+    "scripts/record-hook-behaviour.cjs::copyNamed": 4,
+    "scripts/record-hook-behaviour.cjs::copyShDir": 5,
+    "scripts/record-hook-behaviour.cjs::makeFixture": 2,
     "scripts/record-hook-behaviour.cjs::normalise": 1,
     "scripts/record-hook-behaviour.cjs::record": 5,
     "scripts/record-hook-behaviour.cjs::rmrf": 2,
@@ -621,8 +621,8 @@
     "scripts/record-hook-behaviour.cjs::stage@220": 1,
     "scripts/record-hook-behaviour.cjs::stage@236": 1,
     "scripts/record-hook-behaviour.cjs::stage@250": 1,
-    "scripts/record-hook-behaviour.cjs::writeProjectFiles": 1,
-    "scripts/record-hook-behaviour.cjs::writeToolStubs": 2,
+    "scripts/record-hook-behaviour.cjs::writeProjectFiles": 2,
+    "scripts/record-hook-behaviour.cjs::writeToolStubs": 3,
     "scripts/render-sprint-progress.cjs::buildOutputLines": 2,
     "scripts/render-sprint-progress.cjs::buildPhaseRows": 3,
     "scripts/render-sprint-progress.cjs::buildProgress": 2,
@@ -1714,7 +1714,8 @@
     "src/sastd/sastd.py::_render_rules": 3,
     "src/sastd/sastd.py::_resolve_config": 4,
     "src/sastd/sastd.py::_verify_coverage": 7,
-    "src/sastd/sastd.py::main": 4
+    "src/sastd/sastd.py::main": 4,
+    "scripts/record-hook-behaviour.cjs::writeProjectFixture": 2
   },
   "population": {
     "extensions": [

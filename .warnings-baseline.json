@@ -42,5 +42,9 @@
   "src/principles/rules/__tests__/solid/issue-588-lsp-base-contract.test.ts": {
     "lastAnalyzed": "2026-11-25T05:51:24.019Z",
     "totalWarnings": 1
+  },
+  "scripts/record-hook-behaviour.cjs": {
+    "totalWarnings": 6,
+    "lastAnalyzed": "2026-11-25T08:15:47.484Z"
   }
 }

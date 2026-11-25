@@ -44,25 +44,56 @@ function scrub(line) {
 // wrapped nothing — a defect a syntax check cannot see.
 function splitEntry(content) {
   const lines = content.split('\n');
-  // The generated banner ends at the last `# ====` that appears BEFORE the
-  // "# Called by/Sourced by" footer and before the first non-comment code.
+  const bodyStart = bodyStartOf(lines);
+  const bodyEnd = bodyEndOf(lines, bodyStart);
+  return { header: lines.slice(0, bodyStart), body: lines.slice(bodyStart, bodyEnd), footer: lines.slice(bodyEnd) };
+}
+
+/** A `# ====` rule line, which frames the generated banner. */
+const BANNER_RULE = /^# ={20,}\s*$/;
+
+/** The generated banner's footer, which marks where the gate body ends. */
+const BANNER_FOOTER = /^# (Called by|Sourced by) pre-commit/;
+
+/**
+ * The first line AFTER the generated banner.
+ *
+ * The banner ends at its LAST `# ====`, and the scan stops at the first non-comment line:
+ * the banner is entirely comments, so real code can only come after it. Continuing past
+ * that point would find a `# ====` INSIDE the gate body and cut it in half.
+ */
+function bodyStartOf(lines) {
   let lastRule = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (/^# ={20,}\s*$/.test(lines[i])) lastRule = i;
-    // Stop scanning once real code starts: the banner is entirely comments.
-    if (lines[i].trim() && !lines[i].startsWith('#')) break;
+    if (BANNER_RULE.test(lines[i])) lastRule = i;
+    if (isCode(lines[i])) break;
   }
-  let bodyStart = lastRule + 1;
-  if (lines[bodyStart] === '') bodyStart++;
-  let bodyEnd = lines.length;
+  // One blank line belongs to the banner rather than to the body.
+  const start = lastRule + 1;
+  return lines[start] === '' ? start + 1 : start;
+}
+
+/** Whether this line carries real code rather than a comment. */
+function isCode(line) {
+  return Boolean(line.trim()) && !line.startsWith('#');
+}
+
+/**
+ * The line where the gate body ends.
+ *
+ * Trailing blank lines are trimmed so a re-wrap does not accumulate them, and the footer
+ * itself is kept whole because it is regenerated from its own marker.
+ */
+function bodyEndOf(lines, bodyStart) {
+  let end = lines.length;
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^# (Called by|Sourced by) pre-commit/.test(lines[i])) {
-      bodyEnd = i;
+    if (BANNER_FOOTER.test(lines[i])) {
+      end = i;
       break;
     }
   }
-  while (bodyEnd > bodyStart && lines[bodyEnd - 1].trim() === '') bodyEnd--;
-  return { header: lines.slice(0, bodyStart), body: lines.slice(bodyStart, bodyEnd), footer: lines.slice(bodyEnd) };
+  while (end > bodyStart && lines[end - 1].trim() === '') end--;
+  return end;
 }
 
 function fnNameFor(file) {
