@@ -42,5 +42,9 @@
   "src/principles/rules/__tests__/solid/issue-588-lsp-base-contract.test.ts": {
     "lastAnalyzed": "2026-11-25T05:51:24.019Z",
     "totalWarnings": 1
+  },
+  "src/mutation/init-baseline.ts": {
+    "totalWarnings": 3,
+    "lastAnalyzed": "2026-11-25T09:04:18.887Z"
   }
 }

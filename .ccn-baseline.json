@@ -1125,11 +1125,11 @@
     "src/mutation/init-baseline.ts::calculateScore": 2,
     "src/mutation/init-baseline.ts::getSourceFiles": 5,
     "src/mutation/init-baseline.ts::main": 2,
-    "src/mutation/init-baseline.ts::parseArgs": 6,
-    "src/mutation/init-baseline.ts::parseStrykerReport": 1,
+    "src/mutation/init-baseline.ts::parseArgs": 4,
+    "src/mutation/init-baseline.ts::parseStrykerReport": 2,
     "src/mutation/init-baseline.ts::runStryker": 3,
-    "src/mutation/init-baseline.ts::saveBaseline": 1,
-    "src/mutation/init-baseline.ts::scanFiles": 4,
+    "src/mutation/init-baseline.ts::saveBaseline": 2,
+    "src/mutation/init-baseline.ts::scanFiles": 5,
     "src/mutation/runners/go-mutant-runner.ts::(anonymous)@130": 2,
     "src/mutation/runners/go-mutant-runner.ts::(anonymous)@131": 2,
     "src/mutation/runners/go-mutant-runner.ts::(anonymous)@132": 2,
@@ -1705,7 +1705,8 @@
     "src/sastd/sastd.py::_verify_coverage": 7,
     "src/sastd/sastd.py::main": 4,
     "scripts/record-hook-behaviour.cjs::writeProjectFixture": 2,
-    "plugins/opencode/scripts/prepack.cjs::discoverSkills": 3
+    "plugins/opencode/scripts/prepack.cjs::discoverSkills": 3,
+    "src/mutation/init-baseline.ts::applyArg": 5
   },
   "population": {
     "extensions": [
