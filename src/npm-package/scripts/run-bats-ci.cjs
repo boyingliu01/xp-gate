@@ -540,6 +540,65 @@ Shard ${i + 1}/${total} — ${s.files.length} file(s), ~${s.cost} ms`);
   return 0;
 }
 
+/** The usage line, printed for `--help`. */
+function printUsage() {
+  console.log('usage: node scripts/run-bats-ci.cjs --shard 1/3 [--jobs N] [--print-only]');
+  return 0;
+}
+
+/**
+ * The suites to run, or the EXIT CODE when there is nothing runnable.
+ *
+ * A numeric return means "stop and exit with this". The zero-suite case is a hard
+ * failure on purpose: a green run over zero suites is the 6ebbd5a failure mode, where a
+ * missing directory or an empty glob reported PASS.
+ */
+function loadSuites() {
+  if (!fs.existsSync(BATS_DIR)) {
+    console.error(`❌ no suite directory at ${BATS_DIR}`);
+    return 1;
+  }
+  const suites = listSuites();
+  if (suites.length === 0) {
+    console.error(`❌ no .bats suites in ${BATS_DIR} — refusing to report PASS`);
+    return 2;
+  }
+  return suites;
+}
+
+/**
+ * Which mode the flags select.
+ *
+ * A LADDER rather than a chain of `if (...) return ...`: the flags are mutually exclusive
+ * modes, and naming them makes the precedence (`--print-shards` before `--all`) visible.
+ *
+ * `missing-shard` is a real verdict: with neither flag the caller has to be told, because
+ * running everything by default would hide a mis-invocation inside a full run.
+ */
+function modeVerdict(suites, opts) {
+  if (opts.printShards) return 'print';
+  if (opts.all) return 'all';
+  if (!opts.shard) {
+    console.error('Pass --shard <index>/<total>, or --all to run every suite serially.');
+    return 'missing-shard';
+  }
+  return 'shard';
+}
+
+/**
+ * What each mode does, keyed by the verdict `modeVerdict` returned.
+ *
+ * `missing-shard` is absent on purpose: it has already printed its message and its exit
+ * code is 1, which the caller supplies. A table rather than a chain of `if`s because the
+ * modes are MODES -- each one consumes the same input and owns the whole run.
+ */
+const MODE_HANDLERS = {
+  print: (suites, opts) => printShards(suites, opts.shard),
+  all: (suites, opts) => runShard(suites, opts.jobs),
+  shard: (suites, opts) => runShardMode(suites, opts),
+  'missing-shard': () => 1,
+};
+
 function main(argv) {
   const parsed = parseArgs(argv);
   if (parsed.error) {
@@ -547,45 +606,37 @@ function main(argv) {
     return 1;
   }
   const opts = parsed.opts;
-  if (opts.help) {
-    console.log('usage: node scripts/run-bats-ci.cjs --shard 1/3 [--jobs N] [--print-only]');
-    return 0;
-  }
+  if (opts.help) return printUsage();
 
-  if (!fs.existsSync(BATS_DIR)) {
-    console.error(`❌ no suite directory at ${BATS_DIR}`);
-    return 1;
-  }
-  const suites = listSuites();
-  if (suites.length === 0) {
-    // A green run over zero suites is the 6ebbd5a failure mode. Fail loudly.
-    console.error(`❌ no .bats suites in ${BATS_DIR} — refusing to report PASS`);
-    return 2;
-  }
+  const suites = loadSuites();
+  if (typeof suites === 'number') return suites;
 
   reportUnweighed(suites);
 
-  if (opts.printShards) return printShards(suites, opts.shard);
-  if (opts.all) return runShard(suites, opts.jobs);
+  const mode = modeVerdict(suites, opts);
+  const dispatch = MODE_HANDLERS[mode];
+  if (dispatch) return dispatch(suites, opts);
 
-  if (!opts.shard) {
-    console.error('Pass --shard <index>/<total>, or --all to run every suite serially.');
-    return 1;
-  }
+  return runShardMode(suites, opts);
+}
 
+/**
+ * Run (or print) one shard.
+ *
+ * `printOnly` exits BEFORE the banner is printed: the point of the flag is a machine
+ * -readable plan, and a human banner in the middle of it breaks every consumer.
+ */
+function runShardMode(suites, opts) {
   const shard = resolveShard(suites, opts.shard);
   if (shard.error) {
     console.error(`❌ ${shard.error}`);
     return shard.code;
   }
-
   if (opts.printOnly) {
     console.log(`Shard ${shard.index}/${shard.total}: ${shard.files.join(' ')}`);
     return 0;
   }
-
-  console.log(`
-=== BATS shard ${shard.index}/${shard.total} (~${shard.cost} ms of measured cost) ===`);
+  console.log(`\n=== BATS shard ${shard.index}/${shard.total} (~${shard.cost} ms of measured cost) ===`);
   return runShard(shard.files, opts.jobs);
 }
 
