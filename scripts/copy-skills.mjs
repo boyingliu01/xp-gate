@@ -19,7 +19,14 @@ const __filename = fileURLToPath(import.meta.url);
  */
 function walkFiles(dir) {
   const results = [];
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    // An unreadable subtree contributes no files; the checksum pass then reports the
+    // destination side, which is the side a copy can actually break.
+    return results;
+  }
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -37,7 +44,13 @@ function walkFiles(dir) {
  * @returns {string} Hex digest
  */
 function sha256File(filePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  } catch {
+    // An unreadable file cannot MATCH anything, so return a constant that never equals a
+    // real digest -- reporting it as valid would hide a file the copy never delivered.
+    return 'unreadable';
+  }
 }
 
 /**
@@ -72,46 +85,101 @@ function copyOneSkill(entry, sourceDir, destDir) {
  * not a verify candidate and counts as zero errors.
  */
 function verifyOneSkill(entry, sourceDir, destDir) {
+  if (!isVerifiableSkill(entry, sourceDir, destDir)) return 0;
   const skillDir = path.join(sourceDir, entry.name);
   const destSkillDir = path.join(destDir, entry.name);
-  if (!entry.isDirectory()) return 0;
-  if (!fs.existsSync(path.join(skillDir, 'SKILL.md')) || !fs.existsSync(destSkillDir)) return 0;
-
   let errors = 0;
   for (const srcFile of walkFiles(skillDir)) {
-    const relPath = path.relative(skillDir, srcFile);
-    const destFile = path.join(destSkillDir, relPath);
-    if (!fs.existsSync(destFile)) {
-      console.error(`[verify] ERROR: ${entry.name}/${relPath} — missing in destination`);
-      errors++;
-      continue;
-    }
-    if (sha256File(srcFile) !== sha256File(destFile)) {
-      console.error(`[verify] ERROR: ${entry.name}/${relPath} — SHA-256 mismatch`);
-      errors++;
-    }
+    errors += verifyFilePair(entry.name, skillDir, destSkillDir, srcFile);
   }
   return errors;
 }
 
+/**
+ * Whether this entry is a skill that was actually copied.
+ *
+ * A directory without `SKILL.md` is not a skill, and a destination that does not exist
+ * means the copy skipped it -- neither is a checksum error.
+ */
+function isVerifiableSkill(entry, sourceDir, destDir) {
+  if (!entry.isDirectory()) return false;
+  const skillDir = path.join(sourceDir, entry.name);
+  return fs.existsSync(path.join(skillDir, 'SKILL.md'))
+    && fs.existsSync(path.join(destDir, entry.name));
+}
+
+/**
+ * Compare one file against its copy.
+ *
+ * MISSING and MISMATCH are reported separately: the first means the copy was skipped, the
+ * second that it was corrupted, and an operator chasing one should not have to guess which.
+ *
+ * @returns 1 when the copy is wrong, 0 when it matches
+ */
+function verifyFilePair(skillName, skillDir, destSkillDir, srcFile) {
+  const relPath = path.relative(skillDir, srcFile);
+  const destFile = path.join(destSkillDir, relPath);
+  if (!fs.existsSync(destFile)) {
+    console.error(`[verify] ERROR: ${skillName}/${relPath} — missing in destination`);
+    return 1;
+  }
+  if (sha256File(srcFile) === sha256File(destFile)) return 0;
+  console.error(`[verify] ERROR: ${skillName}/${relPath} — SHA-256 mismatch`);
+  return 1;
+}
+
 export function copySkills(sourceDir, destDir, verify = false) {
-  if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
-    console.error(`Error: Source directory not found: ${sourceDir}`);
+  assertSourceDirectory(sourceDir);
+
+  let entries;
+  try {
+    fs.mkdirSync(destDir, { recursive: true });
+    entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+  } catch (err) {
+    // Nothing was copied, so reporting a count of 0 would read as "no skills to copy".
+    console.error(`Error: cannot prepare ${destDir} <- ${sourceDir}: ${String(err)}`);
     process.exit(1);
   }
+  const count = copyEntries(entries, sourceDir, destDir);
+  console.log(`Total skills copied: ${count}`);
 
-  fs.mkdirSync(destDir, { recursive: true });
-  const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+  // --verify: post-copy integrity check via SHA-256 comparison
+  if (verify) verifyCopiedSkills(entries, sourceDir, destDir, count);
+  return count;
+}
 
+/**
+ * Fail before touching anything if the source is not a directory.
+ *
+ * Checked FIRST: creating the destination and then discovering there is nothing to copy
+ * would leave an empty skills directory behind, which reads as "no skills" downstream.
+ */
+function assertSourceDirectory(sourceDir) {
+  try {
+    if (fs.existsSync(sourceDir) && fs.statSync(sourceDir).isDirectory()) return;
+  } catch {
+    // A path that cannot even be stat'ed is not a usable source either.
+  }
+  console.error(`Error: Source directory not found: ${sourceDir}`);
+  process.exit(1);
+}
+
+/** Copy each entry, returning how many were written. */
+function copyEntries(entries, sourceDir, destDir) {
   let count = 0;
   for (const entry of entries) {
     if (copyOneSkill(entry, sourceDir, destDir)) count++;
   }
-  console.log(`Total skills copied: ${count}`);
+  return count;
+}
 
-  // --verify: post-copy integrity check via SHA-256 comparison
-  if (!verify) return count;
-
+/**
+ * Compare every copied skill's SHA-256 against its source, exiting non-zero on a mismatch.
+ *
+ * The messages start with `[verify]` so a reader can tell the post-copy check apart from
+ * the copy progress, which is the whole reason the flag exists.
+ */
+function verifyCopiedSkills(entries, sourceDir, destDir, count) {
   console.log('');
   console.log('[verify] Checking SHA-256 integrity of copied skills...');
   let errors = 0;
@@ -119,11 +187,10 @@ export function copySkills(sourceDir, destDir, verify = false) {
 
   if (errors === 0) {
     console.log(`[verify] OK: all ${count} skill(s) verified (SHA-256 match)`);
-  } else {
-    console.error(`[verify] FAIL: ${errors} checksum error(s) found`);
-    process.exit(1);
+    return;
   }
-  return count;
+  console.error(`[verify] FAIL: ${errors} checksum error(s) found`);
+  process.exit(1);
 }
 
 // ---------- CLI entry point ----------
