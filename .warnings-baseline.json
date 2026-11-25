@@ -42,9 +42,5 @@
   "src/principles/rules/__tests__/solid/issue-588-lsp-base-contract.test.ts": {
     "lastAnalyzed": "2026-11-25T05:51:24.019Z",
     "totalWarnings": 1
-  },
-  "src/debugger/token-delta.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-11-25T06:49:36.054Z"
   }
 }
