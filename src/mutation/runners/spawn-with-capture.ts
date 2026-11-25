@@ -114,7 +114,11 @@ function armTimeout(
     state.timeoutFired = true;
     child.kill('SIGTERM');
     state.sigkillTimer = setTimeout(() => {
-      if (!child.killed) child.kill('SIGKILL');
+      // NOT `child.killed`: Node sets that the moment `kill()` is CALLED, so after the
+      // SIGTERM above it is already true and the escalation would never fire -- leaving
+      // a tool that ignores SIGTERM to hold the gate open forever. `exitCode`/`signalCode`
+      // are the fields that say whether the child actually DIED.
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     }, SIGKILL_GRACE_MS);
   }, timeoutMs);
 }

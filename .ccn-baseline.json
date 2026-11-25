@@ -1204,7 +1204,7 @@
     "src/mutation/runners/spawn-with-capture.ts::(anonymous)@136": 1,
     "src/mutation/runners/spawn-with-capture.ts::(anonymous)@141": 3,
     "src/mutation/runners/spawn-with-capture.ts::(anonymous)@163": 3,
-    "src/mutation/runners/spawn-with-capture.ts::armTimeout": 2,
+    "src/mutation/runners/spawn-with-capture.ts::armTimeout": 3,
     "src/mutation/runners/spawn-with-capture.ts::clearTimers": 3,
     "src/mutation/runners/spawn-with-capture.ts::settle": 1,
     "src/mutation/runners/spawn-with-capture.ts::spawnWithCapture": 3,

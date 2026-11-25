@@ -74,4 +74,24 @@ describe('spawnWithCapture', () => {
     expect(clearSpy).toHaveBeenCalled();
     clearSpy.mockRestore();
   });
+
+  it('escalates to SIGKILL when the child ignores SIGTERM', async () => {
+    // THE DEFECT THIS PINS: the escalation guard used `!child.killed`, but Node sets
+    // `killed` the moment `kill('SIGTERM')` is CALLED -- so it was already true and the
+    // SIGKILL never fired. A tool that traps TERM then held the gate open forever.
+    // `sleep` in a subshell that ignores TERM reproduces it in ~1s.
+    // `bash -c 'trap "" TERM; sleep 30'` does NOT work as a fixture: bash ignores TERM
+    // but keeps WAITING on `sleep`, which does not inherit the disposition. A Node
+    // process that installs its own SIGTERM handler ignores it reliably.
+    const ignoreTerm = 'process.on("SIGTERM",()=>{}); setInterval(()=>{},1000)';
+    const result = await spawnWithCapture(process.execPath, ['-e', ignoreTerm], {
+      timeoutMs: 300,
+      cwd: process.cwd(),
+    });
+    // The SIGKILL WORKED: the promise SETTLED at all (a hung SIGTERM would leave this
+    // pending until the vitest timeout) and the exit code is null, which is how a
+    // signal death is reported.
+    expect(result.timedOut).toBe(true);
+    expect(result.code).toBeNull();
+  }, 15_000);
 });
