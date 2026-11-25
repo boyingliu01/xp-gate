@@ -81,12 +81,28 @@ function isTestFile(filePath: string): boolean {
   return /\.test\.(ts|js)$/.test(normalized) || /\.spec\.(ts|js)$/.test(normalized);
 }
 
-function classifyTestLayer(filePath: string): 'unit' | 'integration' | 'e2e' | 'unknown' {
+/** The layer a test file belongs to. */
+type TestLayer = 'unit' | 'integration' | 'e2e' | 'unknown';
+
+/**
+ * Layer markers, OUTERMOST first.
+ *
+ * Order matters: a path under `e2e/integration/` is an E2E test, and a rule table that
+ * tested integration first would relabel it. Each entry matches a filename suffix or a
+ * directory segment, because both conventions are in use.
+ */
+const LAYER_MARKERS: Array<{ layer: TestLayer; suffix: RegExp; segment: RegExp }> = [
+  { layer: 'e2e', suffix: /\.e2e\.test\./, segment: /\/e2e\// },
+  { layer: 'integration', suffix: /\.integration\.test\./, segment: /\/integration\// },
+];
+
+function classifyTestLayer(filePath: string): TestLayer {
+  // Normalised first: every marker is written with forward slashes.
   const normalized = filePath.replace(/\\/g, '/');
-  if (/\.e2e\.test\./.test(normalized) || /\/e2e\//.test(normalized)) return 'e2e';
-  if (/\.integration\.test\./.test(normalized) || /\/integration\//.test(normalized)) return 'integration';
-  if (isTestFile(filePath)) return 'unit';
-  return 'unknown';
+  const marker = LAYER_MARKERS.find((m) => m.suffix.test(normalized) || m.segment.test(normalized));
+  if (marker) return marker.layer;
+  // Everything else that IS a test is a unit test; anything that is not is unknown.
+  return isTestFile(filePath) ? 'unit' : 'unknown';
 }
 
 /**
@@ -163,18 +179,43 @@ function scanDirectory(dir: string, basePath?: string): string[] {
   if (!fs.existsSync(dir)) return results;
 
   for (const entry of readDirectoryEntries(dir)) {
-    const fullPath = path.join(dir, entry.name);
-    const relativePath = path.relative(base, fullPath).replace(/\\/g, '/');
-
-    if (entry.isDirectory()) {
-      if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
-      results.push(...scanDirectory(fullPath, base));
-    } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.js')) {
-      results.push(relativePath);
-    }
+    results.push(...pathsForEntry(dir, entry, base));
   }
-
   return results;
+}
+
+/**
+ * The scan results one directory entry contributes.
+ *
+ * An empty array means "nothing here", which is what lets the caller treat a skipped,
+ * non-source and unreadable entry the same way without a cascade of conditions.
+ */
+function pathsForEntry(dir: string, entry: fs.Dirent, base: string): string[] {
+  if (isSkippedDirectory(entry)) return [];
+  const fullPath = path.join(dir, entry.name);
+  if (entry.isDirectory()) return scanDirectory(fullPath, base);
+  if (!isScannableSource(entry.name)) return [];
+  // Forward slashes everywhere: the reported paths are compared across platforms, and a
+  // Windows separator would silently fail every name match downstream.
+  return [path.relative(base, fullPath).replace(/\\/g, '/')];
+}
+
+/** Whether this directory is one the scan must not descend into. */
+function isSkippedDirectory(entry: fs.Dirent): boolean {
+  return entry.isDirectory() && SKIPPED_DIRECTORIES.has(entry.name);
+}
+
+/** Extensions the layer analysis reads. */
+const SCANNED_EXTENSIONS = ['.ts', '.js'];
+
+/**
+ * Whether this file is one the scan reports.
+ *
+ * `.tsx` and `.jsx` are deliberately absent: the layer analysis pairs a source with a
+ * test by NAME, and the JSX extensions never appeared in the sets it was built for.
+ */
+function isScannableSource(name: string): boolean {
+  return SCANNED_EXTENSIONS.some((ext) => name.endsWith(ext));
 }
 
 // ── Main Analysis ──
@@ -382,18 +423,30 @@ function shellSuitesOutside(testFiles: string[], dir: string): string[] {
 /**
  * Analyze test layer distribution for a project.
  */
-export function analyzeTestLayers(cwd?: string): TestLayerReport {
-  const dir = cwd || process.cwd();
-  const allFiles = scanDirectory(path.join(dir, 'src'));
+/**
+ * Split the scanned files into SOURCES and TESTS.
+ *
+ * An excluded path is not a source, and a test file is not a source either -- the two
+ * filters are separate because a test that is also matched by an exclude pattern must
+ * still count as a test.
+ */
+function splitSourcesAndTests(allFiles: string[]): { sourceFiles: string[]; testFiles: string[] } {
+  return {
+    sourceFiles: allFiles.filter((f) => !isExcluded(f) && !isTestFile(f)),
+    testFiles: allFiles.filter((f) => isTestFile(f)),
+  };
+}
 
-  const sourceFiles = allFiles.filter(f => !isExcluded(f) && !isTestFile(f));
-  const testFiles = allFiles.filter(f => isTestFile(f));
-  const byLayer = (layer: string): string[] => testFiles.filter(f => classifyTestLayer(f) === layer);
-
+/** The counts one analysis produces, from the file lists. */
+function gatherCounts(
+  sourceFiles: string[],
+  testFiles: string[],
+  allFiles: string[],
+  shellOutsideSrc: string[],
+): LayerCounts {
+  const byLayer = (layer: string): string[] => testFiles.filter((f) => classifyTestLayer(f) === layer);
   const { unpairedSources, outOfScopeSources, pairedCount } = computePairing(sourceFiles, allFiles);
-  const shellOutsideSrc = shellSuitesOutside(testFiles, dir);
-
-  const counts: LayerCounts = {
+  return {
     sourceFiles,
     testFiles,
     unitTests: byLayer('unit'),
@@ -404,15 +457,35 @@ export function analyzeTestLayers(cwd?: string): TestLayerReport {
     shellSuites: shellOutsideSrc,
     pairedCount,
   };
-  const totalNeedingTests = sourceFiles.filter(f => !isExempt(path.basename(f)) && !isPairingOutOfScope(f)).length;
+}
+
+/**
+ * How many sources the pair rate is computed over.
+ *
+ * Exempt names and out-of-scope sources are removed from the DENOMINATOR rather than
+ * counted as unpaired: a barrel file or a type-only module has no test to pair with, and
+ * including it would make the rate a statement about the exemption list.
+ */
+function countNeedingTests(sourceFiles: string[]): number {
+  return sourceFiles.filter((f) => !isExempt(path.basename(f)) && !isPairingOutOfScope(f)).length;
+}
+
+export function analyzeTestLayers(cwd?: string): TestLayerReport {
+  const dir = cwd || process.cwd();
+  const allFiles = scanDirectory(path.join(dir, 'src'));
+
+  const { sourceFiles, testFiles } = splitSourcesAndTests(allFiles);
+  const shellOutsideSrc = shellSuitesOutside(testFiles, dir);
+  const counts = gatherCounts(sourceFiles, testFiles, allFiles, shellOutsideSrc);
+  const totalNeedingTests = countNeedingTests(sourceFiles);
 
   return {
     summary: buildSummary(counts, shellOutsideSrc),
     layer1: {
-      pairedSources: pairedCount,
-      unpairedSources,
-      outOfScopeSources,
-      pairRate: totalNeedingTests > 0 ? Math.round((pairedCount / totalNeedingTests) * 100) : 100,
+      pairedSources: counts.pairedCount,
+      unpairedSources: counts.unpairedSources,
+      outOfScopeSources: counts.outOfScopeSources,
+      pairRate: totalNeedingTests > 0 ? Math.round((counts.pairedCount / totalNeedingTests) * 100) : 100,
     },
     shellSuites: {
       total: shellOutsideSrc.length,
