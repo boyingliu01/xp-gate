@@ -34,13 +34,44 @@ export function countTopLevelMembers(body: string): string[] {
   let depth = 0;
   for (let i = 0; i < body.length; i += 1) {
     const c = body[i];
-    if (c === '{') { depth += 1; continue; }
-    if (c === '}') { depth -= 1; continue; }
-    if (depth !== MEMBER_DEPTH || c !== '(') continue;
+    const stepped = stepMemberDepth(c, depth);
+    if (stepped.consumed) { depth = stepped.depth; continue; }
+    if (!isMemberParen(c, depth)) continue;
     const name = memberNameBefore(body, i);
-    if (name && !CONTROL_KEYWORDS.has(name.value)) names.push(name.value);
+    if (isMemberName(name)) names.push(name.value);
   }
   return names;
+}
+
+/**
+ * Apply a brace character to the depth.
+ *
+ * @returns the new depth, and whether this character was a brace at all
+ */
+function stepMemberDepth(c: string, depth: number): { depth: number; consumed: boolean } {
+  if (c === '{') return { depth: depth + 1, consumed: true };
+  if (c === '}') return { depth: depth - 1, consumed: true };
+  return { depth, consumed: false };
+}
+
+/**
+ * Whether a `(` at this depth opens a MEMBER's parameter list.
+ *
+ * Only at the member depth: a `(` deeper in is a call inside a body, and one shallower
+ * belongs to the enclosing declaration.
+ */
+function isMemberParen(c: string, depth: number): boolean {
+  return c === '(' && depth === MEMBER_DEPTH;
+}
+
+/**
+ * Whether this name is a MEMBER rather than a control keyword.
+ *
+ * `if (`, `for (` and `while (` sit at the same depth as a method and would otherwise be
+ * collected as members.
+ */
+function isMemberName(name: { value: string } | null): name is { value: string; index: number } {
+  return Boolean(name) && !CONTROL_KEYWORDS.has((name as { value: string }).value);
 }
 
 /**
@@ -53,12 +84,23 @@ function memberNameBefore(
   body: string,
   parenIndex: number,
 ): { value: string; index: number } | null {
-  let end = parenIndex;
+  const end = skipBackOverSpace(body, parenIndex);
+  const start = scanBackOverIdentifier(body, end);
+  return start === end ? null : { value: body.substring(start, end), index: start };
+}
+
+/** The offset before the run of whitespace ending at `from`. */
+function skipBackOverSpace(body: string, from: number): number {
+  let end = from;
   while (end > 0 && /\s/.test(body[end - 1])) end -= 1;
-  let start = end;
+  return end;
+}
+
+/** The offset before the run of identifier characters ending at `from`. */
+function scanBackOverIdentifier(body: string, from: number): number {
+  let start = from;
   while (start > 0 && /[\w$]/.test(body[start - 1])) start -= 1;
-  if (start === end) return null;
-  return { value: body.substring(start, end), index: start };
+  return start;
 }
 
 /**
