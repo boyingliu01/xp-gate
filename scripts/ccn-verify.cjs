@@ -122,37 +122,63 @@ function ccnOfBody(bodyLines) {
 // Shared by the report loop and the Gate 3 csv path (#544): lizard's CCN is
 // only trustworthy after the span has been verified against brace-balanced
 // source. Returns { ccn, inflated, corrected }.
+/**
+ * Whether this row can be verified at all.
+ *
+ * Verification runs on EVERY row, not just `ccn > 10`. Measured on this repo: of 3449
+ * functions lizard reports at CCN <= 10, 521 are actually higher once the body is read
+ * properly -- `renderGatePassRateChart` is reported at 4 and is really 15. Gating on
+ * `ccn > 10` meant the ratchet compared raw UNDER-counts for the overwhelming majority
+ * of functions, and a function could rise from a reported 4 to a genuine 15 without the
+ * ratchet noticing. The cost is one extra body lookup per row.
+ */
+function isVerifiable(srcLines, startLine, ccn) {
+  if (!srcLines || startLine <= 0 || ccn <= 0) return false;
+  return true;
+}
+
 function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
   const startLine = Number(lineNo) || 0;
   const reportedSpan = endNo > startLine ? endNo - startLine + 1 : 0;
   const out = { ccn, inflated: false, corrected: false };
-  // Verify EVERY row, not just ccn > 10. Measured on this repo: of 3449 functions
-  // lizard reports at CCN <= 10, 521 are actually higher once the body is read
-  // properly — renderGatePassRateChart is reported at 4 and is really 15. Gating
-  // verification on ccn > 10 therefore meant the ratchet compared raw
-  // UNDER-counts for the overwhelming majority of functions, and a function could
-  // rise from an under-reported 4 to a genuine 15 without the ratchet noticing.
-  // The cost is one extra body lookup per row, which is what makes the numbers
-  // mean anything.
-  if (!srcLines || startLine <= 0 || ccn <= 0) return out;
-  const body = locateBodyAtRow(srcLines, name, startLine);
-  let recomputed;
-  if (body) {
-    recomputed = ccnOfBody(srcLines.slice(body.start, body.end + 1));
-  } else if (reportedSpan > SPAN_ARTEFACT_MAX_LINES) {
-    // Unlocatable body AND an implausibly long span: recompute over the
-    // reported window rather than trust a number with a broken span.
-    recomputed = ccnOfBody(srcLines.slice(startLine - 1, startLine - 1 + reportedSpan));
-  } else {
+  if (!isVerifiable(srcLines, startLine, ccn)) return out;
+  const recomputed = recomputeRow(srcLines, { name, startLine, reportedSpan });
+  if (recomputed === null) {
     out.unlocatable = true;
     return out;
   }
-  if (recomputed !== ccn) {
-    out.inflated = recomputed < ccn;
-    out.ccn = recomputed;
-    out.corrected = true;
-  }
+  return applyCorrection(out, ccn, recomputed);
+}
+
+/**
+ * Record a correction on the verdict.
+ *
+ * `inflated` says the REPORTED number was too high. The flag is kept because the two
+ * directions mean different things: an over-report is usually a span artefact in the
+ * tool, while an UNDER-report is the dangerous one that lets a function grow unnoticed.
+ */
+function applyCorrection(out, ccn, recomputed) {
+  if (recomputed === ccn) return out;
+  out.inflated = recomputed < ccn;
+  out.ccn = recomputed;
+  out.corrected = true;
   return out;
+}
+
+/**
+ * Recount a row's CCN from its source, or null when the body cannot be found.
+ *
+ * Two ways to find the body, and the second exists because the FIRST can fail on
+ * generated code: an unlocatable body with an implausibly long reported span is a
+ * MEASUREMENT artefact, and recounting over the reported window is more honest than
+ * trusting a number whose span is broken. With a plausible span, an unlocatable body is
+ * reported as unverified rather than guessed at.
+ */
+function recomputeRow(srcLines, { name, startLine, reportedSpan }) {
+  const body = locateBodyAtRow(srcLines, name, startLine);
+  if (body) return ccnOfBody(srcLines.slice(body.start, body.end + 1));
+  if (reportedSpan <= SPAN_ARTEFACT_MAX_LINES) return null;
+  return ccnOfBody(srcLines.slice(startLine - 1, startLine - 1 + reportedSpan));
 }
 
 // Read a source file as lines, or null when unreadable (caller keeps lizard's
@@ -280,43 +306,65 @@ function parseCsvRowIdentity(line, srcPath, root) {
 // callbacks — the `(anonymous)` rows lizard emits for arrow/function literals —
 // are located positionally: their row's start line IS the literal's line, so
 // the first balanced `{...}` body at or after it is theirs.
-function findFunctionBody(lines, name) {
-  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (name === '(anonymous)' || name === '(anon)') {
-    // Positional: find the first line that opens a brace and close it.
-    for (let i = 0; i < lines.length; i++) {
-      const span = balancedExtentFrom(lines, i);
-      if (span) return [i, span];
-    }
-    return null;
-  }
-  // "export const ocpRule: Rule = {" / "const handler = (a) => {" / class
-  // methods: lizard names the row after the binding, so the declaration has to
-  // count as "the function starts here" too. Without this the row was simply
-  // unlocatable and its raw (span-inflated) count survived verification.
-  // NOTE: this comment must never contain a backtick. A stray backtick opens a
-  // template literal for lizard's parser and it emits phantom rows for the rest
-  // of the function (measured: a bogus "=" row at CCN 24 for this very file).
-  // Same for single quotes in the paragraphs around it — keep them paired.
-  const re = new RegExp(
-    '(function\\s+' + esc + '\\s*[(<]' +
-    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=]' +
-    // TypeScript class properties: `public readonly handler = (a) => {`,
-    // `private _handler: Handler = ...`. Any run of visibility/readonly/static
-    // modifiers may precede the name. Without this the body is unlocatable and
-    // the row keeps its raw count — verified by probe that both forms failed
-    // before this alternative existed.
-    '|\\b(?:(?:public|private|protected|readonly|static|override|declare|abstract)\\s+)*' + esc + '\\s*[:=]' +
-    // A bare `name(` / `name:` on a line is a declaration only when it STARTS the
-    // line (optionally behind modifiers). Without the `^\\s*` anchor this branch
-    // matched every USE of the name anywhere in the file, and because the scan
-    // takes the first hit, a call above the declaration won: measured on
-    // src/principles/analyzer.ts, `if (!isRuleEnabled(rule.id)) return;` on line
-    // 189 anchored isRuleEnabled to the helper it is called from, and the row was
-    // graded at that neighbour's CCN 6 instead of its own 2.
-    '|^\\s*(?:(?:public|private|protected|readonly|static|override|declare|abstract|async|get|set)\\s+)*' + esc + '\\s*[:(]' +
-    ')'
+/** Names that stand for "this row has no name of its own". */
+const ANONYMOUS_NAMES = new Set(['(anonymous)', '(anon)']);
+
+/** Escape a name so it can be embedded in a regular expression. */
+function escapeForRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Modifiers that may precede a declaration NAME.
+ *
+ * TypeScript class properties and members carry a run of these, and without them the
+ * body is unlocatable and the row keeps its raw count.
+ */
+const DECL_MODIFIERS = 'public|private|protected|readonly|static|override|declare|abstract';
+
+/** Modifiers allowed before a bare `name(` or `name:` at the START of a line. */
+const LINE_MODIFIERS = `${DECL_MODIFIERS}|async|get|set`;
+
+/**
+ * The pattern that recognises a declaration of `name`.
+ *
+ * Four forms, each added after a measured miss:
+ *
+ *   1. `function name(`                  -- the ordinary one;
+ *   2. `const name =` / `let name:`      -- lizard names the row after the BINDING;
+ *   3. mods then `name =` / `name:`      -- TypeScript class properties;
+ *   4. mods then `name(` / `name:` at the START OF A LINE -- anchored, because
+ *      unanchored it matched every USE, and since the scan takes the first hit, a call
+ *      ABOVE the declaration won (measured: `isRuleEnabled` graded at its caller's CCN 6
+ *      instead of its own 2).
+ *
+ * The source text here must never contain a backtick or an unpaired quote: a stray
+ * backtick opens a template literal for lizard's own parser and it emits phantom rows
+ * for the rest of this function.
+ */
+function declarationPattern(name) {
+  const esc = escapeForRegex(name);
+  return new RegExp(
+    '(function\\s+' + esc + '\\s*[(<]'
+    + '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=]'
+    + '|\\b(?:(?:' + DECL_MODIFIERS + ')\\s+)*' + esc + '\\s*[:=]'
+    + '|^\\s*(?:(?:' + LINE_MODIFIERS + ')\\s+)*' + esc + '\\s*[:(]'
+    + ')',
   );
+}
+
+/** The span of the FIRST block that balances, which is what an unnamed row means. */
+function firstBalancedSpan(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const span = balancedExtentFrom(lines, i);
+    if (span) return [i, span];
+  }
+  return null;
+}
+
+function findFunctionBody(lines, name) {
+  if (ANONYMOUS_NAMES.has(name)) return firstBalancedSpan(lines);
+  const re = declarationPattern(name);
   for (let i = 0; i < lines.length; i++) {
     if (!re.test(stripNonCode(lines[i]))) continue;
     const span = balancedExtentFrom(lines, i);
@@ -331,14 +379,29 @@ function findFunctionBody(lines, name) {
 function balancedExtentFrom(lines, startIdx) {
   let depth = 0, started = false;
   for (let j = startIdx; j < lines.length; j++) {
-    const code = stripNonCode(lines[j]);
-    for (const ch of code) {
-      if (ch === '{') { depth++; started = true; }
-      else if (ch === '}') depth--;
-    }
-    if (started && depth === 0) return j;
+    const step = consumeBraces(stripNonCode(lines[j]), { depth, started });
+    ({ depth, started } = step);
+    if (step.closed) return j;
   }
   return null;
+}
+
+/**
+ * Apply one line's braces to the running depth.
+ *
+ * `started` matters: a line with no opening brace yet cannot CLOSE anything, so a
+ * leading `}` from an earlier construct must not end the block immediately. Counting is
+ * per line rather than per character so the closed line is returned, not a position.
+ *
+ * @returns the new state, plus whether the block closed on this line
+ */
+function consumeBraces(code, state) {
+  let { depth, started } = state;
+  for (const ch of code) {
+    if (ch === '{') { depth++; started = true; }
+    else if (ch === '}') depth--;
+  }
+  return { depth, started, closed: started && depth === 0 };
 }
 
 // Lizard reports a row's start as the DECLARATION of the parsed entity, so for
@@ -393,25 +456,63 @@ function locateBodyAtRow(lines, name, startLine) {
   // reported line therefore only decides WHEN there is no declaration to
   // anchor on. A real declaration always wins — that is the body the row is
   // about, and its own extent is the only trustworthy span.
+  const anchored = bodyFromDeclaration(lines, name);
+  if (anchored) return anchored;
+
+  // No declaration in this file (`(anonymous)` callbacks, class methods named only in a
+  // parent, ...). Fall back to the balanced body at the reported line: exact when the
+  // row starts ON a literal, approximate for member rows, and either way better than
+  // trusting an unverified span.
+  return bodyNearRow(lines, { from, name, mentionOnly });
+}
+
+/**
+ * The body of a real DECLARATION of this name, or null.
+ *
+ * A declaration always wins over the reported line: it is the body the row is about, and
+ * its own extent is the only trustworthy span.
+ */
+function bodyFromDeclaration(lines, name) {
   const declIdx = findDeclarationLine(lines, name);
-  if (declIdx !== null) {
-    const span = balancedExtentFrom(lines, declIdx);
-    if (span !== null) return { start: declIdx, end: span };
-  }
+  if (declIdx === null) return null;
+  const span = balancedExtentFrom(lines, declIdx);
+  return span === null ? null : { start: declIdx, end: span };
+}
 
-  // No declaration in this file (`(anonymous)` callbacks, class methods named
-  // only in a parent, ...). Fall back to the balanced body at the reported line,
-  // which is exact when the row starts ON a literal and merely approximate for
-  // member rows — either way it beats trusting an unverified span.
+/**
+ * The body found by searching BACKWARD from the reported line, or null.
+ *
+ * Two guards on the hit. The window is bounded (`DECL_LOOKBACK` positions of
+ * `RESCUE_WINDOW_LINES` each), because the real body can be hundreds of lines away. And
+ * a hit at or below the reported line is rejected when that line merely MENTIONS the
+ * name: a call site inside the body would otherwise become the body.
+ */
+function bodyNearRow(lines, { from, name, mentionOnly }) {
   for (let k = from; k >= 0 && k >= from - DECL_LOOKBACK; k--) {
-    const span = findFunctionBody(lines.slice(k, Math.min(lines.length, k + RESCUE_WINDOW_LINES)), name);
-    if (!span) continue;
-    const absStart = k + span[0];
-    if (absStart >= from && mentionOnly) continue;
-    return { start: absStart, end: k + span[1] };
+    const hit = bodyAtOffset(lines, k, { name, from, mentionOnly });
+    if (hit) return hit;
   }
-
   return null;
+}
+
+/**
+ * Whether a hit is the body we are looking for.
+ *
+ * A hit at or below the reported line is rejected when that line merely MENTIONS the
+ * name: a call site inside the body would otherwise BE the body, and the row would be
+ * graded on its own caller.
+ */
+function isUsableHit(absStart, from, mentionOnly) {
+  return !(absStart >= from && mentionOnly);
+}
+
+/** Search one window starting at `k` for the function's body. */
+function bodyAtOffset(lines, k, { name, from, mentionOnly }) {
+  const window = lines.slice(k, Math.min(lines.length, k + RESCUE_WINDOW_LINES));
+  const span = findFunctionBody(window, name);
+  if (!span) return null;
+  const absStart = k + span[0];
+  return isUsableHit(absStart, from, mentionOnly) ? { start: absStart, end: k + span[1] } : null;
 }
 
 // Index of the line that DECLARES `name` (function/const/let/var/class-method
