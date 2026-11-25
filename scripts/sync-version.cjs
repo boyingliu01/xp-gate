@@ -51,11 +51,18 @@ const NPM_VERSION = FULL_VERSION.replace(/\.\d+$/, '');
  * @param {string} newVersion - 新版本号
  */
 function syncJsonVersion(filePath, newVersion) {
-  const content = fs.readFileSync(filePath, 'utf8');
-  const pkg = JSON.parse(content);
-  pkg.version = newVersion;
-  syncLockfileRootVersion(pkg, newVersion);
-  fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2) + '\n');
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const pkg = JSON.parse(content);
+    pkg.version = newVersion;
+    syncLockfileRootVersion(pkg, newVersion);
+    fs.writeFileSync(filePath, JSON.stringify(pkg, null, 2) + '\n');
+  } catch (error) {
+    // A manifest that cannot be read or parsed is a REAL failure: continuing would
+    // report a synchronized version for a file that was never touched.
+    console.error(`cannot sync ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 }
 
 /**
@@ -87,30 +94,44 @@ function syncLockfileRootVersion(pkg, newVersion) {
  * @param {string} fileName - 目标文件名
  * @returns {string[]} 匹配文件的绝对路径数组
  */
+/** Directories never descended into: dependencies, VCS metadata and mutation sandboxes. */
+const SKIP_DIRS = new Set(['node_modules', '.git', '.stryker-tmp']);
+
+/** The readable entries of a directory, or none when it cannot be read. */
+function readEntries(currentDir) {
+  try {
+    return fs.readdirSync(currentDir, { withFileTypes: true });
+  } catch {
+    // A directory we cannot read contributes nothing; the walk must not abort.
+    return [];
+  }
+}
+
+/** The path one entry contributes, or null when it is neither descended nor a match. */
+function pathForEntry(currentDir, entry, fileName) {
+  const fullPath = path.join(currentDir, entry.name);
+  if (entry.isDirectory()) return SKIP_DIRS.has(entry.name) ? null : fullPath;
+  return entry.name === fileName ? fullPath : null;
+}
+
+/** Collect every `fileName` under `currentDir`, recursively. */
+function walkInto(currentDir, fileName, results) {
+  for (const entry of readEntries(currentDir)) {
+    const found = pathForEntry(currentDir, entry, fileName);
+    if (found === null) continue;
+    if (entry.isDirectory()) walkInto(found, fileName, results);
+    else results.push(found);
+  }
+}
+
+/**
+ * Find every file with this name under `dir`.
+ *
+ * @returns {{string[]}} absolute paths
+ */
 function findFiles(dir, fileName) {
   const results = [];
-  const skipDirs = new Set(['node_modules', '.git', '.stryker-tmp']);
-
-  function walk(currentDir) {
-    let entries;
-    try {
-      entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    } catch {
-      return; // 权限不足等错误静默跳过
-    }
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry.name);
-      if (entry.isDirectory()) {
-        if (!skipDirs.has(entry.name)) {
-          walk(fullPath);
-        }
-      } else if (entry.name === fileName) {
-        results.push(fullPath);
-      }
-    }
-  }
-
-  walk(dir);
+  walkInto(dir, fileName, results);
   return results;
 }
 

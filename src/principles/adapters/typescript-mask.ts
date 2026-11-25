@@ -35,12 +35,19 @@ function maskLineComment(src: string, out: string[], start: number): number {
 function maskBlockComment(src: string, out: string[], start: number): number {
   let i = start;
   out[i] = ' '; out[i + 1] = ' '; i += 2;
-  while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+  while (i < src.length && !closesBlockComment(src, i)) {
+    // NEWLINES are kept: the masker preserves line count, and a caller reporting a
+    // position depends on it.
     if (src[i] !== '\n') out[i] = ' ';
     i++;
   }
   if (i < src.length) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
   return i;
+}
+
+/** Whether the block comment closes at `i`. */
+function closesBlockComment(src: string, i: number): boolean {
+  return src[i] === '*' && src[i + 1] === '/';
 }
 
 /**
@@ -145,19 +152,33 @@ function maskStringLiteral(src: string, out: string[], start: number): number {
   out[start] = ' ';
   let i = start + 1;
   while (i < src.length) {
-    const d = src[i];
-    if (d === '\\') {
-      out[i] = ' ';
-      if (i + 1 < src.length) out[i + 1] = ' ';
-      i += 2;
-      continue;
-    }
-    if (d === quote) { out[i] = ' '; i++; break; }
-    if (d === '\n' && quote !== '`') break;
-    out[i] = ' ';
-    i++;
+    const step = stringStep(src, i, quote);
+    out.fill(' ', i, clampToLength(step.end, out.length));
+    i = step.end;
+    if (step.done) break;
   }
   return i;
+}
+
+
+/** `to`, never past `length`. */
+function clampToLength(to: number, length: number): number {
+  return Math.min(to, length);
+}
+
+/**
+ * How far a string body advances from `i`, and whether it ended.
+ *
+ * An ESCAPED character consumes two: `\\` and the character after it are content, so a
+ * `\"` inside a double-quoted string does not terminate it. A newline ends the literal
+ * for every quote but the backtick, which spans lines.
+ */
+function stringStep(src: string, i: number, quote: string): { end: number; done: boolean } {
+  const d = src[i];
+  if (d === '\\') return { end: Math.min(i + 2, src.length), done: false };
+  if (d === quote) return { end: i + 1, done: true };
+  if (d === '\n' && quote !== '`') return { end: i, done: true };
+  return { end: i + 1, done: false };
 }
 
 /**
