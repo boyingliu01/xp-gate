@@ -376,6 +376,29 @@ function groupByRunner(files: string[]): Map<string, string[]> {
   return groups;
 }
 
+/**
+ * Evaluate one file against its threshold.
+ *
+ * The threshold can only RISE, never fall: when the baseline scored higher than the
+ * configured threshold, the baseline becomes the effective one. Otherwise a file that was
+ * already good could regress back to the ceiling without being flagged -- the baseline
+ * records what was ACHIEVED, and the threshold records what is merely REQUIRED.
+ */
+function evaluateOne(ft: FileThreshold, fileScores: Record<string, number>, baseline: MutationBaseline | null): ScoreEvaluation {
+  const score = fileScores[ft.file] ?? 0;
+  const baselineScore = baseline?.scores[ft.file]?.score;
+  const regressed = baselineScore !== undefined && score < baselineScore;
+  const threshold = regressed ? Math.max(ft.threshold, baselineScore) : ft.threshold;
+  return {
+    file: ft.file,
+    score,
+    threshold,
+    baselineScore,
+    passed: score >= threshold,
+    isRegression: regressed,
+  };
+}
+
 function evaluateScores(
   fileScores: Record<string, number>,
   thresholds: FileThreshold[],
@@ -386,35 +409,16 @@ function evaluateScores(
   let blocked = false;
 
   for (const ft of thresholds) {
-    const score = fileScores[ft.file] ?? 0;
-    const baselineScore = baseline?.scores[ft.file]?.score;
-
-    let effectiveThreshold = ft.threshold;
-    if (baselineScore !== undefined && score < baselineScore) {
-      effectiveThreshold = Math.max(effectiveThreshold, baselineScore);
-    }
-
-    const passed = score >= effectiveThreshold;
-    const isRegression = baselineScore !== undefined && score < baselineScore;
-
-    const evaluation: ScoreEvaluation = {
-      file: ft.file,
-      score,
-      threshold: effectiveThreshold,
-      baselineScore,
-      passed,
-      isRegression,
-    };
+    const evaluation = evaluateOne(ft, fileScores, baseline);
     evaluations.push(evaluation);
-
-    if (!passed) blocked = true;
+    if (!evaluation.passed) blocked = true;
     messages.push(buildScoreMessage({
-      file: ft.file,
-      score,
-      effectiveThreshold,
-      baselineScore,
-      passed,
-      isRegression,
+      file: evaluation.file,
+      score: evaluation.score,
+      effectiveThreshold: evaluation.threshold,
+      baselineScore: evaluation.baselineScore,
+      passed: evaluation.passed,
+      isRegression: evaluation.isRegression,
     }));
   }
 
