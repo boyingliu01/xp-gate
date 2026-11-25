@@ -29,14 +29,17 @@ function openQuoted(char: string, lex: CppLexState): number {
   return 1;
 }
 
+/** The extensions this adapter handles, C and C++ together. */
+const CPP_EXTENSIONS = ['.cpp', '.cxx', '.cc', '.c', '.hpp', '.h'];
+
 export class CppAdapter extends BaseAdapter implements Adapter {
   detectLanguage(): string {
-    const ext = this.filePath.toLowerCase();
-    if (ext.endsWith('.cpp') || ext.endsWith('.cxx') || ext.endsWith('.cc') ||
-        ext.endsWith('.c') || ext.endsWith('.hpp') || ext.endsWith('.h')) {
-      return 'cpp';
-    }
-    return super.detectLanguage();
+    // One adapter covers C and C++ (they share a grammar for every rule that reads
+    // them), so the extension set is the union -- and the header extensions count for
+    // both, which is why `.h` is here rather than in a separate C adapter.
+    return CPP_EXTENSIONS.some((ext) => this.filePath.toLowerCase().endsWith(ext))
+      ? 'cpp'
+      : super.detectLanguage();
   }
 
   parseAST(): unknown {
