@@ -378,36 +378,99 @@ export class MutmutRunner implements MutationRunner {
  */
 export function mutmutConfigContent(existing: string | null, sourcePathsLine: string): string {
   if (existing === null) return `[tool.mutmut]\n${sourcePathsLine}\n`;
-  const body = mutmutTableBody(existing);
-  if (body === null) return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
-  const keyed = /source_paths\s*=\s*\[[\s\S]*?\]/;
-  const rewritten = keyed.test(body)
-    ? body.replace(keyed, () => sourcePathsLine)
-    : `\n${sourcePathsLine}${body}`;
-  return existing.replace(body, () => rewritten);
+  const table = findMutmutTable(existing);
+  if (table === null) return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
+  const at = findSourcePathsValue(existing, table.bodyStart, table.bodyEnd);
+  if (at === null) {
+    // No key in the table: add it first thing in the body.
+    return existing.slice(0, table.bodyStart) + `\n${sourcePathsLine}` + existing.slice(table.bodyStart);
+  }
+  return existing.slice(0, at.start) + sourcePathsLine + existing.slice(at.end);
+}
+
+/** The `[tool.mutmut]` table's span in the document. */
+interface TableSpan {
+  /** First character AFTER the header line. */
+  bodyStart: number;
+  /** Index of the next table header, or the end of the document. */
+  bodyEnd: number;
 }
 
 /**
- * The body of the `[tool.mutmut]` table, or null when there is no such TABLE.
+ * Locate the `[tool.mutmut]` TABLE, by INDEX rather than by rebuilding the text.
  *
- * Three things this deliberately does NOT treat as the table:
+ * Every earlier attempt matched text and replaced it, and each one broke on a
+ * different input: a commented header, another table's `source_paths`, an array
+ * containing `]`, and -- once the text was assembled -- a body that happens to appear
+ * earlier in the file, so `replace` rewrote the WRONG place. All four are measured.
+ * Working with indices removes the class: nothing is found by its text twice.
  *
- *   - a COMMENT (`# [tool.mutmut]`) -- `includes()` matched it, so the old fallback
- *     inserted the key into a commented-out header and produced a DUPLICATE
- *     `source_paths` in a file that had one (measured);
- *   - a string value that happens to contain the text;
- *   - a table with a DOTTED or quoted name (`[tool."mutmut"]`), which TOML treats
- *     differently from what mutmut reads.
- *
- * The body stops at the next TABLE header, so a later table's `source_paths` is never
- * rewritten -- `source_paths` is a plausible key in any tool's table, and an unscoped
- * replacement changed `[tool.other]`'s value while leaving mutmut's alone.
+ * A commented `# [tool.mutmut]` is not a table, and neither is a string that contains
+ * the text; the header must be a line of its own.
  */
-function mutmutTableBody(existing: string): string | null {
+function findMutmutTable(doc: string): TableSpan | null {
   const header = /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m;
-  const found = header.exec(existing);
+  const found = header.exec(doc);
   if (!found) return null;
-  const rest = existing.slice(found.index + found[0].length);
-  const nextTable = /^[^\S\n]*\[/m.exec(rest);
-  return nextTable ? rest.slice(0, nextTable.index) : rest;
+  const bodyStart = found.index + found[0].length;
+  const rest = doc.slice(bodyStart);
+  const next = /^[^\S\n]*\[/m.exec(rest);
+  return { bodyStart, bodyEnd: next ? bodyStart + next.index : doc.length };
+}
+
+/**
+ * The span of the `source_paths = [...]` VALUE inside the table, or null when absent.
+ *
+ * The array is delimited by BALANCING brackets, not by a lazy `[\s\S]*?\]`: a path may
+ * legitimately contain `]` (`"src]"`), and a lazy match stops there and produced
+ * invalid TOML (measured). Quotes are skipped so a `[` or `]` inside a string cannot
+ * move the depth.
+ */
+function findSourcePathsValue(doc: string, bodyStart: number, bodyEnd: number): { start: number; end: number } | null {
+  const key = /^[^\S\n]*source_paths[^\S\n]*=/m.exec(doc.slice(bodyStart, bodyEnd));
+  if (!key) return null;
+  const start = bodyStart + key.index;
+  const open = doc.indexOf('[', start);
+  if (open === -1 || open >= bodyEnd) return null;
+  const close = matchingBracket(doc, open, bodyEnd);
+  return close === -1 ? null : { start, end: close + 1 };
+}
+
+/** Index of the `]` balancing the `[` at `open`, skipping quoted strings; -1 if none. */
+function matchingBracket(doc: string, open: number, limit: number): number {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = open; i < limit; i += 1) {
+    const step = bracketStep(doc, i, quote);
+    if (step.escape) i += 1;
+    else quote = step.quote;
+    if (step.open) depth += 1;
+    if (step.close && (depth -= 1) === 0) return i;
+  }
+  return -1;
+}
+
+/** What one character does to the bracket scan. */
+interface BracketStep {
+  quote: string | null;
+  open: boolean;
+  close: boolean;
+  /** The character was a backslash inside a string, so the NEXT one is data. */
+  escape: boolean;
+}
+
+/**
+ * Classify one character.
+ *
+ * Quotes are tracked because a path may contain `[` or `]` -- `"src]"` must not close
+ * the array, which is exactly what a lazy regex got wrong.
+ */
+function bracketStep(doc: string, i: number, quote: string | null): BracketStep {
+  const ch = doc[i];
+  if (quote !== null) {
+    if (ch === '\\') return { quote, open: false, close: false, escape: true };
+    return { quote: ch === quote ? null : quote, open: false, close: false, escape: false };
+  }
+  const quoteStarts = ch === '"' || ch === "'";
+  return { quote: quoteStarts ? ch : null, open: ch === '[', close: ch === ']', escape: false };
 }

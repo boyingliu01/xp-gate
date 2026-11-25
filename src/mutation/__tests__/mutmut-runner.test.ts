@@ -935,6 +935,27 @@ describe('MutmutRunner', () => {
       expect(out).toContain('source_paths = ["new"]');
     });
 
+    it('rewrites the array when a path CONTAINS a bracket', async () => {
+      // `["src]", "lib"]` is legal TOML. A lazy `[\s\S]*?\]` stops at the first `]` and
+      // produced invalid output (measured). Brackets are balanced now.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const out = mutmutConfigContent('[tool.mutmut]\nsource_paths = ["src]", "lib"]\n', 'source_paths = ["new"]');
+      expect(out).toBe('[tool.mutmut]\nsource_paths = ["new"]\n');
+    });
+
+    it('rewrites the TABLE copy when the same body appears earlier', async () => {
+      // Rebuilding the document by text made `replace` hit the FIRST occurrence, which
+      // can belong to another table entirely (measured: `[tool.other]` got the new value
+      // and `[tool.mutmut]` kept the old one). Indices remove the ambiguity.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const out = mutmutConfigContent(
+        '[tool.other]\nsource_paths = ["x"]\n\n[tool.mutmut]\nsource_paths = ["x"]\n',
+        'source_paths = ["new"]',
+      );
+      expect(out).toContain('[tool.other]\nsource_paths = ["x"]');
+      expect(out).toContain('[tool.mutmut]\nsource_paths = ["new"]');
+    });
+
     it('ignores a COMMENTED-OUT [tool.mutmut] header', async () => {
       // `includes('[tool.mutmut]')` matched a comment, so the fallback inserted the key
       // into a commented-out header and left a DUPLICATE `source_paths` (measured). A
