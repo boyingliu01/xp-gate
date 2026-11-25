@@ -435,31 +435,70 @@ const BRACKET_DELTA: Readonly<Record<string, readonly [number, number, number]>>
   '}': [0, 0, -1],
 };
 
-function scanParamList(stripped: string, open: number): ParamScan {
-  let parens = 0;
-  let brackets = 0;
-  let braces = 0;
-  let commas = 0;
-  let sawContent = false;
-  for (let i = open; i < stripped.length; i++) {
-    const ch = stripped[i];
-    const delta = BRACKET_DELTA[ch];
+/**
+ * Whether the parameter list just closed.
+ *
+ * `i > open` guards the scan's own opening paren: without it the loop ends on its first
+ * character and every function reports zero parameters.
+ */
+function closesList(parens: number, i: number, open: number): boolean {
+  return parens === 0 && i > open;
+}
 
-    // Brackets are a table lookup, not a branch cascade: the cascade measured
-    // CCN 14-15 against a block threshold of 10 while each arm was one increment.
-    if (delta) {
-      parens += delta[0];
-      brackets += delta[1];
-      braces += delta[2];
-      if (parens === 0 && i > open) break;
-      continue;
-    }
+/** The running state of one parameter-list scan. */
+interface ParamScanState {
+  parens: number;
+  brackets: number;
+  braces: number;
+  commas: number;
+  sawContent: boolean;
+}
 
-    if (!/\s/.test(ch)) sawContent = true;
-    // A comma separates parameters only at the list's own outermost level.
-    if (ch === ',' && parens === 1 && brackets === 0 && braces === 0) commas++;
+/**
+ * Consume one character of a parameter list.
+ *
+ * @returns whether the list just closed, so the caller stops
+ */
+function consumeParamChar(ch: string, i: number, open: number, state: ParamScanState): boolean {
+  const delta = BRACKET_DELTA[ch];
+  // Brackets are a table lookup, not a branch cascade: the cascade measured CCN 14-15
+  // against a block threshold of 10 while each arm was one increment.
+  if (delta) {
+    state.parens += delta[0];
+    state.brackets += delta[1];
+    state.braces += delta[2];
+    return closesList(state.parens, i, open);
   }
-  return { commas, sawContent };
+  if (isParamSeparator(ch, state)) state.commas++;
+  if (!/\s/.test(ch)) state.sawContent = true;
+  return false;
+}
+
+function scanParamList(stripped: string, open: number): ParamScan {
+  const state: ParamScanState = { parens: 0, brackets: 0, braces: 0, commas: 0, sawContent: false };
+  for (let i = open; i < stripped.length; i++) {
+    if (consumeParamChar(stripped[i], i, open, state)) break;
+  }
+  return { commas: state.commas, sawContent: state.sawContent };
+}
+
+/** The nesting depths at one point in a parameter list. */
+interface ParamDepth {
+  parens: number;
+  brackets: number;
+  braces: number;
+}
+
+/**
+ * Whether this character separates two parameters.
+ *
+ * Only a comma at the list's OWN outermost level: `parens === 1` because the scan
+ * started at the opening paren, and no array or brace nesting open. A comma inside a
+ * default value (`[1, 2]`, `foo(1, 2)`, `'a,b'`) is content, not a separator.
+ */
+function isParamSeparator(ch: string, depth: ParamDepth): boolean {
+  if (ch !== ',') return false;
+  return depth.parens === 1 && depth.brackets === 0 && depth.braces === 0;
 }
 
 /**
