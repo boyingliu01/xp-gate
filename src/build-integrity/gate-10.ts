@@ -628,20 +628,28 @@ async function missingDeclaredArtifacts(
   projectRoot: string,
   files: unknown[]
 ): Promise<string | null> {
-  const declaredEntries = files.filter(
-    (entry): entry is string =>
-      typeof entry === 'string' && entry !== '' && !entry.startsWith('!') && !entry.includes('*')
-  );
-  if (declaredEntries.length === 0) {
-    return null;
-  }
-  const presence = await Promise.all(
-    declaredEntries.map((entry) => pathExists(path.join(projectRoot, entry)))
-  );
-  if (presence.some(Boolean)) {
-    return null;
-  }
+  const declaredEntries = files.filter(isDeclaredArtifact);
+  if (declaredEntries.length === 0) return null;
+  if (await anyExists(declaredEntries, projectRoot)) return null;
   return `package.json files entries (${declaredEntries.join(', ')}) do not exist on disk — run the build that produces them, then re-run`;
+}
+
+/**
+ * Whether this `files` entry names one CONCRETE artifact.
+ *
+ * A NEGATION (`!dist/`) and a GLOB (`dist/*`) are rules about other paths, not artifacts
+ * of their own: neither can be checked for existence, and testing a glob literally would
+ * report a missing file for a directory that is perfectly fine.
+ */
+function isDeclaredArtifact(entry: unknown): entry is string {
+  if (typeof entry !== 'string' || entry === '') return false;
+  return !entry.startsWith('!') && !entry.includes('*');
+}
+
+/** Whether any of these entries exists under the project root. */
+async function anyExists(entries: string[], projectRoot: string): Promise<boolean> {
+  const presence = await Promise.all(entries.map((entry) => pathExists(path.join(projectRoot, entry))));
+  return presence.some(Boolean);
 }
 
 /** Existence probe that reports absence instead of throwing. */
@@ -669,12 +677,29 @@ const MAX_PACK_DETAIL = 2000;
 const packFailureResult = (error: unknown, timeoutMs: number): CheckResult => {
   const err = error as PackFailure;
   const durationMs = 0;
-  if (err.killed || err.signal === 'SIGTERM') {
-    return { status: 'skip', message: `npm pack timeout after ${timeoutMs}ms`, durationMs };
-  }
-  const detail = (err.stderr || err.stdout || err.message || '').slice(0, MAX_PACK_DETAIL);
-  return { status: 'fail', message: `npm pack failed: ${detail}`, durationMs };
+  if (wasKilled(err)) return { status: 'skip', message: `npm pack timeout after ${timeoutMs}ms`, durationMs };
+  return { status: 'fail', message: `npm pack failed: ${failureDetail(err)}`, durationMs };
 };
+
+/**
+ * Whether npm pack was KILLED rather than failing on its own.
+ *
+ * A killed run measured nothing, so it is a SKIP: reporting FAIL would blame the package
+ * for a process that never finished examining it.
+ */
+function wasKilled(err: PackFailure): boolean {
+  return Boolean(err.killed) || err.signal === 'SIGTERM';
+}
+
+/**
+ * The most specific detail npm reported, truncated.
+ *
+ * stderr first, then stdout, then the message: stderr is where npm puts the reason, and
+ * the message is often just "Command failed".
+ */
+function failureDetail(err: PackFailure): string {
+  return (err.stderr || err.stdout || err.message || '').slice(0, MAX_PACK_DETAIL);
+}
 
 /**
  * The operator-facing message when a manifest names files the tarball lacks, or
@@ -767,12 +792,13 @@ function resolveGate10Status(
   pack: CheckResult,
   imp: ImportCheckResult
 ): { status: Gate10Status; exitCode: number } {
-  const anyFail = tsc.status === 'fail' || pack.status === 'fail' || imp.status === 'fail';
-  if (anyFail) return { status: 'block', exitCode: 1 };
-
-  const anyPass = tsc.status === 'pass' || pack.status === 'pass' || imp.status === 'pass';
-  if (!anyPass) return { status: 'skip', exitCode: 0 };
-
+  const statuses = [tsc.status, pack.status, imp.status];
+  // ANY failure blocks: a manifest that does not compile or does not ship is a defect
+  // regardless of what the other checks found.
+  if (statuses.includes('fail')) return { status: 'block', exitCode: 1 };
+  // Nothing passed and nothing failed: every check was skipped, which is UNMEASURED and
+  // must not read as a pass.
+  if (!statuses.includes('pass')) return { status: 'skip', exitCode: 0 };
   return { status: 'pass', exitCode: 0 };
 }
 
