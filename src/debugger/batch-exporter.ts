@@ -114,6 +114,15 @@ function armTimer(state: ExporterState): void {
   }
 }
 
+/**
+ * Arm the flush timer, unless one is already pending or shutdown has begun.
+ *
+ * Inlined rather than wrapped: the wrapper was two calls and reported CCN 7 (the
+ * `showHelp` artefact family). The guard's reason lives here, at the timer it protects.
+ *
+ * Skipping when a timer is ALREADY pending is what keeps a burst of records from arming
+ * one timer per record.
+ */
 function scheduleFlush(state: ExporterState): void {
   if (!canSchedule(state)) return;
   armTimer(state);

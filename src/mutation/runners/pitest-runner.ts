@@ -34,6 +34,41 @@ interface PitestJsonReport {
  * Parses the target/pit-reports/.../mutations.json (Maven) or
  * build/reports/pitest/mutations.json (Gradle) into MutationRunResult.
  */
+/** Whether a `mvn` binary answers in this directory. */
+function canRunMaven(cwd: string): boolean {
+  if (!existsSync(join(cwd, 'pom.xml'))) return false;
+  return toolResponds('mvn --version');
+}
+
+/** Whether a `gradle` binary answers in this directory. */
+function canRunGradle(cwd: string): boolean {
+  if (!hasGradleBuild(cwd)) return false;
+  // The WRAPPER is preferred and needs no probe: `gradlew` in the repo is the project's
+  // own pinned version, so its presence is proof enough.
+  if (existsSync(join(cwd, 'gradlew'))) return true;
+  return toolResponds('gradle --version');
+}
+
+/** Whether the directory declares a Gradle build, in either DSL. */
+function hasGradleBuild(cwd: string): boolean {
+  return existsSync(join(cwd, 'build.gradle')) || existsSync(join(cwd, 'build.gradle.kts'));
+}
+
+/**
+ * Whether this command answers within the probe budget.
+ *
+ * A tool that is absent THROWS from `execSync`; a tool that HANGS would block the gate,
+ * so the timeout is part of the check rather than an optimisation.
+ */
+function toolResponds(command: string): boolean {
+  try {
+    execSync(command, { stdio: 'pipe', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class PitestRunner implements MutationRunner {
   readonly name = 'pitest';
   readonly extensions = ['java', 'kt', 'kts'];
@@ -58,31 +93,16 @@ export class PitestRunner implements MutationRunner {
     };
   }
 
+  /**
+   * Which build tool can run these mutants, or null.
+   *
+   * MAVEN is checked first: a project with both build files is conventionally a Maven
+   * project that added a Gradle wrapper experimentally. A build file alone is not
+   * enough -- the tool must answer, or the run fails later with a less useful message.
+   */
   private detectBuildTool(cwd: string): 'maven' | 'gradle' | null {
-    if (existsSync(join(cwd, 'pom.xml'))) {
-      try {
-        execSync('mvn --version', { stdio: 'pipe', timeout: 5000 });
-        return 'maven';
-      } catch {
-        // mvn not available
-      }
-    }
-
-    if (
-      existsSync(join(cwd, 'build.gradle')) ||
-      existsSync(join(cwd, 'build.gradle.kts'))
-    ) {
-      if (existsSync(join(cwd, 'gradlew'))) {
-        return 'gradle';
-      }
-      try {
-        execSync('gradle --version', { stdio: 'pipe', timeout: 5000 });
-        return 'gradle';
-      } catch {
-        // gradle not available
-      }
-    }
-
+    if (canRunMaven(cwd)) return 'maven';
+    if (canRunGradle(cwd)) return 'gradle';
     return null;
   }
 
