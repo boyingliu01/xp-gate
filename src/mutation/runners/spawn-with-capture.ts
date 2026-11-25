@@ -20,7 +20,7 @@
  * no findings", which reads as a pass. A broken toolchain must not look like a
  * clean one.
  */
-import { spawn } from 'node:child_process';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import type { MutationRunOutcome, MutationRunResult } from './types';
 
 export interface SpawnCaptureResult {
@@ -74,20 +74,29 @@ function trySpawn(
   options: SpawnCaptureOptions,
 ): { child?: ReturnType<typeof spawn>; error?: string } {
   try {
-    const child = spawn(command, args as string[], {
-      cwd: options.cwd,
-      // Only forward `env` when the caller supplied one. Passing `process.env`
-      // explicitly is not the same as omitting it: the options object then
-      // carries an env the caller never asked for, which surprises callers that
-      // assert on the options.
-      ...(options.env ? { env: options.env } : {}),
-      shell: options.shell === true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { child };
+    return { child: spawn(command, args as string[], spawnOptionsFor(options)) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * The spawn options for this run.
+ *
+ * `env` is forwarded only when the CALLER supplied one. Passing `process.env` explicitly
+ * is not the same as omitting it: the options object would then carry an env nobody asked
+ * for, which surprises callers that assert on the options.
+ *
+ * stdin is `ignore` on purpose -- a mutated runner has nothing to feed, and an inherited
+ * stdin would let it consume the terminal's input instead.
+ */
+function spawnOptionsFor(options: SpawnCaptureOptions): SpawnOptions {
+  return {
+    cwd: options.cwd,
+    ...(options.env ? { env: options.env } : {}),
+    shell: options.shell === true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  };
 }
 
 /**
