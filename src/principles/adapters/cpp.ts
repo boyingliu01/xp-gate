@@ -13,6 +13,22 @@ interface CppLexState {
   inBlockComment: boolean;
 }
 
+/** Quote characters in C and C++. Neither has a verbatim-string prefix. */
+const CPP_QUOTES = new Set(['"', "'"]);
+
+/**
+ * Note that a string opens here and report how far the lexer consumed.
+ *
+ * The opening quote is consumed but not searched past: the body is stepped through by
+ * `skipStringBody`, which is what makes escapes work.
+ */
+function openQuoted(char: string, lex: CppLexState): number {
+  if (!CPP_QUOTES.has(char)) return 0;
+  lex.inString = true;
+  lex.stringChar = char;
+  return 1;
+}
+
 export class CppAdapter extends BaseAdapter implements Adapter {
   detectLanguage(): string {
     const ext = this.filePath.toLowerCase();
@@ -83,20 +99,45 @@ export class CppAdapter extends BaseAdapter implements Adapter {
     const char = this.fileContent[i];
     const nextChar = this.fileContent[i + 1] || '';
 
+    const inContext = this.skipActiveContext(i, char, nextChar, lex);
+    if (inContext !== null) return inContext;
+    return this.openContext(i, char, nextChar, lex);
+  }
+
+  /**
+   * Continue whatever literal or comment is already open, or null.
+   *
+   * Checked before ANY opener, so a `//` inside a string stays text and a quote inside
+   * a comment stays a comment.
+   */
+  private skipActiveContext(
+    i: number,
+    char: string,
+    nextChar: string,
+    lex: CppLexState,
+  ): number | null {
     if (lex.inBlockComment) return this.skipBlockCommentBody(i, char, nextChar, lex);
     if (lex.inString) return this.skipStringBody(i, char, lex);
+    return null;
+  }
 
+  /**
+   * Recognise a construct that opens here; 0 means the character is structural.
+   *
+   * C and C++ have two comment forms and two string quotes, and no prefixes to
+   * distinguish (unlike C#'s `@"` and raw strings).
+   */
+  private openContext(i: number, char: string, nextChar: string, lex: CppLexState): number {
     if (char === '/' && nextChar === '/') return skipLineComment(this.fileContent, i);
-    if (char === '/' && nextChar === '*') {
-      lex.inBlockComment = true;
-      return 2;
-    }
-    if (char === '"' || char === "'") {
-      lex.inString = true;
-      lex.stringChar = char;
-      return 1;
-    }
-    return 0;
+    if (char === '/') return this.openBlockComment(nextChar, lex);
+    return openQuoted(char, lex);
+  }
+
+  /** A `/` followed by `*` opens a block comment; anything else is structural. */
+  private openBlockComment(nextChar: string, lex: CppLexState): number {
+    if (nextChar !== '*') return 0;
+    lex.inBlockComment = true;
+    return 2;
   }
 
 
