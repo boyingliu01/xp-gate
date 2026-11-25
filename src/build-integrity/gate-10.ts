@@ -837,37 +837,60 @@ function splitChangedFiles(changedFilesStr: string): string[] {
     : [];
 }
 
+/** The default build-check budget, in milliseconds. */
+const GATE10_DEFAULT_TIMEOUT_MS = 60000;
+
+/** Flags that ask for help rather than configuring a run. */
+const GATE10_HELP_FLAGS = new Set(['--help', '-h']);
+
+/**
+ * How each value-taking flag stores its argument.
+ *
+ * A table, because the branches are INDEPENDENT: an if/else chain would count as
+ * nesting and put this function over the depth limit, which blocked every commit that
+ * touched this file while its warning count stayed at or below the "clear to zero"
+ * threshold.
+ */
+const GATE10_VALUE_FLAGS: Record<string, (state: Gate10ArgsDraft, value: string) => void> = {
+  '--changed-files': (state, value) => { state.changedFilesStr = value; },
+  '--project-root': (state, value) => { state.projectRoot = value || process.cwd(); },
+  '--timeout': (state, value) => { state.timeoutMs = parseInt(value || String(GATE10_DEFAULT_TIMEOUT_MS), 10); },
+};
+
+/** The mutable shape the parser builds before it returns. */
+interface Gate10ArgsDraft {
+  changedFilesStr: string;
+  projectRoot: string;
+  timeoutMs: number;
+  help: boolean;
+}
+
 export function parseGate10Args(args: string[]): Gate10Args {
-  let changedFilesStr = '';
-  let projectRoot = process.cwd();
-  let timeoutMs = 60000;
-  let help = false;
+  const state: Gate10ArgsDraft = {
+    changedFilesStr: '',
+    projectRoot: process.cwd(),
+    timeoutMs: GATE10_DEFAULT_TIMEOUT_MS,
+    help: false,
+  };
 
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    // `else if` chains count as nesting depth, which put this function one over
-    // the limit (5 > 4) and blocked every commit that touched this file until it
-    // cleared -- the rule for files at ≤5 warnings is "clear to zero", not "do
-    // not increase". Each branch is independent, so `continue` states that
-    // directly and keeps the depth at 2.
-    if (arg === '--help' || arg === '-h') {
-      help = true;
+    if (GATE10_HELP_FLAGS.has(args[i])) {
+      state.help = true;
       continue;
     }
-    if (arg === '--changed-files') {
-      changedFilesStr = args[++i] || '';
-      continue;
-    }
-    if (arg === '--project-root') {
-      projectRoot = args[++i] || process.cwd();
-      continue;
-    }
-    if (arg === '--timeout') {
-      timeoutMs = parseInt(args[++i] || '60000', 10);
-    }
+    const apply = GATE10_VALUE_FLAGS[args[i]];
+    if (!apply) continue;
+    // The value is consumed from the NEXT position, so it is never re-read as a flag.
+    apply(state, args[i + 1] || '');
+    i++;
   }
 
-  return { changedFiles: splitChangedFiles(changedFilesStr), projectRoot, timeoutMs, help };
+  return {
+    changedFiles: splitChangedFiles(state.changedFilesStr),
+    projectRoot: state.projectRoot,
+    timeoutMs: state.timeoutMs,
+    help: state.help,
+  };
 }
 
 // ─── CLI Result Formatting ─────────────────────────────────────────────────────

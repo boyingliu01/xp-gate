@@ -25,6 +25,30 @@ interface ParsedScoreInput {
   score: number;
 }
 
+/** A mutation score is a percentage, so anything outside 0..100 is a typo. */
+const SCORE_MIN = 0;
+const SCORE_MAX = 100;
+
+/**
+ * Parse one `file.ts:score` entry.
+ *
+ * Both failures are LOUD: a malformed entry silently skipped would write a baseline
+ * that omits a file the caller believed they had recorded, and the omission would only
+ * surface as a threshold that never fires.
+ */
+function parseScoreEntry(entry: string): ParsedScoreInput {
+  const parts = entry.split(':');
+  if (parts.length !== 2) {
+    throw new Error(`Invalid score format: ${entry}. Expected "file.ts:score"`);
+  }
+  const [filePath, scoreStr] = parts;
+  const score = parseFloat(scoreStr);
+  if (Number.isNaN(score) || score < SCORE_MIN || score > SCORE_MAX) {
+    throw new Error(`Invalid score value for ${filePath}: ${scoreStr}. Must be between ${SCORE_MIN} and ${SCORE_MAX}.`);
+  }
+  return { filePath: filePath.trim(), score };
+}
+
 function parseArgs(): { scores: ParsedScoreInput[] } {
   const args = process.argv.slice(2);
   let scoresInput = '';
@@ -40,24 +64,7 @@ function parseArgs(): { scores: ParsedScoreInput[] } {
     throw new Error('Missing required argument: --scores "file1.ts:65.2,file2.ts:58.0"');
   }
 
-  const scores: ParsedScoreInput[] = [];
-  const entries = scoresInput.split(',');
-
-  for (const entry of entries) {
-    const parts = entry.split(':');
-    if (parts.length !== 2) {
-      throw new Error(`Invalid score format: ${entry}. Expected "file.ts:score"`);
-    }
-
-    const [filePath, scoreStr] = parts;
-    const score = parseFloat(scoreStr);
-
-    if (Number.isNaN(score) || score < 0 || score > 100) {
-      throw new Error(`Invalid score value for ${filePath}: ${scoreStr}. Must be between 0 and 100.`);
-    }
-
-    scores.push({ filePath: filePath.trim(), score });
-  }
+  const scores = scoresInput.split(',').map(parseScoreEntry);
 
   return { scores };
 }
