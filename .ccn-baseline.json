@@ -4,25 +4,17 @@
     "version": "1.26.1"
   },
   "entries": {
-    ".perf-measure/paired-ab.cjs::(anonymous)@100": 2,
-    ".perf-measure/paired-ab.cjs::(anonymous)@135": 1,
-    ".perf-measure/paired-ab.cjs::(anonymous)@136": 1,
-    ".perf-measure/paired-ab.cjs::(anonymous)@162": 4,
-    ".perf-measure/paired-ab.cjs::(anonymous)@178": 1,
-    ".perf-measure/paired-ab.cjs::(anonymous)@80": 3,
-    ".perf-measure/paired-ab.cjs::(anonymous)@86": 1,
     ".perf-measure/paired-ab.cjs::cleanupTransient": 3,
     ".perf-measure/paired-ab.cjs::cpuLoad": 3,
     ".perf-measure/paired-ab.cjs::emptyResult": 2,
     ".perf-measure/paired-ab.cjs::entry@148": 1,
     ".perf-measure/paired-ab.cjs::entry@149": 1,
     ".perf-measure/paired-ab.cjs::installCleanupHandlers": 1,
-    ".perf-measure/paired-ab.cjs::main": 7,
-    ".perf-measure/paired-ab.cjs::makeFixture": 1,
-    ".perf-measure/paired-ab.cjs::mean": 1,
+    ".perf-measure/paired-ab.cjs::main": 2,
+    ".perf-measure/paired-ab.cjs::makeFixture": 2,
     ".perf-measure/paired-ab.cjs::median": 2,
-    ".perf-measure/paired-ab.cjs::prepareBaselineSources": 3,
-    ".perf-measure/paired-ab.cjs::runOne": 3,
+    ".perf-measure/paired-ab.cjs::prepareBaselineSources": 4,
+    ".perf-measure/paired-ab.cjs::runOne": 4,
     ".perf-measure/paired-ab.cjs::runRound": 3,
     ".perf-measure/paired-ab.cjs::snap": 1,
     ".perf-measure/paired-ab.cjs::verdictOf": 2,
@@ -1706,7 +1698,8 @@
     "src/sastd/sastd.py::main": 4,
     "scripts/record-hook-behaviour.cjs::writeProjectFixture": 2,
     "plugins/opencode/scripts/prepack.cjs::discoverSkills": 3,
-    "src/mutation/init-baseline.ts::applyArg": 5
+    "src/mutation/init-baseline.ts::applyArg": 5,
+    ".perf-measure/paired-ab.cjs::writeResultFile": 2
   },
   "population": {
     "extensions": [
