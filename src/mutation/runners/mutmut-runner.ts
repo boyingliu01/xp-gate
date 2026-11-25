@@ -442,10 +442,12 @@ function matchingBracket(doc: string, open: number, limit: number): number {
   let quote: string | null = null;
   for (let i = open; i < limit; i += 1) {
     const step = bracketStep(doc, i, quote);
+    // Inside a string the character is DATA: it must not move the depth, and a backslash
+    // also consumes the next one.
     if (step.escape) i += 1;
     else quote = step.quote;
-    if (step.open) depth += 1;
-    if (step.close && (depth -= 1) === 0) return i;
+    depth += step.delta;
+    if (depth === 0) return i;
   }
   return -1;
 }
@@ -453,8 +455,8 @@ function matchingBracket(doc: string, open: number, limit: number): number {
 /** What one character does to the bracket scan. */
 interface BracketStep {
   quote: string | null;
-  open: boolean;
-  close: boolean;
+  /** +1 for `[`, -1 for `]`, 0 otherwise. */
+  delta: number;
   /** The character was a backslash inside a string, so the NEXT one is data. */
   escape: boolean;
 }
@@ -467,10 +469,27 @@ interface BracketStep {
  */
 function bracketStep(doc: string, i: number, quote: string | null): BracketStep {
   const ch = doc[i];
-  if (quote !== null) {
-    if (ch === '\\') return { quote, open: false, close: false, escape: true };
-    return { quote: ch === quote ? null : quote, open: false, close: false, escape: false };
-  }
-  const quoteStarts = ch === '"' || ch === "'";
-  return { quote: quoteStarts ? ch : null, open: ch === '[', close: ch === ']', escape: false };
+  if (quote === null) return outsideString(ch);
+  return { quote: nextQuote(ch, quote), delta: 0, escape: ch === '\\' };
 }
+
+/** What a character does when the scan is OUTSIDE a string. */
+function outsideString(ch: string): BracketStep {
+  if (isQuote(ch)) return { quote: ch, delta: 0, escape: false };
+  return { quote: null, delta: BRACKET_DELTA[ch] ?? 0, escape: false };
+}
+
+/** The quote still open after this character, or null when the string ended. */
+function nextQuote(ch: string, quote: string): string | null {
+  return ch === quote ? null : quote;
+}
+
+/** Whether a character opens a TOML string. */
+function isQuote(ch: string): boolean {
+  return ch === '"' || ch === "'";
+}
+
+/** How each bracket moves the depth, in one place. */
+const BRACKET_DELTA: Record<string, number> = { '[': 1, ']': -1 };
+
+/** How each bracket moves the depth, in one place. */
