@@ -123,11 +123,27 @@ function validateImport(input: ValidateImportInput): MockPolicyViolation[] {
     }));
   }
 
-  if (decision.pendingRemoval && actualStrategy === 'mock' && !content.includes('@mock-justified')) {
+  if (needsJustification(decision, actualStrategy, content)) {
     violations.push(buildPendingRemovalViolation(testFile, importPath, severity));
   }
 
   return violations;
+}
+
+/**
+ * Whether a PENDING-REMOVAL seat still mocks without justification.
+ *
+ * `@mock-justified` is an explicit, greppable opt-out: the annotation is the project's
+ * own statement that this mock is intended, and suppressing it silently would remove the
+ * only record of that decision.
+ */
+function needsJustification(
+  decision: { pendingRemoval?: unknown },
+  actualStrategy: string,
+  content: string,
+): boolean {
+  if (!decision.pendingRemoval || actualStrategy !== 'mock') return false;
+  return !content.includes('@mock-justified');
 }
 
 async function validateFile(
@@ -180,20 +196,28 @@ async function collectAllImports(testFiles: string[], projectRoot: string): Prom
   return [...new Set(all)];
 }
 
+/**
+ * The result when a change set carries no test file.
+ *
+ * SKIP rather than PASS: nothing was validated, and reporting a pass would make an
+ * empty change set look like verified coverage.
+ */
+function skipResult(): MockPolicyResult {
+  return {
+    exitCode: 0,
+    status: 'skip',
+    violations: [],
+    scores: { totalTests: 0, integrationTests: 0, mockDensity: 0, pendingMocks: 0 },
+  };
+}
+
 export async function runGateM3(
   changedFiles: string[],
   projectRoot: string = process.cwd(),
 ): Promise<MockPolicyResult> {
   const testFiles = filterTestFiles(changedFiles);
 
-  if (testFiles.length === 0) {
-    return {
-      exitCode: 0,
-      status: 'skip',
-      violations: [],
-      scores: { totalTests: 0, integrationTests: 0, mockDensity: 0, pendingMocks: 0 },
-    };
-  }
+  if (testFiles.length === 0) return skipResult();
 
   const config = await loadMockPolicyConfig(projectRoot);
   const severity: 'warning' | 'error' = config.severity;
@@ -216,17 +240,34 @@ export async function runGateM3(
     allViolations.push(...await validateFile(testFile, engine, projectRoot, severity, lenientUnit));
   }
 
-  const blocked = severity === 'error' && allViolations.some(v => v.severity === 'error');
+  return buildResult({ allViolations, severity, testFiles, integrationCount });
+}
 
+/**
+ * The gate's verdict and scores.
+ *
+ * A violation blocks only when the config says `error`: warning-level findings are still
+ * reported, because "not blocking" is not "silent" -- the same discipline the other
+ * advisory gates follow.
+ */
+interface BuildResultInput {
+  allViolations: MockPolicyViolation[];
+  severity: 'warning' | 'error';
+  testFiles: string[];
+  integrationCount: number;
+}
+
+function buildResult({ allViolations, severity, testFiles, integrationCount }: BuildResultInput): MockPolicyResult {
+  const blocks = severity === 'error' && allViolations.some((v) => v.severity === 'error');
   return {
-    exitCode: blocked ? 1 : 0,
-    status: blocked ? 'block' : 'pass',
+    exitCode: blocks ? 1 : 0,
+    status: blocks ? 'block' : 'pass',
     violations: allViolations,
     scores: {
       totalTests: testFiles.length,
       integrationTests: integrationCount,
       mockDensity: 0,
-      pendingMocks: allViolations.filter(v => v.reason.includes('pending')).length,
+      pendingMocks: allViolations.filter((v) => v.reason.includes('pending')).length,
     },
   };
 }
@@ -241,19 +282,29 @@ export async function main(args: string[]): Promise<number> {
   console.log(`  Changed files: ${args.length}`);
 
   const result = await runGateM3(args);
-
-  if (result.violations.length > 0) {
-    console.log('\nViolations:');
-    for (const v of result.violations) {
-      const icon = v.severity === 'error' ? String.fromCodePoint(0x2717) : String.fromCodePoint(0x26A0);
-      console.log(`  ${icon} ${v.file}: ${v.reason}`);
-    }
-  }
-
-  const label = result.status === 'block' ? `${String.fromCodePoint(0x2717)} BLOCK` : `${String.fromCodePoint(0x2713)} PASS`;
-  console.log(`\n${label}  Integration tests: ${result.scores.integrationTests}  Pending mocks: ${result.scores.pendingMocks}`);
-
+  reportViolations(result.violations);
+  console.log(`\n${verdictLabel(result.status)}  Integration tests: ${result.scores.integrationTests}  Pending mocks: ${result.scores.pendingMocks}`);
   return result.exitCode;
+}
+
+/** The severity icons, named so the console escapes do not repeat. */
+const CROSS = String.fromCodePoint(0x2717);
+const WARNING = String.fromCodePoint(0x26A0);
+const CHECK = String.fromCodePoint(0x2713);
+
+/** Print each violation with an icon that matches its severity. */
+function reportViolations(violations: MockPolicyViolation[]): void {
+  if (violations.length === 0) return;
+  console.log('\nViolations:');
+  for (const v of violations) {
+    const icon = v.severity === 'error' ? CROSS : WARNING;
+    console.log(`  ${icon} ${v.file}: ${v.reason}`);
+  }
+}
+
+/** The one-word verdict, with its icon. */
+function verdictLabel(status: string): string {
+  return status === 'block' ? `${CROSS} BLOCK` : `${CHECK} PASS`;
 }
 
 // Entry point — process.argv detection for ESM compatibility
