@@ -15,6 +15,33 @@ const {
   clampConsensusSetting, expandEnvPlaceholder,
 } = require('./delphi-model-validation.cjs');
 
+/**
+ * Whether this path is genuinely ABSENT, as opposed to unreadable.
+ *
+ * `statSync` distinguishes ENOENT from EACCES/EISDIR, and only the first is "absent":
+ * treating a permission error as absence would silently route a run to another project's
+ * config, which is how the 2026-10-03 quota incident happened.
+ */
+function isAbsent(configPath) {
+  try {
+    fs.statSync(configPath);
+    return false;
+  } catch (e) {
+    return e.code === 'ENOENT';
+  }
+}
+
+/**
+ * Whether to look for the machine-wide config instead.
+ *
+ * Only when the project file is genuinely ABSENT and the caller gave a RELATIVE path: an
+ * absolute path is an explicit request for that file, and falling back would answer a
+ * different question than the one asked.
+ */
+function shouldFallBack(missingHere, configPath) {
+  return missingHere && !path.isAbsolute(configPath);
+}
+
 function loadConfigFile(configPath) {
   // Global fallback: a relative --config that this cwd does not have resolves
   // to the machine-wide ~/.config/xp-gate/.delphi-config.json. This is what
@@ -26,10 +53,8 @@ function loadConfigFile(configPath) {
   // distinguishes ENOENT from EACCES/EISDIR, and any other error aborts here
   // rather than silently routing this run to another config — matching the
   // TS loader's ENOENT-only semantics (walkthrough R10 FC-01).
-  const missingHere = (() => {
-    try { fs.statSync(configPath); return false; } catch (e) { return e.code === 'ENOENT'; }
-  })();
-  if (missingHere && !path.isAbsolute(configPath)) {
+  const missingHere = isAbsent(configPath);
+  if (shouldFallBack(missingHere, configPath)) {
     // r16 MA-01 disposition: XDG_CONFIG_HOME is an accepted override for the
     // global config location. The CLI lib (shared-paths/doctor) intentionally
     // pins ~/.config/xp-gate — overriding only this loader would make the two

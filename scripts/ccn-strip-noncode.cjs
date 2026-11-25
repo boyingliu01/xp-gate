@@ -157,17 +157,38 @@ function skipRegexFlags(line, from) {
 }
 
 function skipRegexLiteral(line, start) {
-  let k = start + 1;
-  let inClass = false;
-  while (k < line.length) {
-    const ch = line[k];
-    if (ch === '\\') { k += 2; continue; }
-    if (ch === '[') inClass = true;
-    else if (ch === ']') inClass = false;
-    else if (ch === '/' && !inClass) return skipRegexFlags(line, k + 1);
-    k++;
+  const state = { inClass: false };
+  for (let k = start + 1; k < line.length; k++) {
+    const step = regexStep(line, k, state);
+    if (step.done !== undefined) return step.done;
+    k += step.extra;
   }
   return -1;
+}
+
+/**
+ * Advance the regex scan by one character.
+ *
+ * `[/]` is a character CLASS containing a slash, not a closing delimiter -- which is why
+ * the bracket state is tracked. A backslash consumes the NEXT character, so an escaped
+ * slash does not close the literal either.
+ *
+ * @returns `done` when the scan ended, otherwise how many extra characters were consumed
+ */
+function regexStep(line, k, state) {
+  const ch = line[k];
+  if (ch === '\\') return { extra: 1 };
+  if (hasOwn(CLASS_TOGGLES, ch)) state.inClass = CLASS_TOGGLES[ch];
+  else if (ch === '/' && !state.inClass) return { done: skipRegexFlags(line, k + 1), extra: 0 };
+  return { extra: 0 };
+}
+
+/** Characters that open or close a regex character class. */
+const CLASS_TOGGLES = { '[': true, ']': false };
+
+/** Whether an object has this key, without walking the prototype chain. */
+function hasOwn(map, key) {
+  return Object.prototype.hasOwnProperty.call(map, key);
 }
 
 module.exports = {
