@@ -40,11 +40,7 @@
     "totalWarnings": 14
   },
   "src/principles/rules/__tests__/solid/issue-588-lsp-base-contract.test.ts": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-11-25T05:51:24.019Z"
-  },
-  "scripts/normalize-secrets-baseline.cjs": {
-    "totalWarnings": 1,
-    "lastAnalyzed": "2026-11-25T06:28:54.851Z"
+    "lastAnalyzed": "2026-11-25T05:51:24.019Z",
+    "totalWarnings": 1
   }
 }
