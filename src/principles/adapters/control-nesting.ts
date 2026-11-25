@@ -272,10 +272,25 @@ function nestedControlBody(body: string, start: number, to: number): { bodyStart
  * following statement and score sequential guard clauses as nesting.
  */
 function statementBody(body: string, start: number, to: number): { bodyStart: number; bodyEnd: number } {
-  let end = start;
-  while (end < to && body[end] !== ';' && body[end] !== '\n') end++;
-  if (end < to && body[end] === ';') end++;
+  const end = skipToStatementEnd(body, start, to);
   return { bodyStart: start, bodyEnd: end };
+}
+
+/** Whether this character ends a bare statement body. */
+function endsStatement(c: string): boolean {
+  return c === ';' || c === '\n';
+}
+
+/**
+ * The index just past a brace-less body's statement.
+ *
+ * The `;` is CONSUMED but the newline is not: an ASI-terminated statement ends before
+ * the line break, and consuming the break would join it to the next statement.
+ */
+function skipToStatementEnd(body: string, start: number, to: number): number {
+  let end = start;
+  while (end < to && !endsStatement(body[end])) end++;
+  return end < to && body[end] === ';' ? end + 1 : end;
 }
 
 /**
@@ -298,9 +313,11 @@ function trailingClause(body: string, after: number, to: number): { word: string
   if (body[i] === '}') i++;
   i = skipSpaces(body, i, to);
   const tail = readWord(body, i);
-  if (!tail) return null;
-  return tail.word === 'else' || tail.word === 'catch' || tail.word === 'finally' ? tail : null;
+  return tail && CONTINUATION_KEYWORDS.has(tail.word) ? tail : null;
 }
+
+/** Keywords that CONTINUE a control structure past a closing brace. */
+const CONTINUATION_KEYWORDS = new Set(['else', 'catch', 'finally']);
 
 /**
  * True when the parameter list starting at `open` is followed by a method body
@@ -529,18 +546,49 @@ function findBraceAfterReturnType(body: string, from: number, to: number): numbe
   if (body[i] !== ':') return i;
   i = skipSpaces(body, i + 1, to);
 
-  let angles = 0;
-  for (; i < to; i++) {
-    const c = body[i];
-    if (c === ';' || c === '\n') return -1;
-    angles = adjustAngleDepth(c, angles);
-    if (c !== '{') continue;
+  return scanReturnTypeForBrace(body, i, to);
+}
 
-    const brace = classifyReturnBrace(body, i, angles, to);
-    if (brace.kind === 'type') { i = brace.next - 1; continue; }
-    return brace.kind === 'body-after' ? brace.next : i;
+/**
+ * Walk a return type looking for the function body's `{`.
+ *
+ * A `;` or a newline before any body brace means the header has NO braced body -- an
+ * overload signature or an abstract method -- and the caller must not skip anything.
+ * Skipping a range here would swallow the next declaration.
+ *
+ * @returns the body brace (or the index just past an object type), or -1
+ */
+function scanReturnTypeForBrace(body: string, from: number, to: number): number {
+  const state = { angles: 0 };
+  for (let i = from; i < to; i++) {
+    const step = returnTypeStep(body, i, to, state);
+    if (step.done !== undefined) return step.done;
+    i = step.resume;
   }
   return -1;
+}
+
+/**
+ * Advance the return-type scan by one step.
+ *
+ * `done` carries the final answer when the scan ended; `resume` is where the caller
+ * continues. The `- 1` compensates for the loop's own `i++`, which is why it lives here
+ * rather than at each call site.
+ */
+function returnTypeStep(
+  body: string,
+  i: number,
+  to: number,
+  state: { angles: number },
+): { done?: number; resume: number } {
+  const c = body[i];
+  if (c === ';' || c === '\n') return { done: -1, resume: i };
+  state.angles = adjustAngleDepth(c, state.angles);
+  if (c !== '{') return { resume: i };
+
+  const brace = classifyReturnBrace(body, i, state.angles, to);
+  if (brace.kind === 'type') return { resume: brace.next - 1 };
+  return { done: brace.kind === 'body-after' ? brace.next : i, resume: i };
 }
 
 /**
@@ -574,9 +622,19 @@ function classifyReturnBrace(body: string, i: number, angles: number, to: number
 
   const rest = skipSpaces(body, afterBrace, to);
   if (rest >= to) return { kind: 'body', next: i };
-  const continues = '|&'.includes(body[rest]) || body[rest] === '[';
-  if (continues) return { kind: 'type', next: afterBrace };
+  if (typeContinuesAt(body[rest])) return { kind: 'type', next: afterBrace };
   return body[rest] === '{' ? { kind: 'body-after', next: rest } : { kind: 'body', next: i };
+}
+
+/**
+ * Whether this character CONTINUES an object type rather than starting the body.
+ *
+ * A union/intersection (`|`, `&`) or an indexed access (`[`) proves the brace just
+ * closed was a TYPE -- `m(): {a:number} | null { ... }` -- so the scan must keep looking
+ * for the real body instead of stopping there.
+ */
+function typeContinuesAt(c: string): boolean {
+  return c === '|' || c === '&' || c === '[';
 }
 
 /** One classified step of an arrow return-type scan. */
@@ -779,13 +837,18 @@ const STRING_CONTEXTS: Array<{ flag: 'inSingle' | 'inDouble' | 'inTemplate'; quo
  *
  * @returns characters consumed: 2 for a comment opener, 1 otherwise
  */
+/** The two comment forms a `/` may open. */
+const COMMENT_OPENERS: Record<string, keyof NestingScanState> = {
+  '/': 'inLineComment',
+  '*': 'inBlockComment',
+};
+
 function openContext(c: string, next: string, state: NestingScanState): number {
-  if (c === '/' && next === '/') {
-    state.inLineComment = true;
-    return 2;
-  }
-  if (c === '/' && next === '*') {
-    state.inBlockComment = true;
+  // A `//` or `/*` opener consumes BOTH characters; a quote consumes one and leaves the
+  // body to the string-context scanner.
+  const comment = c === '/' ? COMMENT_OPENERS[next] : undefined;
+  if (comment) {
+    (state[comment] as boolean) = true;
     return 2;
   }
   const opened = STRING_CONTEXTS.find((ctx) => ctx.quote === c);
