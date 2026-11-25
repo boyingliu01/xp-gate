@@ -197,6 +197,34 @@ export const dtoLayeringRule: Rule = {
  * Judged on package segments, so a wildcard import IS caught here: the import
  * `com.acme.infrastructure.*` carries the layer name even without a class name.
  */
+/**
+ * The violations for the imports that match `isOffence`.
+ *
+ * `line ?? 1` because an import without a recorded line still has to be reported -- the
+ * message names the import, and dropping it would lose a real finding to a missing
+ * position.
+ */
+function collectHits(
+  imports: Array<{ name: string; line?: number }>,
+  isOffence: (imp: { name: string; line?: number }) => boolean,
+  messageFor: (imp: { name: string; line?: number }) => string,
+): Array<{ line: number; message: string }> {
+  return imports
+    .filter(isOffence)
+    .map((imp) => ({ line: imp.line ?? 1, message: messageFor(imp) }));
+}
+
+/**
+ * Whether this import is one of the PROJECT's application services.
+ *
+ * Framework services are not this project's application layer, so skipping them is what
+ * keeps AC-699-12 quiet.
+ */
+function isApplicationService(imp: { name: string }): boolean {
+  if (isFrameworkType(imp.name)) return false;
+  return dependencyRole(imp.name) === 'service';
+}
+
 export const domainEventRule: Rule = {
   id: DOMAIN_EVENT_RULE_ID,
   name: 'Domain Event Dependency Rule (R15)',
@@ -208,17 +236,9 @@ export const domainEventRule: Rule = {
       const inDomainEvent =
         packageSegments.includes('domain') && packageSegments.includes('event');
       if (!inDomainEvent) return [];
-      const hits: Array<{ line: number; message: string }> = [];
-      for (const imp of imports) {
-        if (!packageSegmentsOf(imp.name).includes('infrastructure')) continue;
-        hits.push({
-          line: imp.line ?? 1,
-          message:
-            `Domain event must not depend on the infrastructure layer ` +
-            `(imported from ${imp.name})`,
-        });
-      }
-      return hits;
+      return collectHits(imports, (imp) => packageSegmentsOf(imp.name).includes('infrastructure'),
+        (imp) => `Domain event must not depend on the infrastructure layer `
+          + `(imported from ${imp.name})`);
     });
   },
 };
@@ -239,20 +259,9 @@ export const utilServiceRule: Rule = {
     const baseName = sourceName.replace(/\.java$/i, '');
     if (!endsWithAny(baseName, UTIL_SOURCE_SUFFIXES)) return [];
     return checkFile(file, adapter, UTIL_SERVICE_RULE_ID, severity, ({ imports }) => {
-      const hits: Array<{ line: number; message: string }> = [];
-      for (const imp of imports) {
-        // Framework services are not this project's application layer; skipping
-        // them is what keeps AC-699-12 quiet.
-        if (isFrameworkType(imp.name)) continue;
-        if (dependencyRole(imp.name) !== 'service') continue;
-        hits.push({
-          line: imp.line ?? 1,
-          message:
-            `Utility "${baseName}" should not depend on application service ` +
-            `"${simpleNameOf(imp.name)}" (imported from ${imp.name})`,
-        });
-      }
-      return hits;
+      return collectHits(imports, isApplicationService,
+        (imp) => `Utility "${baseName}" should not depend on application service `
+          + `"${simpleNameOf(imp.name)}" (imported from ${imp.name})`);
     });
   },
 };
