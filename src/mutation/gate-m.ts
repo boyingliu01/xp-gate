@@ -225,6 +225,23 @@ interface TestIntentCheckResult {
   missingAnnotations: string[];
 }
 
+/** The mandatory annotations, with the field that records each one. */
+const REQUIRED_ANNOTATIONS = [
+  { label: '@test', field: 'hasTest' },
+  { label: '@intent', field: 'hasIntent' },
+  { label: '@covers', field: 'hasCovers' },
+];
+
+/**
+ * Which mandatory annotations this test file lacks.
+ *
+ * A table because the three are the same question asked three times; listing them keeps
+ * the set in ONE place, which matters when the annotation set changes.
+ */
+function missingFrom(annotations: Record<string, boolean>): string[] {
+  return REQUIRED_ANNOTATIONS.filter((a) => !annotations[a.field]).map((a) => a.label);
+}
+
 async function checkTestIntents(sourceFiles: string[]): Promise<TestIntentCheckResult[]> {
   const results: TestIntentCheckResult[] = [];
 
@@ -240,15 +257,10 @@ async function checkTestIntents(sourceFiles: string[]): Promise<TestIntentCheckR
     }
 
     const detection = await detectAITestCharacteristics(testFile);
-    const missingAnnotations: string[] = [];
-    if (!detection.annotations.hasTest) missingAnnotations.push('@test');
-    if (!detection.annotations.hasIntent) missingAnnotations.push('@intent');
-    if (!detection.annotations.hasCovers) missingAnnotations.push('@covers');
-
     results.push({
       sourceFile,
       testFile,
-      missingAnnotations,
+      missingAnnotations: missingFrom(detection.annotations),
     });
   }
 
@@ -711,6 +723,35 @@ export function summarizeSurvivors(
   };
 }
 
+/**
+ * Warn about files whose measurement TIMED OUT.
+ *
+ * Their thresholds leave the evaluation entirely, so they must be called out here -- an
+ * unmeasured file that silently drops out of the check reads as a pass.
+ */
+function noteTimeouts(timeoutFiles: string[], warnings: string[]): void {
+  if (timeoutFiles.length === 0) return;
+  warnings.push(`Mutation testing timed out for: ${timeoutFiles.join(', ')}. Run locally for full report.`);
+}
+
+/** Print one indented line per score message. */
+function printScoreMessages(messages: string[]): void {
+  for (const msg of messages) console.log(`  ${msg}`);
+}
+
+/**
+ * The per-file thresholds and the recorded baseline, logged once.
+ *
+ * Grouped because the two are ALWAYS read together and their log line names both: a
+ * threshold printed without the baseline it is compared against is half the story.
+ */
+async function resolveThresholds(options: GateMOptions, sourceFiles: string[]) {
+  const thresholds = await determineThresholds(sourceFiles, await loadCriticalPaths(options.criticalPathsPath));
+  const baseline = await loadBaseline(options.baselinePath);
+  logThresholdDetails(thresholds, baseline);
+  return { thresholds, baseline };
+}
+
 export async function runGateM(options: GateMOptions): Promise<GateMResult> {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -722,37 +763,53 @@ export async function runGateM(options: GateMOptions): Promise<GateMResult> {
 
   await collectTestIntentWarnings(sourceFiles, warnings);
 
-  const thresholds = await determineThresholds(sourceFiles, await loadCriticalPaths(options.criticalPathsPath));
-  const baseline = await loadBaseline(options.baselinePath);
-
-  logThresholdDetails(thresholds, baseline);
+  const { thresholds, baseline } = await resolveThresholds(options, sourceFiles);
 
   const groups = groupByRunner(sourceFiles);
   const { scores: fileScoresNullable, counts: mutantCounts } =
     await runAllRunners(groups, options.timeoutMs, process.cwd());
 
   const { fileScores, timeoutFiles } = partitionScores(fileScoresNullable);
-  if (timeoutFiles.length > 0) {
-    warnings.push(`Mutation testing timed out for: ${timeoutFiles.join(', ')}. Run locally for full report.`);
-  }
-
+  noteTimeouts(timeoutFiles, warnings);
   const evaluableThresholds = thresholds.filter(ft => !timeoutFiles.includes(ft.file));
   const evalResult = evaluateScores(fileScores, evaluableThresholds, baseline);
-  for (const msg of evalResult.messages) console.log(`  ${msg}`);
+  printScoreMessages(evalResult.messages);
 
-  if (timeoutFiles.length > 0) {
-    for (const f of timeoutFiles) {
-      console.log(`  SKIP ${f}: mutation testing timed out (score unavailable)`);
-    }
+  printTimeouts(timeoutFiles);
+  return finalVerdict({ evalResult, evaluableThresholds, fileScores, mutantCounts, warnings, errors });
+}
+
+/** One SKIP line per file whose measurement timed out. */
+function printTimeouts(timeoutFiles: string[]): void {
+  for (const f of timeoutFiles) {
+    console.log(`  SKIP ${f}: mutation testing timed out (score unavailable)`);
   }
+}
 
+/**
+ * The gate's final verdict.
+ *
+ * Order matters: a BLOCK outranks everything, and an empty threshold list is a SKIP
+ * because NOTHING was evaluated -- reporting PASS there would claim a check that never
+ * had a criterion to apply.
+ */
+/** What the final verdict needs from the run. */
+interface VerdictInput {
+  evalResult: { blocked: boolean };
+  evaluableThresholds: FileThreshold[];
+  fileScores: Record<string, number>;
+  mutantCounts: Record<string, MutantCounts>;
+  warnings: string[];
+  errors: string[];
+}
+
+function finalVerdict({ evalResult, evaluableThresholds, fileScores, mutantCounts, warnings, errors }: VerdictInput) {
+  const count = evaluableThresholds.length;
   if (evalResult.blocked) {
-    return buildResult('block', evaluableThresholds.length, buildMutationScores(fileScores, mutantCounts), warnings, errors);
+    return buildResult('block', count, buildMutationScores(fileScores, mutantCounts), warnings, errors);
   }
-  if (evaluableThresholds.length === 0) {
-    return buildResult('skip', 0, {}, warnings, errors);
-  }
-  return buildResult('pass', evaluableThresholds.length, buildMutationScores(fileScores, mutantCounts), warnings, errors);
+  if (count === 0) return buildResult('skip', 0, {}, warnings, errors);
+  return buildResult('pass', count, buildMutationScores(fileScores, mutantCounts), warnings, errors);
 }
 
 interface PartitionedScores {
@@ -801,38 +858,65 @@ async function readSurvivorSummary(): Promise<SurvivorSummary | null> {
   }
 }
 
-export async function main(args: string[]): Promise<number> {
-  const options = parseArgs(args);
+/**
+ * Refuse an invocation that names no files.
+ *
+ * Exit 1 rather than a default scan: mutation testing without a change set would score
+ * the WHOLE repository, which is slow and not what a commit-time gate asked for.
+ */
+function printUsageAndFail(): number {
+  console.error('Usage: npx tsx src/mutation/gate-m.ts --changed-files "file1.ts,file2.ts" [--baseline <path>] [--critical-paths <path>]');
+  return 1;
+}
 
-  if (options.changedFiles.length === 0) {
-    console.error('Usage: npx tsx src/mutation/gate-m.ts --changed-files "file1.ts,file2.ts" [--baseline <path>] [--critical-paths <path>]');
-    return 1;
-  }
-
+/** Echo the resolved arguments, so a surprising run is explainable from its own output. */
+function printArguments(options: ReturnType<typeof parseArgs>): void {
   console.log(`Gate M: Mutation Testing (LangAdapter)`);
   console.log(`  Changed files: ${options.changedFiles.length}`);
   console.log(`  Baseline: ${options.baselinePath}`);
   console.log(`  Critical paths: ${options.criticalPathsPath}`);
   console.log(`  Timeout: ${options.timeoutMs}ms`);
+}
+
+export async function main(args: string[]): Promise<number> {
+  const options = parseArgs(args);
+
+  if (options.changedFiles.length === 0) return printUsageAndFail();
+
+  printArguments(options);
 
   const result = await runGateM(options);
 
   // #544: survivor detail on a machine-readable line. Printed only when a report
   // exists -- absent means "not measured", never "measured: zero survivors".
-  const survivors = await readSurvivorSummary();
-  if (survivors) {
-    console.log(`GATE_M_SURVIVORS_JSON=${JSON.stringify(survivors)}`);
-  }
-
+  await printSurvivors();
   logDiagnostics(result.warnings, result.errors);
-
-  const statusIcon = result.status === 'pass' ? '✓' :
-    result.status === 'skip' ? '⊘' :
-    result.status === 'timeout' ? '⏱' : '✗';
-
-  console.log(`\n${statusIcon} Gate M ${result.status.toUpperCase()} (${result.filesChecked} files checked)`);
-
+  console.log(`\n${statusIconOf(result.status)} Gate M ${result.status.toUpperCase()} (${result.filesChecked} files checked)`);
   return result.exitCode;
+}
+
+/**
+ * Print the survivor detail on a machine-readable line, when a report exists.
+ *
+ * Absent means "not measured", never "measured: zero survivors" (#544). `readSurvivorSummary`
+ * already returns null for a missing or unparsable report, so this prints nothing then.
+ */
+async function printSurvivors(): Promise<void> {
+  const survivors = await readSurvivorSummary();
+  if (!survivors) return;
+  console.log(`GATE_M_SURVIVORS_JSON=${JSON.stringify(survivors)}`);
+}
+
+/** The one-character status marker, keyed by the verdict. */
+const STATUS_ICONS: Record<string, string> = {
+  pass: '\u2713',
+  skip: '\u2298',
+  timeout: '\u23F1',
+};
+
+/** The marker for a verdict; anything unrecognised reads as a failure. */
+function statusIconOf(status: string): string {
+  return STATUS_ICONS[status] ?? '\u2717';
 }
 
 /** Print Gate M's warnings and errors. Errors go to stderr. */
