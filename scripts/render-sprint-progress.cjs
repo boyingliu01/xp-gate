@@ -208,18 +208,43 @@ const NEXT_ACTIONS = {
  * @param {number|null|undefined} secs
  * @returns {string}
  */
+/** Seconds in one minute, hour and day. */
+const MINUTE = 60;
+const HOUR = MINUTE * 60;
+const DAY = HOUR * 24;
+
+/** `h m`, from a value already known to be at least an hour. */
+function hoursAndMinutes(secs) {
+  return `${Math.floor(secs / HOUR)}h ${Math.floor((secs % HOUR) / MINUTE)}m`;
+}
+
+/** `d h`, from a value already known to be at least a day. */
+function daysAndHours(secs) {
+  return `${Math.floor(secs / DAY)}d ${Math.floor((secs % DAY) / HOUR)}h`;
+}
+
+/**
+ * Format a duration in seconds as a compact human string.
+ *
+ * Sub-minute values are ROUNDED rather than floored: a 45-second step printed as `0m`
+ * would look like it did not run. Everything above a minute is floored, because a
+ * fractional unit reads as precision the measurement does not have.
+ */
 function formatDuration(secs) {
-  if (secs == null || secs < 0) return '-';
-  if (secs < 60) return `${Math.round(secs)}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
-  if (secs < 86400) {
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    return `${h}h ${m}m`;
-  }
-  const d = Math.floor(secs / 86400);
-  const h = Math.floor((secs % 86400) / 3600);
-  return `${d}d ${h}h`;
+  if (isUnmeasured(secs)) return '-';
+  if (secs < MINUTE) return `${Math.round(secs)}s`;
+  return formatLongDuration(secs);
+}
+
+/** Whether this duration was never measured, or is negative. */
+function isUnmeasured(secs) {
+  return secs == null || secs < 0;
+}
+
+/** Minutes, or a two-part hour/day form for anything longer. */
+function formatLongDuration(secs) {
+  if (secs < HOUR) return `${Math.floor(secs / MINUTE)}m`;
+  return secs < DAY ? hoursAndMinutes(secs) : daysAndHours(secs);
 }
 
 /**
@@ -248,17 +273,37 @@ function formatTimestamp(iso) {
  * @param {boolean} isLegacy - whether the source state is legacy
  * @returns {string}
  */
-function getPhaseStatus(history, phaseNum, currentPhase, isLegacy) {
-  if (history) {
-    // Check if any history entry maps to this new phase number
-    const entry = history.find((h) => normalizeHistoryPhase(h, isLegacy) === phaseNum);
-    if (entry) return entry.status;
-  }
-  // Backward compat: infer from currentPhase
-  if (phaseNum < currentPhase) return 'completed';
-  if (phaseNum === currentPhase) return 'running';
-  return 'pending';
+/**
+ * The history entry recorded for a phase, or undefined.
+ *
+ * LEGACY histories number phases differently, so the comparison goes through
+ * `normalizeHistoryPhase` rather than reading the number directly -- otherwise a legacy
+ * sprint reports every phase as pending.
+ */
+function findPhaseEntry(history, phaseNum, isLegacy) {
+  if (!history) return undefined;
+  return history.find((h) => normalizeHistoryPhase(h, isLegacy) === phaseNum);
 }
+
+function getPhaseStatus(history, phaseNum, currentPhase, isLegacy) {
+  const entry = findPhaseEntry(history, phaseNum, isLegacy);
+  if (entry) return entry.status;
+  // Backward compat: infer from currentPhase
+  return PHASE_STATUS_BY_ORDER[Math.sign(phaseNum - currentPhase)];
+}
+
+/**
+ * The status a phase has, relative to the current one.
+ *
+ * Phases before the current one are done, the current one is running, and later ones are
+ * pending. As a table on `Math.sign` there is no "unreachable" arm, and the three-way
+ * comparison reads as the rule rather than as three separate conditions.
+ */
+const PHASE_STATUS_BY_ORDER = {
+  [-1]: 'completed',
+  0: 'running',
+  1: 'pending',
+};
 
 /**
  * Get phase duration from phase_history.
@@ -268,8 +313,7 @@ function getPhaseStatus(history, phaseNum, currentPhase, isLegacy) {
  * @returns {number|null}
  */
 function getPhaseDuration(history, phaseNum, isLegacy) {
-  if (!history) return null;
-  const entry = history.find((h) => normalizeHistoryPhase(h, isLegacy) === phaseNum);
+  const entry = findPhaseEntry(history, phaseNum, isLegacy);
   return entry ? entry.duration_seconds : null;
 }
 
@@ -329,13 +373,53 @@ function buildOutputLines(outputs) {
   return keys.map((k) => `    ${k}: ${outputs[k]}`);
 }
 
+/**
+ * The dashboard's header block.
+ *
+ * The request and branch lines carry no right-hand value, so they get an empty cell
+ * rather than a blank one -- `padLine` needs the cell to keep the border aligned.
+ */
+function headerLines(state, { border, empty, id, taskDesc, branch }) {
+  return [
+    border,
+    padLine('SPRINT PROGRESS', id),
+    border,
+    padLine(`\u9700\u6C42: ${taskDesc}`, ''),
+    padLine(`\u5206\u652F: ${branch}`, ''),
+    padLine(`\u72B6\u6001: ${state.status || '-'}`, `\u542F\u52A8: ${formatTimestamp(state.started_at)}`),
+    border,
+    empty,
+  ];
+}
+
+/** The placeholder printed for a field the state does not carry. */
+const UNKNOWN_FIELD = '-';
+
+/**
+ * The header fields a dashboard shows.
+ *
+ * Every one falls back to a VISIBLE placeholder rather than an empty string: a blank
+ * where the branch should be reads as "no branch", which is a different claim from
+ * "not recorded".
+ */
+function headerFields(state) {
+  const isolation = state.isolation || {};
+  return {
+    id: state.id || UNKNOWN_FIELD,
+    taskDesc: state.task_description || UNKNOWN_FIELD,
+    branch: isolation.branch || UNKNOWN_FIELD,
+  };
+}
+
+/** The phase the sprint is on, normalised out of either numbering scheme. */
+function currentPhaseOf(state, isLegacy) {
+  return normalizePhaseNum(state.phase != null ? state.phase : 1, isLegacy);
+}
+
 function renderDashboard(state) {
-  const id = state.id || '-';
-  const taskDesc = state.task_description || '-';
-  const branch = (state.isolation && state.isolation.branch) || '-';
+  const { id, taskDesc, branch } = headerFields(state);
   const isLegacy = isLegacyState(state);
-  const rawPhase = state.phase != null ? state.phase : 1;
-  const currentPhase = normalizePhaseNum(rawPhase, isLegacy);
+  const currentPhase = currentPhaseOf(state, isLegacy);
   const phaseRows = buildPhaseRows(state, currentPhase, isLegacy);
   const { pct, bar } = buildProgress(phaseRows);
   const currentDef = PHASES.find((p) => p.num === currentPhase) || PHASES[0];
@@ -346,17 +430,15 @@ function renderDashboard(state) {
   const empty = '|' + ' '.repeat(DASHBOARD_WIDTH) + '|';
   const outputs = state.outputs || {};
 
-  const lines = [
-    border,
-    padLine('SPRINT PROGRESS', id),
-    border,
-    padLine(`\u9700\u6C42: ${taskDesc}`, ''),
-    padLine(`\u5206\u652F: ${branch}`, ''),
-    padLine(`\u72B6\u6001: ${state.status || '-'}`, `\u542F\u52A8: ${formatTimestamp(state.started_at)}`),
-    border,
-    empty,
-  ];
+  const lines = headerLines(state, { border, empty, id, taskDesc, branch });
 
+  pushBody(lines, { empty, border, phaseRows, bar, pct, currentPhase, currentDef, currentStatus, nextAction, nextDetail, outputs });
+  return lines.join('\n');
+}
+
+/** The rows after the header: phases, the progress bar, the current phase, outputs. */
+function pushBody(lines, ctx) {
+  const { empty, border, phaseRows, bar, pct, currentPhase, currentDef, currentStatus, nextAction, nextDetail, outputs } = ctx;
   pushPhaseRows(lines, phaseRows);
   lines.push(empty);
   lines.push(padLine(`[${bar}] ${pct}%`, ''));
@@ -365,8 +447,6 @@ function renderDashboard(state) {
   lines.push(border);
   pushOutputLines(lines, outputs);
   lines.push(border);
-
-  return lines.join('\n');
 }
 
 /** Append one padded row per phase. */
