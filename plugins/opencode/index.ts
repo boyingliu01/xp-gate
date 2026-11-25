@@ -671,22 +671,25 @@ function readReloadInputs(): ReloadInputs {
   const parsed = parseOmoConfig(omoConfigPath)
   if (typeof parsed === "string") return { ok: false, reason: parsed }
 
+  const model = resolveReloadModel(parsed)
+  if (typeof model === "string") return { ok: false, reason: model }
+  return { ok: true, dbPath, providerID: model.providerID, modelID: model.modelID }
+}
+
+/**
+ * The provider/model pair to reload onto, or the REASON it cannot be resolved.
+ *
+ * Two failure shapes are collapsed into the string return: `readSisyphusModel` reports its
+ * own failures as a message, and a model ref that is not `provider/model` cannot be split.
+ * Both are "tell the user why" with no partial result to salvage.
+ */
+function resolveReloadModel(parsed: unknown): { providerID: string; modelID: string } | string {
   const model = readSisyphusModel(parsed)
-  // `readSisyphusModel` reports its own failures as a message string; a string that
-  // does not start with the failure prefix is a model id.
-  if (isReloadFailure(model)) return { ok: false, reason: model }
-
+  // A string that does not start with the failure prefix is a model id.
+  if (isReloadFailure(model)) return model as string
   const split = splitModelRef(model as string)
-  if (!split) {
-    return { ok: false, reason: `Session reload failed: model "${model}" is not in provider/model format` }
-  }
-
-  return {
-    ok: true,
-    dbPath,
-    providerID: split.providerID,
-    modelID: split.modelID,
-  }
+  if (split) return split
+  return `Session reload failed: model "${model}" is not in provider/model format`
 }
 
 /** The parsed config object, or the failure message. */
