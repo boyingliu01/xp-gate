@@ -70,4 +70,11 @@ function deeplyNested() {
     // Rule errors must bubble up to analyzer.runRuleOnFile(), not be swallowed.
     expect(() => deepNestingRule.check('test.ts', mockAdapterThatThrows as never)).toThrow('Adapter failed');
   });
+
+  it('reports nothing when the adapter cannot list functions', () => {
+    // `extractFunctions` is OPTIONAL: an adapter may not implement it at all, and the rule
+    // must read that as "no functions" rather than throw.
+    const bare = { detectLanguage: () => 'java', extractClasses: () => [] };
+    expect(deepNestingRule.check('test.java', bare as never)).toHaveLength(0);
+  });
 });

@@ -62,22 +62,38 @@ export const srpRule: Rule = {
   name: 'Single Responsibility Principle Rule',
   threshold: 15,
   severity: 'warning',
-  check: (file: string, adapter: import('../../types').Adapter): Violation[] => {
-    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
-    const settings = getActiveConfig().rules['solid']['srp'];
-    const maxMethods = settings.methodThreshold as number;
-    const sev = (settings.severity as 'error' | 'warning' | 'info') ?? 'warning';
-
-    const violations: Violation[] = [];
-    for (const raw of adapter.extractClasses() || []) {
-      const facts = readClass(raw);
-      for (const found of [
-        methodViolation(facts, file, maxMethods, sev),
-        importViolation(facts, file, sev),
-      ]) {
-        if (found) violations.push(found);
-      }
-    }
-    return violations;
-  },
+  check: checkSrp,
 };
+
+/** The severity vocabulary this rule reports with. */
+type SrpSeverity = 'error' | 'warning' | 'info';
+
+/**
+ * Every SRP violation in one file.
+ *
+ * The config is read PER INVOCATION; a module-load snapshot was #457, which made a
+ * project's own threshold parse but never apply.
+ */
+function checkSrp(file: string, adapter: import('../../types').Adapter): Violation[] {
+  const settings = getActiveConfig().rules.solid.srp;
+  const maxMethods = settings.methodThreshold as number;
+  const sev = (settings.severity as SrpSeverity) ?? 'warning';
+  return (adapter.extractClasses() || [])
+    .flatMap((raw) => violationsForClass(readClass(raw), file, maxMethods, sev));
+}
+
+/**
+ * Both checks for one class.
+ *
+ * A class can break SRP on methods AND on imports; reporting only the first would make
+ * the second invisible once the first is fixed.
+ */
+function violationsForClass(
+  facts: ClassFacts,
+  file: string,
+  maxMethods: number,
+  sev: SrpSeverity,
+): Violation[] {
+  return [methodViolation(facts, file, maxMethods, sev), importViolation(facts, file, sev)]
+    .filter((found): found is Violation => found !== null);
+}

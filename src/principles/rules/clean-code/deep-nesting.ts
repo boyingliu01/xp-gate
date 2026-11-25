@@ -34,17 +34,22 @@ export const deepNestingRule: Rule = {
   name: 'Deep Nesting Rule',
   threshold: 4,
   severity: 'warning',
-  check: (file: string, adapter: unknown): Violation[] => {
-    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
-    const settings = getActiveConfig().rules['clean-code']['deep-nesting'];
-    const maxDepth = settings.threshold ?? 0;
-    const severity = (settings.severity as Severity) ?? 'warning';
-
-    const violations: Violation[] = [];
-    for (const func of (adapter as TypedAdapter).extractFunctions?.() || []) {
-      const found = nestingViolation(func, maxDepth, file, severity);
-      if (found) violations.push(found);
-    }
-    return violations;
-  }
+  check: checkDeepNesting,
 };
+
+/**
+ * Every function that nests deeper than the ceiling.
+ *
+ * Collected with `flatMap` so a function that does not violate contributes nothing --
+ * `nestingViolation` returns null for those, and the shape says so.
+ */
+function checkDeepNesting(file: string, adapter: unknown): Violation[] {
+  // Read the ACTIVE config per invocation; a module-load snapshot was #457.
+  const settings = getActiveConfig().rules['clean-code']['deep-nesting'];
+  const maxDepth = settings.threshold ?? 0;
+  const severity = (settings.severity as Severity) ?? 'warning';
+  const functions = (adapter as TypedAdapter).extractFunctions?.() || [];
+  return functions
+    .map((func) => nestingViolation(func, maxDepth, file, severity))
+    .filter((found): found is Violation => found !== null);
+}
