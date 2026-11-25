@@ -91,16 +91,29 @@ function restoreFromBackup({ pyprojectPath, backupPath, hadExisting }: RestoreTa
  * mutation RESULT into a crash.
  */
 function restoreExisting({ pyprojectPath, backupPath }: BackupPair): void {
+  if (!existsSync(backupPath)) return;
+  // Each step is guarded on its own rather than wrapped in one try/catch, because they
+  // fail differently and only the CALLER can report usefully (it knows the backup path):
+  //
+  //   - an unreadable backup leaves the workspace untouched -- nothing was written, so
+  //     there is nothing to report beyond the caller's warning;
+  //   - a failed WRITE is the serious one: pyproject.toml still carries mutmut's edit,
+  //     and the backup must survive so the content can be recovered by hand;
+  //   - the backup is unlinked only after the write succeeded, since deleting it first
+  //     would destroy the only copy if the write then failed.
+  //
+  // Failures PROPAGATE to `restoreFromBackup`, which is the one place that can name the
+  // backup path and print a warning.
+  const content = readFileSync(backupPath, 'utf-8');
   try {
-    if (!existsSync(backupPath)) return;
-    writeFileSync(pyprojectPath, readFileSync(backupPath, 'utf-8'), { encoding: 'utf-8' });
-    // The backup goes only AFTER the restore SUCCEEDED: deleting it first would destroy
-    // the only copy if the write then failed.
-    unlinkSync(backupPath);
+    writeFileSync(pyprojectPath, content, { encoding: 'utf-8' });
   } catch (err) {
-    // Re-thrown so `restoreFromBackup` reports it once, with the backup path named.
-    throw err;
+    // The write is the step that leaves DAMAGE behind: pyproject.toml keeps mutmut's
+    // edit. Add the backup path here, so the caller's warning tells the reader how to
+    // recover even after the file is gone from the log.
+    throw new Error(`restore of ${pyprojectPath} failed (backup kept at ${backupPath}): ${String(err)}`);
   }
+  unlinkSync(backupPath);
 }
 
 /** Delete the file this run created, if it is still there. */
@@ -160,10 +173,20 @@ export class MutmutRunner implements MutationRunner {
     const sourceDirs = this.extractUniqueDirs(options.files);
 
     const pyprojectPath = join(options.cwd, 'pyproject.toml');
-    const hadExisting = this.backupPyproject(pyprojectPath);
+    // Backing up and writing are OUTSIDE the `finally` on purpose, and both are caught:
+    // a failure to prepare the workspace is a TOOL failure, and this module's contract is
+    // that tool failures arrive as an outcome with `error`, never as a rejected promise
+    // (a rejection reaches the caller's `catch` and reads as "no mutants found").
+    let hadExisting: boolean;
+    try {
+      hadExisting = this.backupPyproject(pyprojectPath);
+      this.writeMutmutConfig(pyprojectPath, sourceDirs);
+    } catch (err) {
+      restorePyproject(pyprojectPath, false);
+      return { report: null, timedOut: false, error: err instanceof Error ? err.message : String(err) };
+    }
 
     try {
-      this.writeMutmutConfig(pyprojectPath, sourceDirs);
       return await this.runMutmut(options);
     } finally {
       restorePyproject(pyprojectPath, hadExisting);

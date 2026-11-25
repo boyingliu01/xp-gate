@@ -114,18 +114,24 @@ function spawnOptionsFor(options: SpawnCaptureOptions): SpawnOptions {
  *     to kill and the pid belongs to nobody in particular;
  *   - `exitCode`/`signalCode` -- the child DIED even if `close` has not fired yet. These
  *     are the fields that say so; `child.killed` does NOT (Node sets it the moment
- *     `kill()` is called, which would make the escalation dead code -- measured);
- *   - `pid` -- with the child gone, a recycled pid is the remaining risk, and
- *     `child.kill()` on a reaped pid throws ESRCH (harmless) while on a RECYCLED one
- *     would signal an unrelated process. A missing pid means there is nothing to signal.
+ *     `kill()` is called, which would make the escalation dead code -- measured).
+ *
+ * NOT `typeof child.pid === 'number'`: measured, Node KEEPS the pid after the child is
+ * reaped, so that check only rules out a spawn that never produced one -- it does not
+ * detect recycling, which is what it looked like it was doing. The dead-process guard
+ * above is what actually covers that case.
+ *
+ * The remaining risk is the TOCTOU gap between THIS check and the `kill` call in
+ * `armTimeout`. It cannot be closed in user land; it is narrowed by the check being the
+ * last statement before the call, and by `kill()` returning false rather than throwing
+ * when the child is already gone (measured).
  */
 export function shouldEscalate(
   state: Pick<CaptureState, 'settled'>,
   child: ReturnType<typeof spawn>,
 ): boolean {
   if (state.settled) return false;
-  if (child.exitCode !== null || child.signalCode !== null) return false;
-  return typeof child.pid === 'number';
+  return child.exitCode === null && child.signalCode === null;
 }
 
 function armTimeout(

@@ -849,12 +849,17 @@ describe('MutmutRunner', () => {
   });
 
   describe('SIGKILL escalation guards', () => {
-    it('does not signal a child whose pid is already gone', async () => {
-      // A reaped pid can be RECYCLED, and a SIGKILL sent to a recycled pid kills an
-      // unrelated process. `child.pid` missing is the honest "nothing to signal" case.
+    it('escalates even though the pid is retained after reaping', async () => {
+      // MEASURED: Node KEEPS `pid` after the child is reaped, so a `typeof pid ===
+      // 'number'` check cannot detect recycling -- it only rules out a spawn that never
+      // produced one. The guard is deliberately NOT that; this test records why, so the
+      // check does not get "restored" by someone reading the field as a liveness probe.
       const child = mockChildProcess({});
-      (child as unknown as { pid?: number }).pid = undefined;
+      expect(typeof child.pid).toBe('number');
+      (child as unknown as { signalCode: string | null }).signalCode = 'SIGTERM';
       const state = { settled: false, timeoutFired: true, stdout: '', stderr: '' };
+      // The DEAD-PROCESS guard is what stops it: exitCode is still null for a
+      // signal-killed child, so `signalCode` is the field that says it is gone.
       expect(shouldEscalate(state, child)).toBe(false);
     });
 
@@ -870,6 +875,25 @@ describe('MutmutRunner', () => {
     it('signals a child that is still running', async () => {
       const state = { settled: false, timeoutFired: true, stdout: '', stderr: '' };
       expect(shouldEscalate(state, mockChildProcess({}))).toBe(true);
+    });
+  });
+
+  describe('preparation failures', () => {
+    it('returns an outcome instead of rejecting when the config cannot be written', async () => {
+      // A rejection here would reach the caller's `catch` and read as "no mutants found",
+      // which is the fail-open this module exists to prevent. A tool that cannot prepare
+      // the workspace is reported as `error`, like any other tool failure.
+      const { writeFileSync } = await import('fs');
+      vi.mocked(writeFileSync).mockImplementation(() => {
+        throw new Error('disk full');
+      });
+      vi.mocked(existsSync).mockReturnValue(false);
+      mockChildProcess({});
+
+      const outcome = await new MutmutRunner('linux').run(opts(['src/main.py'], 60000, tmpDir));
+
+      expect(outcome.report).toBeNull();
+      expect(outcome.error).toContain('disk full');
     });
   });
 });
