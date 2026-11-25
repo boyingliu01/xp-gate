@@ -286,7 +286,19 @@ else
   fi
   # shellcheck source=/dev/null
   . "$XP_FC_LIB"
-  SEMGREP_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E "$(xp_gate_ext_regex "$(xp_gate_source_exts semgrep)")" || true)
+  # #616-SAST: `--all` means the whole tree, and the runner already exports that
+  # decision as GATE_SCOPE (#589). Gate 8 was taught to read it; this fragment was
+  # not, so `xp-gate check --all` reported
+  #   "SKIPPED - SAST (no supported language files changed)"
+  # on a tree of ~60 tracked .ts files while semgrep found 5 real hits in it.
+  # The index form survives for the default path: a plain commit must scan exactly
+  # what it is committing.
+  if [ "${GATE_SCOPE:-diff}" = "all" ]; then
+    SEMGREP_SOURCE=$(git ls-files 2>/dev/null || true)
+  else
+    SEMGREP_SOURCE=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+  fi
+  SEMGREP_FILES=$(printf '%s\n' "$SEMGREP_SOURCE" | grep -E "$(xp_gate_ext_regex "$(xp_gate_source_exts semgrep)")" || true)
 
   if [ -z "$SEMGREP_FILES" ]; then
     echo "     ⏭️  SKIPPED - SAST (no supported language files changed)"

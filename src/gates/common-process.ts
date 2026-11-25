@@ -162,12 +162,37 @@ export function runTool(
 // ── Git Helpers ──
 
 /**
- * Get list of changed (staged) files via git diff --cached.
- * Equivalent to adapter-common.sh's git diff --cached --name-only.
+ * Which `git` subcommand enumerates this run's file list.
+ *
+ * Split out of `getChangedFiles` to keep that function's branching flat — the
+ * complexity ratchet counts the scope test as a decision, and inlining it took
+ * the recorded CCN from 5 to 7.
+ */
+function gitListArgs(): string[] {
+  return (process.env.GATE_SCOPE ?? 'diff') === 'all'
+    ? ['ls-files']
+    : ['diff', '--cached', '--name-only', '--diff-filter=ACM'];
+}
+
+/**
+ * Get the list of files this run should inspect.
+ *
+ * Default (`GATE_SCOPE` unset or `diff`): the staged set, via
+ * `git diff --cached` — a plain commit must scan exactly what it commits.
+ * Equivalent to adapter-common.sh's `git diff --cached --name-only`.
+ *
+ * `GATE_SCOPE=all` (#820): every tracked file, via `git ls-files`. The runner
+ * already exports that decision (`gate-runner.js` builds `GATE_SCOPE="all"`),
+ * and the shell fragments were taught to read it in #589 and #616. These TS
+ * implementations were not: they kept calling `git diff --cached`, so on a
+ * clean index `--all` scanned NOTHING and reported the tree clean. Measured on
+ * a repo with ~60 tracked `.ts` files: `xp-gate check --all` SKIPped SAST with
+ * "no supported language files changed" while semgrep over the same sources
+ * returned 5 findings — the fail-open shape #589 fixed one layer up.
  */
 export function getChangedFiles(cwd?: string): string[] {
   try {
-    const result = spawnSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], {
+    const result = spawnSync('git', gitListArgs(), {
       encoding: 'utf-8',
       cwd: cwd || process.cwd(),
       timeout: 10000,

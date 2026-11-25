@@ -6,7 +6,7 @@
  *         git changed-file parsing, and the PowerShell probe loop
  * @covers AC-GATES-001-01
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('child_process', () => ({ spawnSync: vi.fn() }));
 
@@ -50,6 +50,48 @@ describe('common-process primitives', () => {
   it('getChangedFiles parses staged paths and drops blanks', () => {
     spawnMock.mockReturnValue(ok('a.ts\n\n b.ts \n'));
     expect(getChangedFiles()).toEqual(['a.ts', 'b.ts']);
+  });
+
+  // #820: `--all` is supposed to mean the whole tree, and the runner already
+  // exports that decision as GATE_SCOPE (gate-runner.js builds
+  // `GATE_SCOPE="all"`). The shell fragments were taught to read it in #589 and
+  // #616; these TS implementations kept calling `git diff --cached`, so on a
+  // clean index they scanned NOTHING and reported the tree clean. Measured on
+  // llmveto with ~60 tracked .ts files: `xp-gate check --all` SKIPped SAST with
+  // "no supported language files changed" while semgrep over the same src/
+  // returned 5 findings.
+  describe('getChangedFiles honours GATE_SCOPE (#820)', () => {
+    const original = process.env.GATE_SCOPE;
+    afterEach(() => {
+      if (original === undefined) delete process.env.GATE_SCOPE;
+      else process.env.GATE_SCOPE = original;
+    });
+
+    it('GATE_SCOPE=all enumerates tracked files instead of the index', () => {
+      process.env.GATE_SCOPE = 'all';
+      spawnMock.mockReturnValue(ok('src/a.ts\nsrc/b.ts\n'));
+      expect(getChangedFiles()).toEqual(['src/a.ts', 'src/b.ts']);
+      // The command must be `ls-files`, not `diff --cached`.
+      const args = spawnMock.mock.calls.at(-1)?.[1] as string[];
+      expect(args).toContain('ls-files');
+      expect(args).not.toContain('--cached');
+    });
+
+    it('the default (diff) path is byte-identical to before', () => {
+      delete process.env.GATE_SCOPE;
+      spawnMock.mockReturnValue(ok('a.ts\n'));
+      getChangedFiles();
+      const args = spawnMock.mock.calls.at(-1)?.[1] as string[];
+      expect(args).toEqual(['diff', '--cached', '--name-only', '--diff-filter=ACM']);
+    });
+
+    it('GATE_SCOPE values other than "all" keep the index form', () => {
+      process.env.GATE_SCOPE = 'diff';
+      spawnMock.mockReturnValue(ok('a.ts\n'));
+      getChangedFiles();
+      const args = spawnMock.mock.calls.at(-1)?.[1] as string[];
+      expect(args).toContain('--cached');
+    });
   });
 
   it('getChangedFiles returns empty list when git fails', () => {
