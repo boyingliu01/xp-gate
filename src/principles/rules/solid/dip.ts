@@ -132,17 +132,21 @@ function configuredSeverity(): Severity {
  * #627 composition-root test and the #626 line arithmetic each added a branch, and
  * the ratchet is there to force exactly this trade rather than a baseline refresh.
  */
+/** A class as the adapter reports it. */
+interface DipClass {
+  code?: string;
+  line?: number;
+  name?: string;
+}
+
 function classViolations(
   clsAny: unknown, file: string, severity: Severity,
 ): Violation[] {
-  const cls = clsAny as { code?: string; line?: number; name?: string };
-  if (!cls.code) return [];
-  // #627: a composition root's `new` is the inversion working, not bypassed.
-  // Skipping the whole class body is right here: when the class IS the wiring
-  // point, every instantiation in it is wiring.
-  if (isCompositionRoot(cls.code, cls.name)) return [];
+  const cls = clsAny as DipClass;
+  if (!cls.code || isCompositionRoot(cls.code, cls.name)) return [];
   return instantiationViolations(cls.code, cls.line || 0, file, severity);
 }
+
 
 export const dipRule: Rule = {
   id: 'solid.dip',

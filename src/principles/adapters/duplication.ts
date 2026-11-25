@@ -110,6 +110,35 @@ function buildBlocks(lines: string[], duplicated: Set<number>): DuplicationBlock
  * remain Gate 2's job — jscpd already does that, and duplicating it here would
  * make two gates disagree about the same word.
  */
+/**
+ * Slide a fixed window over the significant lines, marking every repeat.
+ *
+ * The fingerprint joins NORMALISED lines with a NUL separator, which no source line can
+ * contain: without a separator `ab` + `c` and `a` + `bc` would hash the same.
+ *
+ * @returns the indexes that appear in at least one repeated window, and how many repeats
+ *   were seen
+ */
+function scanWindows(lines: string[], significant: number[]) {
+  const duplicated = new Set<number>();
+  const seen = new Set<string>();
+  let repeatCount = 0;
+  for (let i = 0; i + DUPLICATION_WINDOW <= significant.length; i++) {
+    const window = significant.slice(i, i + DUPLICATION_WINDOW);
+    const fingerprint = window.map((lineIndex) => normaliseLine(lines[lineIndex])).join(NUL_SEPARATOR);
+    if (!seen.has(fingerprint)) {
+      seen.add(fingerprint);
+      continue;
+    }
+    repeatCount++;
+    for (const lineIndex of window) duplicated.add(lineIndex);
+  }
+  return { duplicated, repeatCount };
+}
+
+/** A separator no source line can contain, so two different windows never collide. */
+const NUL_SEPARATOR = '\u0000';
+
 export function measureDuplication(content: string): DuplicationReport {
   const lines = content.split('\n');
   const significant = significantLineIndexes(lines);
@@ -119,20 +148,7 @@ export function measureDuplication(content: string): DuplicationReport {
     return { percentage: 0, blocks: [] };
   }
 
-  const duplicated = new Set<number>();
-  const seen = new Set<string>();
-  let repeatCount = 0;
-
-  for (let i = 0; i + DUPLICATION_WINDOW <= significant.length; i++) {
-    const window = significant.slice(i, i + DUPLICATION_WINDOW);
-    const fingerprint = window.map((lineIndex) => normaliseLine(lines[lineIndex])).join('\u0000');
-    if (!seen.has(fingerprint)) {
-      seen.add(fingerprint);
-      continue;
-    }
-    repeatCount++;
-    for (const lineIndex of window) duplicated.add(lineIndex);
-  }
+  const { duplicated, repeatCount } = scanWindows(lines, significant);
 
   if (duplicated.size === 0) {
     return { percentage: 0, blocks: [] };
