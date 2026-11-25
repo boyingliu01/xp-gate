@@ -384,13 +384,14 @@ function enumGuard(allowed: readonly string[]): ValueGuard {
 }
 
 /** Merge one rule, keeping the default for any key whose override is mistyped. */
-function mergeRule(
-  base: RuleConfig,
-  override: Partial<RuleConfig>,
-  ruleId: string
-): RuleConfig {
-  const merged: RuleConfig = { ...base };
-  const guarded: Array<[string, ValueGuard]> = [
+/**
+ * Every rule key that carries a value category, paired with its guard.
+ *
+ * Built per call rather than cached: `ENUM_KEYS` values are read from the config that is
+ * active when the merge runs, and a cached table would freeze the first one seen.
+ */
+function valueGuards(): Array<[string, ValueGuard]> {
+  return [
     ...NUMERIC_KEYS.map((key): [string, ValueGuard] => [key, NUMERIC_GUARD]),
     ...ARRAY_KEYS.map((key): [string, ValueGuard] => [key, ARRAY_GUARD]),
     ...Object.entries(ENUM_KEYS).map(([key, allowed]): [string, ValueGuard] => [
@@ -398,15 +399,39 @@ function mergeRule(
       enumGuard(allowed as readonly string[]),
     ]),
   ];
+}
 
-  for (const [key, guard] of guarded) {
-    const value = override[key as keyof RuleConfig];
-    if (value === undefined) continue;
-    if (!guard.accepts(value)) {
-      warn(`rules.${ruleId}.${key} must be ${guard.expectation} — keeping default`);
-      continue;
-    }
-    merged[key as keyof RuleConfig] = (guard.coerce ? guard.coerce(value) : value) as never;
+/**
+ * Copy one guarded value from the override onto the merged rule.
+ *
+ * An ABSENT key is not an error -- the base value stands. A PRESENT but unusable one is
+ * warned about and also leaves the base value: silently accepting it would make a typo
+ * look like a configured threshold.
+ */
+function mergeGuardedKey(
+  merged: RuleConfig,
+  override: Partial<RuleConfig>,
+  key: keyof RuleConfig,
+  guard: ValueGuard,
+  ruleId: string,
+): void {
+  const value = override[key];
+  if (value === undefined) return;
+  if (!guard.accepts(value)) {
+    warn(`rules.${ruleId}.${String(key)} must be ${guard.expectation} — keeping default`);
+    return;
+  }
+  merged[key] = (guard.coerce ? guard.coerce(value) : value) as never;
+}
+
+function mergeRule(
+  base: RuleConfig,
+  override: Partial<RuleConfig>,
+  ruleId: string
+): RuleConfig {
+  const merged: RuleConfig = { ...base };
+  for (const [key, guard] of valueGuards()) {
+    mergeGuardedKey(merged, override, key as keyof RuleConfig, guard, ruleId);
   }
 
   // `enabled` is a bare boolean, not one of the value categories above.
@@ -630,16 +655,33 @@ export function resolveSeverityForFile(
   const overrides = activeConfig.overrides;
   if (!Array.isArray(overrides) || overrides.length === 0) return declaredSeverity;
 
-  let effective = declaredSeverity;
   const declaredRank = SEVERITY_RANK[declaredSeverity] ?? 0;
-  for (const entry of overrides) {
-    const targetRank = usableOverrideRank(entry?.rules?.[ruleId], declaredRank);
-    if (targetRank === undefined) continue;
-    if (!entry.paths.some(p => matchesGlob(filePath, p))) continue;
-    // A later override may relax further, never tighten back up.
-    if (targetRank < (SEVERITY_RANK[effective] ?? 0)) effective = entry.rules[ruleId];
-  }
-  return effective;
+  return overrides.reduce(
+    (effective, entry) => applyOverride(effective, ruleId, filePath, entry, declaredRank),
+    declaredSeverity,
+  );
+}
+
+/**
+ * Apply one override entry to the severity so far.
+ *
+ * Two gates before the entry counts: its severity must be USABLE, and its paths must
+ * actually cover this file. Then the relax-only rule: a later override may lower the
+ * severity further, never raise it back -- that direction is what keeps a path-scoped
+ * entry from becoming a second, invisible gate policy.
+ */
+function applyOverride(
+  effective: string,
+  ruleId: string,
+  filePath: string,
+  entry: { rules?: Record<string, string>; paths?: string[] },
+  declaredRank: number,
+): string {
+  const targetRank = usableOverrideRank(entry?.rules?.[ruleId], declaredRank);
+  if (targetRank === undefined) return effective;
+  if (!(entry.paths ?? []).some((p) => matchesGlob(filePath, p))) return effective;
+  if (targetRank >= (SEVERITY_RANK[effective] ?? 0)) return effective;
+  return entry.rules?.[ruleId] ?? effective;
 }
 
 /**
@@ -694,19 +736,35 @@ function parseOverrideEntry(
     warn(`overrides[${index}] in ${source} must be an object — ignored`);
     return undefined;
   }
-  const paths = entry.paths;
-  if (!Array.isArray(paths) || paths.length === 0 || paths.some(p => typeof p !== 'string')) {
+  const paths = overridePaths(entry.paths, index, source);
+  if (!paths) return undefined;
+  const rules = overrideRules(entry.rules, index, source);
+  if (!rules) return undefined;
+  return { paths, rules };
+}
+
+/**
+ * The entry's `paths`, or null when unusable.
+ *
+ * Every element must be a STRING: a number in the list would be passed to the glob
+ * matcher, which would throw on `.includes` rather than skip the entry.
+ */
+function overridePaths(raw: unknown, index: number, source: string): string[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.some((p) => typeof p !== 'string')) {
     warn(`overrides[${index}].paths in ${source} must be a non-empty string array — ignored`);
-    return undefined;
+    return null;
   }
-  const rules = entry.rules;
-  if (!isPlainObject(rules) || Object.keys(rules).length === 0) {
+  return raw as string[];
+}
+
+/** The entry's cleaned `rules` map, or null when nothing usable survives. */
+function overrideRules(raw: unknown, index: number, source: string): Record<string, string> | null {
+  if (!isPlainObject(raw) || Object.keys(raw).length === 0) {
     warn(`overrides[${index}].rules in ${source} must be a non-empty object — ignored`);
-    return undefined;
+    return null;
   }
-  const cleanRules = parseOverrideRules(rules, index, source);
-  if (Object.keys(cleanRules).length === 0) return undefined;
-  return { paths: paths as string[], rules: cleanRules };
+  const clean = parseOverrideRules(raw as Record<string, unknown>, index, source);
+  return Object.keys(clean).length === 0 ? null : clean;
 }
 
 function parseOverrides(raw: unknown, source: string): SeverityOverride[] {
