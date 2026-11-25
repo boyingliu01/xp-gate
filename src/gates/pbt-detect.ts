@@ -102,40 +102,50 @@ function scanDirectory(dir: string, basePath?: string): string[] {
 
   const results: string[] = [];
   for (const entry of readDirEntries(dir)) {
-    if (entry.isDirectory()) {
-      if (!SKIPPED_DIRS.has(entry.name)) {
-        results.push(...scanDirectory(path.join(dir, entry.name), basePath ?? dir));
-      }
-      continue;
-    }
-    if (isTestFileName(entry.name)) results.push(path.join(dir, entry.name));
+    results.push(...pathsForEntry(dir, entry, basePath ?? dir));
   }
   return results;
+}
+
+/**
+ * The files one directory entry contributes to the scan.
+ *
+ * An empty array means "nothing here", so a skipped directory and a non-test file need no
+ * separate branches in the caller.
+ */
+function pathsForEntry(dir: string, entry: fs.Dirent, base: string): string[] {
+  if (entry.isDirectory()) {
+    // A skipped DIRECTORY is not descended into, but its files were never candidates
+    // anyway -- this is what keeps `node_modules` out of the walk.
+    return SKIPPED_DIRS.has(entry.name) ? [] : scanDirectory(path.join(dir, entry.name), base);
+  }
+  return isTestFileName(entry.name) ? [path.join(dir, entry.name)] : [];
+}
+
+/** The label reported when a property-based API is used with no recognisable import. */
+const UNKNOWN_PBT = 'unknown-pbt';
+
+/**
+ * The PBT frameworks this file uses, de-duplicated.
+ *
+ * Import patterns are tried FIRST, and the API patterns only when none matched: an
+ * import names the framework, while an API call (`fc.assert`) only proves SOME library is
+ * in use. Reporting `unknown-pbt` from a file that does name its library would lose the
+ * name.
+ */
+function frameworksIn(content: string): string[] {
+  const found = PBT_IMPORT_PATTERNS
+    .filter((fw) => fw.patterns.some((p) => p.test(content)))
+    .map((fw) => fw.name);
+  if (found.length > 0) return [...new Set(found)];
+  return PBT_API_PATTERNS.some((p) => p.test(content)) ? [UNKNOWN_PBT] : [];
 }
 
 function detectPBTInFile(filePath: string): { hasPBT: boolean; frameworks: string[] } {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const foundFrameworks: string[] = [];
-
-    // Check import patterns
-    for (const fw of PBT_IMPORT_PATTERNS) {
-      if (fw.patterns.some(p => p.test(content))) {
-        foundFrameworks.push(fw.name);
-      }
-    }
-
-    // Check API usage patterns
-    if (foundFrameworks.length === 0) {
-      for (const pattern of PBT_API_PATTERNS) {
-        if (pattern.test(content)) {
-          foundFrameworks.push('unknown-pbt');
-          break;
-        }
-      }
-    }
-
-    return { hasPBT: foundFrameworks.length > 0, frameworks: [...new Set(foundFrameworks)] };
+    const frameworks = frameworksIn(content);
+    return { hasPBT: frameworks.length > 0, frameworks };
   } catch {
     return { hasPBT: false, frameworks: [] };
   }
@@ -198,24 +208,45 @@ function buildMessages(input: {
 /**
  * Analyze PBT usage in the project.
  */
+/**
+ * Every test file under the conventional roots, de-duplicated.
+ *
+ * The Set matters because the roots can NEST (`tests/` under `src/`): without it a file
+ * reachable from two roots would be counted twice and lower the coverage ratio.
+ */
+function collectTestFiles(dir: string): string[] {
+  return [...new Set(TEST_ROOTS.flatMap((root) => scanDirectory(path.join(dir, root))))];
+}
+
+/**
+ * The test files that use property-based testing, and which frameworks they name.
+ *
+ * Reported paths are RELATIVE to the project root with forward slashes: an absolute path
+ * would leak the machine's layout into the report, and a backslash would break every
+ * downstream comparison.
+ */
+function findPBTFiles(
+  testFiles: string[],
+  dir: string,
+): { pbtTestFiles: string[]; allFrameworks: Set<string> } {
+  const pbtTestFiles: string[] = [];
+  const allFrameworks = new Set<string>();
+  for (const testFile of testFiles) {
+    const result = detectPBTInFile(testFile);
+    if (!result.hasPBT) continue;
+    pbtTestFiles.push(path.relative(dir, testFile).replace(/\\/g, '/'));
+    result.frameworks.forEach((fw) => allFrameworks.add(fw));
+  }
+  return { pbtTestFiles, allFrameworks };
+}
+
 export function detectPBT(cwd?: string): PBTReport {
   const dir = cwd || process.cwd();
 
   // Find all test files, across every conventional test root (#857). A Set keeps
   // a file from being counted twice when roots nest, e.g. `tests/` under `src/`.
-  const testFiles = [...new Set(
-    TEST_ROOTS.flatMap(root => scanDirectory(path.join(dir, root))),
-  )];
-  const pbtTestFiles: string[] = [];
-  const allFrameworks = new Set<string>();
-
-  for (const testFile of testFiles) {
-    const result = detectPBTInFile(testFile);
-    if (result.hasPBT) {
-      pbtTestFiles.push(path.relative(dir, testFile).replace(/\\/g, '/'));
-      result.frameworks.forEach(fw => allFrameworks.add(fw));
-    }
-  }
+  const testFiles = collectTestFiles(dir);
+  const { pbtTestFiles, allFrameworks } = findPBTFiles(testFiles, dir);
 
   const totalTests = testFiles.length;
   const coverage = totalTests > 0 ? Math.round((pbtTestFiles.length / totalTests) * 100) : 0;
