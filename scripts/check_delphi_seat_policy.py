@@ -32,3 +32,22 @@ MODEL_ALLOWLIST: set[str] = {
     "s-glm-5.3-flash",
     "g-ling-3.1-flash",
 }
+
+
+def active_profile(cfg):
+    """Resolve the active profile exactly like the loaders do. Probing every
+    profile iterated wrong gateways and stale seat lists — a 401 from an
+    inactive profile used to fail the whole guard while its real target never
+    got tested (R9 CI-01 follow-up)."""
+    profiles = cfg.get("profiles", {})
+    active_name = cfg.get("active_profile") or (
+        "default" if "default" in profiles else None
+    )
+    return profiles.get(active_name)
+
+
+def seat_items(experts):
+    """(role, seat) pairs, however that profile shaped its `experts`."""
+    if isinstance(experts, dict):
+        return experts.items()
+    return [(e.get("role", i), e) for i, e in enumerate(experts)]

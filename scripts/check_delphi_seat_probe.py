@@ -17,12 +17,13 @@ The rules this module enforces are the ones a wrong guess would break:
 """
 
 import json
+import os
 import urllib.error
 import urllib.request
 
 # The seat policy lives with the CHECK, not with the probe: these two are what
 # a verdict is judged against, and they move only when that judgement changes.
-from check_delphi_seat_policy import LOCAL_PREFIX, MODEL_ALLOWLIST
+from check_delphi_seat_policy import LOCAL_PREFIX, MODEL_ALLOWLIST, active_profile, seat_items
 
 
 def seat_model(seat):
