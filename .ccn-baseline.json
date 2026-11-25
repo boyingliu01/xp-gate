@@ -1174,7 +1174,7 @@
     "src/mutation/runners/mutmut-runner.ts::parseEmojiProgress": 5,
     "src/mutation/runners/mutmut-runner.ts::pyprojectBackupPath": 1,
     "src/mutation/runners/mutmut-runner.ts::restorePyproject": 6,
-    "src/mutation/runners/mutmut-runner.ts::run": 6,
+    "src/mutation/runners/mutmut-runner.ts::run": 7,
     "src/mutation/runners/mutmut-runner.ts::runMutmut": 4,
     "src/mutation/runners/mutmut-runner.ts::settle": 2,
     "src/mutation/runners/mutmut-runner.ts::settleTracker": 2,

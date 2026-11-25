@@ -177,12 +177,18 @@ export class MutmutRunner implements MutationRunner {
     // a failure to prepare the workspace is a TOOL failure, and this module's contract is
     // that tool failures arrive as an outcome with `error`, never as a rejected promise
     // (a rejection reaches the caller's `catch` and reads as "no mutants found").
-    let hadExisting: boolean;
+    let hadExisting = false;
+    let backedUp = false;
     try {
       hadExisting = this.backupPyproject(pyprojectPath);
+      backedUp = true;
       this.writeMutmutConfig(pyprojectPath, sourceDirs);
     } catch (err) {
-      restorePyproject(pyprojectPath, false);
+      // Roll back ONLY what was done. `backedUp` distinguishes "the backup ran but the
+      // write failed" from "the backup itself failed": with `restorePyproject(path,
+      // false)` hardcoded, the first case DELETES a pyproject.toml that was there all
+      // along -- the user's own file -- because `hadExisting` was never consulted.
+      if (backedUp) restorePyproject(pyprojectPath, hadExisting);
       return { report: null, timedOut: false, error: err instanceof Error ? err.message : String(err) };
     }
 
@@ -370,12 +376,15 @@ export class MutmutRunner implements MutationRunner {
  *
  * @param existing current file content, or null when the file does not exist.
  */
-function mutmutConfigContent(existing: string | null, sourcePathsLine: string): string {
+export function mutmutConfigContent(existing: string | null, sourcePathsLine: string): string {
   if (existing === null) return `[tool.mutmut]\n${sourcePathsLine}\n`;
   if (!existing.includes('[tool.mutmut]')) {
     return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
   }
-  const sourcePathsRegex = /source_paths\s*=\s*\[.*?\]/;
+  // The `s` flag is REQUIRED: TOML allows the array to span lines, and without dotAll
+  // `.*?` stops at the newline, so a multi-line `source_paths` is never matched -- the
+  // key is then APPENDED a second time and mutmut reads a duplicate. Measured.
+  const sourcePathsRegex = /source_paths\s*=\s*\[.*?\]/s;
   if (sourcePathsRegex.test(existing)) return existing.replace(sourcePathsRegex, sourcePathsLine);
   return existing.replace('[tool.mutmut]', `[tool.mutmut]\n${sourcePathsLine}`);
 }

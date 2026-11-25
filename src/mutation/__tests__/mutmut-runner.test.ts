@@ -896,4 +896,50 @@ describe('MutmutRunner', () => {
       expect(outcome.error).toContain('disk full');
     });
   });
+
+  describe('prepare-phase rollback', () => {
+    it("restores the user's pyproject.toml when only the WRITE fails", async () => {
+      // THE DATA-LOSS CASE: the backup succeeded, so a pyproject.toml was there and was
+      // copied aside. The write then failed. Rolling back with a hardcoded `false` routes
+      // to `removeCreated` and DELETES the user's own file -- so the rollback has to
+      // consult what actually happened.
+      const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
+      vi.mocked(existsSync).mockReturnValue(true);   // a pyproject.toml IS there
+      vi.mocked(readFileSync).mockReturnValue('user content');
+      const writes: string[] = [];
+      vi.mocked(writeFileSync).mockImplementation((p) => {
+        writes.push(String(p));
+        if (String(p).endsWith('.xp-gate-backup')) return;   // the backup copy succeeds
+        throw new Error('disk full');                        // the rewrite fails
+      });
+      mockChildProcess({});
+
+      const outcome = await new MutmutRunner('linux').run(opts(['src/main.py'], 60000, tmpDir));
+
+      expect(outcome.error).toContain('disk full');
+      expect(writes).toContain(join(tmpDir, 'pyproject.toml'));
+      expect(vi.mocked(unlinkSync)).not.toHaveBeenCalledWith(join(tmpDir, 'pyproject.toml'));
+    });
+  });
+
+  describe('mutmutConfigContent', () => {
+    it('replaces a MULTI-LINE source_paths instead of keeping the stale value', async () => {
+      // TOML allows the array to span lines. Without the `s` flag `.*?` stops at the
+      // first newline, so `replace` returns the input UNCHANGED -- the stale value is
+      // kept and mutmut reads a source_paths that was never updated. (Measured.)
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      expect(typeof mutmutConfigContent).toBe('function');
+      const existing = '[tool.mutmut]\nsource_paths = [\n  "old_a",\n  "old_b",\n]\n';
+      const out = mutmutConfigContent(existing, 'source_paths = ["new"]');
+      expect(out).not.toContain('old_a');
+      expect(out).toContain('source_paths = ["new"]');
+    });
+
+    it('replaces a single-line source_paths', async () => {
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const out = mutmutConfigContent('[tool.mutmut]\nsource_paths = ["old"]\n', 'source_paths = ["new"]');
+      expect(out).not.toContain('"old"');
+      expect(out).toContain('source_paths = ["new"]');
+    });
+  });
 });
