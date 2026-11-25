@@ -935,6 +935,22 @@ describe('MutmutRunner', () => {
       expect(out).toContain('source_paths = ["new"]');
     });
 
+    it('leaves an UNCLOSED array alone instead of adding a second key', async () => {
+      // The file is already invalid. Appending `source_paths` again compounds it into two
+      // keys in one table (measured). Returning the text unchanged leaves a single, still
+      // broken key for the operator to see and fix.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const broken = '[tool.mutmut]\nsource_paths = ["a"\n';
+      expect(mutmutConfigContent(broken, 'source_paths = ["new"]')).toBe(broken);
+    });
+
+    it('handles a single-quoted string containing a bracket', async () => {
+      // TOML allows single quotes; they are literal strings, so a `]` inside one is data.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const out = mutmutConfigContent("[tool.mutmut]\nsource_paths = ['a]b', 'c']\n", 'source_paths = ["new"]');
+      expect(out).toBe('[tool.mutmut]\nsource_paths = ["new"]\n');
+    });
+
     it('rewrites the array when a path CONTAINS a bracket', async () => {
       // `["src]", "lib"]` is legal TOML. A lazy `[\s\S]*?\]` stops at the first `]` and
       // produced invalid output (measured). Brackets are balanced now.

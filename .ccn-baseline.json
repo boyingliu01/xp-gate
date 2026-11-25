@@ -1169,7 +1169,7 @@
     "src/mutation/runners/mutmut-runner.ts::isAvailable": 4,
     "src/mutation/runners/mutmut-runner.ts::isSettled": 2,
     "src/mutation/runners/mutmut-runner.ts::markTimedOut": 1,
-    "src/mutation/runners/mutmut-runner.ts::mutmutConfigContent": 4,
+    "src/mutation/runners/mutmut-runner.ts::mutmutConfigContent": 5,
     "src/mutation/runners/mutmut-runner.ts::outcomeFor": 4,
     "src/mutation/runners/mutmut-runner.ts::parseEmojiProgress": 5,
     "src/mutation/runners/mutmut-runner.ts::pyprojectBackupPath": 1,

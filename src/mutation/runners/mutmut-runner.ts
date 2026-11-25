@@ -381,6 +381,12 @@ export function mutmutConfigContent(existing: string | null, sourcePathsLine: st
   const table = findMutmutTable(existing);
   if (table === null) return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
   const at = findSourcePathsValue(existing, table.bodyStart, table.bodyEnd);
+  if (at === UNCLOSED) {
+    // The table has a `source_paths` whose array never closes -- a file that is already
+    // invalid. Appending a second key would compound it (measured: two `source_paths`
+    // in one table). Leave the text alone and let the operator fix it.
+    return existing;
+  }
   if (at === null) {
     // No key in the table: add it first thing in the body.
     return existing.slice(0, table.bodyStart) + `\n${sourcePathsLine}` + existing.slice(table.bodyStart);
@@ -426,15 +432,22 @@ function findMutmutTable(doc: string): TableSpan | null {
  * invalid TOML (measured). Quotes are skipped so a `[` or `]` inside a string cannot
  * move the depth.
  */
-function findSourcePathsValue(doc: string, bodyStart: number, bodyEnd: number): { start: number; end: number } | null {
+function findSourcePathsValue(
+  doc: string,
+  bodyStart: number,
+  bodyEnd: number,
+): { start: number; end: number } | null | typeof UNCLOSED {
   const key = /^[^\S\n]*source_paths[^\S\n]*=/m.exec(doc.slice(bodyStart, bodyEnd));
   if (!key) return null;
   const start = bodyStart + key.index;
   const open = doc.indexOf('[', start);
   if (open === -1 || open >= bodyEnd) return null;
   const close = matchingBracket(doc, open, bodyEnd);
-  return close === -1 ? null : { start, end: close + 1 };
+  return close === -1 ? UNCLOSED : { start, end: close + 1 };
 }
+
+/** Marks a `source_paths` whose array never closes, so the caller can leave it alone. */
+const UNCLOSED = Symbol('unclosed array');
 
 /** Index of the `]` balancing the `[` at `open`, skipping quoted strings; -1 if none. */
 function matchingBracket(doc: string, open: number, limit: number): number {
