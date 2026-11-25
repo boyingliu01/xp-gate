@@ -11,6 +11,10 @@
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
     "totalWarnings": 10
   },
+  "src/mutation/__tests__/mutmut-runner.test.ts": {
+    "lastAnalyzed": "2026-11-25T21:00:00.000Z",
+    "totalWarnings": 1
+  },
   "src/mutation/__tests__/stryker-runner.test.ts": {
     "lastAnalyzed": "2026-11-24T04:09:19.091Z",
     "totalWarnings": 8
@@ -42,9 +46,5 @@
   "src/principles/rules/__tests__/solid/issue-588-lsp-base-contract.test.ts": {
     "lastAnalyzed": "2026-11-25T05:51:24.019Z",
     "totalWarnings": 1
-  },
-  "src/mutation/__tests__/mutmut-runner.test.ts": {
-    "totalWarnings": 2,
-    "lastAnalyzed": "2026-11-25T12:10:30.110Z"
   }
 }
