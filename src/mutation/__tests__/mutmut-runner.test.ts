@@ -935,6 +935,15 @@ describe('MutmutRunner', () => {
       expect(out).toContain('source_paths = ["new"]');
     });
 
+    it('does not swallow the NEXT line when the value is a scalar', async () => {
+      // Searching forward from the key found the next assignment's `[` and replaced
+      // everything up to its `]` -- measured: `other = ["a", "b"]` was DELETED. The
+      // bracket must be on the key's own line.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const existing = '[tool.mutmut]\nsource_paths = "src"\nother = ["a", "b"]\n';
+      expect(mutmutConfigContent(existing, 'source_paths = ["new"]')).toBe(existing);
+    });
+
     it('leaves a NON-ARRAY source_paths alone instead of adding a second key', async () => {
       // `source_paths = "text"` has the key but no `[`. Treating that as "no key" made the
       // caller INSERT a second one -- measured: two `source_paths` in one table.

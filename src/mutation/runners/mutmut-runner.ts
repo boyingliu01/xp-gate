@@ -439,7 +439,12 @@ function findSourcePathsValue(
 ): { start: number; end: number } | null | typeof UNCLOSED {
   const key = findKeyOutsideStrings(doc, bodyStart, bodyEnd);
   if (key === -1) return null;
+  // The `[` must be on the KEY's OWN LINE. Searching forward from the key found the next
+  // assignment's array instead, and everything between was swallowed -- measured,
+  // `other = ["a", "b"]` on the following line was DELETED.
+  const lineEnd = firstNewlineFrom(doc, key, bodyEnd);
   const open = doc.indexOf('[', key);
+  if (open >= lineEnd) return UNCLOSED;
   // No `[` after the key within the table: `source_paths` is assigned something that is
   // not an array (a bare string, a number). Reporting `null` here would mean "no key",
   // and the caller would INSERT a second one -- measured: two `source_paths` in one
@@ -447,6 +452,12 @@ function findSourcePathsValue(
   if (open === -1 || open >= bodyEnd) return UNCLOSED;
   const close = matchingBracket(doc, open, bodyEnd);
   return close === -1 ? UNCLOSED : { start: key, end: close + 1 };
+}
+
+/** Index of the newline ending the line that contains `from`, or `limit`. */
+function firstNewlineFrom(doc: string, from: number, limit: number): number {
+  const at = doc.indexOf('\n', from);
+  return at === -1 || at > limit ? limit : at;
 }
 
 /** A line that assigns `source_paths`. */
