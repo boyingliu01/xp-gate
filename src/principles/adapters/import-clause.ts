@@ -74,10 +74,27 @@ function pushNamedImports(clause: string, isTypeOnly: boolean, push: BindingColl
 function parseNamedMember(raw: string, isTypeOnly: boolean): { name: string; type?: string } | null {
   const part = raw.trim();
   if (!part) return null;
-  const asMatch = /\bas\s+(\w+)\s*$/.exec(part);
-  const local = asMatch ? asMatch[1] : part.replace(/^type\s+/, '').trim();
-  const memberTypeOnly = /^type\s+/.test(part);
-  return { name: local, type: isTypeOnly || memberTypeOnly ? 'type' : undefined };
+  return {
+    name: localNameOf(part),
+    type: isTypeOnly || isTypeOnlyMember(part) ? 'type' : undefined,
+  };
+}
+
+/**
+ * The LOCAL name a named import binds to.
+ *
+ * `{ a as b }` binds `b`, so the alias wins -- resolving the imported name would report the
+ * wrong identifier as used. Without an alias the name is the identifier itself, with a
+ * leading `type` modifier removed.
+ */
+function localNameOf(part: string): string {
+  const alias = /\bas\s+(\w+)\s*$/.exec(part);
+  return alias ? alias[1] : part.replace(/^type\s+/, '').trim();
+}
+
+/** Whether the member itself carries the `type` modifier: `{ type Foo }`. */
+function isTypeOnlyMember(part: string): boolean {
+  return /^type\s+/.test(part);
 }
 
 /** `import * as ns from` -- the namespace binding. */

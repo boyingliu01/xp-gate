@@ -1463,7 +1463,7 @@
     "src/principles/baseline.ts::initializeWithAnalyzer": 2,
     "src/principles/baseline.ts::load": 2,
     "src/principles/baseline.ts::processBatches": 4,
-    "src/principles/baseline.ts::save": 1,
+    "src/principles/baseline.ts::save": 2,
     "src/principles/baseline.ts::toolCounters": 2,
     "src/principles/baseline.ts::validate": 3,
     "src/principles/baseline.ts::validateEntry": 5,

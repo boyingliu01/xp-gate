@@ -54,26 +54,37 @@ function buildEntry(counts: Partial<BaselineEntry>): BaselineEntry {
   } as BaselineEntry;
 }
 
+/** Add one entry's CCN figures to the running totals. */
+function accumulateCcn(ccn: { warnings: number; max: number }, entry: BaselineEntry): void {
+  if (!entry.ccn) return;
+  ccn.warnings += entry.ccn.warnings;
+  ccn.max += entry.ccn.max;
+}
+
+/**
+ * Record the CCN aggregate as a pseudo-tool, when there is anything to record.
+ *
+ * Omitted entirely at zero: a `ccn` row reporting 0/0 would look like a measured tool
+ * that found nothing, which is not the same as CCN not being part of this baseline.
+ */
+function recordCcnTotal(toolStats: Record<string, unknown>, ccn: { warnings: number; max: number }): void {
+  if (ccn.warnings === 0 && ccn.max === 0) return;
+  toolStats.ccn = { totalWarnings: ccn.warnings, totalErrors: 0, totalMax: ccn.max };
+}
+
 function computeSummaryStats(baseline: Record<string, BaselineEntry>) {
   let totalFiles = 0;
   let totalWarnings = 0;
   const toolStats: Record<string, { totalWarnings: number; totalErrors: number }> = {};
-  let ccnTotalWarnings = 0;
-  let ccnTotalMax = 0;
 
+  const ccn = { warnings: 0, max: 0 };
   for (const entry of Object.values(baseline)) {
     totalFiles++;
     totalWarnings += entry.totalWarnings;
     aggregateTool(toolStats, entry);
-    if (entry.ccn) {
-      ccnTotalWarnings += entry.ccn.warnings;
-      ccnTotalMax += entry.ccn.max;
-    }
+    accumulateCcn(ccn, entry);
   }
-
-  if (ccnTotalWarnings > 0 || ccnTotalMax > 0) {
-    toolStats.ccn = { totalWarnings: ccnTotalWarnings, totalErrors: 0, totalMax: ccnTotalMax } as unknown as { totalWarnings: number; totalErrors: number };
-  }
+  recordCcnTotal(toolStats, ccn);
 
   return {
     totalFiles,
@@ -177,7 +188,13 @@ class BaselineStorage {
   }
 
   async save(baselinePath: string, baseline: Record<string, BaselineEntry>): Promise<void> {
-    await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+    try {
+      await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2));
+    } catch (err) {
+      // A silent write failure leaves the OLD baseline in place while the caller believes
+      // the new one was recorded -- every later comparison then uses stale budgets.
+      throw new Error(`cannot write the baseline to ${baselinePath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   validate(baseline: Record<string, BaselineEntry>): boolean {

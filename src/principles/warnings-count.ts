@@ -20,12 +20,20 @@ export async function analyzeWarningsForFiles(filesInput: string | string[]): Pr
   if (files.length === 0) return {};
 
   const result = await analyze(files, getAllRules(), getAdapterForFile);
-  // Every REQUESTED file starts at 0: a clean file must be present in the map, or the
-  // caller cannot tell "no warnings" from "not analysed".
+  return countByFile(files, result.violations);
+}
+
+/**
+ * The counted violations, per file, with every REQUESTED file present.
+ *
+ * Every requested file starts at 0 because a CLEAN file must appear in the map -- without
+ * that, a caller cannot tell "no warnings" from "not analysed", which is the difference
+ * the Boy Scout budget depends on.
+ */
+function countByFile(files: string[], violations: Array<{ severity: string; file: string }>): Record<string, number> {
   const fileWarnings: Record<string, number> = {};
   for (const file of files) fileWarnings[file] = 0;
-
-  for (const violation of result.violations) {
+  for (const violation of violations) {
     if (!COUNTED_SEVERITIES.has(violation.severity)) continue;
     fileWarnings[violation.file] = (fileWarnings[violation.file] || 0) + 1;
   }

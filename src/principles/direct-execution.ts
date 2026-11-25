@@ -27,21 +27,33 @@ export function isDirectExecution(
   argv1: string | undefined,
   metaUrl: string | undefined,
 ): boolean {
-  // CJS entry points are already unambiguous, and `require.main === module` is
-  // exact. This tests the CALLER's module only when the caller's own file runs
-  // this branch; under ESM the whole expression is inert because `typeof require`
-  // is 'undefined' (that is why it is guarded by `typeof`, not `require` -- a bare
-  // `require.main` would throw ReferenceError in ESM).
-  if (typeof require !== 'undefined' && require.main === module) {
-    return true;
-  }
-  if (!metaUrl || !argv1) {
-    return false;
-  }
+  if (isCommonJsMain()) return true;
+  if (!metaUrl || !argv1) return false;
+  return runsAsEsmEntry(argv1, metaUrl);
+}
+
+/**
+ * Whether this module IS the CommonJS main module.
+ *
+ * `require.main === module` is exact. It is guarded by `typeof require` rather than
+ * called bare: under ESM the whole expression is inert, and a bare `require.main` would
+ * throw ReferenceError at module load.
+ */
+function isCommonJsMain(): boolean {
+  return typeof require !== 'undefined' && require.main === module;
+}
+
+/**
+ * Whether argv[1] resolves to the same file as this ESM module.
+ *
+ * Both sides are CANONICALISED, because the same file has several spellings (a relative
+ * path, a `file://` URL, a symlinked path) and comparing raw strings would miss a real
+ * match. An unparsable argv[1] is not an entry point -- a guard must never throw.
+ */
+function runsAsEsmEntry(argv1: string, metaUrl: string): boolean {
   try {
     return canonical(pathToFileURL(resolve(argv1)).href) === canonical(metaUrl);
   } catch {
-    // An unparsable argv[1] is not an entry point; never throw from a guard.
     return false;
   }
 }

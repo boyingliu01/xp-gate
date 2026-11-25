@@ -41,18 +41,31 @@ const QUOTE_KINDS: ReadonlyArray<{ quote: string; flag: 'inSingle' | 'inDouble' 
  *
  * @returns the number of characters consumed (2 when the next char is escaped).
  */
+type QuoteKind = (typeof QUOTE_KINDS)[number];
+
 export function advanceQuoteState(src: string, i: number, state: QuoteState): number {
   const c = src[i];
 
-  for (const kind of QUOTE_KINDS) {
-    if (!state[kind.flag]) continue;
-    if (c === '\\') return 2;
-    if (c === kind.quote) state[kind.flag] = false;
-    return 1;
-  }
-
+  const inside = QUOTE_KINDS.find((kind) => state[kind.flag]);
   // Not inside any literal: open the one this character starts, if any.
-  const opener = QUOTE_KINDS.find(kind => kind.quote === c);
+  return inside ? consumeInside(c, inside, state) : openIfQuote(c, state);
+}
+
+/**
+ * Consume one character INSIDE a literal.
+ *
+ * A backslash consumes the next character too -- `\\` and `\'` are data, and treating
+ * the escaped quote as a terminator would end the literal early.
+ */
+function consumeInside(c: string, kind: QuoteKind, state: QuoteState): number {
+  if (c === '\\') return 2;
+  if (c === kind.quote) state[kind.flag] = false;
+  return 1;
+}
+
+/** Open the literal this character starts, if it starts one. */
+function openIfQuote(c: string, state: QuoteState): number {
+  const opener = QUOTE_KINDS.find((kind) => kind.quote === c);
   if (opener) state[opener.flag] = true;
   return 1;
 }
