@@ -297,6 +297,22 @@ function isAlreadyClassified(
  * @param options - Scan options
  * @returns The project scope with classified modules
  */
+/**
+ * Whether the import resolves to a file that exists, memoised per resolved path.
+ *
+ * Two imports of the same module must not hit the disk twice, and the cache is keyed by
+ * the RESOLVED path rather than the import string -- `./a` and `./a/index.ts` are one
+ * file, and caching them separately would double the stat calls.
+ */
+function fileExistsCached(importPath: string, projectRoot: string, cache: Map<string, boolean>): boolean {
+  const resolved = resolveToRealPath(importPath, projectRoot);
+  const cached = cache.get(resolved);
+  if (cached !== undefined) return cached;
+  const exists = existsSync(resolved);
+  cache.set(resolved, exists);
+  return exists;
+}
+
 export async function scanProjectScope(options: ScanOptions): Promise<ProjectScope> {
   const { projectRoot, imports, boundary } = options;
   const existCache = new Map<string, boolean>();
@@ -313,9 +329,7 @@ export async function scanProjectScope(options: ScanOptions): Promise<ProjectSco
       continue;
     }
 
-    const resolved = resolveToRealPath(importPath, projectRoot);
-    const exists = existCache.get(resolved) ?? existsSync(resolved);
-    existCache.set(resolved, exists);
+    const exists = fileExistsCached(importPath, projectRoot, existCache);
 
     if (exists) {
       implemented.push(importPath);
