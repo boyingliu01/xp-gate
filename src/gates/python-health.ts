@@ -217,11 +217,21 @@ function resolveRealPython(exe: string): { exe: string; version: string } | null
   if (!found.available) return null;
   if (found.path.toLowerCase().includes(WINDOWS_STORE_STUB)) return null;
 
-  const result = runTool(found.path, ['--version'], { timeoutMs: 3000 });
+  const version = versionOf(found.path);
+  return version === null ? null : { exe: found.path, version };
+}
+
+/**
+ * The version this binary reports, or null when it does not behave like Python.
+ *
+ * Both streams are read because some Pythons print their banner on stderr, and a run
+ * that timed out or exited non-zero is not a Python this gate can use.
+ */
+function versionOf(exePath: string): string | null {
+  const result = runTool(exePath, ['--version'], { timeoutMs: 3000 });
   if (result.exitCode !== 0 || result.timedOut) return null;
-  // Some Pythons print the banner on stderr, so both streams are read.
   const banner = (result.stdout + result.stderr).trim().match(VERSION_BANNER);
-  return banner ? { exe: found.path, version: banner[1] } : null;
+  return banner ? banner[1] : null;
 }
 
 /**
@@ -230,13 +240,28 @@ function resolveRealPython(exe: string): { exe: string; version: string } | null
 export function checkPythonVersion(version: string, minVersion = '3.8.0'): boolean {
   const parts = version.split('.').map(Number);
   const minParts = minVersion.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    const v = parts[i] || 0;
-    const m = minParts[i] || 0;
-    if (v > m) return true;
-    if (v < m) return false;
+  for (let i = 0; i < VERSION_DEPTH; i++) {
+    const verdict = compareAt(parts[i] || 0, minParts[i] || 0);
+    if (verdict !== null) return verdict;
   }
   return true; // equal
+}
+
+/** How many version segments participate in the comparison. */
+const VERSION_DEPTH = 3;
+
+/**
+ * The verdict for one version segment, or null when the two are equal.
+ *
+ * Compared from the MAJOR segment outward, so 3.10 > 3.9 -- a string comparison would
+ * put `3.10` before `3.9` and reject a Python that is new enough.
+ *
+ * @returns true when `v` is newer, false when older, null when equal
+ */
+function compareAt(v: number, m: number): boolean | null {
+  if (v > m) return true;
+  if (v < m) return false;
+  return null;
 }
 
 // ── pip Detection ──
