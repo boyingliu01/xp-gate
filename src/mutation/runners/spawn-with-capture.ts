@@ -116,9 +116,15 @@ function armTimeout(
     state.sigkillTimer = setTimeout(() => {
       // NOT `child.killed`: Node sets that the moment `kill()` is CALLED, so after the
       // SIGTERM above it is already true and the escalation would never fire -- leaving
-      // a tool that ignores SIGTERM to hold the gate open forever. `exitCode`/`signalCode`
-      // are the fields that say whether the child actually DIED.
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      // a tool that ignores SIGTERM to hold the gate open forever.
+      //
+      // `state.settled` is the guard used here, NOT `exitCode`/`signalCode`: the two
+      // fields are updated asynchronously and can still be null for a child that HAS
+      // exited, which would send SIGKILL to a pid that may already have been recycled.
+      // The settle flag is set by the very `close` handler that reports the outcome, so
+      // it is the authoritative "this run is over" signal -- the same one the mutmut
+      // runner uses.
+      if (!state.settled) child.kill('SIGKILL');
     }, SIGKILL_GRACE_MS);
   }, timeoutMs);
 }
@@ -179,6 +185,12 @@ export function spawnWithCapture(
     const settle = (result: SpawnCaptureResult): void => {
       if (state.settled) return;
       state.settled = true;
+      // Clear HERE rather than only in the handlers: a `kill` can deliver `close`
+      // SYNCHRONOUSLY, so the timeout path would settle before the handler cleared the
+      // escalation timer -- leaving a live timer after the promise resolved. One place
+      // that every exit route passes through is what makes "settled means no timers"
+      // true instead of probable.
+      clearTimers(state);
       resolve(result);
     };
 
@@ -215,7 +227,7 @@ export async function runMutationCommand(
   command: string,
   args: string[],
   options: SpawnCaptureOptions,
-  parse: () => MutationRunResult | null,
+  parse: (stdout: string) => MutationRunResult | null,
 ): Promise<MutationRunOutcome> {
   const result = await spawnWithCapture(command, args, options);
   if (result.error) {
@@ -229,7 +241,7 @@ export async function runMutationCommand(
   // stderr is carried as an `error` so the caller can show WHY without discarding
   // the report the run produced.
   return {
-    report: safeParse(parse),
+    report: safeParse(parse, result.stdout),
     timedOut: false,
     error: result.code !== 0 ? result.stderr || result.stdout : undefined,
   };
@@ -242,9 +254,12 @@ export async function runMutationCommand(
  * exception into "the tool found nothing" -- a clean pass produced by a parse bug. A null
  * report is the honest answer: nothing was read, so nothing is claimed.
  */
-function safeParse(parse: () => MutationRunResult | null): MutationRunResult | null {
+function safeParse(
+  parse: (stdout: string) => MutationRunResult | null,
+  stdout: string,
+): MutationRunResult | null {
   try {
-    return parse();
+    return parse(stdout);
   } catch (err) {
     console.error(`[mutation] could not read the report: ${err instanceof Error ? err.message : String(err)}`);
     return null;

@@ -1,5 +1,5 @@
 // @no-test-required: mutmut wrapper — tested via gate-m integration + pre-push Gate M
-import { spawn, execSync, type ChildProcess } from 'child_process';
+import { execSync } from 'child_process';
 import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import type {
@@ -8,6 +8,7 @@ import type {
   MutationRunOutcome,
   MutationRunResult,
 } from './types';
+import { runMutationCommand } from './spawn-with-capture';
 
 type Platform = NodeJS.Platform;
 type MutmutRoute = 'native' | 'wsl' | 'unavailable' | 'unresolved';
@@ -31,17 +32,7 @@ type MutmutRoute = 'native' | 'wsl' | 'unavailable' | 'unresolved';
  * accumulation inside an already-long Promise body, and their nesting was part
  * of what made that method exceed both the length and the nesting budget.
  */
-function collectOutput(
-  child: ChildProcess,
-  onChunk: (chunk: string, isStderr: boolean) => void,
-): void {
-  child.stdout?.on('data', (data: Buffer) => onChunk(data.toString(), false));
-  child.stderr?.on('data', (data: Buffer) => onChunk(data.toString(), true));
-}
-
 /** How long a SIGTERMed mutmut gets before it is killed outright. */
-const ESCALATION_DELAY_MS = 5000;
-
 /** Where the pre-run copy of pyproject.toml lives. */
 function pyprojectBackupPath(pyprojectPath: string): string {
   return `${pyprojectPath}.xp-gate-backup`;
@@ -119,42 +110,6 @@ function removeCreated(pyprojectPath: string): void {
   } catch {
     // Best effort -- see `restoreExisting`.
   }
-}
-
-/** The tracker shape `settleTracker` returns; only the timeout path uses these. */
-interface SettleTracker {
-  didTimeOut: () => boolean;
-  markTimedOut: () => void;
-  settle: (outcome: MutationRunOutcome) => void;
-  isSettled: () => boolean;
-}
-
-/**
- * Arm the run timeout, escalating SIGTERM to SIGKILL once.
- *
- * Extracted from `runMutmut` for the same reason as `collectOutput`: the
- * two-step kill sequence is twelve lines of policy that pushed the method past
- * both budgets. The escalation timer id is handed back through `setEscalation`
- * so the caller's `cancelTimers` closure can still reach it.
- *
- * @returns the primary timer id, to be cleared by the caller.
- */
-function armTimeout(
-  child: ChildProcess,
-  timeoutMs: number,
-  tracker: SettleTracker,
-  setEscalation: (id: NodeJS.Timeout) => void,
-): NodeJS.Timeout {
-  const escalationMs = ESCALATION_DELAY_MS;
-  return setTimeout(() => {
-    tracker.markTimedOut();
-    child.kill('SIGTERM');
-    if (tracker.isSettled()) return;
-    // SIGTERM may be ignored; escalate once.
-    setEscalation(setTimeout(() => {
-      if (!tracker.isSettled()) child.kill('SIGKILL');
-    }, escalationMs));
-  }, timeoutMs);
 }
 
 export class MutmutRunner implements MutationRunner {
@@ -242,31 +197,7 @@ export class MutmutRunner implements MutationRunner {
    * back the right shape. Factoring that into a single small object keeps
    * `runMutmut` down to spawning and wiring, which is all it should express.
    */
-  private settleTracker(
-    resolve: (outcome: MutationRunOutcome) => void,
-    cancelTimers: () => void,
-  ): {
-    didTimeOut: () => boolean;
-    markTimedOut: () => void;
-    settle: (outcome: MutationRunOutcome) => void;
-    isSettled: () => boolean;
-  } {
-    let settled = false;
-    let timedOut = false;
-    return {
-      didTimeOut: () => timedOut,
-      markTimedOut: () => {
-        timedOut = true;
-      },
-      isSettled: () => settled,
-      settle: (outcome) => {
-        if (settled) return;
-        settled = true;
-        cancelTimers();
-        resolve(outcome);
-      },
-    };
-  }
+
 
   /**
    * How to invoke `mutmut run` for the current route, or null when a WSL path
@@ -281,73 +212,26 @@ export class MutmutRunner implements MutationRunner {
     return { command: 'wsl', args: ['--cd', wslPath, 'mutmut', 'run'] };
   }
 
-  private async runMutmut(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
-      const invocation = this.buildInvocation(options.cwd);
-      if (invocation === null) {
-        resolve({ report: null, timedOut: false });
-        return;
-      }
-
-      const child = spawn(invocation.command, invocation.args, {
-        stdio: 'pipe',
-        cwd: options.cwd,
-      });
-
-      let stdout = '';
-      let stderr = '';
-      let escalationId: NodeJS.Timeout | undefined;
-
-      // Both timers must be cancelled from three different terminal events
-      // (close, error, timeout). Keeping the pair in one place is what stops the
-      // settle path from drifting out of step with the timeout path.
-      const cancelTimers = (): void => {
-        clearTimeout(timeoutId);
-        if (escalationId) clearTimeout(escalationId);
-      };
-
-      const tracker = this.settleTracker(resolve, cancelTimers);
-
-      const timeoutId = armTimeout(child, options.timeoutMs, tracker, (id) => {
-        escalationId = id;
-      });
-
-      collectOutput(child, (chunk, isErr) => {
-        if (isErr) stderr += chunk;
-        else stdout += chunk;
-      });
-
-      child.on('close', (code) => {
-        tracker.settle(this.outcomeFor(code, stdout, stderr, tracker));
-      });
-
-      child.on('error', (err) => {
-        tracker.settle({ report: null, timedOut: tracker.didTimeOut(), error: err.message });
-      });
-    });
-  }
-
   /**
-   * Turn one `mutmut run` exit into the outcome the caller expects.
+   * Run mutmut through the SHARED spawn/timeout/capture path.
    *
-   * Extracted from `runMutmut`'s close handler to bring that method back under
-   * the length and nesting budgets. A null exit code means the process was
-   * killed -- "timed out" when we did it, "unknown" otherwise -- and there is no
-   * report to parse either way.
+   * This runner used to carry its own `spawn` + `armTimeout` + `collectOutput` +
+   * `settleTracker`: a second definition of the timeout policy, which is how the two
+   * could disagree (and did -- one guarded the SIGKILL escalation on `child.killed`,
+   * which Node sets when `kill()` is CALLED, so the escalation never fired).
+   *
+   * The report parser stays local: reading mutmut's emoji progress is this runner's
+   * business, and the shared path takes it as a callback.
    */
-  private outcomeFor(
-    code: number | null,
-    stdout: string,
-    stderr: string,
-    tracker: SettleTracker,
-  ): MutationRunOutcome {
-    if (code === null) return { report: null, timedOut: tracker.didTimeOut() };
-    return {
-      // Parse results from mutmut run stdout (v3.x emoji progress)
-      report: this.parseEmojiProgress(stdout),
-      timedOut: tracker.didTimeOut(),
-      error: code !== 0 ? stderr || stdout : undefined,
-    };
+  private async runMutmut(options: RunMutationOptions): Promise<MutationRunOutcome> {
+    const invocation = this.buildInvocation(options.cwd);
+    if (invocation === null) return { report: null, timedOut: false };
+    return runMutationCommand(
+      invocation.command,
+      invocation.args,
+      { cwd: options.cwd, timeoutMs: options.timeoutMs },
+      (stdout: string) => this.parseEmojiProgress(stdout),
+    );
   }
 
   private toWslPath(path: string): string | null {
