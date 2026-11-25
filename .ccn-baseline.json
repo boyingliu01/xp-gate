@@ -1197,13 +1197,6 @@
     "src/mutation/runners/pitest-runner.ts::runGradle": 2,
     "src/mutation/runners/pitest-runner.ts::runMaven": 1,
     "src/mutation/runners/pitest-runner.ts::runPitest": 5,
-    "src/mutation/runners/spawn-with-capture.ts::(anonymous)@103": 2,
-    "src/mutation/runners/spawn-with-capture.ts::(anonymous)@106": 2,
-    "src/mutation/runners/spawn-with-capture.ts::(anonymous)@128": 3,
-    "src/mutation/runners/spawn-with-capture.ts::(anonymous)@131": 1,
-    "src/mutation/runners/spawn-with-capture.ts::(anonymous)@136": 1,
-    "src/mutation/runners/spawn-with-capture.ts::(anonymous)@141": 3,
-    "src/mutation/runners/spawn-with-capture.ts::(anonymous)@163": 3,
     "src/mutation/runners/spawn-with-capture.ts::armTimeout": 3,
     "src/mutation/runners/spawn-with-capture.ts::clearTimers": 3,
     "src/mutation/runners/spawn-with-capture.ts::settle": 1,
@@ -1696,7 +1689,8 @@
     "scripts/record-hook-behaviour.cjs::writeProjectFixture": 2,
     "plugins/opencode/scripts/prepack.cjs::discoverSkills": 3,
     "src/mutation/init-baseline.ts::applyArg": 5,
-    ".perf-measure/paired-ab.cjs::writeResultFile": 2
+    ".perf-measure/paired-ab.cjs::writeResultFile": 2,
+    "src/mutation/runners/spawn-with-capture.ts::shouldEscalate": 5
   },
   "population": {
     "extensions": [

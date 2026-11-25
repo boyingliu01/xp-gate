@@ -105,6 +105,29 @@ function spawnOptionsFor(options: SpawnCaptureOptions): SpawnOptions {
  * A tool that ignores SIGTERM must not hold the gate open forever, and a tool
  * that needs a moment to flush must not be killed outright.
  */
+/**
+ * Whether the grace period should end in a SIGKILL.
+ *
+ * Three guards, and each rules out a different way of signalling the wrong process:
+ *
+ *   - `state.settled` -- the run already reported an outcome, so there is nothing left
+ *     to kill and the pid belongs to nobody in particular;
+ *   - `exitCode`/`signalCode` -- the child DIED even if `close` has not fired yet. These
+ *     are the fields that say so; `child.killed` does NOT (Node sets it the moment
+ *     `kill()` is called, which would make the escalation dead code -- measured);
+ *   - `pid` -- with the child gone, a recycled pid is the remaining risk, and
+ *     `child.kill()` on a reaped pid throws ESRCH (harmless) while on a RECYCLED one
+ *     would signal an unrelated process. A missing pid means there is nothing to signal.
+ */
+export function shouldEscalate(
+  state: Pick<CaptureState, 'settled'>,
+  child: ReturnType<typeof spawn>,
+): boolean {
+  if (state.settled) return false;
+  if (child.exitCode !== null || child.signalCode !== null) return false;
+  return typeof child.pid === 'number';
+}
+
 function armTimeout(
   child: ReturnType<typeof spawn>,
   state: CaptureState,
@@ -114,17 +137,7 @@ function armTimeout(
     state.timeoutFired = true;
     child.kill('SIGTERM');
     state.sigkillTimer = setTimeout(() => {
-      // NOT `child.killed`: Node sets that the moment `kill()` is CALLED, so after the
-      // SIGTERM above it is already true and the escalation would never fire -- leaving
-      // a tool that ignores SIGTERM to hold the gate open forever.
-      //
-      // `state.settled` is the guard used here, NOT `exitCode`/`signalCode`: the two
-      // fields are updated asynchronously and can still be null for a child that HAS
-      // exited, which would send SIGKILL to a pid that may already have been recycled.
-      // The settle flag is set by the very `close` handler that reports the outcome, so
-      // it is the authoritative "this run is over" signal -- the same one the mutmut
-      // runner uses.
-      if (!state.settled) child.kill('SIGKILL');
+      if (shouldEscalate(state, child)) child.kill('SIGKILL');
     }, SIGKILL_GRACE_MS);
   }, timeoutMs);
 }

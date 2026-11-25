@@ -15,6 +15,7 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { shouldEscalate } from '../runners/spawn-with-capture';
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
@@ -187,6 +188,11 @@ describe('MutmutRunner', () => {
         return true;
       }),
       killed: false,
+      // A live pid: the escalation refuses to signal a child that is gone, and a fake
+      // without one models "already reaped".
+      pid: 4242,
+      exitCode: null,
+      signalCode: null,
     } as unknown as ChildProcess;
     vi.mocked(spawn).mockReturnValue(child);
     return child;
@@ -839,6 +845,31 @@ describe('MutmutRunner', () => {
         join(tmpDir, 'pyproject.toml.xp-gate-backup'),
         expect.anything(),
       );
+    });
+  });
+
+  describe('SIGKILL escalation guards', () => {
+    it('does not signal a child whose pid is already gone', async () => {
+      // A reaped pid can be RECYCLED, and a SIGKILL sent to a recycled pid kills an
+      // unrelated process. `child.pid` missing is the honest "nothing to signal" case.
+      const child = mockChildProcess({});
+      (child as unknown as { pid?: number }).pid = undefined;
+      const state = { settled: false, timeoutFired: true, stdout: '', stderr: '' };
+      expect(shouldEscalate(state, child)).toBe(false);
+    });
+
+    it('does not signal a child that already exited', async () => {
+      // `exitCode` is set the moment the process dies, possibly BEFORE `close` fires --
+      // that gap is the window the escalation must not signal in.
+      const child = mockChildProcess({});
+      (child as unknown as { exitCode: number | null }).exitCode = 1;
+      const state = { settled: false, timeoutFired: true, stdout: '', stderr: '' };
+      expect(shouldEscalate(state, child)).toBe(false);
+    });
+
+    it('signals a child that is still running', async () => {
+      const state = { settled: false, timeoutFired: true, stdout: '', stderr: '' };
+      expect(shouldEscalate(state, mockChildProcess({}))).toBe(true);
     });
   });
 });
