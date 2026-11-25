@@ -38,6 +38,54 @@ export const SEMGREP_RULESET = 'p/security-audit';
  */
 export const SEMGREP_EXTRA_ARGS = ['--disable-version-check', '--metrics=off'] as const;
 
+/**
+ * The SKIP for a change set with nothing semgrep can read.
+ *
+ * The tool is never probed on this path: the input question is FREE and the tool
+ * question is not, so asking the cheap one first is what keeps a docs-only commit from
+ * paying for a `semgrep --version` (#782, P0-A).
+ */
+function skipNoSupportedFiles(startMs: number, messages: string[]): GateOutput {
+  messages.push('     ⏭️  SKIPPED - SAST (no supported language files changed)');
+  recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
+  return { status: 'SKIP', messages, exitCode: 0 };
+}
+
+/**
+ * How to run semgrep for this project.
+ *
+ * `npx` is a command line, not a path: the tool reports it as `npx semgrep`, which
+ * cannot be executed as a file. Fixed overhead per run is what #640 is about -- see
+ * SEMGREP_EXTRA_ARGS.
+ */
+function semgrepInvocation(
+  tool: { via?: string; path: string },
+  files: string[],
+): { command: string; args: string[] } {
+  const viaNpx = tool.via === 'npx';
+  return {
+    command: viaNpx ? 'npx' : tool.path,
+    args: [
+      ...(viaNpx ? ['-y', 'semgrep'] : []),
+      'scan', `--config=${SEMGREP_RULESET}`, '--json', ...SEMGREP_EXTRA_ARGS, ...files,
+    ],
+  };
+}
+
+/**
+ * WARN when semgrep is not installed: the gate degrades rather than failing, and the
+ * message says how to install it AND how to pre-cache the rules, because a first run
+ * without the cache pays that cost inside the push.
+ */
+function warnSemgrepMissing(startMs: number, messages: string[]): GateOutput {
+  messages.push('     ⚠️  WARN - semgrep not installed — SAST scanning unavailable');
+  messages.push('     Install: brew install semgrep (macOS) | pip install semgrep (Linux/Windows)');
+  messages.push('     Pre-cache rules: semgrep --config=' + SEMGREP_RULESET);
+  messages.push('     Gate 10: SAST Security (WARN, semgrep not installed)');
+  recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
+  return { status: 'WARN', messages, exitCode: 0 };
+}
+
 export function runGate9(input: GateInput): GateOutput {
   const startMs = Date.now();
   const messages: string[] = [];
@@ -54,31 +102,14 @@ export function runGate9(input: GateInput): GateOutput {
   // question is free; the tool question is not, so it must be asked second.
   // See the module header for the measurement behind this ordering.
   const semgrepFiles = filterSemgrepFiles(input.changedFiles);
-  if (semgrepFiles.length === 0) {
-    messages.push('     ⏭️  SKIPPED - SAST (no supported language files changed)');
-    recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
-  }
+  if (semgrepFiles.length === 0) return skipNoSupportedFiles(startMs, messages);
 
   // Standard path: semgrep
   const tool = isToolAvailable('semgrep', input.cwd);
-  if (!tool.available) {
-    messages.push('     ⚠️  WARN - semgrep not installed — SAST scanning unavailable');
-    messages.push('     Install: brew install semgrep (macOS) | pip install semgrep (Linux/Windows)');
-    messages.push('     Pre-cache rules: semgrep --config=' + SEMGREP_RULESET);
-    messages.push('     Gate 10: SAST Security (WARN, semgrep not installed)');
-    recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
-    return { status: 'WARN', messages, exitCode: 0 };
-  }
+  if (!tool.available) return warnSemgrepMissing(startMs, messages);
 
-  const semgrepCmd = tool.via === 'npx' ? 'npx' : tool.path;
-  const semgrepArgs = tool.via === 'npx' ? ['-y', 'semgrep'] : [];
-
-  // Run semgrep with JSON output. Fixed overhead per run is the point of #640 --
-  // see SEMGREP_EXTRA_ARGS.
-  semgrepArgs.push('scan', `--config=${SEMGREP_RULESET}`, '--json', ...SEMGREP_EXTRA_ARGS, ...semgrepFiles);
-
-  const result = runTool(semgrepCmd, semgrepArgs, { cwd: input.cwd });
+  const invocation = semgrepInvocation(tool, semgrepFiles);
+  const result = runTool(invocation.command, invocation.args, { cwd: input.cwd });
 
   // #518 (same defect class as the bash gate-10.sh fix): the exit code does NOT
   // carry the verdict. semgrep exits 0 even with ERROR-severity findings, and
@@ -94,6 +125,14 @@ export function runGate9(input: GateInput): GateOutput {
 const NONBLOCKING_SEVERITIES = ['WARNING', 'INFO', 'MEDIUM', 'LOW'];
 const MAX_DETAIL_FINDINGS = 5;
 const MAX_FINDING_MESSAGE_LENGTH = 80;
+
+/** One PSScriptAnalyzer finding, as the analyzer emits it. */
+interface PowerShellFinding {
+  RuleName?: string;
+  ScriptName?: string;
+  Line?: number;
+  Message?: string;
+}
 
 interface SemgrepFinding {
   check_id?: string;
@@ -124,19 +163,32 @@ function countBySeverity(results: SemgrepFinding[]): { blocking: number; warning
   return { blocking, warnings };
 }
 
+/**
+ * The three display lines for one finding.
+ *
+ * Each field has a NAMED fallback (`unknown`, `?`) rather than an empty string: a
+ * finding whose path did not survive parsing still has to be locatable by rule id, and
+ * a blank where the path should be reads as "no finding here".
+ *
+ * The message is truncated because a semgrep message can be a paragraph, and one
+ * finding must not push the others off the screen.
+ */
+/** A field with a named placeholder rather than an empty string. */
+function fieldOr(value: unknown, fallback: string): string {
+  return value ? String(value) : fallback;
+}
+
+function findingLines(r: SemgrepFinding): string[] {
+  const severity = fieldOr(r.extra?.severity, 'UNKNOWN').toUpperCase();
+  const ruleId = fieldOr(r.check_id, 'unknown');
+  const location = `${fieldOr(r.path, 'unknown')}:${fieldOr(r.start?.line, '?')}`;
+  const msg = fieldOr(r.extra?.message, '').slice(0, MAX_FINDING_MESSAGE_LENGTH);
+  return [`  [${severity}] ${ruleId}`, `  ${location} → ${msg}`, ''];
+}
+
+/** The detail block for up to `MAX_DETAIL_FINDINGS` findings. */
 function findingDetailLines(results: SemgrepFinding[]): string[] {
-  const lines: string[] = [];
-  results.slice(0, MAX_DETAIL_FINDINGS).forEach(r => {
-    const severity = (r.extra?.severity || 'UNKNOWN').toUpperCase();
-    const ruleId = r.check_id || 'unknown';
-    const filePath = r.path || 'unknown';
-    const line = r.start?.line || '?';
-    const msg = (r.extra?.message || '').slice(0, MAX_FINDING_MESSAGE_LENGTH);
-    lines.push(`  [${severity}] ${ruleId}`);
-    lines.push(`  ${filePath}:${line} → ${msg}`);
-    lines.push('');
-  });
-  return lines;
+  return results.slice(0, MAX_DETAIL_FINDINGS).flatMap(findingLines);
 }
 
 function renderSemgrepBlock(
@@ -222,6 +274,38 @@ function hasVerdict(results: SemgrepFinding[], scanErrors: unknown[], exitCode: 
   return scanErrors.length === 0 && exitCode === 0;
 }
 
+/** The context a SKIP needs: the tool's exit code, its stderr, and where to record it. */
+interface SkipContext {
+  exitCode: number;
+  stderr: string;
+  startMs: number;
+  messages: string[];
+}
+
+/**
+ * The SKIP for output that cannot be judged, or null when it can.
+ *
+ * Both checks run BEFORE any counting: a scan that errored on everything has no findings
+ * to count, and would otherwise read as a clean run (#475, #518 R2). Fail-closed means
+ * "cannot judge" is never spelled PASS.
+ */
+function unjudgeable(
+  data: SemgrepDocument | null,
+  ctx: SkipContext,
+): GateOutput | null {
+  if (!data) {
+    return skipSemgrep('semgrep output unparseable',
+      'semgrep output unparseable or verdict fields missing — cannot determine verdict',
+      ctx.stderr, ctx.exitCode, ctx.startMs, ctx.messages);
+  }
+  const results = data.results || [];
+  const scanErrors = data.errors || [];
+  if (hasVerdict(results, scanErrors, ctx.exitCode)) return null;
+  return skipSemgrep('semgrep runtime error',
+    `semgrep exit=${ctx.exitCode}, scan errors=${scanErrors.length}, findings=${results.length} — nothing to judge`,
+    ctx.stderr, ctx.exitCode, ctx.startMs, ctx.messages);
+}
+
 function parseSemgrepResults(
   jsonOutput: string,
   exitCode: number,
@@ -229,21 +313,14 @@ function parseSemgrepResults(
   startMs: number,
   messages: string[]
 ): GateOutput {
-  const data = parseSemgrepJson(jsonOutput);
-  if (!data) {
-    return skipSemgrep('semgrep output unparseable',
-      'semgrep output unparseable or verdict fields missing — cannot determine verdict',
-      stderr, exitCode, startMs, messages);
-  }
+  const parsed = parseSemgrepJson(jsonOutput);
+  const preSkip = unjudgeable(parsed, { exitCode, stderr, startMs, messages });
+  if (preSkip) return preSkip;
+  // `unjudgeable` returning null IS the proof that `parsed` was a document; the cast
+  // states what the guard established.
+  const data = parsed as SemgrepDocument;
 
   const results: SemgrepFinding[] = data.results || [];
-  const scanErrors = data.errors || [];
-
-  if (!hasVerdict(results, scanErrors, exitCode)) {
-    return skipSemgrep('semgrep runtime error',
-      `semgrep exit=${exitCode}, scan errors=${scanErrors.length}, findings=${results.length} — nothing to judge`,
-      stderr, exitCode, startMs, messages);
-  }
 
   const { blocking, warnings } = countBySeverity(results);
   const findingLines = findingDetailLines(results);
@@ -292,7 +369,7 @@ function buildPSScriptAnalyzerCommand(psFiles: string[]): string {
 }
 
 function renderPowerShellFindings(
-  findings: Array<{ RuleName?: string; ScriptName?: string; Line?: number; Message?: string }>,
+  findings: PowerShellFinding[],
   startMs: number,
   messages: string[]
 ): GateOutput {
@@ -309,46 +386,77 @@ function renderPowerShellFindings(
  * PowerShell project SAST using PSScriptAnalyzer security rules.
  * Replaces semgrep which doesn't support .ps1 files.
  */
+/** The PowerShell sources in a change set. */
+function powerShellFiles(files: string[]): string[] {
+  return files.filter((f) => f.endsWith('.ps1') || f.endsWith('.psm1'));
+}
+
+/** WARN when the machine has no PowerShell: the gate degrades, it does not fail. */
+function warnNoPowerShell(startMs: number, messages: string[]): GateOutput {
+  messages.push('     ⚠️  WARN - PowerShell not available — SAST scanning unavailable');
+  messages.push('     Gate 10: SAST Security (WARN, PowerShell not installed)');
+  recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
+  return { status: 'WARN', messages, exitCode: 0 };
+}
+
+/** SKIP when a PowerShell project changed no PowerShell source. */
+function skipNoPowerShellFiles(startMs: number, messages: string[]): GateOutput {
+  messages.push('     ⏭️  SKIPPED - SAST (no PowerShell files changed)');
+  recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
+  return { status: 'SKIP', messages, exitCode: 0 };
+}
+
 function runPowerShellSAST(
   input: GateInput,
   startMs: number,
   messages: string[]
 ): GateOutput {
   const ps = detectPowerShell();
-  if (!ps.available) {
-    messages.push('     ⚠️  WARN - PowerShell not available — SAST scanning unavailable');
-    messages.push('     Gate 10: SAST Security (WARN, PowerShell not installed)');
-    recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
-    return { status: 'WARN', messages, exitCode: 0 };
-  }
+  if (!ps.available) return warnNoPowerShell(startMs, messages);
 
-  const psFiles = input.changedFiles.filter(f => f.endsWith('.ps1') || f.endsWith('.psm1'));
-  if (psFiles.length === 0) {
-    messages.push('     ⏭️  SKIPPED - SAST (no PowerShell files changed)');
-    recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
-  }
+  const psFiles = powerShellFiles(input.changedFiles);
+  if (psFiles.length === 0) return skipNoPowerShellFiles(startMs, messages);
 
   messages.push('     Running PSScriptAnalyzer security rules...');
-
   const result = runPowerShellTool(ps, buildPSScriptAnalyzerCommand(psFiles), { cwd: input.cwd });
+  if (result.exitCode !== 0) return warnAnalyzerFailed(startMs, messages);
+  return reportPowerShellFindings(parseAnalyzerOutput(result.stdout), startMs, messages);
+}
 
-  if (result.exitCode !== 0) {
-    messages.push('     ⚠️  PSScriptAnalyzer security check failed, skipping');
-    recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
-    return { status: 'WARN', messages, exitCode: 0 };
-  }
+/** WARN when the analyzer itself failed: a broken tool must not read as a clean repo. */
+function warnAnalyzerFailed(startMs: number, messages: string[]): GateOutput {
+  messages.push('     ⚠️  PSScriptAnalyzer security check failed, skipping');
+  recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
+  return { status: 'WARN', messages, exitCode: 0 };
+}
 
+/**
+ * The analyzer's findings, always as an array.
+ *
+ * PSScriptAnalyzer emits a bare OBJECT for a single finding and an array for several, so
+ * a single result would otherwise be iterated as its own keys.
+ */
+function parseAnalyzerOutput(stdout: string): PowerShellFinding[] {
+  const text = stdout.trim();
+  if (!text) return [];
   try {
-    const findings = result.stdout.trim() ? JSON.parse(result.stdout.trim()) : [];
-    const arr = Array.isArray(findings) ? findings : [findings];
-    if (arr.length > 0) {
-      return renderPowerShellFindings(arr, startMs, messages);
-    }
+    const parsed = JSON.parse(text) as PowerShellFinding | PowerShellFinding[];
+    return Array.isArray(parsed) ? parsed : [parsed];
   } catch {
-    // JSON parse failure
+    // Unparseable output is handled below as "no findings to render", and the PASS
+    // that follows is the documented behaviour for an analyzer that printed nothing
+    // usable -- the exit code above already caught a real failure.
+    return [];
   }
+}
 
+/** The verdict once the analyzer has produced output. */
+function reportPowerShellFindings(
+  findings: PowerShellFinding[],
+  startMs: number,
+  messages: string[],
+): GateOutput {
+  if (findings.length > 0) return renderPowerShellFindings(findings, startMs, messages);
   messages.push('     ✅ PASSED - No PowerShell security vulnerabilities found.');
   recordAudit('gate-9', 'sast-security', 'PASS', 0, startMs);
   return { status: 'PASS', messages, exitCode: 0 };
