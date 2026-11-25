@@ -81,9 +81,15 @@ function restoreFromBackup({ pyprojectPath, backupPath, hadExisting }: RestoreTa
   try {
     if (hadExisting) restoreExisting({ pyprojectPath, backupPath });
     else removeCreated(pyprojectPath);
-  } catch {
-    // Best-effort cleanup: a restore failure leaves the workspace as mutmut left it, and
-    // throwing here would turn a mutation RESULT into a crash.
+  } catch (err) {
+    // LOUD, not silent: a failed restore leaves `pyproject.toml` as MUTMUT rewrote it, in
+    // the user's working tree. Swallowing that would let them commit a mutated manifest.
+    // Not thrown, because that would turn a mutation RESULT into a crash -- but the
+    // backup path is named so the content can still be recovered by hand.
+    console.error(
+      `[mutmut] WARNING: could not restore ${pyprojectPath}; it may still carry the `
+        + `mutmut edit. Backup: ${backupPath} (${String(err)})`,
+    );
   }
 }
 
@@ -97,9 +103,12 @@ function restoreExisting({ pyprojectPath, backupPath }: BackupPair): void {
   try {
     if (!existsSync(backupPath)) return;
     writeFileSync(pyprojectPath, readFileSync(backupPath, 'utf-8'), { encoding: 'utf-8' });
+    // The backup goes only AFTER the restore SUCCEEDED: deleting it first would destroy
+    // the only copy if the write then failed.
     unlinkSync(backupPath);
-  } catch {
-    // Best effort -- see above.
+  } catch (err) {
+    // Re-thrown so `restoreFromBackup` reports it once, with the backup path named.
+    throw err;
   }
 }
 
