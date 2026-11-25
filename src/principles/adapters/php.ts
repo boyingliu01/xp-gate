@@ -45,13 +45,10 @@ function lastBalancedEnd(code: string, startPos: number): BraceScan {
   let seenBrace = false;
   let endPos = -1;
   for (let i = startPos; i < code.length; i++) {
-    if (code[i] === '{') {
-      depth++;
-      seenBrace = true;
-    } else if (code[i] === '}') {
-      depth--;
-      if (seenBrace && depth === 0) endPos = i + 1;
-    }
+    const step = stepDepth(code[i], depth, seenBrace);
+    depth = step.depth;
+    seenBrace = step.seenBrace;
+    if (step.closedAtEnd) endPos = i + 1;
   }
   return { endPos, balanced: depth === 0 };
 }
@@ -192,14 +189,25 @@ function measureNesting(stripped: string): number {
   let depth = 0;
   let maxDepth = 0;
   for (const ch of stripped) {
-    if (ch === '{') {
-      depth++;
-      if (depth > maxDepth) maxDepth = depth;
-    } else if (ch === '}') {
-      depth--;
-    }
+    depth = stepDepth(ch, depth, false).depth;
+    maxDepth = Math.max(maxDepth, depth);
   }
   return maxDepth > 0 ? maxDepth : 0;
+}
+
+/**
+ * Apply one character to a brace depth.
+ *
+ * `depth` may go NEGATIVE, and the callers depend on it: a `}` before any `{` is a
+ * stray closer, and tracking it keeps a later `{` from being mistaken for a balanced
+ * block. `closedAtEnd` is true only when a brace pair closed back to zero -- which is
+ * what makes the LAST balanced block findable rather than the first.
+ */
+function stepDepth(ch: string, depth: number, seenBrace: boolean) {
+  if (ch === '{') return { depth: depth + 1, seenBrace: true, closedAtEnd: false };
+  if (ch !== '}') return { depth, seenBrace, closedAtEnd: false };
+  const next = depth - 1;
+  return { depth: next, seenBrace, closedAtEnd: seenBrace && next === 0 };
 }
 
 /**
@@ -275,6 +283,42 @@ const HEREDOC_OPEN = /<<<[ \t]*(["']?)([A-Za-z_]\w*)\1[ \t]*\r?\n/y;
  * followed by a non-identifier character, so a line whose content merely starts
  * with the same word does not terminate the block early.
  */
+/**
+ * Whether this line closes the heredoc.
+ *
+ * The terminator must be followed by END OF LINE, whitespace, or a
+ * statement/expression terminator -- not the start of a longer word. The comma matters:
+ * PHP allows `SQL,` when the heredoc is an array element, and missing that case
+ * over-blanked silently, the same quiet failure class as truncation.
+ */
+function closesHeredoc(line: string, terminator: string): boolean {
+  const trimmed = line.trimStart();
+  if (!trimmed.startsWith(terminator)) return false;
+  const afterWord = trimmed.charAt(terminator.length);
+  return afterWord === '' || /[\s;,\]})]/.test(afterWord);
+}
+
+/** The index just past this line, newline included. */
+function nextLineStart(code: string, lineEnd: number): number {
+  return lineEnd < code.length ? lineEnd + 1 : lineEnd;
+}
+
+/**
+ * A heredoc with no terminator is MALFORMED source, and the honest reading is to treat
+ * the opener as ordinary text: with no closing marker there is no way to know where the
+ * string ends, so the gate reports what the braces literally say rather than guessing a
+ * boundary.
+ *
+ * The alternative -- blanking to end-of-file -- silently disabled every rule for the rest
+ * of the method (measured: a five-level `if` chain reported depth 1 and length 4). A
+ * malformed file must degrade to LESS CHECKING on that construct, never to a quiet pass
+ * on the whole method.
+ */
+function unterminatedHeredoc(code: string, start: number, openerLength: number) {
+  const last = start + openerLength - 1;
+  return { emit: code.slice(start, last), last };
+}
+
 function blankHeredoc(code: string, start: number): { emit: string; last: number } | undefined {
   HEREDOC_OPEN.lastIndex = start;
   const opener = HEREDOC_OPEN.exec(code);
@@ -283,51 +327,22 @@ function blankHeredoc(code: string, start: number): { emit: string; last: number
   const terminator = opener[2];
   let i = start + opener[0].length;
   let emit = ' '.repeat(opener[0].length);
-  let closed = false;
 
   while (i < code.length) {
-    const lineStart = i;
-    let lineEnd = code.indexOf('\n', i);
-    if (lineEnd < 0) lineEnd = code.length;
-    const line = code.slice(lineStart, lineEnd);
-    const trimmed = line.trimStart();
-
-    if (trimmed.startsWith(terminator)) {
-      const afterWord = trimmed.charAt(terminator.length);
-      // End of line, whitespace, or a statement/expression terminator -- not the
-      // start of a longer word, and not a comma either: PHP allows `SQL,` when the
-      // heredoc is an array element. Missing the comma case over-blanked silently,
-      // which is the same class of quiet failure as truncation.
-      if (afterWord === '' || /[\s;,\]})]/.test(afterWord)) {
-        emit += ' '.repeat(line.length);
-        i = lineEnd;
-        closed = true;
-        break;
-      }
-    }
+    const lineEnd = nextLineEnd(code, i);
+    const line = code.slice(i, lineEnd);
+    const closes = closesHeredoc(line, terminator);
     emit += ' '.repeat(line.length);
-    if (lineEnd < code.length) {
-      emit += '\n';
-      i = lineEnd + 1;
-    } else {
-      i = lineEnd;
-    }
+    i = nextLineStart(code, lineEnd);
+    if (closes) return { emit, last: lineEnd };
   }
+  return unterminatedHeredoc(code, start, opener[0].length);
+}
 
-  // A heredoc with no terminator is malformed source. Treating the opener as
-  // ordinary text keeps the rest of the method analysable, and the unmatched `{`
-  // inside the unterminated body then count as code. That is the honest reading:
-  // with no closing marker there is no way to know where the string ends, so the
-  // gate reports what the braces literally say rather than guessing a boundary.
-  //
-  // The alternative -- blanking to end-of-file -- silently disabled every rule for
-  // the rest of the method (measured: a five-level `if` chain reported depth 1 and
-  // length 4). A malformed file must degrade to less checking on that construct,
-  // never to a quiet pass on the whole method.
-  if (!closed) {
-    return { emit: code.slice(start, start + opener[0].length - 1), last: start + opener[0].length - 1 };
-  }
-  return { emit, last: i };
+/** The index of this line's terminating newline, or the end of the text. */
+function nextLineEnd(code: string, from: number): number {
+  const found = code.indexOf('\n', from);
+  return found < 0 ? code.length : found;
 }
 
 /**
@@ -358,16 +373,30 @@ function blankLiteralAt(code: string, index: number): { emit: string; last: numb
   const single = SINGLE_CHAR_LITERAL[ch];
   if (single) return single(code, index);
 
-  // `//` versus `/*`: same first character, so this needs lookahead.
-  if (ch === '/') {
-    if (code[index + 1] === '/') return blankLineComment(code, index);
-    return code[index + 1] === '*' ? blankBlockComment(code, index) : undefined;
-  }
-  // `<<<` opens a heredoc/nowdoc; a lone `<` is an operator.
-  if (ch === '<' && code[index + 1] === '<' && code[index + 2] === '<') {
-    return blankHeredoc(code, index);
-  }
+  if (ch === '/') return blankSlashAt(code, index);
+  if (ch === '<') return blankLessThanAt(code, index);
   return undefined;
+}
+
+/**
+ * `//` versus `/*`: the same first character, so only lookahead tells them apart.
+ *
+ * A lone `/` is DIVISION, and blanking from it would swallow the rest of the line.
+ */
+function blankSlashAt(code: string, index: number) {
+  if (code[index + 1] === '/') return blankLineComment(code, index);
+  return code[index + 1] === '*' ? blankBlockComment(code, index) : undefined;
+}
+
+/**
+ * `<<<` opens a heredoc or nowdoc; a lone `<` (or `<<`) is an OPERATOR.
+ *
+ * All three characters are required: `$a << 2` is a bit shift, and treating it as a
+ * heredoc opener would blank the rest of the file looking for a terminator.
+ */
+function blankLessThanAt(code: string, index: number) {
+  const isHeredoc = code[index + 1] === '<' && code[index + 2] === '<';
+  return isHeredoc ? blankHeredoc(code, index) : undefined;
 }
 
 /**
