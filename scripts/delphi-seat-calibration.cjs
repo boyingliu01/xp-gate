@@ -81,15 +81,34 @@ function resolveSeatCalibration(expertConfig) {
     console.error(`[delphi-review] WARNING: prompt_calibration ${problem}; ignoring the record.`);
     return { calibration: null, warning: 'prompt_calibration_malformed' };
   }
+  return { calibration: buildCalibration(raw) };
+}
+
+/**
+ * The normalised calibration record.
+ *
+ * The OPTIONAL strings are passed through as `undefined` rather than an empty string: a
+ * record that names no model is not the same as one whose model is blank, and a consumer
+ * filtering on truthiness would treat both as absent while a `typeof` check would not.
+ */
+function buildCalibration(raw) {
   return {
-    calibration: {
-      measured_at: raw.measured_at,
-      model_id: typeof raw.model_id === 'string' ? raw.model_id : undefined,
-      gateway: typeof raw.gateway === 'string' ? raw.gateway : undefined,
-      last_pass_bytes: Math.trunc(raw.last_pass_bytes),
-      last_fail_bytes: raw.last_fail_bytes !== undefined ? Math.trunc(raw.last_fail_bytes) : undefined,
-    },
+    measured_at: raw.measured_at,
+    model_id: optionalString(raw.model_id),
+    gateway: optionalString(raw.gateway),
+    last_pass_bytes: Math.trunc(raw.last_pass_bytes),
+    last_fail_bytes: optionalTruncated(raw.last_fail_bytes),
   };
+}
+
+/** A string when the value is one, else undefined. */
+function optionalString(value) {
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** A truncated integer when the value is present, else undefined. */
+function optionalTruncated(value) {
+  return value === undefined ? undefined : Math.trunc(value);
 }
 
 // Classify a failed expert call. A drop before any response on a payload above
