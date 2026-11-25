@@ -935,6 +935,14 @@ describe('MutmutRunner', () => {
       expect(out).toContain('source_paths = ["new"]');
     });
 
+    it('leaves a NON-ARRAY source_paths alone instead of adding a second key', async () => {
+      // `source_paths = "text"` has the key but no `[`. Treating that as "no key" made the
+      // caller INSERT a second one -- measured: two `source_paths` in one table.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const existing = '[tool.mutmut]\nsource_paths = "not-an-array"\n';
+      expect(mutmutConfigContent(existing, 'source_paths = ["new"]')).toBe(existing);
+    });
+
     it('ignores a fake key inside a MULTI-LINE string', async () => {
       // A `description = """` body can hold a line that looks exactly like the key.
       // Anchoring on `^` matched it and rewrote the STRING while the real key below was

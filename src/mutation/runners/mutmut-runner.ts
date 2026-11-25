@@ -440,7 +440,11 @@ function findSourcePathsValue(
   const key = findKeyOutsideStrings(doc, bodyStart, bodyEnd);
   if (key === -1) return null;
   const open = doc.indexOf('[', key);
-  if (open === -1 || open >= bodyEnd) return null;
+  // No `[` after the key within the table: `source_paths` is assigned something that is
+  // not an array (a bare string, a number). Reporting `null` here would mean "no key",
+  // and the caller would INSERT a second one -- measured: two `source_paths` in one
+  // table. `UNCLOSED` says "there IS a key, and I cannot rewrite it safely".
+  if (open === -1 || open >= bodyEnd) return UNCLOSED;
   const close = matchingBracket(doc, open, bodyEnd);
   return close === -1 ? UNCLOSED : { start: key, end: close + 1 };
 }
