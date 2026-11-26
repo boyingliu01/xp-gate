@@ -754,6 +754,9 @@ async function installLocal(args) {
 
   console.log('\nInstallation complete!');
   console.log('Run git commit to trigger quality gates');
+  // The moment an install succeeds is the only moment the user is certain the
+  // tool works; that is where the invitation belongs (#871).
+  require('./star-notice.js').maybeShowStarNotice();
 
   // Auto-install missing CLI tools (prompt user)
   const autoYes = args.includes('--yes') || args.includes('--auto-install');

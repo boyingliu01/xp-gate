@@ -618,7 +618,11 @@ function main() {
   
   if (args.includes('--version')) {
     const pkg = require('../package.json');
+    const { maybeShowStarNotice } = require('../lib/star-notice.js');
     console.log(`xp-gate v${pkg.version}`);
+    // `--version` is the highest-frequency call site: it is where a user who
+    // already trusts the tool is most likely to be looking (#871).
+    maybeShowStarNotice();
     return;
   }
   

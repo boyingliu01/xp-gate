@@ -115,6 +115,9 @@ async function runDefaultChecks(target) {
 
   console.log('');
   console.log(`[xp-gate check] ${ran - failures}/${ran} gate(s) passed`);
+  // Only a clean run earns the invitation: congratulating someone on a failed
+  // check would read as tone-deaf (#871).
+  if (failures === 0) require('./star-notice.js').maybeShowStarNotice();
   return failures === 0 ? 0 : 1;
 }
 
