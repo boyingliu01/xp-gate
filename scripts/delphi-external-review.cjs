@@ -848,6 +848,7 @@ if (require.main !== module) {
     globalConfigPath,
     validateDistinctModels,
     extractJsonFromResponse,
+    classifyHttpResponse,
     buildSystemPrompt,
     buildUserPrompt,
     resolveInputContent,
