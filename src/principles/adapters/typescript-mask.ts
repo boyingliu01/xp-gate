@@ -143,8 +143,21 @@ function maskRegexLiteral(src: string, out: string[], start: number): number {
 
 /**
  * Blank a quoted or template literal starting at `start`.
- * A backtick runs to its closing backtick (interpolations included); a single
- * or double quote stops at an unescaped newline, matching a syntax error.
+ *
+ * A backtick runs to its closing backtick, INTERPOLATIONS INCLUDED; a single or double
+ * quote stops at an unescaped newline, matching a syntax error.
+ *
+ * KNOWN LIMIT, measured 2026-11-26 and NOT fixed: `${...}` is CODE, and blanking it hides
+ * any structure inside an interpolation from `maxControlNesting`. `` `${a ? b : c}` `` is
+ * unaffected (a ternary is not a control structure), but `` `${(() => { if (x) {} })()}` ``
+ * would under-count by one. Three reviewers raised it independently.
+ *
+ * It is recorded rather than fixed because the fix belongs HERE, in the lexer, and the
+ * current impact is zero: no file in this repository puts a control structure inside an
+ * interpolation. Changing the lexer to enter an expression state would also change what
+ * every other consumer of the mask sees, which is a larger change than the defect
+ * justifies today. If a template ever grows an `if`, this comment is the starting point.
+ *
  * @returns the index to resume scanning from.
  */
 function maskStringLiteral(src: string, out: string[], start: number): number {
