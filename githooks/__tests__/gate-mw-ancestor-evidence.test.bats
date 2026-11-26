@@ -51,8 +51,8 @@ setup() {
   git config core.hooksPath /dev/null
   git config user.email t@example.com
   git config user.name t
-  printf 'a\n' > a.txt && git add a.txt && git commit -qm one
-  printf 'b\n' > b.txt && git add b.txt && git commit -qm two
+  printf 'a\n' > a.txt && git add a.txt && git commit -qm one --no-verify
+  printf 'b\n' > b.txt && git add b.txt && git commit -qm two --no-verify
   local line role model
   while IFS= read -r line; do
     role="${line%%=*}"; model="${line#*=}"

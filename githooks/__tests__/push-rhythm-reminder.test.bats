@@ -38,7 +38,7 @@ commit_n() {
     f="${tag}$i.txt"
     printf '%s\n' "$i" > "$f"
     git add "$f"
-    git commit -qm "commit $tag$i"
+    git commit -qm "commit $tag$i" --no-verify
   done
 }
 
