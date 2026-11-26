@@ -270,8 +270,14 @@ function parseSemgrepJson(jsonOutput: string): SemgrepDocument | null {
  * fall through to PASS (#475, #518 R2).
  */
 function hasVerdict(results: SemgrepFinding[], scanErrors: unknown[], exitCode: number): boolean {
+  // SCAN ERRORS INVALIDATE THE VERDICT EVEN WITH FINDINGS PRESENT. A partial run reports
+  // the files it managed to scan, so `results.length > 0` only proves that SOME of the
+  // repository was examined -- and the files it failed on are exactly the ones nobody has
+  // looked at. Passing on that is a fail-open that hides unscanned code behind a real
+  // finding (measured by review FC-02).
+  if (scanErrors.length > 0) return false;
   if (results.length > 0) return true;
-  return scanErrors.length === 0 && exitCode === 0;
+  return exitCode === 0;
 }
 
 /** The context a SKIP needs: the tool's exit code, its stderr, and where to record it. */
@@ -436,26 +442,32 @@ function warnAnalyzerFailed(startMs: number, messages: string[]): GateOutput {
  * PSScriptAnalyzer emits a bare OBJECT for a single finding and an array for several, so
  * a single result would otherwise be iterated as its own keys.
  */
-function parseAnalyzerOutput(stdout: string): PowerShellFinding[] {
+export function parseAnalyzerOutput(stdout: string): PowerShellFinding[] | null {
   const text = stdout.trim();
-  if (!text) return [];
+  // NO output and UNREADABLE output are the same thing to a parser and opposite things
+  // to a gate: one can happen on a clean run, the other means the tool did not answer.
+  // Returning `[]` for both reported PASS on a corrupt payload (measured by two
+  // reviewers). `null` means "could not be read" and the caller WARNs.
+  if (!text) return null;
   try {
     const parsed = JSON.parse(text) as PowerShellFinding | PowerShellFinding[];
     return Array.isArray(parsed) ? parsed : [parsed];
   } catch {
-    // Unparseable output is handled below as "no findings to render", and the PASS
-    // that follows is the documented behaviour for an analyzer that printed nothing
-    // usable -- the exit code above already caught a real failure.
-    return [];
+    return null;
   }
 }
 
 /** The verdict once the analyzer has produced output. */
 function reportPowerShellFindings(
-  findings: PowerShellFinding[],
+  findings: PowerShellFinding[] | null,
   startMs: number,
   messages: string[],
 ): GateOutput {
+  if (findings === null) {
+    messages.push('     ⚠️  PSScriptAnalyzer produced unreadable output, skipping');
+    recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
+    return { status: 'WARN', messages, exitCode: 0 };
+  }
   if (findings.length > 0) return renderPowerShellFindings(findings, startMs, messages);
   messages.push('     ✅ PASSED - No PowerShell security vulnerabilities found.');
   recordAudit('gate-9', 'sast-security', 'PASS', 0, startMs);
