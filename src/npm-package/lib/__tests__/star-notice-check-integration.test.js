@@ -74,21 +74,42 @@ describe('REQ-871 check invites a star only when every gate passed', () => {
     vi.restoreAllMocks();
   });
 
-  test('stays silent when a gate fails', () => {
-    // `runDefaultChecks` reaches the notice through exactly one guard,
-    // `if (failures === 0)`. Asserting that guard is the honest way to cover
-    // the FAIL path: driving a real gate into failure inside this repo is not
-    // reproducible, because the gates resolve configuration from the enclosing
-    // checkout -- measured, `check --all` on a bare fixture passes 9/19.
-    // The subprocess suite (star-notice-wiring.test.js) covers the piped CLI.
-    const source = fs.readFileSync(path.join(__dirname, '..', 'check.js'), 'utf8');
-    const guard = source.match(/if \(failures === 0\) (\w+)\(\);/);
-    expect(guard, 'the notice must sit behind the all-passed guard').not.toBeNull();
-    expect(guard[1]).toBe('celebrateCleanRun');
+  test('stays silent when a gate fails', async () => {
+    // Round 3's remaining objection: the earlier version grepped check.js for
+    // the guard instead of running it. This drives the FAIL path for real --
+    // `principles` is replaced on its module export, then the SAME check.js is
+    // re-required, so the code under test is the shipped `runDefaultChecks`,
+    // not a copy of its string.
+    //
+    // Driving a real gate to failure is not reproducible here: the gates
+    // resolve configuration from the enclosing checkout, so `check --all` on a
+    // bare fixture passes 9/19. Replacing one gate's verdict is the smallest
+    // honest way to reach the branch.
+    const principlesModule = require('../principles.js');
+    const originalPrinciples = principlesModule.principles;
+    const checkPath = require.resolve('../check.js');
+    const cachedCheck = require.cache[checkPath];
 
-    // And the guard must not be reachable on the failure branch: the line that
-    // returns a non-zero code comes from the same expression.
-    expect(source).toContain('return failures === 0 ? 0 : 1;');
+    principlesModule.principles = async () => 1;
+    delete require.cache[checkPath];
+    try {
+      vi.restoreAllMocks();
+      const freshSpy = vi.spyOn(starNotice, 'maybeShowStarNotice').mockImplementation(() => true);
+      const muted = vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const freshCheck = require('../check.js');
+      const exitCode = await freshCheck.check(['.']);
+
+      expect(exitCode, 'a failing gate must produce a failing exit code').toBe(1);
+      expect(freshSpy, 'a failed check must not invite a star').not.toHaveBeenCalled();
+      muted.mockRestore();
+      vi.restoreAllMocks();
+    } finally {
+      principlesModule.principles = originalPrinciples;
+      if (cachedCheck) require.cache[checkPath] = cachedCheck;
+      else delete require.cache[checkPath];
+    }
   });
 
   test('reaches the notice exactly once when every gate passes', async () => {
