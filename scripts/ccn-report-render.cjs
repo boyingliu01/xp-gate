@@ -49,6 +49,9 @@ function collectGateTimings(report, deps) {
 function countOverByBucket(functions, bucket, threshold) {
   return functions.filter((f) => f.bucket === bucket && f.ccn > threshold).length;
 }
+/** The default `--top` count, named so the parser and its fallback agree. */
+const DEFAULT_TOP = 20;
+
 function productionOverThreshold(functions) {
   return functions.filter((f) => f.bucket === 'production' && f.ccn > 10);
 }
@@ -79,10 +82,28 @@ function printReport(report, get, deps) {
  * closure, not because the code is complex. Counting them as production would block every
  * commit on a shape nobody can change; hiding them would make the report lie by omission.
  */
+/**
+ * The `--top` count, or 20.
+ *
+ * `parseInt` alone is not enough: `--top abc` yields NaN and `slice(0, NaN)` returns an
+ * EMPTY list, which reads as "no functions over the threshold" -- a confident report about
+ * a filter the caller typo'd. `--top -1` silently drops the last row instead (review
+ * CI-02). A bad value falls back to the default and says so on stderr.
+ */
+function parseTopCount(raw) {
+  if (raw === undefined) return DEFAULT_TOP;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    console.error(`[ccn-report] ignoring --top ${raw}: not a positive integer, using ${DEFAULT_TOP}`);
+    return DEFAULT_TOP;
+  }
+  return parsed;
+}
+
 function buildSummary(report, get, deps) {
   const { byGate } = collectGateTimings(report, deps);
   const prodOver = productionOverThreshold(report.functions);
-  const top = parseInt(get('--top') || '20', 10);
+  const top = parseTopCount(get('--top'));
   return {
     files_scanned: report.filesScanned,
     production_functions_gt10: prodOver.length,

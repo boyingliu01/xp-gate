@@ -46,8 +46,14 @@ function requireEmptyOutputIsReal({ err, root, relPath, withStderr }) {
  */
 function requireNotTruncated({ err, relPath }) {
   if (!err) return;
-  if (!err.killed && !err.signal) return;
-  throw new Error(`lizard was killed while measuring ${relPath} (${err.signal || 'timeout'}); output is truncated`);
+  // `ETIMEDOUT` is checked explicitly. Measured with `spawnSync(..., { timeout })`:
+  // `signal` is set to SIGTERM but `killed` is UNDEFINED, so a guard written against
+  // `killed` alone would miss a timeout entirely. `signal` happens to cover this case,
+  // and naming the code keeps it covered if Node ever stops sending the signal (review
+  // FC-02).
+  const timedOut = err.code === 'ETIMEDOUT';
+  if (!err.killed && !err.signal && !timedOut) return;
+  throw new Error(`lizard was killed while measuring ${relPath} (${err.signal || err.code || 'timeout'}); output is truncated`);
 }
 
 module.exports = { requireEmptyOutputIsReal, requireNotTruncated };
