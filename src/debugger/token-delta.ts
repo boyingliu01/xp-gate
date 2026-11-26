@@ -119,10 +119,28 @@ function lastRecordFor(history: TokenRecord[], sprintId: string): TokenRecord | 
  * With no previous record the runner's cumulative counters ARE the delta: they reset at
  * a sprint boundary, so their whole value happened in this sprint.
  */
+/**
+ * The delta since the previous record, never negative.
+ *
+ * The counters are CUMULATIVE within a runner process, so a counter that went DOWN means
+ * the process restarted (or the caller corrected it) -- not that the run un-consumed
+ * tokens. Subtracting anyway wrote a negative delta into the audit history, where it is
+ * indistinguishable from a real measurement and corrupts every sum that reads it
+ * (review CI-02 / FC-02, same finding from two seats).
+ *
+ * A reset is treated as "the whole current count is new", which is what actually happened.
+ */
 function deltasFrom(lastRecord: TokenRecord | null, options: RecordTokenDeltaOptions) {
-  const input = lastRecord ? options.inputTokens - lastRecord.input_tokens : options.inputTokens;
-  const output = lastRecord ? options.outputTokens - lastRecord.output_tokens : options.outputTokens;
+  const input = nonNegativeDelta(options.inputTokens, lastRecord?.input_tokens);
+  const output = nonNegativeDelta(options.outputTokens, lastRecord?.output_tokens);
   return { deltaInput: input, deltaOutput: output, deltaTotal: input + output };
+}
+
+/** `current` minus `previous`, treating a DECREASE as a counter reset. */
+function nonNegativeDelta(current: number, previous: number | undefined): number {
+  if (previous === undefined) return current;
+  const delta = current - previous;
+  return delta >= 0 ? delta : current;
 }
 
 export function recordTokenDelta(options: RecordTokenDeltaOptions): void {

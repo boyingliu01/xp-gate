@@ -103,6 +103,11 @@ function armTimer(state: ExporterState): void {
   state.flushTimer = setTimeout(() => {
     state.flushTimer = null;
     flushBuffer(state);
+    // Re-arm only when there is work AND no shutdown is pending. A record that arrives
+    // while `shutdownRequested` is true is not stranded: `shutdown` and the SIGTERM
+    // handler both call `drain`, which writes synchronously. (Review CI-01 raised the
+    // stranded-record case; it needs a record to arrive AFTER drain, and by then the
+    // process is exiting.)
     if (state.buffer.length > 0 && !state.shutdownRequested) {
       if (canSchedule(state)) armTimer(state);
     }
