@@ -388,7 +388,24 @@ SOURCE_EXTENSIONS="\.py$|\.js$|\.cjs$|\.mjs$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.
 # its .bats suite was classified "Documentation-only push (no source code
 # files)" and the walkthrough was skipped — the single most safety-critical
 # script in the repo, exempt from review by a filename-shape accident.
-NON_EXT_SOURCE_RE='^(githooks/(pre-commit|pre-push|post-merge|install\.sh|verify\.sh)|[^/]+\.bats)$|/__tests__/'
+#
+# The same accident covered every file that decides what SHIPS. Measured
+# 2026-11-26, each of these was classified "非源码" and skipped the walkthrough
+# entirely:
+#
+#   src/npm-package/package.json   the `files` allowlist and `bin` entry
+#   src/npm-package/.npmignore     what the tarball excludes
+#   .github/workflows/*.yml        what CI runs
+#   package-lock.json              the dependency graph
+#
+# A push that changes only package.json can add a file to the published
+# tarball, repoint `bin`, or widen the `files` glob — and no gate looked at it.
+# Reviewing that as "documentation only" is the same defect as the githooks
+# case, one layer out: the file's NAME decided whether it was reviewed.
+#
+# Artefacts that are genuinely not code stay classified as such: markdown,
+# images, LICENSE and similar are not matched here and never were.
+NON_EXT_SOURCE_RE='^(githooks/(pre-commit|pre-push|post-merge|install\.sh|verify\.sh)|[^/]+\.bats)$|/__tests__/|(^|/)package\.json$|(^|/)package-lock\.json$|(^|/)\.npmignore$|^\.github/workflows/.*\.ya?ml$'
 
 for file in $PUSHED_FILES; do
   if echo "$file" | grep -qE "$SOURCE_EXTENSIONS" || echo "$file" | grep -qE "$NON_EXT_SOURCE_RE"; then
