@@ -90,11 +90,24 @@ function secretsFound(startMs: number, messages: string[], stdout: string): Gate
  * SKIP rather than PASS: nothing was examined, and a PASS here would claim the
  * repository is clean on the strength of a broken scan.
  */
+/**
+ * gitleaks could not complete: FAIL, not SKIP.
+ *
+ * `AGENTS.md` states the rule as "Tool missing → SKIP, not BLOCK — except secret
+ * scanning, which is fail-closed: a security gate that cannot run must not report
+ * success." A gitleaks that timed out or crashed is exactly "cannot run", and this
+ * returned `SKIP` with exit code 0 while printing a green tick -- the third of those
+ * three statements contradicted the first two (review FC-01).
+ *
+ * A MISSING gitleaks still SKIPs: that is a deliberate choice about a development
+ * checkout without the tool, and it is unchanged. Whether the scan STARTED and failed is
+ * a different question from whether it could start at all.
+ */
 function gitleaksErrored(startMs: number, messages: string[], exitCode: number): GateOutput {
-  messages.push(`     ⚠️  gitleaks exited with code ${exitCode} - skipping gate`);
-  messages.push('     ✅ Secret Scanning (SKIP, gitleaks error)');
-  recordAudit('gate-8', 'secret-scanning', 'SKIP', exitCode, startMs);
-  return { status: 'SKIP', messages, exitCode: 0 };
+  messages.push(`     ❌ FAILED - Secret scanning could not complete (gitleaks exited ${exitCode})`);
+  messages.push('     This is NOT a clean scan: nothing was verified. Fix gitleaks, then re-run.');
+  recordAudit('gate-8', 'secret-scanning', 'FAIL', exitCode, startMs);
+  return { status: 'FAIL', messages, exitCode: 1 };
 }
 
 /** The report + remediation shown when gitleaks finds secrets (exit code 1). */

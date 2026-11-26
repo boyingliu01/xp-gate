@@ -12,6 +12,13 @@ vi.mock('child_process', () => ({
   spawnSync: vi.fn(),
 }));
 
+/** A `spawnSync` result for the mocked gitleaks calls. */
+function spawnResult(status: number, stdout: string, stderr = '') {
+  return { status, stdout, stderr, pid: 1, output: ['', stdout, stderr], signal: null } as never;
+}
+
+
+
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -37,7 +44,7 @@ describe('gate-8.ts', () => {
 
   it('SKIPs when gitleaks is not installed', () => {
     // isToolAvailable: which fails, npx fails, custom path doesn't exist
-    mockSpawnSync.mockReturnValue({ status: 1, stdout: '', stderr: '', pid: 1, output: ['', '', ''], signal: null } as any);
+    mockSpawnSync.mockReturnValue(spawnResult(1, '', ''));
 
     const result = runGate8({ changedFiles: ['src/app.ts'], projectLang: 'typescript' });
     expect(result.status).toBe('SKIP');
@@ -46,13 +53,9 @@ describe('gate-8.ts', () => {
 
   it('PASSes when gitleaks finds no secrets', () => {
     // Tool found via PATH
-    mockSpawnSync.mockReturnValueOnce({
-      status: 0, stdout: '/usr/bin/gitleaks\n', stderr: '', pid: 1, output: ['', '/usr/bin/gitleaks\n', ''], signal: null,
-    } as any);
+    mockSpawnSync.mockReturnValueOnce(spawnResult(0, '/usr/bin/gitleaks\n', ''));
     // gitleaks run — exit 0 = no secrets
-    mockSpawnSync.mockReturnValueOnce({
-      status: 0, stdout: '', stderr: '', pid: 1, output: ['', '', ''], signal: null,
-    } as any);
+    mockSpawnSync.mockReturnValueOnce(spawnResult(0, '', ''));
 
     const result = runGate8({ changedFiles: ['src/app.ts'], projectLang: 'typescript' });
     expect(result.status).toBe('PASS');
@@ -62,13 +65,9 @@ describe('gate-8.ts', () => {
 
   it('FAILs when gitleaks finds secrets (exit code 1)', () => {
     // Tool found
-    mockSpawnSync.mockReturnValueOnce({
-      status: 0, stdout: '/usr/bin/gitleaks\n', stderr: '', pid: 1, output: ['', '/usr/bin/gitleaks\n', ''], signal: null,
-    } as any);
+    mockSpawnSync.mockReturnValueOnce(spawnResult(0, '/usr/bin/gitleaks\n', ''));
     // gitleaks run — exit 1 = secrets found
-    mockSpawnSync.mockReturnValueOnce({
-      status: 1, stdout: 'Found API key in src/config.ts', stderr: '', pid: 1, output: ['', 'Found API key', ''], signal: null,
-    } as any);
+    mockSpawnSync.mockReturnValueOnce(spawnResult(1, 'Found API key in src/config.ts', ''));
 
     const result = runGate8({ changedFiles: ['src/config.ts'], projectLang: 'typescript' });
     expect(result.status).toBe('FAIL');
@@ -77,29 +76,29 @@ describe('gate-8.ts', () => {
     expect(result.messages.some(m => m.includes('Remediation'))).toBe(true);
   });
 
-  it('SKIPs on gitleaks runtime error (exit code 2)', () => {
-    mockSpawnSync.mockReturnValueOnce({
-      status: 0, stdout: '/usr/bin/gitleaks\n', stderr: '', pid: 1, output: ['', '/usr/bin/gitleaks\n', ''], signal: null,
-    } as any);
-    mockSpawnSync.mockReturnValueOnce({
-      status: 2, stdout: '', stderr: 'config error', pid: 1, output: ['', '', 'config error'], signal: null,
-    } as any);
+  it('FAILS on a gitleaks runtime error (exit code 2)', () => {
+    // SUPERSEDES "SKIPs on gitleaks runtime error". `AGENTS.md` states secret scanning is
+    // the ONE gate that is fail-closed: "a security gate that cannot run must not report
+    // success". A gitleaks that STARTED and errored is exactly that case, and SKIP with
+    // exit code 0 -- while printing a green tick -- is the shape the convention forbids
+    // (review FC-01).
+    //
+    // A MISSING gitleaks still SKIPs; that is a separate decision about a checkout without
+    // the tool, covered by the test below.
+    mockSpawnSync.mockReturnValueOnce(spawnResult(0, '/usr/bin/gitleaks\n', ''));
+    mockSpawnSync.mockReturnValueOnce(spawnResult(2, '', 'config error'));
 
     const result = runGate8({ changedFiles: ['src/app.ts'], projectLang: 'typescript' });
-    expect(result.status).toBe('SKIP');
-    expect(result.exitCode).toBe(0);
+    expect(result.status).toBe('FAIL');
+    expect(result.exitCode).toBe(1);
   });
 
   it('uses .gitleaks.toml config when present', () => {
     mockExistsSync.mockImplementation((p: any) => String(p).endsWith('.gitleaks.toml'));
     // Tool found
-    mockSpawnSync.mockReturnValueOnce({
-      status: 0, stdout: '/usr/bin/gitleaks\n', stderr: '', pid: 1, output: ['', '/usr/bin/gitleaks\n', ''], signal: null,
-    } as any);
+    mockSpawnSync.mockReturnValueOnce(spawnResult(0, '/usr/bin/gitleaks\n', ''));
     // gitleaks run with config
-    mockSpawnSync.mockReturnValueOnce({
-      status: 0, stdout: '', stderr: '', pid: 1, output: ['', '', ''], signal: null,
-    } as any);
+    mockSpawnSync.mockReturnValueOnce(spawnResult(0, '', ''));
 
     const result = runGate8({ changedFiles: ['src/app.ts'], projectLang: 'typescript', cwd: '/project' });
     expect(result.status).toBe('PASS');
