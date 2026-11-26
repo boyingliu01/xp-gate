@@ -79,10 +79,12 @@ async function scanFiles(dir: string, results: string[], basePath: string): Prom
   try {
     entries = await fs.readdir(dir, { withFileTypes: true }) as unknown as import('fs').Dirent[];
   } catch (err) {
-    // An unreadable directory contributes no files; the BASELINE it would have produced
-    // is incomplete, so the failure is reported rather than silently skipped.
-    console.warn(`cannot read ${dir}: ${errMessage(err)}`);
-    return;
+    // THROW, do not warn and continue. A baseline is a record of what was measured, and
+    // one built from a partial tree silently omits every file that directory contained --
+    // those files then score as "no surviving mutants" for the rest of their lives. The
+    // previous `console.warn` + `return` said the failure "is reported", but a warning
+    // scrolls past and the artifact it produced looked complete (review FC-01).
+    throw new Error(`cannot read directory ${dir}: ${errMessage(err)}`);
   }
 
   for (const entry of entries) {
