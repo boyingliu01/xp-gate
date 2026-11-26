@@ -403,9 +403,19 @@ function withoutTable(existing: string, line: string): string {
   return hasMutmutHeader(existing) ? existing : appendTable(existing, line);
 }
 
+/**
+ * A `[tool.mutmut]` header LINE.
+ *
+ * `[ ]` may hold whitespace and a trailing `#` comment is legal TOML --
+ * `[ tool.mutmut ] # note` is a valid header, and a stricter pattern reported "no table"
+ * for it, leaving the array unrewritten (measured). The parser has already confirmed the
+ * table EXISTS; this only has to find where its body starts.
+ */
+const MUTMUT_HEADER = /^[^\S\n]*\[[^\S\n]*tool[^\S\n]*\.[^\S\n]*mutmut[^\S\n]*\][^\n]*$/m;
+
 /** Whether the TEXT has a `[tool.mutmut]` header, parseable or not. */
 function hasMutmutHeader(existing: string): boolean {
-  return /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m.test(existing);
+  return MUTMUT_HEADER.test(existing);
 }
 
 /** The `source_paths = [...]` line, as TOML with quoted entries. */
@@ -549,7 +559,7 @@ function arraySpan(doc: string): { start: number; end: number } | null {
  * value (measured).
  */
 function mutmutBodyRange(doc: string): { start: number; end: number } | null {
-  const header = /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m.exec(doc);
+  const header = MUTMUT_HEADER.exec(doc);
   if (!header) return null;
   const start = header.index + header[0].length;
   const next = /^[^\S\n]*\[/m.exec(doc.slice(start));

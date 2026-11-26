@@ -952,6 +952,20 @@ describe('MutmutRunner', () => {
       expect(mutmutConfigContent(existing, ['new'])).toBe(existing);
     });
 
+    it('finds a header with spaces inside the brackets', async () => {
+      // `[ tool.mutmut ]` is legal TOML. A stricter pattern reported "no table" and left
+      // the array unrewritten (measured).
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      expect(mutmutConfigContent('[ tool.mutmut ]\nsource_paths = ["a"]\n', ['new']))
+        .toBe('[ tool.mutmut ]\nsource_paths = ["new"]\n');
+    });
+
+    it('finds a header with a trailing comment', async () => {
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      expect(mutmutConfigContent('[tool.mutmut] # note\nsource_paths = ["a"]\n', ['new']))
+        .toBe('[tool.mutmut] # note\nsource_paths = ["new"]\n');
+    });
+
     it('ignores a fake key inside a MULTI-LINE string', async () => {
       // A `description = """` body can hold a line that looks exactly like the key.
       // Anchoring on `^` matched it and rewrote the STRING while the real key below was
