@@ -22,9 +22,15 @@ function walkFiles(dir) {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    // An unreadable subtree contributes no files; the checksum pass then reports the
-    // destination side, which is the side a copy can actually break.
+  } catch (err) {
+    // NOT an empty list. Returning [] made an unreadable subtree INVISIBLE to the checksum
+    // pass, which then compared the remaining files and reported success -- a subtree
+    // nobody could read "passing" by absence (review FC-01).
+    //
+    // The sentinel mirrors `sha256File`'s `'unreadable'`: a path that cannot be hashed
+    // must make the comparison FAIL, not disappear from it. Two functions in one file
+    // disagreeing about what an unreadable path means is how this survived review.
+    results.push(path.join(dir, '.unreadable-directory'));
     return results;
   }
   for (const entry of entries) {
