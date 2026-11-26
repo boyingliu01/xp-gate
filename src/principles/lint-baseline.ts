@@ -70,11 +70,38 @@ interface ShellcheckResult {
  * @returns a function from a reported path to the matched file, or null
  */
 function makeFileMatcher(files: string[], bidirectional: boolean) {
-  const fileSet = new Set(files);
-  return (reported: string): string | null => {
-    const matched = files.find((f) => f.endsWith(reported) || (bidirectional && reported.endsWith(f)));
-    return matched && fileSet.has(matched) ? matched : null;
-  };
+  return (reported: string): string | null => pickMatchedFile(files, reported, bidirectional);
+}
+
+/**
+ * The file a reported path refers to, or null.
+ *
+ * PATH-BOUNDARY match, not a bare `endsWith`. `endsWith('bar.ts')` is true for
+ * `foobar.ts`, so a report about one file claimed another file's baseline entry -- the
+ * counts land on the wrong file and the real one looks clean (review MC-01).
+ */
+function pickMatchedFile(files: string[], reported: string, bidirectional: boolean): string | null {
+  return files.find((f) => eitherEndsAtBoundary(f, reported, bidirectional)) ?? null;
+}
+
+/** Either direction of the suffix match, when the caller allows both. */
+function eitherEndsAtBoundary(f: string, reported: string, bidirectional: boolean): boolean {
+  if (endsAtPathBoundary(f, reported)) return true;
+  return bidirectional && endsAtPathBoundary(reported, f);
+}
+
+/**
+ * Whether `whole` ends with `suffix` on a path boundary (`/` or the start).
+ *
+ * A suffix that begins with a separator already carries its boundary; otherwise the
+ * character before it must be one.
+ */
+function endsAtPathBoundary(whole: string, suffix: string): boolean {
+  if (suffix === '' || !whole.endsWith(suffix)) return false;
+  if (whole.length === suffix.length) return true;
+  if (suffix.startsWith('/') || suffix.startsWith('\\')) return true;
+  const before = whole[whole.length - suffix.length - 1];
+  return before === '/' || before === '\\';
 }
 
 /** A tool's warning/error counts for one file. */
@@ -263,7 +290,19 @@ export function parseLintOutput(
 
   try {
     return parser(JSON.parse(output), files);
-  } catch {
+  } catch (err) {
+    // The RETURN stays `{}` -- the caller's exit-code check is what decides whether a run
+    // failed, and changing a return type here would be a bigger contract change than the
+    // defect. But silence is wrong: an unparseable payload and a genuinely clean run both
+    // produce "no entries", and a baseline built on the first is missing every one of them
+    // (review MC-02 / FC-01, two seats). The warning is the only signal that separates them.
+    //
+    // Note this function has no production caller yet; the risk is realised the moment one
+    // is added, which is why the signal is here rather than in the future caller.
+    console.warn(
+      `[lint-baseline] could not parse ${tool} output (${output.length} bytes): `
+        + `${err instanceof Error ? err.message : String(err)} — treating as no entries`,
+    );
     return {};
   }
 }
