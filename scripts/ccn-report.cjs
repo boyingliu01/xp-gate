@@ -96,11 +96,23 @@ const RESCUE_WINDOW_LINES = 400;
  * prefix is still not production), and adding a bucket should not move the enclosing
  * function's complexity.
  */
+/**
+ * Where a row's file belongs, first match wins.
+ *
+ * `TEST_PATH` is FIRST, and not for tidiness: the location rules below it are prefix
+ * tests, so `plugins/dsh/client/client.test.js` matched `HOST_CLOSURE_PREFIX` and was
+ * bucketed `host-closure` -- exempt from the production threshold -- before the test
+ * pattern was ever consulted. A test file must not escape the threshold by where it
+ * happens to live (review CI-01 / FC-01).
+ *
+ * Nothing in the repository has that shape today, which is why this is a latent bug
+ * rather than a live one; the first `client/*.test.js` would have made it live.
+ */
 const BUCKET_RULES = [
+  [TEST_PATH, 'test'],
   [MIRROR_PREFIX, 'mirror'],
   [PLUGIN_BUNDLE_PREFIX, 'mirror'],
   [HOST_CLOSURE_PREFIX, 'host-closure'],
-  [TEST_PATH, 'test'],
 ];
 
 function bucketFor(relPath) {
@@ -129,7 +141,6 @@ function taggedError(code, message) {
   err.code = code;
   return err;
 }
-
 
 // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name: field 8
 // is only trustworthy when it carries no '@'. A C operator function
@@ -233,27 +244,15 @@ function isReadableFile(target) {
 }
 
 // Lizard's TS parser loses brace balance on generic-arrow fields such as
-// `const handlers: Record<string, (p: X, n?: Y) => boolean> = {` — the `<...>`
-// reads as comparison operators and the `{` goes uncounted. From that line to
-// EOF every reported function span swallows everything in between, so CCN is
-// charged across neighbours (measured: showHelp body is 687-706 real, lizard
-// reports 687-763 with CCN=77). The scary numbers are exactly the broken ones.
-// Recompute CCN over the brace-balanced body instead. Branch tokens, counted
-// outside strings/comments/templates.
-//
-// `?:` ternaries ARE counted, matching lizard: verified against lizard 1.21.3,
-// `return a ? b : c;` scores 2 and `return a ?? b;` scores 3. An earlier comment
-// here claimed ternaries were deliberately excluded — it was wrong, and the
-// regex was right. `\?[^.]` is what makes it right: it counts `?` unless it
-// begins `?.` (optional chaining, which is not a branch — `a?.b` stays at 1).
-// `else` is NOT a branch token at all. lizard does not count it: measured on
-// lizard 1.26.1, `function a(x){ if(x){} else {} }` and `function a(x){ if(x){} }`
-// both score CCN 2, and `if / else if` scores 3 with or without a trailing `else`.
-// Counting `else` charged every function that has one an extra point. On
-// src/principles/adapters/java.ts that read as a uniform CCN baseline+1 across
-// the file (braceDepth 5->6, maskCode 1->2, lineOf 1->2, extractBracedBlock 6->7)
-// while lizard's own CSV matched the baseline exactly. A uniform offset is the
-// signature of a counting rule, not of code getting more complex.
+// `const handlers: Record<string, (p: X, n?: Y) => boolean> = {`: `<...>` reads as
+// comparison operators, the `{` goes uncounted, and every span from there to EOF swallows
+// its neighbours (measured: showHelp body 687-706 real, lizard reports 687-763 at CCN=77).
+// So CCN is recomputed over the brace-balanced body, counting branch tokens outside
+// strings/comments/templates. Verified against lizard 1.21.3: `a ? b : c` scores 2 and
+// `a ?? b` scores 3, so ternaries ARE counted -- `\?[^.]` counts `?` unless it begins
+// `?.` (chaining is not a branch). `else` is NOT a token: measured on lizard 1.26.1,
+// `if(x){} else {}` and `if(x){}` both score 2, so counting it charged every function an
+// extra point -- on java.ts that read as a uniform baseline+1 while lizard's CSV matched.
 
 // Gate 3 (#544): rewrite `lizard --csv` rows with the VERIFIED CCN so the gate
 // and the ratchet baseline speak the same numbers. Fatal (exit 1) on a row
@@ -277,9 +276,26 @@ function isReadableFile(target) {
  * a wrong decision, and the caller cannot tell it from a verified one.
  */
 function refuseUnverifiedRows(tally, srcPath, allowUnverified) {
-  if (tally.unverified === 0 || allowUnverified) return;
-  console.error(`FAIL - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
+  if (tally.unverified === 0) return;
+  // Still emit when asked, but SAY SO: an unmarked warning-free run is indistinguishable
+  // from a fully verified one, and an unverified high-CCN row can reach the baseline as
+  // though a human had checked it (review CI-02).
+  if (allowUnverified) {
+    console.error(
+      `WARN - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be `
+        + `span-verified in ${srcPath}; --allow-unverified was given, so they are emitted UNVERIFIED`,
+    );
+    return;
+  }
+  console.error(unverifiedFailure(tally.unverified, srcPath));
   process.exit(1);
+}
+
+
+/** What a run without the flag says before refusing. */
+function unverifiedFailure(count, srcPath) {
+  return `FAIL - ${count} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified `
+    + `(${srcPath}); refusing to emit unverified complexity`;
 }
 
 /**
@@ -422,12 +438,9 @@ function mergeDuplicateRow({ functions, byRowKey, rowKey, ccn, nloc }) {
   return true;
 }
 
-// Turn one file's lizard CSV into rows, recording the two facts that separate
-// "no functions here" from "nothing ran": whether any data row was seen and
-// whether lizard printed its header at all.
-//
-// Split out of processSourceFile so the per-line parsing lives on its own; the
-// two flags it reports back are the caller's silent-zero guard.
+// Turn one file's lizard CSV into rows, recording the two facts that separate "no
+// functions here" from "nothing ran": whether any data row was seen, and whether lizard
+// printed its header at all. Those two flags are the caller's silent-zero guard.
 // What a raw CSV line is, before any parsing.
 //   'skip'   -- blank or not a data row
 //   'header' -- lizard's column header (`NLOC,CCN,...`); printed once per file
@@ -768,19 +781,11 @@ function ratchetFindings(report, baseline, warnThreshold = 5, blockThreshold = 1
 // byte-identical file; an unordered declaration would churn the diff on every
 // refresh and make "did the population change?" unreadable.
 //
-// Both axes are derived from f.file, NOT from the baseline KEY: keys embed `::`
-// and `@line` (baselineKey), so path.extname() on a key would read the suffix of
-// a symbol name as an extension.
-//
-// Named rather than inlined: the two chains used to sit directly in main() as
-// four arrow callbacks, and lizard scores each callback as its own anonymous
-// function -- six of them above the CCN-10 block threshold, in the tool whose job
-// is to report exactly that. A named helper is also where the "which functions
-// count" predicate belongs; it now has one definition instead of two copies that
-// could drift apart.
-// Sorted + de-duplicated: a re-run on unchanged inputs must produce a
-// byte-identical file, or the diff churns on every refresh and "did the
-// population change?" becomes unreadable.
+// Both axes are derived from f.file, NOT from the baseline KEY: keys embed `::` and
+// `@line` (baselineKey), so path.extname() on a key reads a symbol suffix as an extension.
+// Named rather than inlined: the two chains sat in main() as four arrow callbacks, and
+// lizard scores each as its own anonymous function -- six of them over the CCN-10
+// threshold, in the tool whose job is to report exactly that.
 function uniqueSorted(values) {
   return [...new Set(values)].sort();
 }
@@ -813,7 +818,9 @@ function baselinePopulation(functions) {
 // main()'s own CCN past the threshold this file exists to report.
 function writeBaseline(report) {
   if (report.unverified_rows.length) {
-    console.error(`FAIL - ${report.unverified_rows.length} function(s) above CCN 10 could not be span-verified; refusing to write a baseline that would record an unverified complexity as its ceiling:`);
+    // Same reason as `refuseUnverifiedRows`: a baseline is a CEILING, so recording an
+    // unverified number there decides future verdicts on a measurement nobody checked.
+    console.error(unverifiedFailure(report.unverified_rows.length, 'baseline write'));
     for (const row of report.unverified_rows.slice(0, 20)) console.error(`  ${row}`);
     process.exit(1);
   }
@@ -843,13 +850,11 @@ function writeBaseline(report) {
   // Which analyzer produced these numbers. Without it a baseline is
   // indistinguishable from one written by any other lizard release, and the
   // ratchet happily compares across versions that disagree about the same
-  // functions (see checkLizardVersion). Recorded as `null` when the version
-  // probe is unsupported; the reader treats null as "unknown, compare anyway"
-  // rather than as a mismatch, so an older toolchain still works.
+  // functions (see checkLizardVersion). `null` when the version probe is unsupported; the
+  // reader treats null as "unknown, compare anyway" so an older toolchain still works.
   const document = { analyzer: { tool: 'lizard', version: report.lizardVersion ?? null }, population, entries: baseline };
-  // A refused write must be loud. Silently continuing would print "wrote N
-  // entries" for a file that does not exist, and the next gate run would then
-  // grade against the previous baseline while believing it was refreshed.
+  // A refused write must be loud: otherwise "wrote N entries" prints for a file that does
+  // not exist, and the next gate grades the OLD baseline believing it was refreshed.
   try {
     fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
   } catch (err) {
@@ -857,8 +862,8 @@ function writeBaseline(report) {
   }
   console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
   console.log(`  analyzer: lizard ${report.lizardVersion ?? '(version unknown)'}`);
-  // The reader accepts both shapes (see ccn-ratchet.sh), so an older gate can
-  // still load this file: a flat map and {population, entries} both parse.
+  // Both shapes parse (ccn-ratchet.sh): a flat map and {population, entries}, so an
+  // older gate still loads a file this version wrote.
 }
 
 // A ratchet is only sound if the same analyzer wrote the ceiling and took today's
