@@ -558,7 +558,6 @@ describe('MutmutRunner', () => {
       );
       expect(mockChild.kill).toHaveBeenCalledWith('SIGTERM');
       expect(result).toEqual({ report: null, timedOut: true });
-      // Settling proves cleanup; getTimerCount also counts the harness's own.
       expect(result.timedOut).toBe(true);
     });
 
@@ -922,7 +921,6 @@ describe('MutmutRunner', () => {
 
   describe('unreadable progress counts', () => {
     it('returns null when an emoji has no number', () => {
-      // Absent emoji = a measured zero; present with no number = a parse failure.
       const runner = new MutmutRunner('linux');
       const parse = (line: string) => (runner as unknown as {
         parseEmojiProgress: (t: string) => { mutationScore: number } | null;
@@ -963,7 +961,6 @@ describe('MutmutRunner', () => {
       const existing = '[tool.mutmut]\ndescription = """\n[x]\n"""\nsource_paths = ["a"]\n';
       expect(mutmutConfigContent(existing, ['new'])).toContain('source_paths = ["new"]');
     });
-
     it('finds a header with spaces inside the brackets or a trailing comment', async () => {
       // Both are legal TOML; a stricter pattern missed them (measured).
       expect(mutmutConfigContent('[ tool.mutmut ]\nsource_paths = ["a"]\n', ['new']))
@@ -971,20 +968,24 @@ describe('MutmutRunner', () => {
       expect(mutmutConfigContent('[tool.mutmut] # note\nsource_paths = ["a"]\n', ['new']))
         .toBe('[tool.mutmut] # note\nsource_paths = ["new"]\n');
     });
+    it('does not open a string at a QUOTE inside a comment', async () => {
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const existing = "[tool.mutmut]\n# don't touch this\nsource_paths = [\"a\"]\n";
+      const out = mutmutConfigContent(existing, ['new']);
+      expect(out).toContain('source_paths = ["new"]');
+      expect(out).toContain("don't");
+    });
 
     it('does not close the array at a bracket inside a COMMENT', async () => {
-      // A `#` runs to end of line; a `]` inside one is prose, not the array end.
       const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const existing = '[tool.mutmut]\nsource_paths = [\n  "a", # ] tricky\n  "b",\n]\n';
       expect(mutmutConfigContent(existing, ['new'])).toBe('[tool.mutmut]\nsource_paths = ["new"]\n');
     });
-
     it('does not end a string at an ESCAPED quote', async () => {
-      // `\"` is data; without handling it the key after it was skipped (measured).
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const existing = '[tool.mutmut]\ndescription = "a \\" b"\nsource_paths = ["x"]\n';
       expect(mutmutConfigContent(existing, ['new'])).toContain('source_paths = ["new"]');
     });
-
     it('ignores a fake key inside a MULTI-LINE string', async () => {
       // A string body can hold a line that looks like the key (measured).
       const existing = '[tool.mutmut]\ndescription = """\nsource_paths = ["fake"]\n"""\nsource_paths = ["real"]\n';
@@ -1039,7 +1040,6 @@ describe('MutmutRunner', () => {
       expect(out).toContain('source_paths = ["other_a"]');
       expect(out).not.toContain('mut_a');
     });
-
     it('replaces a single-line source_paths', async () => {
       const out = mutmutConfigContent('[tool.mutmut]\nsource_paths = ["old"]\n', ['new']);
       expect(out).not.toContain('"old"');

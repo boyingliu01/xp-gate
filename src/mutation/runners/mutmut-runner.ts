@@ -551,9 +551,13 @@ function scanLineForQuote(line: string, quote: string | null): string | null {
   while (i < line.length) {
     const skipped = escapedCharacter(line, i, open);
     if (skipped > 0) { i += skipped; continue; }
-    const hit = QUOTE_TOKENS.find((token) => line.startsWith(token.delimiter, i));
-    open = hit ? nextDelimiter(open, hit.delimiter) : open;
-    i += hit ? hit.delimiter.length : 1;
+    // A `#` OUTSIDE a string starts a comment to end of line: nothing after it is code,
+    // so a `'` in `# don't touch this` must not open a string -- measured, it swallowed
+    // the rest of the line and the real key below was never found.
+    if (open === null && line[i] === '#') return null;
+    const delimiter = delimiterAt(line, i);
+    open = delimiter === null ? open : nextDelimiter(open, delimiter);
+    i += delimiter === null ? 1 : delimiter.length;
   }
   return open;
 }
@@ -575,8 +579,13 @@ function nextDelimiter(open: string | null, delimiter: string): string | null {
   return open === delimiter ? null : open;
 }
 
-/** The TOML string delimiters, LONGEST FIRST so the triple forms win. */
-const QUOTE_TOKENS = [{ delimiter: '"""' }, { delimiter: "'''" }, { delimiter: '"' }, { delimiter: "'" }];
+/** The TOML string delimiter starting at `i`, or null. LONGEST first, so `\"\"\"` wins. */
+function delimiterAt(line: string, i: number): string | null {
+  return QUOTE_DELIMITERS.find((d) => line.startsWith(d, i)) ?? null;
+}
+
+/** The TOML string delimiters, longest first so the triple forms win. */
+const QUOTE_DELIMITERS = ['"""', "'''", '"', "'"];
 
 /** Where the `source_paths = [...]` value sits in the text, or null. */
 function arraySpan(doc: string): { start: number; end: number } | null {
