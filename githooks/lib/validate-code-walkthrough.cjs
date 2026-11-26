@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const { execFileSync } = require('child_process');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -468,17 +470,33 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
   validateResolvedModel(expert, resolvedModels);
 }
 
-function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats) {
+function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, coversHead) {
   if (!isPlainObject(evidence)) fail('top level must be a plain object.');
-  validateEvidenceIdentity(evidence, expectedCommit, expectedBranch);
+  validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead);
   validateEvidenceTimestamps(evidence, now);
   validateConsensusRatio(evidence.consensus_ratio);
   validateExperts(evidence.experts, bindingSeats);
 }
 
 /** The document must describe this exact push, and must approve it. */
-function validateEvidenceIdentity(evidence, expectedCommit, expectedBranch) {
-  if (evidence.commit !== expectedCommit) fail('commit does not match HEAD.');
+/**
+ * The commit a walkthrough must cover: HEAD, or an ancestor of it.
+ *
+ * Evidence names the commit the review SAW. Requiring it to equal HEAD made every
+ * commit after a review invalidate it, so a branch that was worked on for a day could
+ * not be pushed without a fresh three-model sweep of everything -- and a branch that
+ * had never been pushed needed one sweep of its ENTIRE history, which does not fit in
+ * the 40 KB prompt budget. Batching was therefore not merely awkward but impossible.
+ *
+ * `coversHead` (set by the caller when it can resolve git) accepts evidence for an
+ * ANCESTOR, because that commit is inside the range being pushed: the review did see
+ * the code that is landing. The check still rejects a commit on another branch, and
+ * still rejects a hypothetical one, since neither is an ancestor of HEAD.
+ */
+function validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead) {
+  const exact = evidence.commit === expectedCommit;
+  const ancestor = typeof coversHead === 'function' && coversHead(evidence.commit);
+  if (!exact && !ancestor) fail('commit does not match HEAD.');
   if (evidence.branch !== expectedBranch) fail('branch does not match the current branch.');
   if (evidence.verdict !== 'APPROVED') fail('top-level verdict must be APPROVED.');
 }
@@ -565,7 +583,35 @@ function main() {
 
   const root = resolveProjectRoot(projectRoot);
   const bindingSeats = root === null ? null : loadBindingSeats(root);
-  validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats);
+  validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, ancestorCheck(root));
+}
+
+/**
+ * A predicate that answers "is `commit` an ancestor of HEAD in this repository?".
+ *
+ * Resolved HERE rather than in the validator's core, so the identity rule stays
+ * testable without a git repository. A missing repository, a missing git, or a commit
+ * object that does not exist all answer `false`: the exact-match path still works, and
+ * the gate never PASSES on a lookup it could not perform.
+ */
+function ancestorCheck(root) {
+  // `root` is null when the caller passed no project-root, which is normal for an
+  // ad-hoc invocation. Falling back to `cwd` keeps the ancestor rule WORKING instead of
+  // silently reverting to exact-match only -- a check that quietly disables itself is
+  // the failure shape this repository keeps finding.
+  const cwd = root === null ? process.cwd() : root;
+  return (commit) => {
+    if (typeof commit !== 'string' || commit === '') return false;
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+        cwd,
+        stdio: 'ignore',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 main();

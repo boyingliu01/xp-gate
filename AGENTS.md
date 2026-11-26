@@ -184,6 +184,37 @@ difference, not the product.
 - **Three gates skip on main/master pushes by design** (pre-reviewed via PR).
   That is intentional; do not "fix" it.
 
+## PUSH RHYTHM — the walkthrough gate makes batching expensive
+
+Gate MW (code walkthrough) is the one gate whose cost GROWS with how long you
+wait, and its shape is easy to work against without noticing:
+
+- **The evidence names the commit the review saw.** It must be that commit or an
+  ANCESTOR of HEAD — never an unrelated one.
+- **It expires in one hour.** Review, then push; a review that sits overnight is
+  worthless.
+- **A review's input budget is 40 KB per expert** — roughly two source files.
+
+Measured 2026-11-26, on a branch that had never been pushed: **223 files,
+26 713 changed lines, 300+ commits**. At 40 KB per review that is ~27 reviews
+minimum, and the first push could not be performed at all. Three branches were
+sitting in that state.
+
+**So: push at least once per work session.** Concretely:
+
+- Push after a coherent unit (one gate change, one refactor with green tests),
+  not after a day of work.
+- A branch that has never been pushed is the WORST case, not the safest: its
+  first push must review everything on it at once. `git log @{u}..HEAD` failing
+  with "no upstream configured" is the warning sign.
+- If a review is rejected and you commit fixes, push promptly — each new commit
+  on top would otherwise need its own review before the one you have can be used.
+
+This is not a rule about discipline for its own sake. Batching genuinely costs
+MORE here: 27 reviews for one push of a large branch, versus one review per push
+when each push is small. **Small pushes are the cheaper option, and the gate is
+built to say so.**
+
 ## MEASUREMENT DISCIPLINE
 
 This machine runs at 90–100% CPU, so noise routinely exceeds the effect being
