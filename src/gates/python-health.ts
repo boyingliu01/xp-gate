@@ -404,6 +404,11 @@ function versionViaExecutable(name: string, cwd?: string): string | null {
     npx ? ['-y', name, '--version'] : ['--version'],
     { timeoutMs: 5000, cwd },
   );
+  // The exit code decides, exactly as in `versionViaModule` above. Without it a tool that
+  // crashed or timed out is reported "available" whenever a version-looking string reached
+  // stdout or stderr -- and those are the runs whose banner is least trustworthy (review
+  // FC-02). Two functions asking the same question must not answer it differently.
+  if (result.exitCode !== 0 || result.timedOut) return null;
   return versionFrom(result);
 }
 
