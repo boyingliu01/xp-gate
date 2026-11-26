@@ -106,7 +106,24 @@ function maxNestingOf(body: string): number {
   return Math.max(0, maxDepth);
 }
 
-/** A quoted run, keeping the quotes but not the contents. */
+/**
+ * A quoted run, keeping the quotes but not the contents.
+ *
+ * This does NOT model C#'s grammar -- no raw strings, no verbatim strings -- and it does
+ * not need to. MEASURED against every form that can hold a brace:
+ *
+ *   `"""\n{ { { {\n"""`         raw string      -> 0 braces survive
+ *   `@"a""b{ {"`                   verbatim        -> 0 braces survive
+ *   `"""\nsay "hi" { {\n"""`        raw + quotes     -> 0 braces survive
+ *   `@"a""b{ {"; if (x) { }`       verbatim + code -> 1 brace, which is the `if`
+ *
+ * The reason is structural: C# quote pairing always yields a CLOSED interval, and a
+ * verbatim `""` escape consumes as two adjacent literals. So the regex is right for any
+ * input a C# file can produce even though it would be wrong for a general lexer.
+ *
+ * Recorded because three reviewers raised it independently; if a future form breaks the
+ * closed-interval property, this comment is where the reasoning lives.
+ */
 const STRING_LITERAL = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
 
 /**
