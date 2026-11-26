@@ -24,14 +24,23 @@
 SOURCE_GITHOOKS="${XP_GATE_GITHOOKS:-$(cd "$BATS_TEST_DIRNAME/.." && pwd)}"
 VALIDATOR="$SOURCE_GITHOOKS/lib/validate-code-walkthrough.cjs"
 
-# The seats the repository's .delphi-config.json binds, so the expert identity check
-# passes and the case under test is the COMMIT rule alone.
-SEAT_ARCH_MODEL="g-deepseek-v4-pro"
-SEAT_ARCH_RESOLVED="deepseek-v4-pro-ga-260813"
-SEAT_TECH_MODEL="g-mimo-v2.6-pro"
-SEAT_TECH_RESOLVED="mimo-v2.6-pro"
-SEAT_FEAS_MODEL="g-qwen3.8-max"
-SEAT_FEAS_RESOLVED="qwen3.8-max"
+# The seats are READ from the repository's .delphi-config.json (seeded as
+# <requested> / <resolved> pairs below), so this stays a test of the COMMIT rule.
+# Hardcoding them made the failure look like a rule violation when the real cause was
+# a changed seat -- measured, when the technical seat moved from g-glm-5.3.
+seat_models() {
+  node -e '
+    const fs = require("fs"), os = require("os"), path = require("path");
+    const p = path.join(os.homedir(), ".config", "xp-gate", ".delphi-config.json");
+    const d = JSON.parse(fs.readFileSync(p, "utf8"));
+    const prof = d.profiles[d.active_profile];
+    for (const role of ["architecture", "technical", "feasibility"]) {
+      const e = prof.experts[role];
+      console.log(role + "=" + (e && e.model ? e.model : ""));
+    }
+  ' 2>/dev/null
+}
+
 
 setup() {
   export TEST_DIR="$(mktemp -d)"
@@ -44,6 +53,19 @@ setup() {
   git config user.name t
   printf 'a\n' > a.txt && git add a.txt && git commit -qm one
   printf 'b\n' > b.txt && git add b.txt && git commit -qm two
+  local line role model
+  while IFS= read -r line; do
+    role="${line%%=*}"; model="${line#*=}"
+    case "$role" in
+      architecture) export SEAT_ARCH_MODEL="$model" ;;
+      technical)    export SEAT_TECH_MODEL="$model" ;;
+      feasibility)  export SEAT_FEAS_MODEL="$model" ;;
+    esac
+  done <<< "$(seat_models)"
+  # resolved_model only has to be DISTINCT across seats and stable per run.
+  export SEAT_ARCH_RESOLVED="resolved-architecture"
+  export SEAT_TECH_RESOLVED="resolved-technical"
+  export SEAT_FEAS_RESOLVED="resolved-feasibility"
   export HEAD_SHA="$(git rev-parse HEAD)"
   export PARENT_SHA="$(git rev-parse HEAD~1)"
   export BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -58,8 +80,10 @@ teardown() {
 write_evidence() {
   local file="$1" commit="$2" branch="$3"
   local now expires
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  expires="$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+  # Stamped in the PAST: the validator compares against a `now` it reads itself, and a
+  # timestamp taken moments later made it fail as "in the future" (intermittent).
+  now="$(date -u -d '-5 minutes' +%Y-%m-%dT%H:%M:%SZ)"
+  expires="$(date -u -d '-5 minutes +1 hour' +%Y-%m-%dT%H:%M:%SZ)"
   cat > "$file" <<JSON
 {
   "verdict": "APPROVED",
@@ -93,29 +117,29 @@ JSON
 
 @test "evidence for the exact HEAD is accepted" {
   write_evidence ev.json "$HEAD_SHA" "$BRANCH"
-  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
-  [ "$status" -eq 0 ]
+  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
+  [ "$status" -eq 0 ] || { echo "OUTPUT: $output" >&2; false; }
 }
 
 @test "evidence for an ANCESTOR of HEAD is accepted" {
   # The reviewed commit is inside the pushed range: the review did see this code.
   write_evidence ev.json "$PARENT_SHA" "$BRANCH"
-  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
-  [ "$status" -eq 0 ]
+  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
+  [ "$status" -eq 0 ] || { echo "OUTPUT: $output" >&2; false; }
 }
 
 @test "evidence for a commit that is neither HEAD nor an ancestor is BLOCKED" {
   # Without this case the rule degenerates into "any commit passes" -- the two PASS
   # cases above would both be satisfied by accepting everything.
   write_evidence ev.json "0000000000000000000000000000000000000000" "$BRANCH"
-  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
+  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"commit does not match HEAD"* ]]
 }
 
 @test "evidence for a foreign branch is still BLOCKED" {
   write_evidence ev.json "$HEAD_SHA" "some-other-branch"
-  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
+  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"branch does not match"* ]]
 }

@@ -1228,4 +1228,49 @@ fi
 generate_quality_report
 _QUALITY_REPORT_DONE=1
 
+# ── Push-rhythm reminder ────────────────────────────────────────────────────
+# Gate MW binds its walkthrough evidence to a COMMIT and expires it after an hour,
+# so the cost of pushing grows with how long the branch stays local: an unpushed
+# branch must be reviewed in one pass at 40 KB per expert. Measured 2026-11-26, a
+# branch 300 commits deep needed ~27 reviews and could not be pushed at all.
+#
+# This is a REMINDER, never a gate. It prints and returns 0 on every path -- a
+# commit that succeeds must not be turned into a failure because the operator has
+# not pushed yet, and no verdict may depend on a count this cannot compute.
+_xp_gate_push_rhythm_note() {
+  local branch unpushed
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || return 0
+
+  # main/master skip Gate MW by design, so there is nothing to warn about there.
+  case "$branch" in main|master|HEAD) return 0 ;; esac
+
+  if git rev-parse --verify --quiet '@{upstream}' >/dev/null 2>&1; then
+    unpushed=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null) || return 0
+  else
+    # No upstream at all: the FIRST push will have to review the whole branch.
+    unpushed=$(git rev-list --count HEAD 2>/dev/null) || return 0
+    if [ "${unpushed:-0}" -ge 10 ]; then
+      echo ""
+      echo "   ℹ️  ${branch} has NO upstream and ${unpushed} commit(s)."
+      echo "      The first push needs a walkthrough of the WHOLE branch"
+      echo "      (Gate MW: 40 KB per expert, ~2 source files per review)."
+      echo "      Consider: git push -u origin ${branch}  — then push often."
+      echo ""
+    fi
+    return 0
+  fi
+
+  # Past a handful the reminder stops being noise and starts being true.
+  if [ "${unpushed:-0}" -ge 5 ]; then
+    echo ""
+    echo "   ℹ️  ${unpushed} commit(s) unpushed on ${branch}."
+    echo "      Gate MW evidence is bound to a commit and expires in 1 hour;"
+    echo "      a larger range means a larger review before this can be pushed."
+    echo ""
+  fi
+  return 0
+}
+
+_xp_gate_push_rhythm_note
+
 exit 0
