@@ -50,7 +50,7 @@ const INTEGER_FLAGS = { '--round': (v) => parseInt(v) };
 function applyRawFlag(argv, i, args, state) {
   const flag = argv[i];
   if (flag === '--timeout-ms') {
-    state.timeoutMsRaw = argv[i + 1];
+    state.timeoutMsRaw = requireFlagValue(argv, i, flag);
     return i + 1;
   }
   if (BOOLEAN_FLAGS[flag]) {
@@ -59,9 +59,25 @@ function applyRawFlag(argv, i, args, state) {
   }
   const key = VALUE_FLAGS[flag];
   if (!key) return i;
-  const value = argv[i + 1];
+  const value = requireFlagValue(argv, i, flag);
   args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
   return i + 1;
+}
+
+/**
+ * The value that follows a flag, or a message naming the flag.
+ *
+ * Reading `argv[i + 1]` unchecked put `undefined` into the arguments, and the run then
+ * failed LATER with a message about something else -- a missing API key, in the case
+ * measured -- so the operator fixed the wrong thing (all three seats, same finding).
+ */
+function requireFlagValue(argv, i, flag) {
+  const value = argv[i + 1];
+  if (value === undefined || value.startsWith('--')) {
+    console.error(`[delphi-review] ERROR: ${flag} needs a value`);
+    process.exit(2);
+  }
+  return value;
 }
 
 function collectRawArgs(argv) {
@@ -204,8 +220,10 @@ function resolveInputContent(args) {
       return fs.readFileSync(args.inputFile, 'utf8');
     } catch (err) {
       console.error(`[delphi-review] ERROR: Cannot read input file ${args.inputFile}: ${err.message}`);
+      // `process.exit` does not return; the `return ''` that used to sit here was
+      // unreachable and read as if this function could fall through (review CI-02).
       process.exit(1);
-      return '';
+      throw err;
     }
   }
   return args.input || '';
