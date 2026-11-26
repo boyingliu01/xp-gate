@@ -351,6 +351,15 @@ function nextLineStart(code: string, lineEnd: number): number {
  * malformed file must degrade to LESS CHECKING on that construct, never to a quiet pass
  * on the whole method.
  */
+/**
+ * The "blanking" result for a heredoc that has NO terminator.
+ *
+ * It returns the source UNCHANGED, and that is the point: an unterminated heredoc is a
+ * syntax error, so the braces inside it are real characters the reader can see. Blanking
+ * them would hide the mistake behind a result that looks parsed -- the opposite of what
+ * the blanking exists for. Pinned by a test, because "kept on purpose" and "leaked
+ * unblanked" look identical in the output (review technical CI-01).
+ */
 function unterminatedHeredoc(code: string, start: number, openerLength: number) {
   const last = start + openerLength - 1;
   return { emit: code.slice(start, last), last };

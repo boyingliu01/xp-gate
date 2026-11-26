@@ -205,4 +205,24 @@ describe('PhpAdapter', () => {
       expect(lengths(src)).toEqual({ withHeredoc: 7, after: 1 });
     });
   });
+
+  describe('stripPhpLiterals on an UNTERMINATED heredoc', () => {
+    it('keeps the raw characters instead of blanking them', () => {
+      // `unterminatedHeredoc` returns the source unchanged, and that is deliberate: a
+      // heredoc with no terminator is a SYNTAX ERROR, so the braces it contains are real
+      // characters the reader can see. Blanking them would hide the mistake behind a
+      // clean-looking result -- the opposite of what the blanking exists for.
+      //
+      // Pinned because a reviewer read the raw slice as a leak of unblanked content
+      // (technical CI-01); the difference between "leaked" and "kept on purpose" is only
+      // visible in a test.
+      const broken = '<?php\n$s = <<<EOT\n{ { {\n';
+      expect(stripPhpLiterals(broken).match(/\{/g)).toHaveLength(3);
+    });
+
+    it('still blanks a TERMINATED heredoc', () => {
+      const closed = '<?php\n$s = <<<EOT\n{ {\nEOT;\nif (x) { }\n';
+      expect(stripPhpLiterals(closed).match(/\{/g)).toHaveLength(1);
+    });
+  });
 });
