@@ -265,25 +265,38 @@ function runPowerShellComplexity(
 }
 
 /**
- * How many findings the analyzer printed.
+ * How many findings the analyzer printed, or null when it printed nothing readable.
  *
- * An unparseable body counts as ZERO rather than as a failure: PowerShell projects treat
- * these findings as warnings, and a JSON hiccup is not evidence of a quality problem.
- * A non-array body also yields 0, because a single object is not a findings list.
+ * NULL, not zero: `[]` means the analyzer ran and found nothing, while unreadable output
+ * means it did not answer -- and rendering both as 0 produced "✅ PASSED - PowerShell code
+ * quality check passed" on a corrupt payload. Same distinction, and the same fix, as
+ * `gate-9`'s `parseAnalyzerOutput`; two gates reading the same tool must not disagree
+ * about what an empty answer means.
+ *
+ * A non-array body is also null: a single object is not a findings list.
  */
-function analyzerFindingCount(stdout: string): number {
+function analyzerFindingCount(stdout: string): number | null {
   const text = stdout.trim();
-  if (!text) return 0;
+  if (!text) return null;
   try {
     const parsed = JSON.parse(text) as unknown;
-    return Array.isArray(parsed) ? parsed.length : 0;
+    return Array.isArray(parsed) ? parsed.length : null;
   } catch {
-    return 0;
+    return null;
   }
 }
 
 /** The verdict once the analyzer has produced output. */
-function reportAnalyzerFindings(count: number, startMs: number, messages: string[]): GateOutput {
+function reportAnalyzerFindings(
+  count: number | null,
+  startMs: number,
+  messages: string[],
+): GateOutput {
+  if (count === null) {
+    messages.push('     ⚠️  PSScriptAnalyzer produced unreadable output, skipping');
+    recordAudit('gate-3', 'complexity', 'WARN', 0, startMs);
+    return { status: 'WARN', messages, exitCode: 0 };
+  }
   if (count > 0) {
     messages.push(`⚠️  ${count} PSScriptAnalyzer findings (warnings only for PowerShell projects)`);
     recordAudit('gate-3', 'complexity', 'WARN', count, startMs);
