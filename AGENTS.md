@@ -184,6 +184,45 @@ difference, not the product.
 - **Three gates skip on main/master pushes by design** (pre-reviewed via PR).
   That is intentional; do not "fix" it.
 
+## DELPHI SEATS — pick three VENDORS, not three model IDs
+
+The review skill requires three DISTINCT model IDs. That is necessary and NOT
+sufficient: two tiers of one vendor (say `g-qwen3.7-max` and `s-qwen3.8-flash`)
+share training data and method, so they agree with each other for reasons that
+have nothing to do with the code. Consensus between them measures the vendor,
+not the change.
+
+**Choose one model per vendor.** Measured 2026-11-26 on the same snippet, a
+three-vendor panel returned three genuinely different first findings — a parse
+robustness concern, a silent-failure concern, and no critical at all. A
+single-vendor panel produces one of those three and repeats it.
+
+The seats currently used (`g-deepseek-v4-pro`, `g-qwen3.7-max`, `g-minimax-m3`)
+are three vendors at 12–13 s per review. Latency matters because a review is on
+the push path, and it is where this went wrong before: the template shipped GLM
+5.3, which measured **58.7 s and timed out**, while every other model answered
+in 1–6 s. Candidates that cannot be used at all, for measured reasons:
+`g-mimo-v2.6-pro` returns prose instead of the requested JSON, and `g-hy4`
+answers 403.
+
+The endpoint exposes no prices. It does expose `channel_tier` and a `model_desc`
+line, which is the cost signal that IS reachable: a `g-` id is a gold/dealer-price
+channel, an `s-` id is a silver/discounted one. Prefer `s-` when the vendor
+constraint still holds.
+
+## PUSH RHYTHM — the walkthrough gate makes batching expensive
+
+Gate MW's cost grows with how long a branch stays local: the evidence names a
+commit (accepted only if it is HEAD or its ancestor), expires in one hour, and a
+review takes 40 KB of source per expert — roughly two files.
+
+Measured: a branch 300 commits deep, never pushed, was 223 files / 26 713 lines.
+At 40 KB per review that is ~27 reviews, and the push could not be performed.
+
+**Push at least once per work session.** A branch with no upstream is the WORST
+case, not the safest: its first push reviews everything at once. Small pushes are
+cheaper — 27 reviews for one large push versus one per small push.
+
 ## MEASUREMENT DISCIPLINE
 
 This machine runs at 90–100% CPU, so noise routinely exceeds the effect being

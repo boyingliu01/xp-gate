@@ -31,15 +31,15 @@
       "experts": {
         "architecture": {
           "provider": "whalecloud",
-          "model": "g-minimax-m3"
+          "model": "g-deepseek-v4-pro"
         },
         "technical": {
           "provider": "whalecloud",
-          "model": "s-qwen3.8-flash"
+          "model": "g-qwen3.7-max"
         },
         "feasibility": {
           "provider": "whalecloud",
-          "model": "g-qwen3.7-max"
+          "model": "g-minimax-m3"
         }
       }
     },
@@ -54,15 +54,15 @@
       "experts": {
         "architecture": {
           "provider": "whalecloud",
-          "model": "g-minimax-m3"
+          "model": "g-deepseek-v4-pro"
         },
         "technical": {
           "provider": "whalecloud",
-          "model": "s-qwen3.8-flash"
+          "model": "g-qwen3.7-max"
         },
         "feasibility": {
           "provider": "whalecloud",
-          "model": "g-qwen3.7-max"
+          "model": "g-minimax-m3"
         }
       }
     }
