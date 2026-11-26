@@ -318,7 +318,7 @@ function writeUpgradeNotice(notice: UpgradeNotice): void {
  * @param message what to show the user
  * @returns the message, so the caller can surface it directly
  */
-function announceUpgrade(kind: UpgradeNotice["kind"], result: XpGateUpdateResult, message: string): string {
+function announceUpgrade(kind: UpgradeNotice["kind"], result: UpgradeResult, message: string): string {
   writeUpgradeNotice({
     kind,
     localVersion: result.localVersion,
@@ -335,7 +335,7 @@ function announceUpgrade(kind: UpgradeNotice["kind"], result: XpGateUpdateResult
  * Both versions must be present: a check that could not read either one is not
  * evidence that an upgrade is available.
  */
-function isNewerAvailable(result: XpGateUpdateResult): boolean {
+function isNewerAvailable(result: UpgradeResult): boolean {
   if (!result.remoteVersion || !result.localVersion) return false
   return semverLt(result.localVersion, result.remoteVersion)
 }
@@ -386,6 +386,35 @@ async function runCmd(cmd: string, cwd: string): Promise<string> {
   }
 }
 
+/**
+ * Run a command from an argv ARRAY, so no argument ever reaches a shell.
+ *
+ * The tools below used to build one string per call (`check "${target}"${gatesFlag}`),
+ * which meant a `path` or a `gates` entry containing a quote or a semicolon became
+ * COMMAND SYNTAX. Measured: `gates: ['principles; touch /tmp/PWNED']` produced
+ * `xp-gate check "src/a.ts" --gates principles; touch /tmp/PWNED,arch` -- the `gates` value
+ * was never quoted, so the shell split it (review CI-02 / FC-02).
+ */
+function runArgv(file: string, args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve) => {
+    const child = spawn(file, args, { cwd })
+    let stdout = ""
+    let stderr = ""
+    const timer = setTimeout(() => child.kill("SIGTERM"), CMD_TIMEOUT_MS)
+    child.stdout?.on("data", (chunk) => { stdout += String(chunk) })
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk) })
+    child.on("error", (err) => {
+      clearTimeout(timer)
+      resolve(`[XP-Gate] Error: ${err.message}`)
+    })
+    child.on("close", (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve(stdout || "[XP-Gate] Command completed (no output).")
+      else resolve(stderr || `[XP-Gate] Command exited with ${code ?? "no status"}.`)
+    })
+  })
+}
+
 async function runXpGate(subcommand: string, cwd: string): Promise<string> {
   try {
     await execAsync("command -v xp-gate", { cwd })
@@ -393,6 +422,28 @@ async function runXpGate(subcommand: string, cwd: string): Promise<string> {
     return ""
   }
   return runCmd(`xp-gate ${subcommand}`, cwd)
+}
+
+/** `runXpGate` for arguments that must not be shell-interpreted. */
+async function runXpGateArgv(args: string[], cwd: string): Promise<string> {
+  try {
+    await execAsync("command -v xp-gate", { cwd })
+  } catch {
+    return ""
+  }
+  return runArgv("xp-gate", args, cwd)
+}
+
+/** Gate names are identifiers; anything else is rejected rather than escaped. */
+const GATE_NAME = /^[a-z][a-z0-9-]*$/i
+
+function safeGateNames(gates: string[] | undefined): string[] {
+  if (!gates?.length) return []
+  const accepted = gates.filter((g) => GATE_NAME.test(g))
+  if (accepted.length !== gates.length) {
+    throw new Error(`[XP-Gate] Refusing gate names that are not identifiers: ${gates.filter((g) => !GATE_NAME.test(g)).join(", ")}`)
+  }
+  return accepted
 }
 
 async function getUpgradeSuggestion(cwd: string): Promise<string> {
@@ -511,9 +562,10 @@ function gateCheckTool(directory: string) {
     async execute(args, ctx) {
       const cwd = ctx.directory || directory
       const target = resolveTarget(args.path, cwd)
-      const gatesFlag = args.gates?.length ? ` --gates ${args.gates.join(",")}` : ""
-      return withUpgradeSuggestion(cwd, await runXpGate(`check "${target}"${gatesFlag}`, cwd),
-        () => runCmd(`node ${directory}/src/npm-package/bin/xp-gate.js check "${target}"${gatesFlag}`, cwd))
+      const gates = safeGateNames(args.gates)
+      const gatesArgs = gates.length > 0 ? ["--gates", gates.join(",")] : []
+      return withUpgradeSuggestion(cwd, await runXpGateArgv(["check", target, ...gatesArgs], cwd),
+        () => runArgv("node", [`${directory}/src/npm-package/bin/xp-gate.js`, "check", target, ...gatesArgs], cwd))
     },
   })
 }
@@ -527,8 +579,8 @@ function gatePrinciplesTool(directory: string) {
     async execute(args, ctx) {
       const cwd = ctx.directory || directory
       const target = resolveTarget(args.path, cwd)
-      return withUpgradeSuggestion(cwd, await runXpGate(`principles "${target}"`, cwd),
-        () => runCmd(`npx -y tsx ${directory}/src/principles/index.ts --files "${target}" --format console`, cwd))
+      return withUpgradeSuggestion(cwd, await runXpGateArgv(["principles", target], cwd),
+        () => runArgv("npx", ["-y", "tsx", `${directory}/src/principles/index.ts`, "--files", target, "--format", "console"], cwd))
     },
   })
 }
@@ -684,10 +736,12 @@ function readReloadInputs(): ReloadInputs {
  * Both are "tell the user why" with no partial result to salvage.
  */
 function resolveReloadModel(parsed: unknown): { providerID: string; modelID: string } | string {
-  const model = readSisyphusModel(parsed)
+  // `parsed` is a JSON document read from a file, so its shape is only known at runtime;
+  // the reader guards every field it touches and returns a message on any mismatch.
+  const model = readSisyphusModel(parsed as Record<string, unknown>)
   // A string that does not start with the failure prefix is a model id.
-  if (isReloadFailure(model)) return model as string
-  const split = splitModelRef(model as string)
+  if (isReloadFailure(model)) return model
+  const split = splitModelRef(model)
   if (split) return split
   return `Session reload failed: model "${model}" is not in provider/model format`
 }
