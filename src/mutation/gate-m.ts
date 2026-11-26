@@ -527,7 +527,7 @@ async function resolveFirstAvailable(ext: string): Promise<MutationRunner | unde
 }
 
 
-function applyMutationResult(
+export function applyMutationResult(
   outcome: MutationRunOutcome,
   files: string[],
   scores: Record<string, number | null>,
@@ -543,6 +543,11 @@ function applyMutationResult(
   // Per-file reporting is the modern shape; without it the run's totals apply to every
   // file, which is all the older reporters gave.
   if (outcome.report.files) {
+    // Every file this run was asked about MUST end up with a score, null included. A
+    // reporter that omits one (older Stryker builds skip files with no mutants) would
+    // otherwise leave the key absent, and the evaluator's `?? 0` reads an absent key as a
+    // MEASURED zero -- the exact confusion this function exists to prevent (review FC-01).
+    for (const f of files) scores[f] = null;
     applyPerFileScores(outcome.report.files, scores, counts);
     return;
   }
