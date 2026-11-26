@@ -1,12 +1,128 @@
 # XP-Gate
 
-> **AI 写 100 行代码只需 5 秒，但判断这 100 行对不对仍然要人工花 30 分钟。XP-Gate 把这 30 分钟压缩回秒级。**
->
-> Three machine-driven feedback loops bringing Extreme Programming speed to the AI era. *(English docs: see `skills/*/SKILL.md`)*
+**AI 写的代码，谁来验？**
 
-[![Delphi](https://img.shields.io/badge/AI%20Review-Delphi%20≥90%25-blue)](./skills/delphi-review)
-[![Sprint Flow](https://img.shields.io/badge/Sprint%20Flow-6%20Phases-purple)](./skills/sprint-flow)
-[![npm package](https://img.shields.io/badge/npm%20registry-npm%20install%20--g%20%40boyingliu01%2Fxp--gate-blue?logo=npm)](src/npm-package)
+> AI 写 100 行代码只需 5 秒，但判断这 100 行对不对仍然要人工花 30 分钟。
+> XP-Gate 在每次提交、每次推送、每次设计评审上放一道机器门禁，把这 30 分钟压回秒级。
+
+[![npm](https://img.shields.io/npm/v/@boyingliu01/xp-gate?logo=npm&color=cb3837)](https://www.npmjs.com/package/@boyingliu01/xp-gate)
+[![npm downloads](https://img.shields.io/npm/dm/@boyingliu01/xp-gate?color=brightgreen)](https://www.npmjs.com/package/@boyingliu01/xp-gate)
+[![GitHub stars](https://img.shields.io/github/stars/boyingliu01/xp-gate?style=flat&color=yellow)](https://github.com/boyingliu01/xp-gate/stargazers)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20WSL%20%7C%20Windows-lightgrey)]()
+
+[Delphi 评审](./skills/delphi-review) · [Sprint Flow](./skills/sprint-flow) · [变更日志](./CHANGELOG.md) · [贡献指南](./CONTRIBUTING.md)
+
+---
+
+## 60 秒看效果（不需要安装）
+
+在一个现有的 Git 仓库里直接跑，**只看不拦**：
+
+```bash
+npx @boyingliu01/xp-gate check .
+```
+
+你会立刻拿到一份代码体检报告 —— 21 条 Clean Code / SOLID 规则。
+**不写任何配置、不装 hook、不碰你的提交。**
+
+```text
+━━━ Gate 4: Principles ━━━
+✓ No violations found
+Files checked: 1    Rules run: 21    Execution time: 4ms
+```
+
+默认只跑 `principles`（Gate 4）。想把架构层、复杂度、重复代码也一起体检：
+
+```bash
+npx @boyingliu01/xp-gate check . --all
+```
+
+觉得有用，再决定要不要把它接到提交上 👇
+
+---
+
+## 装上之后，它替你挡什么
+
+本仓库共 **15 道数字门禁（Gate 0–13，含 12b / 12c）** 挂在 `git commit` / `git push` 上，另有 4 道按需门禁（`python-health` / `test-layers` / `pbt` 等）由 `xp-gate check` 单独调用。
+
+下面每一条都来自本仓库自己的审计记录（`docs/gate-quality-matrix-2026-11-19.md` §10.4），
+不是设想出来的场景：
+
+| 门禁 | 真实拦下的一次提交 | 是不是真问题 |
+|---|---|---|
+| **Gate 0** | 改了生产源码却忘记升级版本号 | ✅ 是 |
+| **Gate 1** | shellcheck 告警数超过空基线 | ✅ 是 |
+| **Gate 3** | 一个函数复杂度从 3 涨到 4（加了三元表达式） | ✅ 是 |
+| **Gate 12b** | 只改了 canonical 源码，没有同步镜像文件 | ✅ 是 |
+
+> **门禁在拦我，说明它们在工作。**
+
+反过来，这个项目也被自己的门禁坑过：三个门禁看起来一直是绿的，
+实际上一次都没真正执行过（[#636](https://github.com/boyingliu01/xp-gate/issues)，详见 CHANGELOG 0.38.126）。
+从那以后，每个门禁都必须输出 **PASS / DEBT / SKIP / FAIL 四态**，
+**没跑过永远不会被报告成"绿"**。这是 XP-Gate 和"看起来能跑"的工具之间最大的区别。
+
+---
+
+## 安装（三行）
+
+```bash
+npm install -g @boyingliu01/xp-gate   # 需要 Node ≥18、Git ≥2.38
+cd your-project
+xp-gate init                          # 装 Git Hooks + 适配器，即刻生效
+```
+
+确认装好了：
+
+```bash
+xp-gate doctor        # 诊断安装状态，出问题会告诉你修哪一行
+xp-gate check .       # 手动跑一次门禁
+```
+
+**装错了怎么办？** `xp-gate uninstall` 会完整回滚，不给你留残留配置。
+
+### 已经装了但被门禁挡得难受？
+
+先别卸载。你可能遇到了最常见的适配问题：
+
+```bash
+xp-gate doctor --fix          # 自动修复安装状态
+xp-gate baseline create       # 把存量告警记为基线，只拦"新变差的部分"
+xp-gate gate-coverage --debt  # 看清哪些门禁没生效、为什么、还欠多少
+```
+
+XP-Gate 的设计立场是**不因为存量欠债惩罚你**：基线 + 童子军规则（只能持平或下降），
+所以一个 5 万行的老项目也能从今天开始接入，而不是先还一整个月的技术债。
+
+---
+
+## 想参与进来？
+
+这个项目目前是**一个人在写**，但跑得很快 —— 一年 2,188 次提交、121 个已合并 PR。
+它需要的不只是代码，下面任何一件都算数：
+
+| 你可以做的 | 从哪开始 |
+|---|---|
+| 报告门禁的**误报**，这是最有价值的贡献 | [开 issue](https://github.com/boyingliu01/xp-gate/issues/new)（请带复现命令和期望输出） |
+| 给一门**新语言**写适配器（Rust / Go / Kotlin / Swift 都还没有） | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+| 补文档里说不清的地方 | `docs/` 下任何一个你觉得卡住了的段落 |
+| 只是想聊聊"AI 代码质量该怎么管" | [Discussions](https://github.com/boyingliu01/xp-gate/discussions) |
+
+**门禁相关的真实痛点，比漂亮的功能更受欢迎。** 提 issue 前不用读完全部源码。
+
+---
+
+## 这个项目由什么驱动
+
+XP-Gate 由三个反馈环组成：**代码层**（秒级）、**需求层**（分钟级）、**迭代层**（每个 Sprint）。
+它的理论源头是 Kent Beck 的极限编程，只是把反馈的驱动力从"人"换成了"机器"。
+
+<details>
+<summary><b>展开阅读：三个反馈环的完整设计</b></summary>
+
+
+</details>
 
 ---
 

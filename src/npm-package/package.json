@@ -1,11 +1,12 @@
 {
   "name": "@boyingliu01/xp-gate",
   "version": "0.38.126",
-  "description": "AI-driven development workflow: 6 quality gates + Delphi review + Sprint Flow",
+  "description": "Deterministic quality gates for AI-generated code: 15 gates, Delphi review, sprint flow. Works with Claude Code, OpenCode, Qoder.",
   "bin": {
     "xp-gate": "bin/xp-gate.js"
   },
   "files": [
+    "README.md",
     "bin/",
     "hooks/",
     "adapters/",
@@ -64,11 +65,21 @@
     "test": "echo \"Run tests\" && exit 0"
   },
   "keywords": [
-    "xp-gate",
-    "quality-gates",
-    "delphi-review",
-    "sprint-flow",
-    "ai-development"
+    "ai-coding",
+    "claude-code",
+    "code-quality",
+    "delphi",
+    "developer-tools",
+    "opencode",
+    "qoder",
+    "quality-gate",
+    "sdlc",
+    "static-analysis",
+    "typescript",
+    "ci",
+    "pre-commit",
+    "git-hooks",
+    "lint"
   ],
   "author": "boyingliu01",
   "license": "MIT",
