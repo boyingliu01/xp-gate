@@ -46,7 +46,19 @@ const CCN_BLOCK_THRESHOLD = 10;
  * `stripNonCode` has already removed strings and comments, so a surviving `?` is either a
  * ternary or one of those three type-level markers.
  */
-const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?(?![:?.])/g;
+/**
+ * Branch tokens, with the two lexical exclusions a bare `\b` misses.
+ *
+ * `\b(if|for|while|case|catch)\b` also matched a PROPERTY or an OBJECT KEY:
+ * `obj.if = 1` and `{ while: 1 }` each counted as a branch, inflating the recomputed CCN
+ * on ordinary code (review CC-02). The lookbehind rejects a preceding `.` or word
+ * character; the lookahead rejects a following `:` or `=`, which is what distinguishes an
+ * object key from the keyword.
+ *
+ * `case 1:` survives because its colon comes AFTER the expression, not immediately after
+ * the keyword. Measured across eight shapes including `case`, `catch`, `??` and `&&`.
+ */
+const BRANCH_RE = /(?<![.\w])(?:if|for|while|case|catch)\b(?!\s*[:=])|(?<![.\w])\?\?|&&|\|\||\?(?![:?.])/g;
 
 // Skip a quoted run starting at `i` (which points at the opening quote) and
 // return the index just past the closing quote. Unterminated runs consume the

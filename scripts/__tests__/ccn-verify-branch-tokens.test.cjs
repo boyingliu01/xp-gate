@@ -40,4 +40,18 @@ describe('ccnOfBody and TypeScript optional markers', () => {
     expect(ccnOfBody(['if (a && b) { }'])).toBe(3); // +1 if, +1 &&
     expect(ccnOfBody(['for (const x of xs) { }'])).toBe(2);
   });
+
+  it('does not count a PROPERTY named like a keyword', () => {
+    // `obj.if` is not a branch. The word boundary alone matched it, inflating CCN on
+    // ordinary code (review CC-02).
+    expect(ccnOfBody(['obj.if = 1;'])).toBe(1);
+  });
+
+  it('does not count an OBJECT KEY named like a keyword', () => {
+    expect(ccnOfBody(['const o = { while: 1 };'])).toBe(1);
+  });
+
+  it('still counts a real case label, whose colon comes after the expression', () => {
+    expect(ccnOfBody(['switch (x) { case 1: break; }'])).toBe(2);
+  });
 });
