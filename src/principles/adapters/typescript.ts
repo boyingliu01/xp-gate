@@ -391,6 +391,24 @@ const ARROW_ASSIGNMENT = /(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*
  * An empty list is 0, not 1: `()` declares nothing, and the naive "start at 1" would
  * report one parameter for every no-argument function.
  */
+/**
+ * How many characters of a `=>` / `>=` operator start at `i`, or 0 for anything else.
+ *
+ * `>` closes a generic parameter list, but in `=>` and `>=` it is an OPERATOR. Counting it
+ * as a closer drove the depth negative, after which no later comma looked top-level --
+ * measured: `f(cb = (x, y) => x + y, d)` and `f(a = b >= c, d)` each reported 1 parameter
+ * instead of 2.
+ *
+ * A lone `>` PRECEDED BY `=` is the `>` of an arrow whose `=` was consumed on the previous
+ * iteration, so it counts as skipped too -- without skipping, the loop would advance past
+ * it and still close the depth.
+ */
+function angleOperatorLength(src: string, i: number): number {
+  if (src[i] === '=' && src[i + 1] === '>') return 2;
+  if (src[i] === '>' && (src[i + 1] === '=' || src[i - 1] === '=')) return 1;
+  return 0;
+}
+
 function countParams(rawList: string): number {
   const trimmed = rawList.trim();
   if (trimmed === '') return 0;
@@ -404,6 +422,8 @@ function countParams(rawList: string): number {
       i += advanceQuoteState(trimmed, i, state);
       continue;
     }
+    const skipped = angleOperatorLength(trimmed, i);
+    if (skipped > 0) { i += skipped; continue; }
     if (!deepensParamNesting(trimmed[i], depth)) count += 1;
     i++;
   }
@@ -413,9 +433,15 @@ function countParams(rawList: string): number {
 /**
  * Whether this character is NOT a top-level parameter separator.
  *
- * Absorbing the decision keeps the loop to one test. A quote opens a state; a
- * delimiter changes depth; anything else is a separator only when it is a top-level
- * comma.
+ * Absorbing the decision keeps the loop to one test. A delimiter changes depth; anything
+ * else is a separator only when it is a top-level comma.
+ *
+ * A QUOTE returns true but does NOT open a state here, and that is correct: `countParams`
+ * receives text that `readParenGroup` already scanned, so a quoted run has been resolved
+ * to one opaque item before this sees it. The earlier wording ("a quote opens a state")
+ * read as a promise this function does not keep, and three reviewers concluded a comma
+ * inside a string was counted as a separator -- it is not. Measured on four shapes
+ * including `f(a: string = "1,2,3", b: number)` -> 2.
  *
  * @returns true when the caller should not count a new parameter
  */
