@@ -558,8 +558,7 @@ describe('MutmutRunner', () => {
       );
       expect(mockChild.kill).toHaveBeenCalledWith('SIGTERM');
       expect(result).toEqual({ report: null, timedOut: true });
-      // Not `getTimerCount() === 0`: fake timers also count the harness's own. Cleanup is
-      // proven by the promise SETTLING -- an armed escalation would keep it pending.
+      // Settling proves cleanup; getTimerCount also counts the harness's own.
       expect(result.timedOut).toBe(true);
     });
 
@@ -927,7 +926,7 @@ describe('MutmutRunner', () => {
   });
 
   describe('unreadable progress counts', () => {
-    it('returns null when an emoji is present but its number is not', () => {
+    it('returns null for an emoji with no number', () => {
       // Absent emoji = a measured zero; present with no number = a parse failure.
       const runner = new MutmutRunner('linux');
       const parse = (line: string) => (runner as unknown as {
@@ -971,15 +970,18 @@ describe('MutmutRunner', () => {
       expect(mutmutConfigContent(existing, ['new'])).toContain('source_paths = ["new"]');
     });
 
-    it('finds a header with spaces inside the brackets', async () => {
-      // `[ tool.mutmut ]` is legal TOML; a stricter pattern missed it (measured).
+    it('finds a header with spaces inside the brackets or a trailing comment', async () => {
+      // Both are legal TOML; a stricter pattern missed them (measured).
       expect(mutmutConfigContent('[ tool.mutmut ]\nsource_paths = ["a"]\n', ['new']))
         .toBe('[ tool.mutmut ]\nsource_paths = ["new"]\n');
-    });
-
-    it('finds a header with a trailing comment', async () => {
       expect(mutmutConfigContent('[tool.mutmut] # note\nsource_paths = ["a"]\n', ['new']))
         .toBe('[tool.mutmut] # note\nsource_paths = ["new"]\n');
+    });
+
+    it('does not end a string at an ESCAPED quote', async () => {
+      // `\"` is data; without handling it the key after it was skipped (measured).
+      const existing = '[tool.mutmut]\ndescription = "a \\" b"\nsource_paths = ["x"]\n';
+      expect(mutmutConfigContent(existing, ['new'])).toContain('source_paths = ["new"]');
     });
 
     it('ignores a fake key inside a MULTI-LINE string', async () => {
@@ -1027,13 +1029,11 @@ describe('MutmutRunner', () => {
     it('ignores a COMMENTED-OUT [tool.mutmut] header', async () => {
       // `includes('[tool.mutmut]')` matched a comment, so the fallback inserted the key
       // into a commented-out header and left a DUPLICATE `source_paths` (measured). A
-      // commented header means there is no table, so a real one is appended.
       const out = mutmutConfigContent('# [tool.mutmut]\nsource_paths = ["a"]\n', ['new']);
       expect(out.match(/^\[tool\.mutmut\]/gm)).toHaveLength(1);
     });
 
     it('leaves ANOTHER table\'s source_paths alone', async () => {
-      // An unscoped regex rewrote `[tool.other]` and left mutmut's alone (measured).
       const existing = '[tool.other]\nsource_paths = ["other_a"]\n\n[tool.mutmut]\nsource_paths = ["mut_a"]\n';
       const out = mutmutConfigContent(existing, ['new']);
       expect(out).toContain('source_paths = ["other_a"]');

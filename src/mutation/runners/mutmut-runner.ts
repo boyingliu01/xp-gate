@@ -547,12 +547,24 @@ function findKeyOutsideStrings(doc: string, from: number, to: number): number {
 /** The string delimiter still open after this line, or null when outside one. */
 function scanLineForQuote(line: string, quote: string | null): string | null {
   let open: string | null = quote;
-  for (let i = 0; i < line.length; i += 1) {
+  let i = 0;
+  while (i < line.length) {
+    // A backslash escapes the NEXT character inside a basic string, so `\"` is data.
+    // Without this the escaped quote ENDED the string and everything after it read as
+    // outside -- a valid line then looked like a string, and the array was skipped
+    // (measured with a real file).
+    if (open === '"' && line[i] === '\\') {
+      i += 2;
+      continue;
+    }
     const hit = QUOTE_TOKENS.find((token) => line.startsWith(token.delimiter, i));
-    if (!hit) continue;
+    if (!hit) {
+      i += 1;
+      continue;
+    }
     if (open === null) open = hit.delimiter;
     else if (open === hit.delimiter) open = null;
-    i += hit.delimiter.length - 1;
+    i += hit.delimiter.length;
   }
   return open;
 }
