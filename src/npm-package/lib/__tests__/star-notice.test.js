@@ -12,13 +12,20 @@ const path = require('path');
 const {
   NOTICE_TEXT,
   DAY_MS,
+  DISMISS_DAYS,
   shouldShowNotice,
   configFileFor,
   readConfig,
+  dismiss,
   maybeShowStarNotice,
+  resetProcessGuard,
 } = require('../star-notice');
+const { CONFIG_FILE } = require('../shared-paths');
 
 const NOW = 1_800_000_000_000;
+// One printed notice costs three log lines: a blank line, the text, and the
+// "could not record" warning. More than that means the guard let it through again.
+const MAX_LINES_PER_PRINTED_NOTICE = 3;
 
 describe('REQ-871 star notice is opt-in by context, never a nag', () => {
   describe('shouldShowNotice', () => {
@@ -61,24 +68,73 @@ describe('REQ-871 star notice is opt-in by context, never a nag', () => {
       const config = { starNotice: { dismissedUntil: NOW - 1 } };
       expect(shouldShowNotice({ isTTY: true, config, now: NOW })).toBe(true);
     });
+
+    it('resumes when the recorded time is in the future (clock rollback)', () => {
+      // A future timestamp must not silence the notice forever: the machine
+      // that wrote it may be wrong, and the user may have restored a backup.
+      const config = { starNotice: { lastShownAt: NOW + 10 * DAY_MS } };
+      expect(shouldShowNotice({ isTTY: true, config, now: NOW })).toBe(true);
+    });
   });
 
-  describe('maybeShowStarNotice', () => {
-    let homeDir;
+  describe('config location', () => {
+    it('uses the canonical GLOBAL_DIRS.CONFIG_FILE, not a second path', () => {
+      expect(configFileFor()).toBe(CONFIG_FILE);
+    });
+
+    it('lives under ~/.config/xp-gate', () => {
+      expect(configFileFor()).toContain(path.join('.config', 'xp-gate', 'xp-gate.json'));
+    });
+  });
+
+  describe('dismiss', () => {
+    let configFile;
 
     beforeEach(() => {
-      homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-star-'));
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-dismiss-'));
+      configFile = path.join(home, 'xp-gate.json');
     });
 
     afterEach(() => {
-      fs.rmSync(homeDir, { recursive: true, force: true });
+      fs.rmSync(path.dirname(configFile), { recursive: true, force: true });
+      resetProcessGuard();
     });
 
-    it('force prints even without a TTY and records the time', () => {
+    it('writes a window of DISMISS_DAYS and survives a real read', () => {
+      expect(dismiss({ configFile, now: NOW })).toBe(true);
+
+      const { starNotice } = readConfig(configFile);
+      expect(starNotice.dismissedUntil).toBe(NOW + DISMISS_DAYS * DAY_MS);
+
+      expect(shouldShowNotice({ isTTY: true, config: readConfig(configFile), now: NOW })).toBe(false);
+    });
+
+    it('reports failure when the config cannot be written', () => {
+      const missingParent = path.join(path.dirname(configFile), 'a-file');
+      fs.writeFileSync(missingParent, 'not a directory');
+      expect(dismiss({ configFile: path.join(missingParent, 'xp-gate.json'), now: NOW })).toBe(false);
+    });
+  });
+
+  describe('maybeShowStarNotice', () => {
+    let configFile;
+
+    beforeEach(() => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-star-'));
+      configFile = path.join(home, 'xp-gate.json');
+      resetProcessGuard();
+    });
+
+    afterEach(() => {
+      fs.rmSync(path.dirname(configFile), { recursive: true, force: true });
+      resetProcessGuard();
+    });
+
+    it('prints on a TTY and records the time', () => {
       const printed = [];
       const shown = maybeShowStarNotice({
-        homeDir,
-        force: true,
+        configFile,
+        isTTY: true,
         env: {},
         now: NOW,
         log: (s) => printed.push(s),
@@ -86,37 +142,79 @@ describe('REQ-871 star notice is opt-in by context, never a nag', () => {
 
       expect(shown).toBe(true);
       expect(printed.join('\n')).toContain(NOTICE_TEXT);
-      expect(readConfig(configFileFor(homeDir)).starNotice.lastShownAt).toBe(NOW);
+      expect(readConfig(configFile).starNotice.lastShownAt).toBe(NOW);
     });
 
-    it('does not print twice for the same forced window', () => {
+    it('does not print twice in one process even without force', () => {
       const log = () => {};
-      expect(maybeShowStarNotice({ homeDir, force: true, env: {}, now: NOW, log })).toBe(true);
+      expect(maybeShowStarNotice({ configFile, isTTY: true, env: {}, now: NOW, log })).toBe(true);
+      expect(maybeShowStarNotice({ configFile, isTTY: true, env: {}, now: NOW + DAY_MS * 2, log })).toBe(false);
+    });
 
-      const second = maybeShowStarNotice({
-        homeDir,
-        env: {},
-        now: NOW + 60_000,
-        log,
+    it('honours isTTY passed in rather than consulting the real terminal', () => {
+      const log = () => {};
+      // A piped process must stay silent even though the caller passed nothing.
+      expect(maybeShowStarNotice({ configFile, isTTY: false, env: {}, now: NOW, log })).toBe(false);
+    });
+
+    it('force cannot push the notice into CI or a pipe', () => {
+      const log = () => {};
+      expect(maybeShowStarNotice({ configFile, force: true, isTTY: true, env: { CI: 'true' }, now: NOW, log })).toBe(false);
+      resetProcessGuard();
+      expect(maybeShowStarNotice({ configFile, force: true, isTTY: false, env: {}, now: NOW, log })).toBe(false);
+    });
+
+    describe('when the config cannot be written', () => {
+      it('still prints once, says so, and never claims a silent success', () => {
+        const parentAsFile = path.join(path.dirname(configFile), 'blocked');
+        fs.writeFileSync(parentAsFile, 'not a directory');
+        const blockedConfig = path.join(parentAsFile, 'xp-gate.json');
+        const printed = [];
+
+        const shown = maybeShowStarNotice({
+          configFile: blockedConfig,
+          isTTY: true,
+          env: {},
+          now: NOW,
+          log: (s) => printed.push(s),
+        });
+
+        expect(shown).toBe(true);
+        const output = printed.join('\n');
+        expect(output).toContain(NOTICE_TEXT);
+        expect(output).toContain('could not record');
       });
-      expect(second).toBe(false);
+
+      it('does not nag on the next call in the same process', () => {
+        const parentAsFile = path.join(path.dirname(configFile), 'blocked');
+        fs.writeFileSync(parentAsFile, 'not a directory');
+        const blockedConfig = path.join(parentAsFile, 'xp-gate.json');
+        let count = 0;
+        const log = () => { count += 1; };
+
+        maybeShowStarNotice({ configFile: blockedConfig, isTTY: true, env: {}, now: NOW, log });
+        maybeShowStarNotice({ configFile: blockedConfig, isTTY: true, env: {}, now: NOW, log });
+        maybeShowStarNotice({ configFile: blockedConfig, isTTY: true, env: {}, now: NOW, log });
+
+        // One blank line + one notice + one warning line per printed notice.
+        expect(count).toBeLessThanOrEqual(MAX_LINES_PER_PRINTED_NOTICE);
+      });
     });
 
     it('treats a corrupt config as empty rather than throwing', () => {
-      const configFile = configFileFor(homeDir);
       fs.mkdirSync(path.dirname(configFile), { recursive: true });
       fs.writeFileSync(configFile, '{not json', 'utf8');
 
       expect(() => readConfig(configFile)).not.toThrow();
       expect(readConfig(configFile)).toEqual({});
+      expect(() => maybeShowStarNotice({ configFile, isTTY: true, env: {}, now: NOW, log: () => {} })).not.toThrow();
     });
 
     it('preserves unrelated config keys when recording', () => {
-      const configFile = configFileFor(homeDir);
       fs.mkdirSync(path.dirname(configFile), { recursive: true });
       fs.writeFileSync(configFile, JSON.stringify({ lastInit: 'keep-me' }), 'utf8');
 
-      maybeShowStarNotice({ homeDir, force: true, env: {}, now: NOW, log: () => {} });
+      maybeShowStarNotice({ configFile, isTTY: true, env: {}, now: NOW, log: () => {} });
 
       expect(readConfig(configFile).lastInit).toBe('keep-me');
     });

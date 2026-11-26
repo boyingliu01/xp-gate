@@ -275,6 +275,11 @@ const COMMANDS = {
     run: subargs => migrate(subargs).then(code => process.exit(code)),
     usage: 'xp-gate migrate [--dry-run]'
   },
+  'star-notice': {
+    description: 'Control the star invitation shown on --version / init / check',
+    run: subargs => process.exit(require('../lib/star-notice.js').cli(subargs)),
+    usage: 'xp-gate star-notice [--off | --status]'
+  },
   'doctor': {
     description: 'Diagnose xp-gate installation health',
     run: subargs => {
@@ -618,11 +623,13 @@ function main() {
   
   if (args.includes('--version')) {
     const pkg = require('../package.json');
-    const { maybeShowStarNotice } = require('../lib/star-notice.js');
     console.log(`xp-gate v${pkg.version}`);
     // `--version` is the highest-frequency call site: it is where a user who
-    // already trusts the tool is most likely to be looking (#871).
-    maybeShowStarNotice();
+    // already trusts the tool is most likely to be looking (#871). Wrapped
+    // because printing a version must never fail.
+    try {
+      require('../lib/star-notice.js').maybeShowStarNotice();
+    } catch { /* best-effort */ }
     return;
   }
   
