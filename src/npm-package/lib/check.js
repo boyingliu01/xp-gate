@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const { principles } = require('./principles.js');
 const { arch } = require('./arch.js');
 const { getGateInfo, runGate, resolveAlias, getAliases, GATE_NOT_RUN } = require('./gate-runner.js');
@@ -118,7 +119,10 @@ function celebrateCleanRun(target) {
     // `xp-gate check ../other` both run from somewhere else, and reading the
     // wrong README would either nag a project that already has the badge or
     // skip one that wants it.
-    notice.maybeOfferBadge({ projectRoot: target || process.cwd() });
+    // Resolve, do not assume: `check ../other` passes a relative path and
+    // `check .` passes the cwd literal. resolve() makes both name the same
+    // directory the gates just inspected.
+    notice.maybeOfferBadge({ projectRoot: path.resolve(target || process.cwd()) });
   } catch {
     // A decoration must never turn a green check into a crash. The notice and
     // the badge are optional; the exit code is not.
@@ -324,7 +328,6 @@ async function runBriefGates(sourceFiles) {
   const results = [];
   if (sourceFiles.length === 0) return results;
   results.push({ id: '3', code: await runGate('3', '.', {}) });
-  const { principles } = require('./principles.js');
   results.push({ id: '4', code: await principles(sourceFiles) });
   return results;
 }

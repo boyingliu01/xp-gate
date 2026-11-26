@@ -26,7 +26,8 @@ const NOTICE_TEXT = `⭐ If XP-Gate saves you time, a star helps others find it:
  * shows a passing gate, not a promise. That is why it is offered only after a
  * run where nothing failed -- the markup would be false otherwise.
  */
-const BADGE_MARKDOWN = '[![gated by XP-Gate](https://img.shields.io/badge/gated%20by-XP--Gate-blueviolet)](https://github.com/boyingliu01/xp-gate)';
+const BADGE_SHIELD_URL = 'https://img.shields.io/badge/gated%20by-XP--Gate-blueviolet';
+const BADGE_MARKDOWN = `[![gated by XP-Gate](${BADGE_SHIELD_URL})](${REPO_URL})`;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -242,9 +243,13 @@ function maybeOfferBadge(opts = {}) {
     && now < config.starNotice.dismissedUntil);
   const optedOut = Boolean(env.CI || env.NO_UPDATE_NOTIFIER || env.XP_GATE_NO_NOTICE) || dismissed;
 
-  const eligible = force ? Boolean(isTTY) && !optedOut : Boolean(isTTY) && !optedOut;
+  // `force` bypasses the frequency and freshness checks and nothing else. It
+  // must still honour an explicit opt-out and the "already carries it" check:
+  // telling someone to claim what they have already claimed is not advice, and
+  // forcing it into CI puts the markup in a log nobody reads.
+  const eligible = Boolean(isTTY) && !optedOut;
   if (!eligible) return false;
-  if (!force && alreadyBadged(projectRoot)) return false;
+  if (alreadyBadged(projectRoot)) return false;
 
   // The frequency check must come BEFORE the first log line: printing and then
   // deciding not to record would show the advice on every run.
@@ -269,12 +274,24 @@ function maybeOfferBadge(opts = {}) {
  * @returns {boolean}
  */
 function alreadyBadged(projectRoot) {
+  let readme;
   try {
-    const readme = fs.readFileSync(require('path').join(projectRoot, 'README.md'), 'utf8');
-    return readme.includes('XP--Gate') || readme.includes('boyingliu01/xp-gate');
+    readme = fs.readFileSync(require('path').join(projectRoot, 'README.md'), 'utf8');
   } catch {
+    // A missing README means the project has not made the claim, so the offer
+    // stands. An unreadable one (permissions, I/O) is deliberately treated the
+    // same: the alternative is to nag forever when the file cannot be read, and
+    // the offer is harmless -- it only prints the markup for a human to paste.
     return false;
   }
+  // Match the BADGE, not the project. An earlier draft used
+  // `readme.includes('boyingliu01/xp-gate')`, which is true of any README that
+  // mentions the repo in prose -- "built on boyingliu01/xp-gate", a credits
+  // line, a link-back. Those projects were silently treated as already badged
+  // and never told how to make the claim they could honestly make.
+  //
+  // The distinguishing part is the SHIELD IMAGE URL: prose never contains it.
+  return readme.includes(BADGE_SHIELD_URL) || readme.includes(BADGE_MARKDOWN);
 }
 
 /**
@@ -323,6 +340,7 @@ module.exports = {
   maybeOfferBadge,
   alreadyBadged,
   BADGE_MARKDOWN,
+  BADGE_SHIELD_URL,
   resetProcessGuard,
   cli,
 };

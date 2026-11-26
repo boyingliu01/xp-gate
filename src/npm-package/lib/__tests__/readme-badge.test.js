@@ -21,6 +21,7 @@ const path = require('path');
 
 const {
   BADGE_MARKDOWN,
+  BADGE_SHIELD_URL,
   DAY_MS,
   maybeOfferBadge,
   maybeShowStarNotice,
@@ -150,6 +151,37 @@ describe('REQ-BADGE a badge is offered only when the claim would be true', () =>
 
     test('AC-BADGE-03: a project without the badge is offered it', () => {
       expect(alreadyBadged(fixture.dir)).toBe(false);
+    });
+
+    test('AC-BADGE-03: mentioning the repo in prose is NOT the badge', () => {
+      // All three reviewers caught the first draft here. It matched
+      // `readme.includes('boyingliu01/xp-gate')`, which is true of any README
+      // that credits the repo -- so a project that could honestly make the
+      // claim was silently never told how. The offer is advice, not news, and
+      // prose about the project is neither.
+      const prose = makeFixture([
+        '# My tool',
+        '',
+        'Built on [boyingliu01/xp-gate](https://github.com/boyingliu01/xp-gate).',
+        'Thanks to the XP-Gate authors for the gate scripts.',
+        '',
+      ].join('\n'));
+      try {
+        expect(alreadyBadged(prose.dir)).toBe(false);
+      } finally {
+        fs.rmSync(prose.dir, { recursive: true, force: true });
+      }
+    });
+
+    test('AC-BADGE-03: the shield URL alone counts as the badge', () => {
+      // A user may paste the image without the wrapping link, or swap the link
+      // target for their fork. The claim is in the image, so that is what counts.
+      const bare = makeFixture(`# Demo\n\n![gated](${BADGE_SHIELD_URL})\n`);
+      try {
+        expect(alreadyBadged(bare.dir)).toBe(true);
+      } finally {
+        fs.rmSync(bare.dir, { recursive: true, force: true });
+      }
     });
 
     test('AC-BADGE-03: a missing README is not an error', () => {
