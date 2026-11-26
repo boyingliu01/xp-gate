@@ -15,7 +15,9 @@ interface GodClassSettings {
 function checkGodClass(file: string, adapter: unknown): Violation[] {
   const settings = getActiveConfig().rules['clean-code']['god-class'] as GodClassSettings;
   return extractClasses(adapter)
-    .flatMap((cls) => violationFor(cls, file, settings, settings.threshold ?? 0));
+    // The rule's own default, not 0: a missing threshold must not turn every class into
+    // a violation (review MC-01, same shape as `deep-nesting`).
+    .flatMap((cls) => violationFor(cls, file, settings, settings.threshold ?? godClassRule.threshold ?? 15));
 }
 
 export const godClassRule: Rule = {

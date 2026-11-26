@@ -35,7 +35,8 @@ function extractFunctions(adapter: unknown): FunctionObj[] {
 function checkLongFunctions(file: string, adapter: unknown): Violation[] {
   // Read the ACTIVE config per invocation; a module-load snapshot was #457.
   const settings = getActiveConfig().rules['clean-code']['long-function'];
-  const threshold = settings.threshold ?? 0;
+  // The rule's own default, not 0: see `deep-nesting` for why (review MC-01).
+  const threshold = settings.threshold ?? longFunctionRule.threshold ?? 50;
   return extractFunctions(adapter)
     .filter((func) => func.length > threshold)
     .map((func) => violationFor(func, file, settings, threshold));

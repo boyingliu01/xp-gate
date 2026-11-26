@@ -46,7 +46,12 @@ export const deepNestingRule: Rule = {
 function checkDeepNesting(file: string, adapter: unknown): Violation[] {
   // Read the ACTIVE config per invocation; a module-load snapshot was #457.
   const settings = getActiveConfig().rules['clean-code']['deep-nesting'];
-  const maxDepth = settings.threshold ?? 0;
+  // The RULE's own default, not 0. `?? 0` is unreachable today -- `getActiveConfig()`
+  // merges the defaults in -- but if that ever stopped holding, every function with one
+  // nested block would be reported and the gate would become noise. Falling back to the
+  // declared threshold keeps the worst case "unchanged" instead of "everything violates"
+  // (review MC-02).
+  const maxDepth = settings.threshold ?? deepNestingRule.threshold ?? 4;
   const severity = (settings.severity as Severity) ?? 'warning';
   const functions = (adapter as TypedAdapter).extractFunctions?.() || [];
   return functions

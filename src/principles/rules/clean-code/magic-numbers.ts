@@ -39,6 +39,16 @@ function extractNumbers(adapter: unknown): NumberObject[] {
     const literals = typed.extract?.();
     return Array.isArray(literals) ? literals : [];
   } catch {
+    // KNOWN LIMIT (review FC-01): an adapter that THROWS and an adapter that finds
+    // nothing both arrive here as []. The other rules avoid the ambiguity with
+    // `extractFunctions?.()` -- optional chaining returns undefined for an unsupported
+    // adapter without an exception -- but `extract` has no such convention, and a throw
+    // here is not a RULE bug: the outer try/catch is deliberately absent so a genuine
+    // rule defect surfaces at the gate (#392-#4), and catching it here would defeat that.
+    //
+    // Consequence, stated so it is not rediscovered: a broken `extract` silently reports
+    // zero magic numbers. Nothing in this repository distinguishes the two today, and the
+    // remedy is a convention on `extract`, not a wider catch here.
     return [];
   }
 }
