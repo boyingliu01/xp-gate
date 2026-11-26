@@ -72,6 +72,20 @@ setup_file() {
   [[ "$output" == *"WHOLE branch"* ]]
 }
 
+@test "the no-upstream count is the BRANCH's commits, not the whole history" {
+  # `git rev-list --count HEAD` counted every commit ever and reported 2473 for a
+  # branch with 284 (measured). The count must be from the merge-base.
+  git remote add origin "$TEST_DIR/remote.git"
+  commit_n 3 base
+  git push -q -u origin feature
+  git checkout -q -b second
+  commit_n 12 more
+  run run_note
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"12 commit(s)"* ]]
+  [[ "$output" != *"15 commit(s)"* ]]
+}
+
 @test "a branch under 10 commits with no upstream stays silent" {
   commit_n 3
   run run_note

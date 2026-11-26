@@ -76,9 +76,9 @@ teardown() {
   rm -rf "$TEST_DIR"
 }
 
-# write_evidence <file> <commit> <branch>
+# write_evidence <file> <commit> <branch> [reviewed-paths-json]
 write_evidence() {
-  local file="$1" commit="$2" branch="$3"
+  local file="$1" commit="$2" branch="$3" reviewed="${4:-null}"
   local now expires
   # Stamped in the PAST: the validator compares against a `now` it reads itself, and a
   # timestamp taken moments later made it fail as "in the future" (intermittent).
@@ -97,6 +97,7 @@ write_evidence() {
   "findings_addressed": ["fixture"],
   "commit": "${commit}",
   "branch": "${branch}",
+  "reviewed_paths": ${reviewed},
   "experts": [
     {"role": "architecture", "verdict": "APPROVED", "confidence": 8,
      "result_type": "delphi_expert_result",
@@ -122,8 +123,9 @@ JSON
 }
 
 @test "evidence for an ANCESTOR of HEAD is accepted" {
-  # The reviewed commit is inside the pushed range: the review did see this code.
-  write_evidence ev.json "$PARENT_SHA" "$BRANCH"
+  # The reviewed commit is inside the pushed range: the review did see this code, and
+  # `reviewed_paths` says it also saw what changed since.
+  write_evidence ev.json "$PARENT_SHA" "$BRANCH" '["b.txt"]' 
   run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
   [ "$status" -eq 0 ] || { echo "OUTPUT: $output" >&2; false; }
 }
@@ -142,4 +144,30 @@ JSON
   run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"branch does not match"* ]]
+}
+
+@test "an ancestor whose review did NOT cover the new work is BLOCKED" {
+  # THE HOLE THIS CLOSES: evidence approved at an old commit says nothing about the
+  # commits stacked on top of it. Accepting the ancestor without checking coverage let a
+  # stale approval carry arbitrary unreviewed code into the push (three reviewers, one
+  # round, same finding).
+  write_evidence ev.json "$PARENT_SHA" "$BRANCH" '["something-else.txt"]' 
+  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"did not cover"* ]]
+}
+
+@test "an ancestor with no reviewed_paths at all is BLOCKED" {
+  # "No record" must not read as "covered everything".
+  write_evidence ev.json "$PARENT_SHA" "$BRANCH" 'null'
+  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"reviewed_paths must be an array"* ]]
+}
+
+@test "the exact HEAD does not require reviewed_paths" {
+  # Nothing changed between the reviewed commit and HEAD, so there is no gap to cover.
+  write_evidence ev.json "$HEAD_SHA" "$BRANCH" 'null'
+  run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
+  [ "$status" -eq 0 ]
 }

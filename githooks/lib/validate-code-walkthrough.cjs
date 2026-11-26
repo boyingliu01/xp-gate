@@ -470,9 +470,47 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
   validateResolvedModel(expert, resolvedModels);
 }
 
-function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, coversHead) {
+/**
+ * The review must have covered EVERY path this push actually changes.
+ *
+ * An ANCESTOR commit is accepted, which raises the question the reviewers put their
+ * finger on: evidence approved at commit A says nothing about the work added between A
+ * and HEAD. Without this check a stale approval could carry an arbitrary amount of
+ * unreviewed code into main -- the flat opposite of what the gate is for.
+ *
+ * `reviewed_paths` is the walkthrough's own record of what it was given. It is checked
+ * as a SUPERSET of the changed paths, so splitting one change across several reviews is
+ * fine as long as their union covers it. A missing field fails: "no record" cannot be
+ * read as "covered everything", which is the fail-open shape this repository keeps
+ * finding.
+ */
+function validateCoverage(evidence, changedPaths) {
+  // Null means git could not answer here; skipping beats inventing an empty set, which
+  // would pass every review on a repository this could not read.
+  if (!Array.isArray(changedPaths)) return;
+  const changed = changedPaths;
+  // Nothing changed between the reviewed commit and HEAD: there is no gap to cover, so
+  // the field is not required. Demanding it here would fail the exact-match case that
+  // worked before this check existed.
+  if (changed.length === 0) return;
+  const reviewed = evidence.reviewed_paths;
+  if (!Array.isArray(reviewed)) {
+    fail('reviewed_paths must be an array of the paths this walkthrough read.');
+  }
+  const seen = new Set(reviewed.map((p) => String(p).replace(/^\.\//, '')));
+  const missing = changed.filter((p) => !seen.has(p));
+  if (missing.length > 0) {
+    fail(
+      `the walkthrough did not cover ${missing.length} changed path(s): `
+        + `${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}. `
+        + 'Review them, or split the push.',
+    );
+  }
+}
+function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, coversHead, changedPaths) {
   if (!isPlainObject(evidence)) fail('top level must be a plain object.');
   validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead);
+  validateCoverage(evidence, changedPaths);
   validateEvidenceTimestamps(evidence, now);
   validateConsensusRatio(evidence.consensus_ratio);
   validateExperts(evidence.experts, bindingSeats);
@@ -572,18 +610,66 @@ function resolveProjectRoot(projectRoot) {
   return path.resolve(projectRoot);
 }
 
-function main() {
-  const [file, expectedCommit, expectedBranch, nowValue, projectRoot] = process.argv.slice(2);
-  if (!file || !expectedCommit || !expectedBranch) {
-    fail(`usage: validate-code-walkthrough.cjs <file> <commit> <branch> [now] [project-root].`);
+/**
+ * The paths changed between `commit` and HEAD, or null when git cannot answer.
+ *
+ * Null means "not measurable here", and the coverage check then SKIPS rather than
+ * inventing an empty set: reporting zero changed paths would pass every review on a
+ * repository this could not read, which is worse than not checking.
+ */
+function changedPathsSince(root, commit) {
+  if (typeof commit !== 'string' || commit === '') return null;
+  const cwd = root === null ? process.cwd() : root;
+  try {
+    const out = execFileSync('git', ['diff', '--name-only', `${commit}..HEAD`], {
+      cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return splitPathList(out);
+  } catch {
+    return null;
   }
+}
 
-  const evidence = readEvidence(file);
-  const now = nowValue === undefined ? Date.now() : parseTimestamp(nowValue, 'current time');
+/** Non-empty, trimmed lines of a `--name-only` listing. */
+function splitPathList(text) {
+  const paths = [];
+  for (const line of text.split('\n')) {
+    const p = line.trim();
+    if (p !== '') paths.push(p);
+  }
+  return paths;
+}
 
-  const root = resolveProjectRoot(projectRoot);
+function main() {
+  const args = parseArguments(process.argv.slice(2));
+  const evidence = readEvidence(args.file);
+  const root = resolveProjectRoot(args.projectRoot);
   const bindingSeats = root === null ? null : loadBindingSeats(root);
-  validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, ancestorCheck(root));
+  const changedPaths = changedPathsSince(root, evidence && evidence.commit);
+  validateEvidence(
+    evidence,
+    args.expectedCommit,
+    args.expectedBranch,
+    args.now,
+    bindingSeats,
+    ancestorCheck(root),
+    changedPaths,
+  );
+}
+
+/** The command line, or a usage failure. */
+function parseArguments(argv) {
+  const [file, expectedCommit, expectedBranch, nowValue, projectRoot] = argv;
+  if (!file || !expectedCommit || !expectedBranch) {
+    fail('usage: validate-code-walkthrough.cjs <file> <commit> <branch> [now] [project-root].');
+  }
+  return {
+    file,
+    expectedCommit,
+    expectedBranch,
+    projectRoot,
+    now: nowValue === undefined ? Date.now() : parseTimestamp(nowValue, 'current time'),
+  };
 }
 
 /**

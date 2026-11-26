@@ -1247,8 +1247,15 @@ _xp_gate_push_rhythm_note() {
   if git rev-parse --verify --quiet '@{upstream}' >/dev/null 2>&1; then
     unpushed=$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null) || return 0
   else
-    # No upstream at all: the FIRST push will have to review the whole branch.
-    unpushed=$(git rev-list --count HEAD 2>/dev/null) || return 0
+    # No upstream at all: the FIRST push will have to review the whole branch. Count
+    # from the merge-base with the default branch, NOT `HEAD` -- the latter counts the
+    # repository's entire history and reported 2473 for a branch with 284 commits
+    # (measured), which makes the reminder alarming and wrong at the same time.
+    base=$(git merge-base HEAD origin/main 2>/dev/null \
+      || git merge-base HEAD origin/master 2>/dev/null \
+      || git merge-base HEAD main 2>/dev/null \
+      || git merge-base HEAD master 2>/dev/null) || return 0
+    unpushed=$(git rev-list --count "$base"..HEAD 2>/dev/null) || return 0
     if [ "${unpushed:-0}" -ge 10 ]; then
       echo ""
       echo "   ℹ️  ${branch} has NO upstream and ${unpushed} commit(s)."
