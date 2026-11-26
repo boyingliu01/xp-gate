@@ -133,7 +133,23 @@ JSON
 @test "evidence for a commit that is neither HEAD nor an ancestor is BLOCKED" {
   # Without this case the rule degenerates into "any commit passes" -- the two PASS
   # cases above would both be satisfied by accepting everything.
-  write_evidence ev.json "0000000000000000000000000000000000000000" "$BRANCH"
+  #
+  # The commit must EXIST: a made-up hash fails earlier, when the diff for the coverage
+  # check cannot be computed, which is a different (also correct) block. A real commit on
+  # a detached side branch exercises the ancestor rule itself.
+  local side
+  side="$(git rev-parse HEAD)"
+  git checkout -q --detach
+  git checkout -q -B side-branch
+  printf 'side\n' > side.txt
+  git add side.txt
+  git commit -qm side --no-verify
+  local side_sha
+  side_sha="$(git rev-parse HEAD)"
+  git checkout -q "$side"
+  git branch -q -D side-branch
+
+  write_evidence ev.json "$side_sha" "$BRANCH"
   run node "$VALIDATOR" ev.json "$HEAD_SHA" "$BRANCH" "$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ)" "$TEST_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"commit does not match HEAD"* ]]

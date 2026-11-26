@@ -213,7 +213,10 @@ judge_pytest_output() {
   fi
 
   # Check for errors in summary line (e.g. "3 errors")
-  ERROR_COUNT=$(echo "$PYTEST_OUTPUT" | grep -oP '\d+ error' | grep -oP '\d+' | sed -n '1p; 1q')
+  # `sed`, not `grep -oP`: -P is a GNU extension that BSD/macOS grep and BusyBox (Alpine)
+  # do not have, and a missing flag here FAILS THE HOOK rather than the check -- the gate
+  # would block every commit on those platforms for a reason unrelated to the code.
+  ERROR_COUNT=$(printf '%s\n' "$PYTEST_OUTPUT" | sed -n 's/.*\([0-9][0-9]*\) error.*/\1/p' | head -1)
   if [ -n "$ERROR_COUNT" ] && [ "$ERROR_COUNT" -gt 0 ]; then
     echo "❌ $ERROR_COUNT test collection/execution errors detected"
     return 1

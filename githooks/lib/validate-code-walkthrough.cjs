@@ -507,10 +507,28 @@ function validateCoverage(evidence, changedPaths) {
     );
   }
 }
-function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, coversHead, changedPaths) {
+/**
+ * The diff to check coverage against, or null when there is nothing to compare.
+ *
+ * Null in two cases, for opposite reasons: an EXACT match means HEAD is the reviewed
+ * commit (no gap, and git may not be reachable at all -- unit tests build records in
+ * temporary directories on purpose), and a commit that is not an ancestor cannot be
+ * diffed against HEAD without failing inside git, which would mask the real finding.
+ */
+function comparablePaths(evidence, expectedCommit, coversHead, changedPathsOf) {
+  if (evidence.commit === expectedCommit) return null;
+  if (typeof coversHead !== 'function' || !coversHead(evidence.commit)) return null;
+  return typeof changedPathsOf === 'function' ? changedPathsOf() : null;
+}
+
+function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, coversHead, changedPathsOf) {
   if (!isPlainObject(evidence)) fail('top level must be a plain object.');
   validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead);
-  validateCoverage(evidence, changedPaths);
+  // Lazy AND conditional: the diff is only meaningful when the reviewed commit is this
+  // branch's ancestor. A fake or foreign commit cannot be diffed against HEAD at all, and
+  // computing it would surface a git error in place of the real finding (that the evidence
+  // describes a different commit). Records built by unit tests use such commits on purpose.
+  validateCoverage(evidence, comparablePaths(evidence, expectedCommit, coversHead, changedPathsOf));
   validateEvidenceTimestamps(evidence, now);
   validateConsensusRatio(evidence.consensus_ratio);
   validateExperts(evidence.experts, bindingSeats);
@@ -619,33 +637,37 @@ function resolveProjectRoot(projectRoot) {
  */
 function changedPathsSince(root, commit) {
   if (typeof commit !== 'string' || commit === '') return null;
+  // NOT wrapped in try/catch. An unanswerable diff means the gate cannot prove what this
+  // push contains, and "unable to prove coverage" must not read as "covered" -- that is
+  // the fail-open shape this repository keeps removing. The error propagates and BLOCKS.
   const cwd = root === null ? process.cwd() : root;
   try {
-    const out = execFileSync('git', ['diff', '--name-only', `${commit}..HEAD`], {
+    return execFileSync('git', ['diff', '--name-only', '-z', `${commit}..HEAD`], {
       cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return splitPathList(out);
-  } catch {
+    })
+      .split('\0')
+      .filter((p) => p !== '');
+  } catch (err) {
+    // Deliberately NOT "return null and skip": the gate cannot prove what this push
+    // contains, and that must block rather than pass. The message says which commit and
+    // why, so the operator knows whether the evidence is wrong or the repository is.
+    fail(
+      `cannot list what changed since ${commit}: ${err instanceof Error ? err.message : String(err)}. `
+        + 'Gate MW needs the diff to prove the review covers this push.',
+    );
     return null;
   }
 }
 
-/** Non-empty, trimmed lines of a `--name-only` listing. */
-function splitPathList(text) {
-  const paths = [];
-  for (const line of text.split('\n')) {
-    const p = line.trim();
-    if (p !== '') paths.push(p);
-  }
-  return paths;
-}
 
 function main() {
   const args = parseArguments(process.argv.slice(2));
   const evidence = readEvidence(args.file);
   const root = resolveProjectRoot(args.projectRoot);
   const bindingSeats = root === null ? null : loadBindingSeats(root);
-  const changedPaths = changedPathsSince(root, evidence && evidence.commit);
+  // ORDER MATTERS: identity first, coverage second. Computing the diff for a commit that
+  // is not this branch's ancestor fails inside git, and reporting that would mask the real
+  // problem ("this evidence is about a different commit").
   validateEvidence(
     evidence,
     args.expectedCommit,
@@ -653,7 +675,7 @@ function main() {
     args.now,
     bindingSeats,
     ancestorCheck(root),
-    changedPaths,
+    () => changedPathsSince(root, evidence && evidence.commit),
   );
 }
 
