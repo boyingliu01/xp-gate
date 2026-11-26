@@ -12,12 +12,20 @@
 #         claimed ignored artefacts were filtered "by their directory, not by
 #         name", but the code excluded only `__pycache__/*`.
 #
-#         The fix must NOT go the other way. Filtering by `git check-ignore`
-#         would be wrong: the entire `hooks/lib/` subtree is gitignored by
-#         design, so that predicate would drop 24 legitimate mirrors and fail in
-#         the opposite direction. What is excluded is artefact NAMES; a file the
-#         gate has no business comparing and no artefact name still trips the
-#         set check, which is the behaviour these tests pin.
+#         Two candidate fixes were rejected by measurement:
+#
+#           * filter by `git check-ignore` -- wrong, because `hooks/lib/` is
+#             gitignored BY DESIGN, so the predicate would drop 24 legitimate
+#             mirrors and fail in the opposite direction.
+#           * filter by artefact SUFFIX (*.bak, *.orig, ...) -- wrong for the
+#             actual failure mode. A stale generated `.ts` from an earlier layout
+#             is neither an editor backup nor ignored by name; a suffix list only
+#             relocates the bug. The first draft of THIS test passed the suffix
+#             version by only using suffix artefacts, which is exactly the
+#             tautology the Delphi review caught.
+#
+#         The rule that ships: disk content in the mirror tree that no mirror
+#         pair generates is stale, and the message names it.
 #
 # @covers AC-MIRROR-ARTIFACTS-01 AC-MIRROR-ARTIFACTS-02
 #
@@ -74,35 +82,62 @@ build_clean_fixture() {
   [[ "$output" == *"byte- and mode-identical"* ]]
 }
 
-@test "AC-MIRROR-ARTIFACTS-01: a leftover artefact does not block the push" {
+@test "AC-MIRROR-ARTIFACTS-01: a stale generated .ts is named, not lost in a 60-name list" {
   build_clean_fixture
-  # An editor backup, a patch reject and a Python cache: all three are things a
-  # generator or an editor leaves behind, none of them is a mirror.
-  printf 'stale\n' > "$FIXTURE/src/npm-package/hooks/lib/typecheck.sh.bak"
-  printf 'stale\n' > "$FIXTURE/src/npm-package/hooks/lib/patch.rej"
-  printf 'stale\n' > "$FIXTURE/src/npm-package/hooks/lib/note.orig"
+  # The reproducer from the issue: a stale generated .ts left by an earlier
+  # layout. A suffix list (*.bak, *.orig) would miss exactly this case, which is
+  # why the fix keys on "not in HOOK_MIRROR_FILES" instead.
+  printf 'stale\n' > "$FIXTURE/src/npm-package/hooks/lib/stray-artifact.ts"
+
+  run bash -c "cd '$FIXTURE' && bash '$SCRIPT'"
+
+  # The gate still blocks -- a file nobody can account for must not be ignored
+  # silently. What changes is that the message says which file it is.
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"stray-artifact.ts"* ]]
+  [[ "$output" == *"no mirror pair generates"* ]]
+}
+
+@test "AC-MIRROR-ARTIFACTS-01: cache directories alone do not trip the gate" {
+  build_clean_fixture
   mkdir -p "$FIXTURE/src/npm-package/hooks/lib/__pycache__"
   printf 'cache\n' > "$FIXTURE/src/npm-package/hooks/lib/__pycache__/x.pyc"
 
   run bash -c "cd '$FIXTURE' && bash '$SCRIPT'"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"byte- and mode-identical"* ]]
 }
 
-@test "AC-MIRROR-ARTIFACTS-02: an unexplained file is still reported" {
-  # The set assertion is not decoration: a file the gate has no business
-  # comparing, with no artefact name, means an enumeration nobody updated.
+@test "AC-MIRROR-ARTIFACTS-02: the operator is told WHICH file is stale" {
+  # The original message printed all 60 expected names and never said which one
+  # was found instead. That is the part that made the failure unactionable.
   build_clean_fixture
-  printf 'mystery\n' > "$FIXTURE/src/npm-package/hooks/lib/unexplained.ts"
+  printf 'stale\n' > "$FIXTURE/src/npm-package/hooks/lib/stray-artifact.ts"
 
   run bash -c "cd '$FIXTURE' && bash '$SCRIPT'"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"file set drifted"* ]]
+  [[ "$output" == *"stray-artifact.ts"* ]]
+  [[ "$output" == *"no mirror pair generates"* ]]
+}
+
+@test "AC-MIRROR-ARTIFACTS-02: a listed mirror missing from disk is still caught" {
+  # The set check must not become "anything goes": if the generator skips a
+  # listed file, that has to block, and the message must name it.
+  build_clean_fixture
+  local target
+  # shellcheck disable=SC2086  # word splitting IS the intent: HOOK_FILES is a space-separated list
+  target="$(printf '%s\n' $HOOK_FILES | head -1)"
+  rm -f "$FIXTURE/src/npm-package/hooks/$target"
+
+  run bash -c "cd '$FIXTURE' && bash '$SCRIPT'"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing"* ]]
+  [[ "$output" == *"$target"* ]]
 }
 
 @test "AC-MIRROR-ARTIFACTS-02: genuine content drift is still caught" {
   build_clean_fixture
   local target
+  # shellcheck disable=SC2086  # word splitting IS the intent: HOOK_FILES is a space-separated list
   target="$(printf '%s\n' $HOOK_FILES | head -1)"
   printf 'drifted\n' > "$FIXTURE/src/npm-package/hooks/$target"
 

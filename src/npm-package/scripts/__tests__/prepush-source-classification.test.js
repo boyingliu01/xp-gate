@@ -73,9 +73,17 @@ describe('REQ-PREPUSH-SOURCE-CLASS a push that ships something is reviewed', () 
       'src/npm-package/package.json',
       'package.json',
       'package-lock.json',
+      // Reviewers asked why shrinkwrap was missing while package-lock was not:
+      // both lock the published dependency graph.
+      'npm-shrinkwrap.json',
       'src/npm-package/.npmignore',
+      // A registry/auth change here can repoint where a publish goes.
+      'src/npm-package/.npmrc',
       '.github/workflows/cross-platform-ci.yml',
       '.github/workflows/tests.yaml',
+      // A composite action's own entrypoint.
+      '.github/actions/setup/action.yml',
+      'src/foo/action.yml',
     ];
 
     it.each(shipping)('%s requires the walkthrough', (file) => {
