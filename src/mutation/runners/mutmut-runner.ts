@@ -552,6 +552,28 @@ function arraySpan(doc: string): { start: number; end: number } | null {
 }
 
 /**
+ * Where the table body ends: the next TABLE HEADER, skipping string content.
+ *
+ * A plain `^\[` scan stops at a `[x]` line INSIDE a multi-line string, so the body was
+ * cut short and the real key fell outside it -- the array was never rewritten (measured).
+ * The line is only a header when it is not inside a string.
+ */
+function nextTableStart(doc: string, from: number): number {
+  let quote: string | null = null;
+  let offset = from;
+  for (const line of doc.slice(from).split('\n')) {
+    const isHeader = quote === null && TABLE_HEADER.test(line);
+    quote = scanLineForQuote(line, quote);
+    if (isHeader && quote === null) return offset;
+    offset += line.length + 1;
+  }
+  return doc.length;
+}
+
+/** Any TOML table header line. */
+const TABLE_HEADER = /^[^\S\n]*\[/;
+
+/**
  * The character range of the `[tool.mutmut]` table body.
  *
  * BOTH bounds matter: without them the search finds the first `source_paths` in the FILE
@@ -562,8 +584,7 @@ function mutmutBodyRange(doc: string): { start: number; end: number } | null {
   const header = MUTMUT_HEADER.exec(doc);
   if (!header) return null;
   const start = header.index + header[0].length;
-  const next = /^[^\S\n]*\[/m.exec(doc.slice(start));
-  return { start, end: next ? start + next.index : doc.length };
+  return { start, end: nextTableStart(doc, start) };
 }
 
 /**

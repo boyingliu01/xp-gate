@@ -16,6 +16,10 @@ import {
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { shouldEscalate } from '../runners/spawn-with-capture';
+// The TOML helpers are PURE -- no I/O, no mocks needed -- so they import statically. The
+// runner itself stays a dynamic import inside beforeEach, because it must be loaded
+// AFTER the fs/child_process mocks are installed.
+import { mutmutConfigContent } from '../runners/mutmut-runner';
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
@@ -927,7 +931,6 @@ describe('MutmutRunner', () => {
       // TOML allows the array to span lines. Without the `s` flag `.*?` stops at the
       // first newline, so `replace` returns the input UNCHANGED -- the stale value is
       // kept and mutmut reads a source_paths that was never updated. (Measured.)
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       expect(typeof mutmutConfigContent).toBe('function');
       const existing = '[tool.mutmut]\nsource_paths = [\n  "old_a",\n  "old_b",\n]\n';
       const out = mutmutConfigContent(existing, ['new']);
@@ -939,7 +942,6 @@ describe('MutmutRunner', () => {
       // Searching forward from the key found the next assignment's `[` and replaced
       // everything up to its `]` -- measured: `other = ["a", "b"]` was DELETED. The
       // bracket must be on the key's own line.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const existing = '[tool.mutmut]\nsource_paths = "src"\nother = ["a", "b"]\n';
       expect(mutmutConfigContent(existing, ['new'])).toBe(existing);
     });
@@ -947,21 +949,26 @@ describe('MutmutRunner', () => {
     it('leaves a NON-ARRAY source_paths alone instead of adding a second key', async () => {
       // `source_paths = "text"` has the key but no `[`. Treating that as "no key" made the
       // caller INSERT a second one -- measured: two `source_paths` in one table.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const existing = '[tool.mutmut]\nsource_paths = "not-an-array"\n';
       expect(mutmutConfigContent(existing, ['new'])).toBe(existing);
+    });
+
+    it('does not end the table at a header-like line inside a string', async () => {
+      // A `[x]` line inside a multi-line string is DATA. A plain `^\[` scan treated it as
+      // the next table, cut the body short, and left the real key outside it -- the array
+      // was never rewritten (measured, silently).
+      const existing = '[tool.mutmut]\ndescription = """\n[x]\n"""\nsource_paths = ["a"]\n';
+      expect(mutmutConfigContent(existing, ['new'])).toContain('source_paths = ["new"]');
     });
 
     it('finds a header with spaces inside the brackets', async () => {
       // `[ tool.mutmut ]` is legal TOML. A stricter pattern reported "no table" and left
       // the array unrewritten (measured).
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       expect(mutmutConfigContent('[ tool.mutmut ]\nsource_paths = ["a"]\n', ['new']))
         .toBe('[ tool.mutmut ]\nsource_paths = ["new"]\n');
     });
 
     it('finds a header with a trailing comment', async () => {
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       expect(mutmutConfigContent('[tool.mutmut] # note\nsource_paths = ["a"]\n', ['new']))
         .toBe('[tool.mutmut] # note\nsource_paths = ["new"]\n');
     });
@@ -970,7 +977,6 @@ describe('MutmutRunner', () => {
       // A `description = """` body can hold a line that looks exactly like the key.
       // Anchoring on `^` matched it and rewrote the STRING while the real key below was
       // left alone (measured). The scan tracks string state across lines instead.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const existing = '[tool.mutmut]\ndescription = """\nsource_paths = ["fake"]\n"""\nsource_paths = ["real"]\n';
       const out = mutmutConfigContent(existing, ['new']);
       expect(out).toContain('source_paths = ["fake"]');
@@ -982,14 +988,12 @@ describe('MutmutRunner', () => {
       // The file is already invalid. Appending `source_paths` again compounds it into two
       // keys in one table (measured). Returning the text unchanged leaves a single, still
       // broken key for the operator to see and fix.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const broken = '[tool.mutmut]\nsource_paths = ["a"\n';
       expect(mutmutConfigContent(broken, ['new'])).toBe(broken);
     });
 
     it('handles a single-quoted string containing a bracket', async () => {
       // TOML allows single quotes; they are literal strings, so a `]` inside one is data.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const out = mutmutConfigContent("[tool.mutmut]\nsource_paths = ['a]b', 'c']\n", ['new']);
       expect(out).toBe('[tool.mutmut]\nsource_paths = ["new"]\n');
     });
@@ -997,7 +1001,6 @@ describe('MutmutRunner', () => {
     it('rewrites the array when a path CONTAINS a bracket', async () => {
       // `["src]", "lib"]` is legal TOML. A lazy `[\s\S]*?\]` stops at the first `]` and
       // produced invalid output (measured). Brackets are balanced now.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const out = mutmutConfigContent('[tool.mutmut]\nsource_paths = ["src]", "lib"]\n', ['new']);
       expect(out).toBe('[tool.mutmut]\nsource_paths = ["new"]\n');
     });
@@ -1006,7 +1009,6 @@ describe('MutmutRunner', () => {
       // Rebuilding the document by text made `replace` hit the FIRST occurrence, which
       // can belong to another table entirely (measured: `[tool.other]` got the new value
       // and `[tool.mutmut]` kept the old one). Indices remove the ambiguity.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const out = mutmutConfigContent(
         '[tool.other]\nsource_paths = ["x"]\n\n[tool.mutmut]\nsource_paths = ["x"]\n',
         ['new'],
@@ -1019,7 +1021,6 @@ describe('MutmutRunner', () => {
       // `includes('[tool.mutmut]')` matched a comment, so the fallback inserted the key
       // into a commented-out header and left a DUPLICATE `source_paths` (measured). A
       // commented header means there is no table, so a real one is appended.
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const out = mutmutConfigContent('# [tool.mutmut]\nsource_paths = ["a"]\n', ['new']);
       expect(out.match(/^\[tool\.mutmut\]/gm)).toHaveLength(1);
     });
@@ -1028,7 +1029,6 @@ describe('MutmutRunner', () => {
       // `source_paths` is a plausible key in any tool's table. An unscoped regex rewrote
       // `[tool.other]`'s value while leaving mutmut's untouched -- the exact inverse of
       // the intent (measured).
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const existing = '[tool.other]\nsource_paths = ["other_a"]\n\n[tool.mutmut]\nsource_paths = ["mut_a"]\n';
       const out = mutmutConfigContent(existing, ['new']);
       expect(out).toContain('source_paths = ["other_a"]');
@@ -1036,7 +1036,6 @@ describe('MutmutRunner', () => {
     });
 
     it('replaces a single-line source_paths', async () => {
-      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
       const out = mutmutConfigContent('[tool.mutmut]\nsource_paths = ["old"]\n', ['new']);
       expect(out).not.toContain('"old"');
       expect(out).toContain('source_paths = ["new"]');
