@@ -243,6 +243,18 @@ function loadBaseline(target) {
  * "needs normalizing" -- the same wrong verdict as invalid JSON.
  */
 function countChanges(parsed) {
+  // A baseline with no usable `results` map is NOT "already normalized" -- it is a file
+  // that cannot answer the question. `normalizeBaseline` returns 0 for it, which `main`
+  // would print as "OK, 0 fields changed" and `--check` would exit 0 on, so a truncated
+  // or hand-broken baseline passed the check that exists to protect it (review FC-02).
+  //
+  // Checked here rather than inside `normalizeBaseline`: that function is exported and
+  // its 0 return is a legitimate answer for a caller that only counts, while exit codes
+  // are this script's business.
+  if (!hasResultsMap(parsed)) {
+    console.error('FAIL — baseline has no usable results map; cannot tell whether paths are normalized');
+    process.exit(NO_EVIDENCE);
+  }
   try {
     return normalizeBaseline(parsed);
   } catch (err) {
