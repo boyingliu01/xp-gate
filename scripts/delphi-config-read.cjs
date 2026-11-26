@@ -77,7 +77,15 @@ function loadConfigFile(configPath) {
   try {
     raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (err) {
-    console.error(`[delphi-review] ERROR: Failed to parse config: ${err.message}`);
+    // POSITION ONLY, never `err.message`. V8 quotes the surrounding TEXT in a JSON
+    // syntax error -- measured: `Unexpected token '}', ...", "oops": }" is not valid JSON`
+    // -- and a config that failed next to `"api_key": "sk-..."` would print that key into
+    // CI logs (review technical CI-01).
+    console.error(
+      `[delphi-review] ERROR: Failed to parse config ${configPath}: `
+        + 'invalid JSON. Check it with a JSON validator — the error position is not '
+        + 'printed here because it would quote the file, keys included.',
+    );
     process.exit(1);
   }
   return raw;
