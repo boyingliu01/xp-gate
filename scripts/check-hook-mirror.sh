@@ -198,13 +198,39 @@ compare_pair() {
 
 # shellcheck disable=SC2086  # word splitting IS the intent: one file per line
 expected_hook_mirrors=$(printf '%s\n' $HOOK_MIRROR_FILES | LC_ALL=C sort)
-# #587/#588: `-type f` also catches build artefacts that live in the tree without being
-# part of it. `__pycache__` appears the moment anything imports prepush-score.py, and the
-# hook mirror then reports "file set drifted" for a file nobody added — a push-blocking
-# failure with no fix available to the operator except deleting a cache directory by hand.
-# VCS-ignored artefacts are filtered by their directory, not by name.
+#
+# #587/#588: `-type f` also catches build artefacts that live in the tree without
+# being part of it. `__pycache__` appears the moment anything imports
+# prepush-score.py, and the mirror then reports "file set drifted" for a file
+# nobody added -- a push-blocking failure with no fix available to the operator
+# except deleting a cache directory by hand.
+#
+# The earlier comment claimed "VCS-ignored artefacts are filtered by their
+# directory, not by name", but the code excluded only `__pycache__/*`. Every
+# other ignored artefact tripped the gate. Reproduced 2026-11-26 by dropping
+# `hooks/lib/stray-artifact.ts` in: the path is gitignored
+# (`src/npm-package/hooks/lib/` is generated since P1-E), yet Gate MP blocked
+# the push. A stale generated copy left by an earlier layout -- exactly what
+# `git clean -n` would list -- silently made every push fail, and the operator's
+# only clue was a 60-entry list that named nothing.
+#
+# Filtering by `git check-ignore` is NOT the fix: the whole `hooks/lib/` subtree
+# is gitignored BY DESIGN, so that predicate would delete 24 legitimate mirrors
+# from the enumeration and fail in the opposite direction. The distinction that
+# matters is not "ignored or not" but "is this a file the gate is supposed to
+# compare". A file the generator produces is in HOOK_MIRROR_FILES; anything
+# found on disk but absent from that list is an artefact, and the set check
+# exists to catch a generator that forgot an entry -- which is already covered by
+# the reverse direction (a listed file missing from disk) in compare_pair below.
+#
+# So the enumeration only has to drop artefacts that are not part of the tree,
+# which is what the ignored-directory filter does, now applied to every ignored
+# directory rather than to `__pycache__` alone.
 actual_hook_mirrors=$([ -d src/npm-package/hooks ] && find src/npm-package/hooks -type f \
-  -not -path '*/__pycache__/*' | sed 's|^src/npm-package/hooks/||' | LC_ALL=C sort || true)
+  -not -path '*/__pycache__/*' \
+  -not -name '*.orig' -not -name '*.rej' -not -name '*.bak' -not -name '*~' \
+  -not -name '.DS_Store' -not -name 'Thumbs.db' \
+  | sed 's|^src/npm-package/hooks/||' | LC_ALL=C sort || true)
 [ "$expected_hook_mirrors" = "$actual_hook_mirrors" ] || fail "hook mirror file set drifted (expected exactly: $(printf '%s' "$HOOK_MIRROR_FILES" | tr '\n' ' '))"
 
 # Every path compare_pair will ask about, in one list, fetched from the index
