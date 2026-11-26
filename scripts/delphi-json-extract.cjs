@@ -16,8 +16,44 @@
 /** A fenced block, with or without a `json` tag. */
 const FENCED_BLOCK = /```(?:json)?\s*\n?([\s\S]*?)\n?```/;
 
-/** The first brace-delimited run, whatever surrounds it. */
-const FIRST_OBJECT = /\{[\s\S]*\}/;
+/**
+ * The first BALANCED brace run, whatever surrounds it.
+ *
+ * NOT `/{[\s\S]*}/`: that is greedy and runs to the LAST `}` in the text, so an answer
+ * containing two objects produced one span from the first `{` to the second `}` -- not
+ * JSON at all, while the first object on its own might have parsed (measured, review
+ * MC-01). Quotes are skipped so a brace inside a string does not move the depth.
+ */
+function firstBalancedObject(text) {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let quote = null;
+  for (let i = start; i < text.length; i += 1) {
+    const step = braceStep(text, i, quote);
+    if (step.skip > 0) i += step.skip;
+    quote = step.quote;
+    if (step.open) depth += 1;
+    if (step.close && (depth -= 1) === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
+
+/**
+ * What one character does to the brace scan.
+ *
+ * Quotes are honoured because `"}"` is data: closing the object at that brace truncated
+ * valid JSON. A backslash inside a string also consumes the next character.
+ */
+function braceStep(text, i, quote) {
+  const ch = text[i];
+  if (quote !== null) {
+    if (ch === '\\') return { quote, skip: 1, open: false, close: false };
+    return { quote: ch === quote ? null : quote, skip: 0, open: false, close: false };
+  }
+  if (ch === '"' || ch === "'") return { quote: ch, skip: 0, open: false, close: false };
+  return { quote: null, skip: 0, open: ch === '{', close: ch === '}' };
+}
 
 /**
  * The candidate texts to try, in the order a model's answer is likely to need them.
@@ -28,11 +64,10 @@ const FIRST_OBJECT = /\{[\s\S]*\}/;
  */
 function jsonCandidates(trimmed) {
   const fenced = trimmed.match(FENCED_BLOCK);
-  const object = trimmed.match(FIRST_OBJECT);
   return [
     trimmed,
     fenced ? fenced[1].trim() : null,
-    object ? object[0] : null,
+    firstBalancedObject(trimmed),
   ];
 }
 
