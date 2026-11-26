@@ -883,9 +883,7 @@ describe('MutmutRunner', () => {
 
   describe('preparation failures', () => {
     it('returns an outcome instead of rejecting when the config cannot be written', async () => {
-      // A rejection here would reach the caller's `catch` and read as "no mutants found",
-      // which is the fail-open this module exists to prevent. A tool that cannot prepare
-      // the workspace is reported as `error`, like any other tool failure.
+      // A rejection reads as "no mutants found" -- the fail-open this module prevents.
       const { writeFileSync } = await import('fs');
       vi.mocked(writeFileSync).mockImplementation(() => {
         throw new Error('disk full');
@@ -902,10 +900,7 @@ describe('MutmutRunner', () => {
 
   describe('prepare-phase rollback', () => {
     it("restores the user's pyproject.toml when only the WRITE fails", async () => {
-      // THE DATA-LOSS CASE: the backup succeeded, so a pyproject.toml was there and was
-      // copied aside. The write then failed. Rolling back with a hardcoded `false` routes
-      // to `removeCreated` and DELETES the user's own file -- so the rollback has to
-      // consult what actually happened.
+      // Backup ok, write failed: a hardcoded `false` rollback DELETED the user's file.
       const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
       vi.mocked(existsSync).mockReturnValue(true);   // a pyproject.toml IS there
       vi.mocked(readFileSync).mockReturnValue('user content');
@@ -926,7 +921,7 @@ describe('MutmutRunner', () => {
   });
 
   describe('unreadable progress counts', () => {
-    it('returns null for an emoji with no number', () => {
+    it('returns null when an emoji has no number', () => {
       // Absent emoji = a measured zero; present with no number = a parse failure.
       const runner = new MutmutRunner('linux');
       const parse = (line: string) => (runner as unknown as {
@@ -936,7 +931,6 @@ describe('MutmutRunner', () => {
       expect(parse('38/38  🎉 9 🫥 x  ⏰ 0')).toBeNull();
     });
   });
-
   describe('mutmutConfigContent', () => {
     it('replaces a MULTI-LINE source_paths instead of keeping the stale value', async () => {
       // A multi-line array: without dotAll the stale value survives (measured).
@@ -978,6 +972,13 @@ describe('MutmutRunner', () => {
         .toBe('[tool.mutmut] # note\nsource_paths = ["new"]\n');
     });
 
+    it('does not close the array at a bracket inside a COMMENT', async () => {
+      // A `#` runs to end of line; a `]` inside one is prose, not the array end.
+      const { mutmutConfigContent } = await import('../runners/mutmut-runner');
+      const existing = '[tool.mutmut]\nsource_paths = [\n  "a", # ] tricky\n  "b",\n]\n';
+      expect(mutmutConfigContent(existing, ['new'])).toBe('[tool.mutmut]\nsource_paths = ["new"]\n');
+    });
+
     it('does not end a string at an ESCAPED quote', async () => {
       // `\"` is data; without handling it the key after it was skipped (measured).
       const existing = '[tool.mutmut]\ndescription = "a \\" b"\nsource_paths = ["x"]\n';
@@ -1017,7 +1018,6 @@ describe('MutmutRunner', () => {
     it('rewrites the TABLE copy when the same body appears earlier', async () => {
       // Rebuilding the document by text made `replace` hit the FIRST occurrence, which
       // can belong to another table entirely (measured: `[tool.other]` got the new value
-      // and `[tool.mutmut]` kept the old one). Indices remove the ambiguity.
       const out = mutmutConfigContent(
         '[tool.other]\nsource_paths = ["x"]\n\n[tool.mutmut]\nsource_paths = ["x"]\n',
         ['new'],

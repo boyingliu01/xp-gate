@@ -640,7 +640,7 @@ function matchingBracket(doc: string, open: number): number {
   for (let i = open; i < doc.length; i += 1) {
     const step = bracketStep(doc, i, quote);
     if (step.escape) i += 1;
-    else quote = step.quote;
+    else quote = endCommentAt(doc[i], step.quote);
     depth += step.delta;
     if (depth === 0) return i;
   }
@@ -659,6 +659,7 @@ interface BracketStep {
 /** Classify one character for the bracket scan. */
 function bracketStep(doc: string, i: number, quote: string | null): BracketStep {
   const ch = doc[i];
+  if (quote === COMMENT) return { quote: COMMENT, delta: 0, escape: false };
   if (quote === null) return outsideString(ch);
   return { quote: ch === quote ? null : quote, delta: 0, escape: ch === '\\' };
 }
@@ -666,7 +667,19 @@ function bracketStep(doc: string, i: number, quote: string | null): BracketStep 
 /** What a character does when the scan is OUTSIDE a string. */
 function outsideString(ch: string): BracketStep {
   if (isQuote(ch)) return { quote: ch, delta: 0, escape: false };
+  // A `#` starts a comment that runs to the end of the LINE, and a `]` inside one is
+  // prose. Without this the array closed EARLY and the rest of it was left in the file as
+  // garbage -- measured: `source_paths = ["new"] tricky` followed by orphaned entries.
+  if (ch === '#') return { quote: COMMENT, delta: 0, escape: false };
   return { quote: null, delta: BRACKET_DELTA[ch] ?? 0, escape: false };
+}
+
+/** Pseudo-quote standing for "inside a comment", cleared at the newline. */
+const COMMENT = '#';
+
+/** End the comment pseudo-quote at a newline; comments do not span lines. */
+function endCommentAt(lineBreak: string, quote: string | null): string | null {
+  return quote === COMMENT && lineBreak === '\n' ? null : quote;
 }
 
 /** Whether a character opens a TOML string. */
