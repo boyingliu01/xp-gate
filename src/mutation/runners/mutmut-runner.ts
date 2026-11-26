@@ -349,12 +349,11 @@ export class MutmutRunner implements MutationRunner {
   }
 
   private writeMutmutConfig(pyprojectPath: string, sourceDirs: string[]): void {
-    const sourcePathsLine = `source_paths = [${sourceDirs.map((d) => `"${d}"`).join(', ')}]`;
     try {
       // Read here so the content builder stays pure: it then has no I/O to
       // fail on, and the one place that can fail is the one that explains why.
       const existing = existsSync(pyprojectPath) ? readFileSync(pyprojectPath, 'utf-8') : null;
-      writeFileSync(pyprojectPath, mutmutConfigContent(existing, sourcePathsLine), {
+      writeFileSync(pyprojectPath, mutmutConfigContent(existing, sourceDirs), {
         encoding: 'utf-8',
       });
     } catch (err) {
@@ -365,99 +364,131 @@ export class MutmutRunner implements MutationRunner {
   }
 }
 
+import { parse as parseToml } from 'smol-toml';
+
 /**
- * pyproject.toml content with `[tool.mutmut] source_paths` set as requested.
+ * pyproject.toml content with `[tool.mutmut] source_paths` set to `sourceDirs`.
  *
- * Pure by design: the caller reads the existing file and passes it in, so this
- * function has no I/O that could fail partway through. Three shapes have to be
- * preserved -- an existing `source_paths` is rewritten in place, a bare
- * `[tool.mutmut]` table gets the key added, and a file without the table gets
- * one appended (a fresh file passes `null`).
+ * THE PARSER DECIDES, THE TEXT IS EDITED. A real TOML parser answers "is there a
+ * `[tool.mutmut]` table, and is its `source_paths` an array?" -- questions that five
+ * rounds of review showed cannot be answered by pattern-matching. A commented header, a
+ * string containing the key, a multi-line string body, an array whose path holds a `]`,
+ * and a scalar followed by another array each defeated a textual check; two of them by
+ * DELETING user content (all measured).
  *
- * @param existing current file content, or null when the file does not exist.
+ * Serialising the parsed document would answer them too, but it rewrites the whole file
+ * -- comments, ordering and spacing included -- which is not ours to discard. So the
+ * parser only SELECTS the branch, and the edit is applied to the original text.
+ *
+ * @param existing the current file content, or null when the file does not exist.
  */
-export function mutmutConfigContent(existing: string | null, sourcePathsLine: string): string {
-  if (existing === null) return `[tool.mutmut]\n${sourcePathsLine}\n`;
-  const table = findMutmutTable(existing);
-  if (table === null) return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
-  const at = findSourcePathsValue(existing, table.bodyStart, table.bodyEnd);
-  if (at === UNCLOSED) {
-    // The table has a `source_paths` whose array never closes -- a file that is already
-    // invalid. Appending a second key would compound it (measured: two `source_paths`
-    // in one table). Leave the text alone and let the operator fix it.
-    return existing;
+export function mutmutConfigContent(existing: string | null, sourceDirs: string[]): string {
+  const line = arrayLine(sourceDirs);
+  if (existing === null) return `[tool.mutmut]\n${line}\n`;
+  const table = findMutmutTable(parseDocument(existing));
+  if (table === null) return withoutTable(existing, line);
+  if (table.source_paths === undefined) return insertKey(existing, line);
+  if (!Array.isArray(table.source_paths)) return existing;
+  return replaceArrayText(existing, line);
+}
+
+/**
+ * Handle a document with no USABLE `[tool.mutmut]` table.
+ *
+ * Two reasons to get here, and they need opposite answers: the file parses and simply has
+ * no table (append one), or it does NOT parse -- in which case a header may well be there
+ * and appending a second `[tool.mutmut]` would leave two, so the text is left alone.
+ */
+function withoutTable(existing: string, line: string): string {
+  return hasMutmutHeader(existing) ? existing : appendTable(existing, line);
+}
+
+/** Whether the TEXT has a `[tool.mutmut]` header, parseable or not. */
+function hasMutmutHeader(existing: string): boolean {
+  return /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m.test(existing);
+}
+
+/** The `source_paths = [...]` line, as TOML with quoted entries. */
+function arrayLine(sourceDirs: string[]): string {
+  return `source_paths = [${sourceDirs.map((d) => JSON.stringify(d)).join(', ')}]`;
+}
+
+/** The parsed document, or `UNPARSEABLE` when the file is not valid TOML. */
+const UNPARSEABLE = Symbol('unparseable');
+
+/**
+ * Parse the document, tolerating an invalid one.
+ *
+ * A pyproject.toml that does not parse is a file mutmut cannot use either. Returning a
+ * sentinel rather than throwing keeps this function total: the caller appends its table
+ * to whatever is there, which is the same thing a hand edit would do.
+ */
+function parseDocument(existing: string): Record<string, unknown> | typeof UNPARSEABLE {
+  try {
+    return parseToml(existing) as Record<string, unknown>;
+  } catch {
+    return UNPARSEABLE;
   }
-  if (at === null) {
-    // No key in the table: add it first thing in the body.
-    return existing.slice(0, table.bodyStart) + `\n${sourcePathsLine}` + existing.slice(table.bodyStart);
-  }
-  return existing.slice(0, at.start) + sourcePathsLine + existing.slice(at.end);
-}
-
-/** The `[tool.mutmut]` table's span in the document. */
-interface TableSpan {
-  /** First character AFTER the header line. */
-  bodyStart: number;
-  /** Index of the next table header, or the end of the document. */
-  bodyEnd: number;
 }
 
 /**
- * Locate the `[tool.mutmut]` TABLE, by INDEX rather than by rebuilding the text.
+ * The `[tool.mutmut]` table from a parsed document, or null when there is none.
  *
- * Every earlier attempt matched text and replaced it, and each one broke on a
- * different input: a commented header, another table's `source_paths`, an array
- * containing `]`, and -- once the text was assembled -- a body that happens to appear
- * earlier in the file, so `replace` rewrote the WRONG place. All four are measured.
- * Working with indices removes the class: nothing is found by its text twice.
- *
- * A commented `# [tool.mutmut]` is not a table, and neither is a string that contains
- * the text; the header must be a line of its own.
+ * Read STRUCTURALLY: `tool.mutmut` is a path in the parsed tree, so a commented header,
+ * a string that mentions the table name, or a `[tool.other]` entry cannot be mistaken
+ * for it. That is the whole reason this function takes a parsed document.
  */
-function findMutmutTable(doc: string): TableSpan | null {
-  const header = /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m;
-  const found = header.exec(doc);
-  if (!found) return null;
-  const bodyStart = found.index + found[0].length;
-  const rest = doc.slice(bodyStart);
-  const next = /^[^\S\n]*\[/m.exec(rest);
-  return { bodyStart, bodyEnd: next ? bodyStart + next.index : doc.length };
+function findMutmutTable(parsed: Record<string, unknown> | typeof UNPARSEABLE): Record<string, unknown> | null {
+  if (parsed === UNPARSEABLE) return null;
+  const tool = parsed.tool;
+  if (!isRecord(tool)) return null;
+  const mutmut = tool.mutmut;
+  return isRecord(mutmut) ? mutmut : null;
+}
+
+/** Whether a parsed value is a TOML table. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
- * The span of the `source_paths = [...]` VALUE inside the table, or null when absent.
+ * Append a fresh `[tool.mutmut]` table.
  *
- * The array is delimited by BALANCING brackets, not by a lazy `[\s\S]*?\]`: a path may
- * legitimately contain `]` (`"src]"`), and a lazy match stops there and produced
- * invalid TOML (measured). Quotes are skipped so a `[` or `]` inside a string cannot
- * move the depth.
+ * The table is appended rather than merged because there is no table to merge INTO --
+ * either the file has none, or it does not parse and guessing where a table belongs in
+ * an invalid document is worse than adding one at the end.
  */
-function findSourcePathsValue(
-  doc: string,
-  bodyStart: number,
-  bodyEnd: number,
-): { start: number; end: number } | null | typeof UNCLOSED {
-  const key = findKeyOutsideStrings(doc, bodyStart, bodyEnd);
-  if (key === -1) return null;
-  // The `[` must be on the KEY's OWN LINE. Searching forward from the key found the next
-  // assignment's array instead, and everything between was swallowed -- measured,
-  // `other = ["a", "b"]` on the following line was DELETED.
-  const lineEnd = firstNewlineFrom(doc, key, bodyEnd);
-  const open = doc.indexOf('[', key);
-  if (open >= lineEnd) return UNCLOSED;
-  // No `[` after the key within the table: `source_paths` is assigned something that is
-  // not an array (a bare string, a number). Reporting `null` here would mean "no key",
-  // and the caller would INSERT a second one -- measured: two `source_paths` in one
-  // table. `UNCLOSED` says "there IS a key, and I cannot rewrite it safely".
-  if (open === -1 || open >= bodyEnd) return UNCLOSED;
-  const close = matchingBracket(doc, open, bodyEnd);
-  return close === -1 ? UNCLOSED : { start: key, end: close + 1 };
+function appendTable(existing: string, line: string): string {
+  const trimmed = existing.trimEnd();
+  // No stacked blank lines in an otherwise empty file.
+  return trimmed === '' ? `[tool.mutmut]\n${line}\n` : `${trimmed}\n\n[tool.mutmut]\n${line}\n`;
 }
 
-/** Index of the newline ending the line that contains `from`, or `limit`. */
-function firstNewlineFrom(doc: string, from: number, limit: number): number {
-  const at = doc.indexOf('\n', from);
-  return at === -1 || at > limit ? limit : at;
+/**
+ * Add `source_paths` to an existing table that does not have it yet.
+ *
+ * Inserted directly after the header, which keeps it inside the table no matter what
+ * follows -- no scan for the next header, so there is nothing to get wrong.
+ */
+function insertKey(existing: string, line: string): string {
+  const header = /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m.exec(existing);
+  if (!header) return appendTable(existing, line);
+  const at = header.index + header[0].length;
+  return `${existing.slice(0, at)}\n${line}${existing.slice(at)}`;
+}
+
+/**
+ * Replace the array literal with `line`, keeping the rest of the file byte for byte.
+ *
+ * Only reached when the parser has already confirmed the table and that its
+ * `source_paths` IS an array, so all that remains is finding that array's text. The
+ * search is bounded to the key's own line for the opening bracket and balanced
+ * afterwards, which is what makes a `]` inside a path safe.
+ */
+function replaceArrayText(existing: string, line: string): string {
+  const span = arraySpan(existing);
+  if (span === null) return existing;
+  return existing.slice(0, span.start) + line + existing.slice(span.end);
 }
 
 /** A line that assigns `source_paths`. */
@@ -466,22 +497,19 @@ const KEY_LINE = /^[^\S\n]*source_paths[^\S\n]*=/;
 /**
  * Index where a REAL `source_paths =` key starts, or -1.
  *
- * Line-by-line with a string state machine, not `^.../m`: a MULTI-LINE string can hold
- * a line that looks exactly like the key. Measured -- a
- * `description = """` containing `source_paths = ["fake"]` inside `[tool.mutmut]` was
- * rewritten while the REAL key below it was left alone.
+ * The parser has already confirmed the table HAS the key; this finds its TEXT. A plain
+ * regex cannot, because a multi-line string can hold a line that looks exactly like the
+ * key -- measured: the STRING was rewritten and the real key below it left alone.
  *
- * All four TOML string forms are tracked: `"..."`, `'...'`, `"""..."""` and
- * `'''...'''`. The multi-line forms are why a single-line regex cannot work here --
- * they legitimately span the newlines the regex would anchor on.
+ * All four TOML string forms are tracked, the multi-line ones included: they legitimately
+ * span the newlines a `^`-anchored regex relies on.
  */
 function findKeyOutsideStrings(doc: string, from: number, to: number): number {
   let quote: string | null = null;
   let offset = from;
   for (const line of doc.slice(from, to).split('\n')) {
-    const isKey = quote === null && KEY_LINE.test(line);
+    if (quote === null && KEY_LINE.test(line)) return offset;
     quote = scanLineForQuote(line, quote);
-    if (isKey && quote === null) return offset;
     offset += line.length + 1;
   }
   return -1;
@@ -489,7 +517,7 @@ function findKeyOutsideStrings(doc: string, from: number, to: number): number {
 
 /** The string delimiter still open after this line, or null when outside one. */
 function scanLineForQuote(line: string, quote: string | null): string | null {
-  let open = quote;
+  let open: string | null = quote;
   for (let i = 0; i < line.length; i += 1) {
     const hit = QUOTE_TOKENS.find((token) => line.startsWith(token.delimiter, i));
     if (!hit) continue;
@@ -500,25 +528,55 @@ function scanLineForQuote(line: string, quote: string | null): string | null {
   return open;
 }
 
-/** The TOML string delimiters, longest first so `"""` wins over `"`. */
-const QUOTE_TOKENS = [
-  { delimiter: '"""' },
-  { delimiter: "'''" },
-  { delimiter: '"' },
-  { delimiter: "'" },
-];
+/** The TOML string delimiters, LONGEST FIRST so the triple forms win. */
+const QUOTE_TOKENS = [{ delimiter: '"""' }, { delimiter: "'''" }, { delimiter: '"' }, { delimiter: "'" }];
 
-/** Marks a `source_paths` whose array never closes, so the caller can leave it alone. */
-const UNCLOSED = Symbol('unclosed array');
+/** Where the `source_paths = [...]` value sits in the text, or null. */
+function arraySpan(doc: string): { start: number; end: number } | null {
+  const body = mutmutBodyRange(doc);
+  if (body === null) return null;
+  const keyIndex = findKeyOutsideStrings(doc, body.start, body.end);
+  if (keyIndex === -1) return null;
+  const close = bracketOnKeyLine(doc, keyIndex);
+  return close === -1 ? null : { start: keyIndex, end: close + 1 };
+}
+
+/**
+ * The character range of the `[tool.mutmut]` table body.
+ *
+ * BOTH bounds matter: without them the search finds the first `source_paths` in the FILE
+ * -- another table's, or a fake one inside a multi-line string -- and rewrote the wrong
+ * value (measured).
+ */
+function mutmutBodyRange(doc: string): { start: number; end: number } | null {
+  const header = /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m.exec(doc);
+  if (!header) return null;
+  const start = header.index + header[0].length;
+  const next = /^[^\S\n]*\[/m.exec(doc.slice(start));
+  return { start, end: next ? start + next.index : doc.length };
+}
+
+/**
+ * Index of the `]` closing the array that starts on the key's own line; -1 when there is
+ * no array there.
+ *
+ * The bracket must be on THAT line: searching forward found the next assignment's `[`
+ * and replaced everything up to its `]`, DELETING `other = ["a", "b"]` (measured).
+ */
+function bracketOnKeyLine(doc: string, keyIndex: number): number {
+  const open = doc.indexOf('[', keyIndex);
+  if (open === -1) return -1;
+  const lineEnd = doc.indexOf('\n', keyIndex);
+  if (lineEnd !== -1 && open > lineEnd) return -1;
+  return matchingBracket(doc, open);
+}
 
 /** Index of the `]` balancing the `[` at `open`, skipping quoted strings; -1 if none. */
-function matchingBracket(doc: string, open: number, limit: number): number {
+function matchingBracket(doc: string, open: number): number {
   let depth = 0;
   let quote: string | null = null;
-  for (let i = open; i < limit; i += 1) {
+  for (let i = open; i < doc.length; i += 1) {
     const step = bracketStep(doc, i, quote);
-    // Inside a string the character is DATA: it must not move the depth, and a backslash
-    // also consumes the next one.
     if (step.escape) i += 1;
     else quote = step.quote;
     depth += step.delta;
@@ -532,31 +590,21 @@ interface BracketStep {
   quote: string | null;
   /** +1 for `[`, -1 for `]`, 0 otherwise. */
   delta: number;
-  /** The character was a backslash inside a string, so the NEXT one is data. */
+  /** A backslash inside a string, so the NEXT character is data. */
   escape: boolean;
 }
 
-/**
- * Classify one character.
- *
- * Quotes are tracked because a path may contain `[` or `]` -- `"src]"` must not close
- * the array, which is exactly what a lazy regex got wrong.
- */
+/** Classify one character for the bracket scan. */
 function bracketStep(doc: string, i: number, quote: string | null): BracketStep {
   const ch = doc[i];
   if (quote === null) return outsideString(ch);
-  return { quote: nextQuote(ch, quote), delta: 0, escape: ch === '\\' };
+  return { quote: ch === quote ? null : quote, delta: 0, escape: ch === '\\' };
 }
 
 /** What a character does when the scan is OUTSIDE a string. */
 function outsideString(ch: string): BracketStep {
   if (isQuote(ch)) return { quote: ch, delta: 0, escape: false };
   return { quote: null, delta: BRACKET_DELTA[ch] ?? 0, escape: false };
-}
-
-/** The quote still open after this character, or null when the string ended. */
-function nextQuote(ch: string, quote: string): string | null {
-  return ch === quote ? null : quote;
 }
 
 /** Whether a character opens a TOML string. */
