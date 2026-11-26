@@ -107,12 +107,21 @@ async function check(args) {
  * prove the side effect happens on the pass path and, more importantly, does
  * NOT happen on the fail path.
  */
-function celebrateCleanRun() {
+function celebrateCleanRun(target) {
   try {
-    require('./star-notice.js').maybeShowStarNotice();
+    const notice = require('./star-notice.js');
+    notice.maybeShowStarNotice();
+    // Offered after the same clean run, and only then: the badge claims a
+    // passing gate, so offering it after a failure would be a false claim.
+    //
+    // The project root is the checked TARGET, not the working directory: CI and
+    // `xp-gate check ../other` both run from somewhere else, and reading the
+    // wrong README would either nag a project that already has the badge or
+    // skip one that wants it.
+    notice.maybeOfferBadge({ projectRoot: target || process.cwd() });
   } catch {
-    // A decoration must never turn a green check into a crash. The notice is
-    // optional; the exit code is not.
+    // A decoration must never turn a green check into a crash. The notice and
+    // the badge are optional; the exit code is not.
   }
 }
 
@@ -132,7 +141,7 @@ async function runDefaultChecks(target) {
 
   console.log('');
   console.log(`[xp-gate check] ${ran - failures}/${ran} gate(s) passed`);
-  if (failures === 0) celebrateCleanRun();
+  if (failures === 0) celebrateCleanRun(target);
   return failures === 0 ? 0 : 1;
 }
 

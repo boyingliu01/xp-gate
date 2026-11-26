@@ -18,6 +18,15 @@ const { CONFIG_FILE } = require('./shared-paths.js');
 
 const REPO_URL = 'https://github.com/boyingliu01/xp-gate';
 const NOTICE_TEXT = `⭐ If XP-Gate saves you time, a star helps others find it: ${REPO_URL}`;
+
+/**
+ * README badge markup offered once a project's gates come back clean.
+ *
+ * A badge is the cheapest honest claim a project can make about itself: it
+ * shows a passing gate, not a promise. That is why it is offered only after a
+ * run where nothing failed -- the markup would be false otherwise.
+ */
+const BADGE_MARKDOWN = '[![gated by XP-Gate](https://img.shields.io/badge/gated%20by-XP--Gate-blueviolet)](https://github.com/boyingliu01/xp-gate)';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -185,6 +194,90 @@ function maybeShowStarNotice(opts = {}) {
 }
 
 /**
+ * Offer the README badge after a run where every gate passed.
+ *
+ * Deliberately silent in more places than the star notice is:
+ *
+ *   - never on a failing run (the markup would be a false claim)
+ *   - never when the project already carries the badge (it is advice, not news)
+ *   - never in CI or a pipe, same as the notice
+ *   - at most once per badge-offer day, tracked separately from the notice, so
+ *     accepting one does not silence the other
+ *
+ * @param {{
+ *   projectRoot?: string,
+ *   configFile?: string,
+ *   force?: boolean,
+ *   log?: (s: string) => void,
+ *   env?: Record<string, string|undefined>,
+ *   isTTY?: boolean,
+ *   now?: number,
+ * }} [opts]
+ * @returns {boolean} whether the badge was offered
+ */
+function maybeOfferBadge(opts = {}) {
+  const {
+    projectRoot = process.cwd(),
+    configFile = configFileFor(),
+    force = false,
+    log = (s) => console.log(s),
+    env = process.env,
+    isTTY = process.stdout.isTTY,
+    now = Date.now(),
+  } = opts;
+
+  const config = readConfig(configFile);
+  const badgeNotice = config.badgeOffer || {};
+
+  // The badge keeps its OWN clock. Reusing shouldShowNotice would read
+  // `starNotice.lastShownAt` -- which the star invitation writes moments earlier
+  // in the same run -- and conclude the badge had already been offered. Measured
+  // 2026-11-26: the badge never printed after a clean check for exactly this
+  // reason, while the star line did.
+  //
+  // Only the dismiss window is shared: a user who ran `--off` has asked for
+  // silence about the project, and that covers both.
+  const dismissed = Boolean(config.starNotice
+    && config.starNotice.dismissedUntil
+    && now < config.starNotice.dismissedUntil);
+  const optedOut = Boolean(env.CI || env.NO_UPDATE_NOTIFIER || env.XP_GATE_NO_NOTICE) || dismissed;
+
+  const eligible = force ? Boolean(isTTY) && !optedOut : Boolean(isTTY) && !optedOut;
+  if (!eligible) return false;
+  if (!force && alreadyBadged(projectRoot)) return false;
+
+  // The frequency check must come BEFORE the first log line: printing and then
+  // deciding not to record would show the advice on every run.
+  if (!force && badgeNotice.lastShownAt && now - badgeNotice.lastShownAt < DAY_MS) return false;
+
+  log('');
+  log('✅ Every gate passed. Claim it in your README:');
+  log(`   ${BADGE_MARKDOWN}`);
+
+  config.badgeOffer = { ...badgeNotice, lastShownAt: now };
+  writeConfig(configFile, config);
+  return true;
+}
+
+/**
+ * Whether the project's README already carries the badge.
+ *
+ * A missing or unreadable README is not an error -- it just means the project
+ * has not made the claim, so the offer stands.
+ *
+ * @param {string} projectRoot
+ * @returns {boolean}
+ */
+function alreadyBadged(projectRoot) {
+  try {
+    const readme = fs.readFileSync(require('path').join(projectRoot, 'README.md'), 'utf8');
+    return readme.includes('XP--Gate') || readme.includes('boyingliu01/xp-gate');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Handle the `star-notice` CLI subcommand.
  *
  * @param {string[]} args
@@ -227,6 +320,9 @@ module.exports = {
   writeConfig,
   dismiss,
   maybeShowStarNotice,
+  maybeOfferBadge,
+  alreadyBadged,
+  BADGE_MARKDOWN,
   resetProcessGuard,
   cli,
 };
