@@ -239,7 +239,19 @@ export async function loadConfig(configPath?: string): Promise<PrinciplesConfig>
   if (!resolvedPath) return defaults;
 
   const parsed = readConfigObject(resolvedPath);
-  return parsed ? mergeConfig(defaults, parsed) : defaults;
+  if (parsed === null) {
+    // A config that EXISTS but cannot be used is a mistake, not an absence -- the same
+    // fail-open AC-457-14 removes for a missing file, reached from the other direction.
+    // Falling back to the built-in defaults made a typo silently disappear: the run
+    // reported verdicts the operator never configured (review FC-01 / technical CI-01).
+    //
+    // NO config at all is still the defaults above; the two cases must not share an answer.
+    throw new Error(
+      `cannot use the config at ${resolvedPath}: the file exists but is not a readable `
+        + 'JSON object. Fix it, or remove it to use the built-in defaults.',
+    );
+  }
+  return mergeConfig(defaults, parsed);
 }
 
 /**
