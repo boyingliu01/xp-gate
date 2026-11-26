@@ -160,12 +160,14 @@ function maybeShowStarNotice(opts = {}) {
     now = Date.now(),
   } = opts;
 
-  // `force` bypasses the frequency and freshness checks, never the ones that
-  // exist to keep the notice out of logs. Forcing it into CI or a pipe would
-  // contradict the reason those checks exist.
-  const eligible = force
-    ? Boolean(isTTY) && !env.CI
-    : shouldShowNotice({ isTTY, env, config: readConfig(configFile), now });
+  // `force` bypasses the frequency and freshness checks and nothing else. It
+  // must still honour an explicit opt-out (`--off`, the env switches) and the
+  // guards that keep the notice out of logs: a user who asked us to stop has
+  // asked regardless of who is forcing.
+  const config = readConfig(configFile);
+  const optedOut = Boolean(env.CI || env.NO_UPDATE_NOTIFIER || env.XP_GATE_NO_NOTICE)
+    || Boolean(config.starNotice && config.starNotice.dismissedUntil && now < config.starNotice.dismissedUntil);
+  const eligible = force ? Boolean(isTTY) && !optedOut : shouldShowNotice({ isTTY, env, config, now });
 
   if (!eligible || shownInThisProcess) return false;
 
@@ -173,7 +175,6 @@ function maybeShowStarNotice(opts = {}) {
   log(NOTICE_TEXT);
   shownInThisProcess = true;
 
-  const config = readConfig(configFile);
   config.starNotice = { ...(config.starNotice || {}), lastShownAt: now };
   if (!writeConfig(configFile, config)) {
     // The in-process guard alone now holds the promise: it is the only state

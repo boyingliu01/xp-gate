@@ -18,6 +18,14 @@ const { execFileSync, spawnSync } = require('child_process');
 const BIN = path.join(__dirname, '..', '..', 'bin', 'xp-gate.js');
 const NOTICE_MARK = 'a star helps others find it';
 const CLI_TIMEOUT_MS = 60_000;
+const CLEAN_SOURCE = 'const answer = 42;\nexport default answer;\n';
+// Six parameters trips the too-many-arguments rule while the body stays honest.
+const DIRTY_SOURCE = [
+  'export function add(a: number, b: number, c: number, d: number, e: number, f: number): number {',
+  '  return a + b + c + d + e + f;',
+  '}',
+  '',
+].join('\n');
 
 function makeHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-wiring-'));
@@ -52,17 +60,40 @@ function runCli(args, { home, tty = false, env = {}, cwd, timeout = CLI_TIMEOUT_
   }
 }
 
-const hasScript = (() => {
+const hasScript = detectScript();
+
+/** @returns {boolean} whether a util-linux `script` is available for pty fakes. */
+function detectScript() {
   try {
     execFileSync('which', ['script'], { encoding: 'utf8' });
     return true;
   } catch {
     return false;
   }
-})();
+}
 
-// `script` is a util-linux pty helper; CI images without it cannot fake a TTY.
-const describeTty = hasScript ? describe : describe.skip;
+/**
+ * Run a TTY-dependent test only when a pty can be faked.
+ *
+ * A missing `script` FAILS the test rather than skipping it. A skipped test
+ * is a green test, and the silent-on-pipe guarantee is the whole point of this
+ * change: silently not checking it is the failure mode this repo exists to
+ * prevent. The assertion exists so the environment problem is visible.
+ */
+function describeTty(name, fn) {
+  describe(name, () => {
+    if (!hasScript) {
+      it('requires util-linux `script` to fake a TTY', () => {
+        throw new Error(
+          'Cannot verify the interactive-only contract: `script` is not installed. '
+          + 'Install util-linux, or the notice may print into pipes unnoticed.',
+        );
+      });
+      return;
+    }
+    fn();
+  });
+}
 
 describe('REQ-871 the notice is reachable from the real CLI', () => {
   let home;
@@ -157,15 +188,31 @@ describe('REQ-871 the notice is reachable from the real CLI', () => {
       it('does not invite a star when a gate failed', () => {
         const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-proj-'));
         try {
-          // A deliberately broken source file: the principles gate must reject it.
-          fs.writeFileSync(
-            path.join(proj, 'bad.ts'),
-            'export function f(a: any, b: any, c: any, d: any, e: any, f2: any) { return a + b + c + d + e + f2; }\n',
-          );
+          // A deliberately broken source file: the principles gate must reject
+          // it. The fixture is asserted BEFORE the silence assertion -- a test
+          // that skips itself when its fixture stops failing passes for the
+          // wrong reason and is exactly what round 1 caught.
+          fs.writeFileSync(path.join(proj, 'bad.ts'), DIRTY_SOURCE);
           const r = runCli(['check', '.'], { home, cwd: proj, tty: true });
-          if (r.stdout.includes('gate(s) passed') && /0\/\d+ gate/.test(r.stdout)) {
-            expect(r.stdout).not.toContain(NOTICE_MARK);
-          }
+
+          expect(r.status, 'fixture must actually fail a gate').not.toBe(0);
+          expect(r.stdout).toMatch(/\d+\/\d+ gate\(s\) passed/);
+          expect(r.stdout).not.toContain(NOTICE_MARK);
+        } finally {
+          cleanup(proj);
+        }
+      });
+
+      it('invites a star when every gate passed', () => {
+        const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'xp-gate-proj-'));
+        try {
+          fs.writeFileSync(path.join(proj, 'good.ts'), CLEAN_SOURCE);
+          // Gate 6 fails closed without a config; declare no constraints.
+          fs.writeFileSync(path.join(proj, '.architecture-skip'), '');
+          const r = runCli(['check', '.'], { home, cwd: proj, tty: true });
+
+          expect(r.status, 'fixture must pass every gate').toBe(0);
+          expect(r.stdout).toContain(NOTICE_MARK);
         } finally {
           cleanup(proj);
         }
