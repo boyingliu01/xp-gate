@@ -34,7 +34,19 @@ const RESCUE_WINDOW_LINES = 400;
 const CCN_BLOCK_THRESHOLD = 10;
 
 
-const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
+/**
+ * The branch tokens this verifier counts.
+ *
+ * The ternary arm is `\?(?![:?.])`: a bare `?[^.]` also matched TypeScript's OPTIONAL
+ * property and parameter markers (`key?: string`, `f(a?: number)`), inflating the
+ * recomputed CCN and producing a confident correction to a number that was right
+ * (review MC-02). `?:` is a type annotation, `?.` is optional chaining, `??` is already
+ * its own arm -- none of the three is a branch.
+ *
+ * `stripNonCode` has already removed strings and comments, so a surviving `?` is either a
+ * ternary or one of those three type-level markers.
+ */
+const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?(?![:?.])/g;
 
 // Skip a quoted run starting at `i` (which points at the opening quote) and
 // return the index just past the closing quote. Unterminated runs consume the
@@ -132,9 +144,17 @@ function ccnOfBody(bodyLines) {
  * of functions, and a function could rise from a reported 4 to a genuine 15 without the
  * ratchet noticing. The cost is one extra body lookup per row.
  */
+/**
+ * Whether this row can be recomputed against the file at all.
+ *
+ * The line must be INSIDE the file. Checking only `startLine > 0` let a row whose line is
+ * past the end through, and `slice()` then returned a short or empty window that
+ * `ccnOfBody` happily turned into a number -- a "corrected" figure computed from no code,
+ * which is the most dangerous kind of measurement error: confident and wrong (CI-01/CI-02).
+ */
 function isVerifiable(srcLines, startLine, ccn) {
   if (!srcLines || startLine <= 0 || ccn <= 0) return false;
-  return true;
+  return startLine <= srcLines.length;
 }
 
 function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
