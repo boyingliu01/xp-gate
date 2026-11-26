@@ -11,6 +11,19 @@
  * opened a block the brace scan never saw closed.
  */
 
+/**
+ * Skip a quoted run, returning the index just past its closing quote.
+ *
+ * KNOWN LIMIT (review FC-02, same family as the `maskLiterals` note): a template is
+ * scanned as opaque TEXT, so `${...}` interpolation is blanked along with the literal.
+ * Code inside an interpolation therefore contributes no CCN here.
+ *
+ * Measured before accepting it: the only `if`-inside-`${}` occurrences in this repository
+ * are inside comments describing this very limitation (2 matches, both prose). A ternary
+ * inside an interpolation is not a control structure, so the 48 ternary matches are
+ * unaffected either way. Fixing it properly means a real lexer, which is the same decision
+ * recorded in `typescript-mask.ts`.
+ */
 function skipQuoted(line, i, quote) {
   let k = i + 1;
   while (k < line.length) {

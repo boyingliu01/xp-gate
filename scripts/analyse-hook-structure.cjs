@@ -44,6 +44,17 @@ for (let i = 0; i < starts.length; i++) {
  * @param {string[]} lines
  * @param {Array<{key: string, start: number, end: number}>} sections mutated in place
  */
+/**
+ * A section's rule line: `# ====...` or `# ----...`.
+ *
+ * Restored after commit f62ff5a8 deleted the definition while `findRuleAbove` kept using
+ * it. `node --check` passes (it is a runtime binding, not a syntax error) and the script
+ * still ran, because Gate 13's branch is not taken on this repository's pre-commit -- so
+ * the ReferenceError sits waiting for whichever hook first has that section. Measured by
+ * the walkthrough (FC-01), which read the diff and spotted the dangling name.
+ */
+const BANNER = /^# ={20,}\s*$/;
+
 /** The line that marks Gate 13's section, which has no banner of its own. */
 const GATE13_MARKER = /^GATE_13_STATUS="SKIP"$/;
 
