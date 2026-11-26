@@ -74,41 +74,61 @@ describe('REQ-871 check invites a star only when every gate passed', () => {
     vi.restoreAllMocks();
   });
 
-  test('stays silent when a gate fails', async () => {
-    // Round 3's remaining objection: the earlier version grepped check.js for
-    // the guard instead of running it. This drives the FAIL path for real --
-    // `principles` is replaced on its module export, then the SAME check.js is
-    // re-required, so the code under test is the shipped `runDefaultChecks`,
-    // not a copy of its string.
-    //
-    // Driving a real gate to failure is not reproducible here: the gates
-    // resolve configuration from the enclosing checkout, so `check --all` on a
-    // bare fixture passes 9/19. Replacing one gate's verdict is the smallest
-    // honest way to reach the branch.
+  /**
+   * Run `check(['.'])` with `principles` replaced by `verdict`, on a freshly
+   * required check.js so the replacement is the binding it captured.
+   *
+   * Returns the exit code and how many times the notice was reached.
+   */
+  async function checkWithPrinciplesVerdict(verdict, spy) {
     const principlesModule = require('../principles.js');
-    const originalPrinciples = principlesModule.principles;
+    const original = principlesModule.principles;
     const checkPath = require.resolve('../check.js');
     const cachedCheck = require.cache[checkPath];
 
-    principlesModule.principles = async () => 1;
+    principlesModule.principles = async () => verdict;
     delete require.cache[checkPath];
     try {
-      vi.restoreAllMocks();
-      const freshSpy = vi.spyOn(starNotice, 'maybeShowStarNotice').mockImplementation(() => true);
-      const muted = vi.spyOn(console, 'log').mockImplementation(() => {});
-      vi.spyOn(console, 'error').mockImplementation(() => {});
-
-      const freshCheck = require('../check.js');
-      const exitCode = await freshCheck.check(['.']);
-
-      expect(exitCode, 'a failing gate must produce a failing exit code').toBe(1);
-      expect(freshSpy, 'a failed check must not invite a star').not.toHaveBeenCalled();
-      muted.mockRestore();
-      vi.restoreAllMocks();
+      const fresh = require('../check.js');
+      const exitCode = await fresh.check(['.']);
+      return { exitCode, noticeCalls: spy.mock.calls.length };
     } finally {
-      principlesModule.principles = originalPrinciples;
+      principlesModule.principles = original;
       if (cachedCheck) require.cache[checkPath] = cachedCheck;
       else delete require.cache[checkPath];
+    }
+  }
+
+  test('stays silent when a gate fails, and the stub is proven to be in effect', async () => {
+    // Two reviewers objected, correctly, that neither the stub nor the branch
+    // is proven by asserting a single exit code. This is a differential
+    // experiment: the SAME harness is run with the stub returning 0 and 1.
+    // If the replacement were ignored, both runs would produce the same exit
+    // code, because the real gates pass on this checkout. They do not.
+    vi.restoreAllMocks();
+    const spy = vi.spyOn(starNotice, 'maybeShowStarNotice').mockImplementation(() => true);
+    const mute = () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+    };
+
+    try {
+      mute();
+      const passing = await checkWithPrinciplesVerdict(0, spy);
+      vi.restoreAllMocks();
+      const spy2 = vi.spyOn(starNotice, 'maybeShowStarNotice').mockImplementation(() => true);
+      mute();
+      const failing = await checkWithPrinciplesVerdict(1, spy2);
+
+      // Differential: the verdict drives the exit code, so the stub is consumed.
+      expect(passing.exitCode, 'stub 0 must yield a passing run').toBe(0);
+      expect(failing.exitCode, 'stub 1 must yield a failing run').toBe(1);
+
+      // And the branch: a passing run reaches the notice, a failing one does not.
+      expect(passing.noticeCalls, 'a passing run invites a star').toBe(1);
+      expect(failing.noticeCalls, 'a failing run must not').toBe(0);
+    } finally {
+      vi.restoreAllMocks();
     }
   });
 
