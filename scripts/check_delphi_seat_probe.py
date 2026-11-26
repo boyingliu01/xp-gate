@@ -129,10 +129,13 @@ def probe_profile(path, cfg, key):
     """Probe every seat of one config file. Returns False on any failed seat."""
     prof = active_profile(cfg)
     if not prof:
+        # False, not True: a config whose `active_profile` names nothing has no seats to
+        # probe, and "no seats were measured" is not "every seat is allowed".
         print(
-            f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})"
+            f"PROBE FAIL {path}: no resolvable active profile "
+            f"(active_profile={cfg.get('active_profile')!r}) -- nothing was measured"
         )
-        return True
+        return False
 
     providers = prof.get("providers", {})
     ok = True
@@ -153,10 +156,17 @@ def probe_seat(role, seat, prof, providers, key):
 
 
 def probe(cfg_by_path):
+    """Probe every configured seat, returning whether the probe COULD RUN and PASSED.
+
+    A missing key returns False, not True. Nothing was measured without it, and `True`
+    made CI report "ALL SEATS ALLOWED" from a run that never reached the gateway -- the
+    fail-open shape ("not checked" must never read as "passed") this repository removes
+    everywhere else (three reviewers, same finding).
+    """
     key = (os.environ.get("WHALECLOUD_API_KEY") or "").strip()
     if not key:
-        print("PROBE SKIP: WHALECLOUD_API_KEY not set")
-        return True
+        print("PROBE FAIL: WHALECLOUD_API_KEY not set -- nothing was measured")
+        return False
     ok = True
     for path, cfg in cfg_by_path.items():
         ok = probe_profile(path, cfg, key) and ok
