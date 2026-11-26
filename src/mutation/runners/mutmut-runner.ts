@@ -549,24 +549,30 @@ function scanLineForQuote(line: string, quote: string | null): string | null {
   let open: string | null = quote;
   let i = 0;
   while (i < line.length) {
-    // A backslash escapes the NEXT character inside a basic string, so `\"` is data.
-    // Without this the escaped quote ENDED the string and everything after it read as
-    // outside -- a valid line then looked like a string, and the array was skipped
-    // (measured with a real file).
-    if (open === '"' && line[i] === '\\') {
-      i += 2;
-      continue;
-    }
+    const skipped = escapedCharacter(line, i, open);
+    if (skipped > 0) { i += skipped; continue; }
     const hit = QUOTE_TOKENS.find((token) => line.startsWith(token.delimiter, i));
-    if (!hit) {
-      i += 1;
-      continue;
-    }
-    if (open === null) open = hit.delimiter;
-    else if (open === hit.delimiter) open = null;
-    i += hit.delimiter.length;
+    open = hit ? nextDelimiter(open, hit.delimiter) : open;
+    i += hit ? hit.delimiter.length : 1;
   }
   return open;
+}
+
+/**
+ * Characters to skip at `i`, or 0 when the character is ordinary.
+ *
+ * A backslash inside a BASIC string (`"`) escapes the next character, so `\"` is data.
+ * Without this the escaped quote ENDED the string, everything after it read as outside,
+ * and a valid key was skipped (measured with a real file).
+ */
+function escapedCharacter(line: string, i: number, open: string | null): number {
+  return open === '"' && line[i] === '\\' ? 2 : 0;
+}
+
+/** The delimiter still open after one is encountered. */
+function nextDelimiter(open: string | null, delimiter: string): string | null {
+  if (open === null) return delimiter;
+  return open === delimiter ? null : open;
 }
 
 /** The TOML string delimiters, LONGEST FIRST so the triple forms win. */
