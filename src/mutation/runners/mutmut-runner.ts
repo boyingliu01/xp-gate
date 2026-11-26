@@ -307,9 +307,15 @@ export class MutmutRunner implements MutationRunner {
     const unknown1 = this.extractEmojiCount(progressLine, '🔇');
     const unknown2 = this.extractEmojiCount(progressLine, '🧙');
 
-    const nrOfKilledMutants = killed;
+    // Any UNREADABLE count makes the whole line untrustworthy: reporting a score built
+    // from a partial parse is worse than reporting that the run could not be read.
+    const counts = [killed, untested, timeout, suspicious, survived, unknown1, unknown2];
+    if (counts.some((n) => n === null)) return null;
+
+    const nrOfKilledMutants = killed as number;
     const nrOfSurvivedMutants =
-      survived + timeout + suspicious + untested + unknown1 + unknown2;
+      (survived as number) + (timeout as number) + (suspicious as number)
+      + (untested as number) + (unknown1 as number) + (unknown2 as number);
     const nrOfMutants = nrOfKilledMutants + nrOfSurvivedMutants;
 
     if (nrOfMutants === 0) return null;
@@ -326,10 +332,21 @@ export class MutmutRunner implements MutationRunner {
    * Extract count after an emoji in a progress line.
    * e.g., "🎉 9" → 9
    */
-  private extractEmojiCount(line: string, emoji: string): number {
-    const escapedEmoji = emoji.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = line.match(new RegExp(`${escapedEmoji}\\s*(\\d+)`));
-    return parseInt(match?.[1] ?? '0', 10);
+  /**
+   * The count after an emoji on mutmut's progress line.
+   *
+   * ABSENT means zero: mutmut omits an emoji whose count is 0, so a line without `🫥`
+   * really did have no untested mutants. That is a measured zero, not an unknown.
+   *
+   * PRESENT BUT UNREADABLE is different, and returns null: if the emoji is there and the
+   * number after it is not, the line was not understood, and calling that 0 would report
+   * a clean run on a parse failure.
+   */
+  private extractEmojiCount(line: string, emoji: string): number | null {
+    const at = line.indexOf(emoji);
+    if (at === -1) return 0;
+    const after = line.slice(at + emoji.length).match(/^\s*(\d+)/);
+    return after ? parseInt(after[1], 10) : null;
   }
 
   /**
@@ -481,7 +498,9 @@ function appendTable(existing: string, line: string): string {
  * follows -- no scan for the next header, so there is nothing to get wrong.
  */
 function insertKey(existing: string, line: string): string {
-  const header = /^[^\S\n]*\[tool\.mutmut\][^\S\n]*$/m.exec(existing);
+  // The SAME pattern the body scan uses. A second, stricter copy here meant a header
+  // like `[ tool.mutmut ]` was found by one and missed by the other.
+  const header = MUTMUT_HEADER.exec(existing);
   if (!header) return appendTable(existing, line);
   const at = header.index + header[0].length;
   return `${existing.slice(0, at)}\n${line}${existing.slice(at)}`;

@@ -926,11 +926,21 @@ describe('MutmutRunner', () => {
     });
   });
 
+  describe('unreadable progress counts', () => {
+    it('returns null when an emoji is present but its number is not', () => {
+      // Absent emoji = a measured zero; present with no number = a parse failure.
+      const runner = new MutmutRunner('linux');
+      const parse = (line: string) => (runner as unknown as {
+        parseEmojiProgress: (t: string) => { mutationScore: number } | null;
+      }).parseEmojiProgress(line);
+      expect(parse('38/38  🎉 9 🫥 29  ⏰ 0')).not.toBeNull();
+      expect(parse('38/38  🎉 9 🫥 x  ⏰ 0')).toBeNull();
+    });
+  });
+
   describe('mutmutConfigContent', () => {
     it('replaces a MULTI-LINE source_paths instead of keeping the stale value', async () => {
-      // TOML allows the array to span lines. Without the `s` flag `.*?` stops at the
-      // first newline, so `replace` returns the input UNCHANGED -- the stale value is
-      // kept and mutmut reads a source_paths that was never updated. (Measured.)
+      // A multi-line array: without dotAll the stale value survives (measured).
       expect(typeof mutmutConfigContent).toBe('function');
       const existing = '[tool.mutmut]\nsource_paths = [\n  "old_a",\n  "old_b",\n]\n';
       const out = mutmutConfigContent(existing, ['new']);
@@ -962,8 +972,7 @@ describe('MutmutRunner', () => {
     });
 
     it('finds a header with spaces inside the brackets', async () => {
-      // `[ tool.mutmut ]` is legal TOML. A stricter pattern reported "no table" and left
-      // the array unrewritten (measured).
+      // `[ tool.mutmut ]` is legal TOML; a stricter pattern missed it (measured).
       expect(mutmutConfigContent('[ tool.mutmut ]\nsource_paths = ["a"]\n', ['new']))
         .toBe('[ tool.mutmut ]\nsource_paths = ["new"]\n');
     });
@@ -974,9 +983,7 @@ describe('MutmutRunner', () => {
     });
 
     it('ignores a fake key inside a MULTI-LINE string', async () => {
-      // A `description = """` body can hold a line that looks exactly like the key.
-      // Anchoring on `^` matched it and rewrote the STRING while the real key below was
-      // left alone (measured). The scan tracks string state across lines instead.
+      // A string body can hold a line that looks like the key (measured).
       const existing = '[tool.mutmut]\ndescription = """\nsource_paths = ["fake"]\n"""\nsource_paths = ["real"]\n';
       const out = mutmutConfigContent(existing, ['new']);
       expect(out).toContain('source_paths = ["fake"]');
@@ -1026,9 +1033,7 @@ describe('MutmutRunner', () => {
     });
 
     it('leaves ANOTHER table\'s source_paths alone', async () => {
-      // `source_paths` is a plausible key in any tool's table. An unscoped regex rewrote
-      // `[tool.other]`'s value while leaving mutmut's untouched -- the exact inverse of
-      // the intent (measured).
+      // An unscoped regex rewrote `[tool.other]` and left mutmut's alone (measured).
       const existing = '[tool.other]\nsource_paths = ["other_a"]\n\n[tool.mutmut]\nsource_paths = ["mut_a"]\n';
       const out = mutmutConfigContent(existing, ['new']);
       expect(out).toContain('source_paths = ["other_a"]');
