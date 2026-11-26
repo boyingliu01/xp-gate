@@ -493,6 +493,15 @@ function validateCoverage(evidence, changedPaths) {
   // the field is not required. Demanding it here would fail the exact-match case that
   // worked before this check existed.
   if (changed.length === 0) return;
+  // KNOWN LIMIT, measured and NOT fixed (review FC-01): this compares PATHS, so work done
+  // to an ALREADY-REVIEWED path between the review commit and HEAD is not detected. A
+  // review of `src/x.ts` at A, followed by more edits to `src/x.ts` before HEAD, passes.
+  //
+  // Closing it needs a content fingerprint per path -- `reviewed_digests` holding the blob
+  // each review saw -- and `git diff --name-only` cannot supply one. That is a schema
+  // change to the evidence format, which every existing evidence file would fail, so it is
+  // recorded as debt rather than half-built here. Until then this check is a real guard
+  // (it stops an unreviewed FILE) and not a proof.
   const reviewed = evidence.reviewed_paths;
   if (!Array.isArray(reviewed)) {
     fail('reviewed_paths must be an array of the paths this walkthrough read.');
@@ -516,6 +525,13 @@ function validateCoverage(evidence, changedPaths) {
  * diffed against HEAD without failing inside git, which would mask the real finding.
  */
 function comparablePaths(evidence, expectedCommit, coversHead, changedPathsOf) {
+  // Null here means ONE thing: there is no gap to compare. Two cases produce it -- the
+  // reviewed commit IS HEAD, or it is not an ancestor (which `validateEvidenceIdentity`
+  // rejects, so we never reach the coverage check). Neither can hide unread work.
+  //
+  // "Could not compute the diff" is NOT one of them: `changedPathsSince` calls `fail()`
+  // in that case rather than returning null (review technical CI-01 asked whether the
+  // two could be confused; the answer is that `fail` exits, so this cannot receive it).
   if (evidence.commit === expectedCommit) return null;
   if (typeof coversHead !== 'function' || !coversHead(evidence.commit)) return null;
   return typeof changedPathsOf === 'function' ? changedPathsOf() : null;
@@ -636,6 +652,8 @@ function resolveProjectRoot(projectRoot) {
  * repository this could not read, which is worse than not checking.
  */
 function changedPathsSince(root, commit) {
+  // Not a string: `validateEvidenceIdentity` has already rejected this, so the value never
+  // reaches a caller that would treat null as "nothing to compare".
   if (typeof commit !== 'string' || commit === '') return null;
   // NOT wrapped in try/catch. An unanswerable diff means the gate cannot prove what this
   // push contains, and "unable to prove coverage" must not read as "covered" -- that is
@@ -655,7 +673,6 @@ function changedPathsSince(root, commit) {
       `cannot list what changed since ${commit}: ${err instanceof Error ? err.message : String(err)}. `
         + 'Gate MW needs the diff to prove the review covers this push.',
     );
-    return null;
   }
 }
 
