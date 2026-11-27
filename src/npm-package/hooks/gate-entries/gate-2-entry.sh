@@ -73,19 +73,18 @@ else
   fi
   # #591: drop data/evidence/build-output paths before the scan. Real source
   # extensions are untouched, so this narrows the noise, not the gate.
-  JSCPD_SCAN_FILES=""
+  JSCPD_SCAN_FILES=()
   while IFS= read -r _jf; do
     [ -n "$_jf" ] || continue
     if ! jscpd_is_default_ignored "$_jf"; then
-      JSCPD_SCAN_FILES="$JSCPD_SCAN_FILES $_jf"
+      JSCPD_SCAN_FILES+=("$_jf")
     fi
   done <<EOF_CHANGED
 $CHANGED_FILES
 EOF_CHANGED
   JSCPD_OUTPUT=$(mktemp)
   JSCPD_EXIT=0
-  # shellcheck disable=SC2086 # pre-existing splitting of the file list; #477/#591 change the scan set, not the splitting
-  jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} $JSCPD_SCAN_FILES > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
+  jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} ${JSCPD_SCAN_FILES[@]+"${JSCPD_SCAN_FILES[@]}"} > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
   head -30 "$JSCPD_OUTPUT" || true
   JSCPD_OUTCOME=$(classify_jscpd_run "$JSCPD_EXIT" "$(cat "$JSCPD_OUTPUT")")
   rm -f "$JSCPD_OUTPUT"
@@ -265,19 +264,18 @@ GO_LIST
     # was replaced by head's (and SIGPIPE under pipefail) — inconsistent with the
     # temp-file treatment the typescript branch already had from #477/#392. The
     # #591 default ignore set applies here too.
-    GENERIC_JSCPD_FILES=""
+    GENERIC_JSCPD_FILES=()
     while IFS= read -r _gf; do
       [ -n "$_gf" ] || continue
       if ! jscpd_is_default_ignored "$_gf"; then
-        GENERIC_JSCPD_FILES="$GENERIC_JSCPD_FILES $_gf"
+        GENERIC_JSCPD_FILES+=("$_gf")
       fi
     done <<EOF_GENERIC
 $SOURCE_FILES
 EOF_GENERIC
-    if [ -n "$GENERIC_JSCPD_FILES" ]; then
+    if [ "${#GENERIC_JSCPD_FILES[@]}" -gt 0 ]; then
       GENERIC_JSCPD_TMP=$(mktemp)
-      # shellcheck disable=SC2086
-      jscpd $GENERIC_JSCPD_FILES > "$GENERIC_JSCPD_TMP" 2>&1 || GENERIC_JSCPD_EXIT=$?
+      jscpd ${GENERIC_JSCPD_FILES[@]+"${GENERIC_JSCPD_FILES[@]}"} > "$GENERIC_JSCPD_TMP" 2>&1 || GENERIC_JSCPD_EXIT=$?
       head -15 "$GENERIC_JSCPD_TMP" || true
       rm -f "$GENERIC_JSCPD_TMP"
       if [ "${GENERIC_JSCPD_EXIT:-0}" -ne 0 ]; then
