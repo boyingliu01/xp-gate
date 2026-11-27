@@ -99,6 +99,23 @@ async function check(args) {
   return runDefaultChecks(opts.pathArg);
 }
 
+/**
+ * Called only when every gate in the default run passed (#871).
+ *
+ * Only a clean run earns the star invitation: congratulating someone on a
+ * failed check would read as tone-deaf. Exported so the integration test can
+ * prove the side effect happens on the pass path and, more importantly, does
+ * NOT happen on the fail path.
+ */
+function celebrateCleanRun() {
+  try {
+    require('./star-notice.js').maybeShowStarNotice();
+  } catch {
+    // A decoration must never turn a green check into a crash. The notice is
+    // optional; the exit code is not.
+  }
+}
+
 async function runDefaultChecks(target) {
   let failures = 0;
   let ran = 0;
@@ -115,6 +132,7 @@ async function runDefaultChecks(target) {
 
   console.log('');
   console.log(`[xp-gate check] ${ran - failures}/${ran} gate(s) passed`);
+  if (failures === 0) celebrateCleanRun();
   return failures === 0 ? 0 : 1;
 }
 
@@ -379,4 +397,4 @@ function listGates() {
   return 0;
 }
 
-module.exports = { check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary, normalizeGateExit };
+module.exports = { check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary, normalizeGateExit, celebrateCleanRun };
