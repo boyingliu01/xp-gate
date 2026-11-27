@@ -949,7 +949,16 @@ if (typeof require !== 'undefined' && require.main === module) {
       process.exit(1);
     });
 }
-/** One file's entry in a mutation report, as much as this gateway reads. */
+/**
+ * One file's entry in a RAW reporter payload, as much as this gateway reads.
+ *
+ * Deliberately NOT `MutationFileReport` from `runners/types.ts`, which looks similar and
+ * is not: that one describes a VALIDATED result (every field required, score never null),
+ * while this describes untrusted JSON straight off a reporter. Widening the validated type
+ * to `number | null` to share it would delete the guarantee that a parsed result is
+ * complete -- the opposite of what the type is for (review technical CI-01 read the two as
+ * duplicates).
+ */
 interface FileMutationReport {
   mutationScore: number | null;
   nrOfMutants?: number;
