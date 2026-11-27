@@ -26,32 +26,79 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
  * @param isTypeOnly whether the whole statement was `import type ...`
  */
 export function parseImportClause(clause: string, isTypeOnly: boolean): ImportBinding[] {
-  const bindings: ImportBinding[] = [];
   const marker = isTypeOnly ? 'type' : undefined;
+  // One collector for all three forms: an import clause names a default, a set of
+  // named members, a namespace, or several of them at once.
+  const bindings: ImportBinding[] = [];
   const push = (name: string, type?: string): void => {
     if (IDENTIFIER.test(name)) bindings.push({ name, ...(type ? { type } : {}) });
   };
 
-  // default import
+  pushDefaultImport(clause, marker, push);
+  pushNamedImports(clause, isTypeOnly, push);
+  pushNamespaceImport(clause, marker, push);
+  return bindings;
+}
+
+/** A collector for one binding, as `parseImportClause` builds it. */
+type BindingCollector = (name: string, type?: string) => void;
+
+/** `import Foo from` -- the leading identifier, if any. */
+function pushDefaultImport(clause: string, marker: string | undefined, push: BindingCollector): void {
   const def = /^(\w+)/.exec(clause);
   if (def) push(def[1], marker);
+}
 
-  // named imports { a, b as c }
+/**
+ * `import { a, b as c, type D } from` -- every member of the brace list.
+ *
+ * A member may be type-only on its own (`type D`) even when the whole clause is not,
+ * which is why `memberTypeOnly` is OR-ed with the clause-level flag rather than
+ * replacing it.
+ */
+function pushNamedImports(clause: string, isTypeOnly: boolean, push: BindingCollector): void {
   const braces = /\{([\s\S]*?)\}/.exec(clause);
-  if (braces) {
-    for (const raw of braces[1].split(',')) {
-      const part = raw.trim();
-      if (!part) continue;
-      const asMatch = /\bas\s+(\w+)\s*$/.exec(part);
-      const local = asMatch ? asMatch[1] : part.replace(/^type\s+/, '').trim();
-      const memberTypeOnly = /^type\s+/.test(part);
-      push(local, isTypeOnly || memberTypeOnly ? 'type' : undefined);
-    }
+  if (!braces) return;
+  for (const raw of braces[1].split(',')) {
+    const binding = parseNamedMember(raw, isTypeOnly);
+    if (binding) push(binding.name, binding.type);
   }
+}
 
-  // namespace import * as ns
+/**
+ * One member of a named import list, or null for an empty slot.
+ *
+ * The `as` alias wins when present: the LOCAL name is what the file binds, and that is
+ * what a later reference resolves against.
+ */
+function parseNamedMember(raw: string, isTypeOnly: boolean): { name: string; type?: string } | null {
+  const part = raw.trim();
+  if (!part) return null;
+  return {
+    name: localNameOf(part),
+    type: isTypeOnly || isTypeOnlyMember(part) ? 'type' : undefined,
+  };
+}
+
+/**
+ * The LOCAL name a named import binds to.
+ *
+ * `{ a as b }` binds `b`, so the alias wins -- resolving the imported name would report the
+ * wrong identifier as used. Without an alias the name is the identifier itself, with a
+ * leading `type` modifier removed.
+ */
+function localNameOf(part: string): string {
+  const alias = /\bas\s+(\w+)\s*$/.exec(part);
+  return alias ? alias[1] : part.replace(/^type\s+/, '').trim();
+}
+
+/** Whether the member itself carries the `type` modifier: `{ type Foo }`. */
+function isTypeOnlyMember(part: string): boolean {
+  return /^type\s+/.test(part);
+}
+
+/** `import * as ns from` -- the namespace binding. */
+function pushNamespaceImport(clause: string, marker: string | undefined, push: BindingCollector): void {
   const ns = /\*\s+as\s+(\w+)/.exec(clause);
   if (ns) push(ns[1], marker);
-
-  return bindings;
 }

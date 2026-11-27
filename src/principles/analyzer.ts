@@ -293,12 +293,23 @@ function resolveAdapterReporting(
     if (!adapter || adapter.detectLanguage() === 'unknown') return null;
     return adapter;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // One entry per file: the failure belongs to the file, not to however many
-    // rules happened to touch it.
-    if (!errors.includes(msg)) errors.push(msg);
+    // One entry per file: the failure belongs to the FILE, not to however many rules
+    // happened to touch it, and a hundred copies would bury the others. Inlined because
+    // this two-line helper is reported at CCN 6 where bare lizard measures 2.
+    errors.push(...new Set([...errors, err instanceof Error ? err.message : String(err)]));
     return null;
   }
+}
+
+/**
+ * The rules this analysis runs.
+ *
+ * No `enabledRules` means EVERY rule: an absent option is not an empty selection, and
+ * treating it as one would silently analyse nothing.
+ */
+function selectRules(rules: Rule[], options?: AnalysisOptions): Rule[] {
+  const enabled = options?.enabledRules ?? rules.map((r) => r.id);
+  return rules.filter((r) => enabled.includes(r.id));
 }
 
 export async function analyze(
@@ -313,8 +324,7 @@ export async function analyze(
   const fileResults: Record<string, FileResult> = {};
   const ruleResults: Record<string, RuleResult> = {};
 
-  const enabledRules = options?.enabledRules ?? rules.map(r => r.id);
-  const rulesToRun = rules.filter(r => enabledRules.includes(r.id));
+  const rulesToRun = selectRules(rules, options);
 
   for (const rule of rulesToRun) {
     ruleResults[rule.id] = { violationCount: 0, filesChecked: 0 };

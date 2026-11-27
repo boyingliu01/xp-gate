@@ -51,21 +51,41 @@ function parseArgs(): { filesPattern: string; source: 'local' | 'ci' } {
   let source: 'local' | 'ci' = 'local';
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--files' && args[i + 1]) {
-      filesPattern = args[i + 1];
-      i++;
-    }
-    if (args[i] === '--source' && args[i + 1]) {
-      source = args[i + 1] as 'local' | 'ci';
-      i++;
-    }
+    const step = applyArg(args, i);
+    if (step.filesPattern !== undefined) filesPattern = step.filesPattern;
+    if (step.source !== undefined) source = step.source;
+    i += step.consumed;
   }
-
   return { filesPattern, source };
 }
 
+/**
+ * Apply the flag at `i`.
+ *
+ * The value is consumed from the NEXT position so it is never re-read as a flag, and a
+ * flag with no value is ignored rather than taking `undefined` -- a silent default is
+ * safer than a pattern of "undefined".
+ */
+function applyArg(args: string[], i: number) {
+  const value = args[i + 1];
+  const hasValue = value !== undefined;
+  if (args[i] === '--files' && hasValue) return { filesPattern: value, consumed: 1 };
+  if (args[i] === '--source' && hasValue) return { source: value as 'local' | 'ci', consumed: 1 };
+  return { consumed: 0 };
+}
+
 async function scanFiles(dir: string, results: string[], basePath: string): Promise<void> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
+  let entries: import('fs').Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true }) as unknown as import('fs').Dirent[];
+  } catch (err) {
+    // THROW, do not warn and continue. A baseline is a record of what was measured, and
+    // one built from a partial tree silently omits every file that directory contained --
+    // those files then score as "no surviving mutants" for the rest of their lives. The
+    // previous `console.warn` + `return` said the failure "is reported", but a warning
+    // scrolls past and the artifact it produced looked complete (review FC-01).
+    throw new Error(`cannot read directory ${dir}: ${errMessage(err)}`);
+  }
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
@@ -116,8 +136,18 @@ async function runStryker(): Promise<void> {
 }
 
 async function parseStrykerReport(reportPath: string): Promise<StrykerReport> {
-  const reportContent = await fs.readFile(reportPath, 'utf-8');
-  return JSON.parse(reportContent) as StrykerReport;
+  try {
+    return JSON.parse(await fs.readFile(reportPath, 'utf-8')) as StrykerReport;
+  } catch (err) {
+    // A report that cannot be read or parsed must not become an empty baseline: that
+    // would record "no mutations measured" for a file that was never scored.
+    throw new Error(`cannot read the Stryker report at ${reportPath}: ${errMessage(err)}`);
+  }
+}
+
+/** The message of a thrown value, which is not always an `Error`. */
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function calculateScore(entry: StrykerFileReport): MutationScoreEntry {
@@ -156,7 +186,13 @@ function buildBaseline(
 }
 
 async function saveBaseline(baseline: MutationBaseline, outputPath: string): Promise<void> {
-  await fs.writeFile(outputPath, JSON.stringify(baseline, null, 2));
+  try {
+    await fs.writeFile(outputPath, JSON.stringify(baseline, null, 2));
+  } catch (err) {
+    // Reporting success for an unwritten baseline would send the caller on to commit
+    // scores that are not on disk.
+    throw new Error(`cannot write the baseline to ${outputPath}: ${errMessage(err)}`);
+  }
 }
 
 async function main(): Promise<void> {

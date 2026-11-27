@@ -223,6 +223,7 @@ At 40 KB per review that is ~27 reviews, and the push could not be performed.
 case, not the safest: its first push reviews everything at once. Small pushes are
 cheaper — 27 reviews for one large push versus one per small push.
 
+
 ## MEASUREMENT DISCIPLINE
 
 This machine runs at 90–100% CPU, so noise routinely exceeds the effect being

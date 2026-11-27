@@ -12,6 +12,23 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const script = path.resolve(__dirname, '..', 'normalize-secrets-baseline.cjs');
+
+/**
+ * Write a fixture file, failing the TEST on error.
+ *
+ * A swallowed fixture error produces a test that passes over a file it never wrote, which
+ * is the same fail-open shape the production code is being fixed for. Not a try/catch that
+ * ignores: the message names the path so the failure is diagnosable.
+ */
+function writeFixture(target, contents) {
+  try {
+    fs.writeFileSync(target, contents);
+  } catch (err) {
+    throw new Error(`cannot write fixture ${target}: ${err.message}`);
+  }
+}
+
+
 const { normalizeBaseline, normalizePath, detectEol } = require(script);
 
 const BS = '\\';
@@ -162,7 +179,7 @@ describe('CLI contract', () => {
 
   const write = (data) => {
     const p = path.join(dir, '.secrets.baseline');
-    fs.writeFileSync(p, `${JSON.stringify(data, null, 2)}\n`);
+    writeFixture(p, `${JSON.stringify(data, null, 2)}\n`);
     return p;
   };
   const run = (args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', cwd: dir });
@@ -274,7 +291,7 @@ describe('line-ending fidelity', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-eol-'));
     const p = path.join(dir, '.secrets.baseline');
     const body = JSON.stringify(data, null, 2).split(LF).join(eol);
-    fs.writeFileSync(p, body + eol);
+    writeFixture(p, body + eol);
     return { dir, p };
   }
 
@@ -363,5 +380,34 @@ describe('line-ending fidelity', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('a baseline with no usable results map', () => {
+  // `--check` exists to say whether a baseline is normalized. A baseline that cannot
+  // ANSWER that -- truncated JSON, `results: null`, a hand-edit that removed the key --
+  // used to produce `normalizeBaseline`'s 0 and exit 0, i.e. "nothing to normalize" from
+  // a file that proves nothing (review FC-02).
+  const run = (contents) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-baseline-'));
+    const file = path.join(dir, 'baseline.json');
+    writeFixture(file, contents);
+    try {
+      return spawnSync(process.execPath, [script, '--check', file], { encoding: 'utf8' });
+    } catch (err) {
+      // A runner that cannot start is not "the script exited 0"; fail the test.
+      throw new Error(`cannot run the normalizer: ${err.message}`);
+    }
+  };
+
+  it('exits 2 (no evidence), not 0', () => {
+    const result = run('{"results":null}');
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('no usable results map');
+  });
+
+  it('still treats a WELL-FORMED baseline normally', () => {
+    const result = run('{"results":{"a/b.ts":[]}}');
+    expect(result.status).toBe(1); // non-normalized, which is a real finding
   });
 });

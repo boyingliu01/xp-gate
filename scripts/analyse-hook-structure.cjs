@@ -23,27 +23,9 @@ const HOOK = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirna
 const lines = fs.readFileSync(HOOK, 'utf8').split('\n');
 
 // ── gate sections ───────────────────────────────────────────────────────────
-const BANNER = /^# ={20,}\s*$/;
-const isGateBannerText = (t) => /^# GATE ?\d+[a-c]?:/i.test(t) || /^# Gate 1[2][a-c]?:/i.test(t);
+const { isGateBannerText, keyOf, findGateBanners } = require('./gate-banner-locator.cjs');
 
-const starts = [];
-for (let i = 0; i < lines.length; i++) {
-  if (!BANNER.test(lines[i])) continue;
-  for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-    if (isGateBannerText(lines[j])) {
-      starts.push({ banner: i, text: lines[j].trim() });
-      break;
-    }
-    if (!/^#/.test(lines[j])) break;
-  }
-}
-function keyOf(t) {
-  const a = t.match(/^# GATE ?(\d+)([a-c]?):/i);
-  if (a) return a[2] ? a[1] + a[2] : a[1];
-  const b = t.match(/^# Gate 12([a-c]?):/i);
-  if (b) return b[1] ? '12' + b[1] : '12';
-  return null;
-}
+const starts = findGateBanners(lines);
 const sections = [];
 for (let i = 0; i < starts.length; i++) {
   const s = starts[i].banner;
@@ -51,23 +33,95 @@ for (let i = 0; i < starts.length; i++) {
   const k = keyOf(starts[i].text);
   if (k) sections.push({ key: k, start: s, end: e, text: starts[i].text });
 }
-// Gate 13's banner carries no marker line.
-{
-  let g13 = -1;
-  for (let i = 0; i < lines.length; i++) if (/^GATE_13_STATUS="SKIP"$/.test(lines[i])) { g13 = i; break; }
-  if (g13 >= 0 && !sections.some((s) => s.key === '13')) {
-    for (let i = g13; i >= 0 && g13 - i < 200; i--) {
-      if (BANNER.test(lines[i])) {
-        const next = sections.find((s) => s.start > i);
-        if (next) next.start = Math.max(next.start, i + 1);
-        sections.push({ key: '13', start: i, end: (next ? next.start : lines.length) - 1, text: '# GATE 13' });
-        break;
-      }
-    }
-    sections.sort((a, b) => a.start - b.start);
-    for (let i = 0; i < sections.length - 1; i++) sections[i].end = sections[i + 1].start - 1;
-  }
+
+/**
+ * Add Gate 13's section, which has a banner but no `# GATE 13:` title.
+ *
+ * The marker is a status assignment in its BODY, so the section is found by walking
+ * UP from that line to the nearest rule. Without this Gate 13 had no section at all
+ * and every line in it was attributed to the gate before it.
+ *
+ * @param {string[]} lines
+ * @param {Array<{key: string, start: number, end: number}>} sections mutated in place
+ */
+/**
+ * A section's rule line: `# ====...` or `# ----...`.
+ *
+ * Restored after commit f62ff5a8 deleted the definition while `findRuleAbove` kept using
+ * it. `node --check` passes (it is a runtime binding, not a syntax error) and the script
+ * still ran, because Gate 13's branch is not taken on this repository's pre-commit -- so
+ * the ReferenceError sits waiting for whichever hook first has that section. Measured by
+ * the walkthrough (FC-01), which read the diff and spotted the dangling name.
+ */
+const BANNER = /^# ={20,}\s*$/;
+
+/** The line that marks Gate 13's section, which has no banner of its own. */
+const GATE13_MARKER = /^GATE_13_STATUS="SKIP"$/;
+
+/** Whether a section is already the Gate 13 one. */
+function isGate13Section(section) {
+  return section.key === '13';
 }
+
+/**
+ * Add Gate 13's section, which has a banner but no `# GATE 13:` title.
+ *
+ * The marker lives in the gate's BODY, so the section is found by walking UP from that
+ * line to the nearest rule. Without this Gate 13 had no section at all and every line
+ * in it was attributed to the gate before it.
+ *
+ * Three guards, all of them "nothing to do": no marker, already present, no rule above.
+ * Written as early returns so the happy path is the last statement and needs no nesting.
+ */
+function locateGate13(lines, sections) {
+  const marker = lines.findIndex((l) => GATE13_MARKER.test(l));
+  if (marker < 0) return;
+  if (sections.some(isGate13Section)) return;
+
+  const banner = findRuleAbove(lines, marker);
+  if (banner < 0) return;
+
+  const next = sections.find((sec) => sec.start > banner);
+  if (next) next.start = Math.max(next.start, banner + 1);
+  sections.push({ key: '13', start: banner, end: sectionEnd(next, lines), text: '# GATE 13' });
+  resequenceSections(sections);
+}
+
+/**
+ * Where Gate 13's section ends.
+ *
+ * It ends where the NEXT section begins, or at the end of the file -- minus one,
+ * because `start` is inclusive on both ends.
+ */
+function sectionEnd(next, lines) {
+  return (next ? next.start : lines.length) - 1;
+}
+
+// Gate 13's banner carries no marker line, so its section is located from the
+// status assignment in its body. Done here, after the definitions it uses.
+locateGate13(lines, sections);
+
+/**
+ * The nearest rule line at or above `from`, within 200 lines.
+ *
+ * The bound keeps a missing rule from walking to the top of the file and claiming
+ * the preamble for this gate.
+ *
+ * @returns the index, or -1
+ */
+function findRuleAbove(lines, from) {
+  for (let i = from; i >= 0 && from - i < 200; i--) {
+    if (BANNER.test(lines[i])) return i;
+  }
+  return -1;
+}
+
+/** Sort by start and make each section end where the next begins. */
+function resequenceSections(sections) {
+  sections.sort((a, b) => a.start - b.start);
+  for (let i = 0; i < sections.length - 1; i++) sections[i].end = sections[i + 1].start - 1;
+}
+
 function sectionOf(lineIdx) {
   for (const s of sections) if (lineIdx >= s.start && lineIdx <= s.end) return s.key;
   return 'preamble';
@@ -81,25 +135,56 @@ const defRe = /^([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{\s*$|^function\s+([A-Za-z_][
 // `${var}` / `$( ... )` inside an eval'd string is counted as a block and the
 // match runs to EOF: the first version of this script reported _hook_resolve as
 // spanning 236-6341 when it really closes at 254.
-function stripNonBlockBraces(line) {
-  let s = line.replace(/\\$/g, '');
-  // Remove single-quoted strings.
-  s = s.replace(/'[^']*'/g, "''");
-  // Remove double-quoted strings, including any ${...}/$(...) inside them.
-  s = s.replace(/"(?:[^"\\]|\\.)*"/g, '""');
-  // Remove remaining parameter expansions ${...} (may nest once).
-  let prev;
+/**
+ * The constructs whose braces are NOT block delimiters, in the order they must be
+ * removed.
+ *
+ * Order is load-bearing: a double-quoted string is stripped before parameter
+ * expansions, because `"${x}"` contains a `${}` that would otherwise be replaced
+ * while still inside the string's quotes.
+ */
+const NON_BLOCK_STRIPPERS = [
+  // A line continuation is not content.
+  [/\\$/g, ''],
+  // Single-quoted strings hold no expansions.
+  [/'[^']*'/g, "''"],
+  // Double-quoted strings, including any ${...}/$(...) inside them.
+  [/"(?:[^"\\]|\\.)*"/g, '""'],
+  // Parameter expansions ${...} (may nest once, hence the loop below).
+  [/\$\{[^{}]*\}/g, 'X'],
+  // Command substitutions $( ... ), shallowly.
+  [/\$\([^()]*\)/g, 'X'],
+  // Arithmetic $(( ... )).
+  [/\$\(\([^()]*\)\)/g, 'X'],
+  // Comments.
+  [/(^|\s)#.*$/, '$1'],
+];
+
+/** Expansions may nest once, so apply the expansion stripper until it settles. */
+function settleNestedExpansions(text) {
+  let prev = text;
+  let next = text;
   do {
-    prev = s;
-    s = s.replace(/\$\{[^{}]*\}/g, 'X');
-  } while (s !== prev);
-  // Remove command substitutions $( ... ) shallowly.
-  s = s.replace(/\$\([^()]*\)/g, 'X');
-  // Remove arithmetic $(( ... )).
-  s = s.replace(/\$\(\([^()]*\)\)/g, 'X');
-  // Remove comments.
-  s = s.replace(/(^|\s)#.*$/, '$1');
-  return s;
+    prev = next;
+    next = prev.replace(/\$\{[^{}]*\}/g, 'X');
+  } while (next !== prev);
+  return next;
+}
+
+/**
+ * Remove the constructs whose braces are not block delimiters.
+ *
+ * Without this, `${var}` / `$( ... )` inside an eval'd string is counted as a block
+ * and the match runs to EOF: the first version of this script reported _hook_resolve
+ * as spanning 236-6341 when it really closes at 254.
+ */
+function stripNonBlockBraces(line) {
+  const [continuation, ...rest] = NON_BLOCK_STRIPPERS;
+  const unescaped = line.replace(continuation[0], continuation[1]);
+  const [single, double, ...afterStrings] = rest;
+  const quoted = unescaped.replace(single[0], single[1]).replace(double[0], double[1]);
+  const expanded = settleNestedExpansions(quoted);
+  return afterStrings.reduce((acc, [re, rep]) => acc.replace(re, rep), expanded);
 }
 
 const funcs = [];

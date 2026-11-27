@@ -25,15 +25,33 @@ export interface ScanOptions {
  */
 type GlobCharResult = { regex: string; advance: number };
 
+/** Single-character glob tokens and the regex each becomes. */
+const GLOB_CHAR_TOKENS: Record<string, string> = {
+  '*': '[^/]*',
+  '.': '\\.',
+  '?': '[^/]',
+  '/': '/',
+};
+
+/** `**` spans directories; a bare `*` does not. */
+const GLOBSTAR = '.*';
+
+/** Regex metacharacters that match themselves literally in a glob. */
+const REGEX_SPECIALS = '.+^${}()|[]\\';
+
+/**
+ * Translate one glob character.
+ *
+ * `**` is checked first and consumed whole: translating its two stars separately would
+ * produce `[^/]*[^/]*`, which does NOT span a slash and silently fails to match any
+ * nested path.
+ */
 function globCharToRegex(ch: string, nextCh: string): GlobCharResult {
-  if (ch === '*' && nextCh === '*') return { regex: '.*', advance: 2 };
-  if (ch === '*') return { regex: '[^/]*', advance: 1 };
-  if (ch === '.') return { regex: '\\.', advance: 1 };
-  if (ch === '?') return { regex: '[^/]', advance: 1 };
-  if (ch === '/') return { regex: '/', advance: 1 };
-  const special = '.+^${}()|[]\\';
-  if (special.includes(ch)) return { regex: '\\' + ch, advance: 1 };
-  return { regex: ch, advance: 1 };
+  if (ch === '*' && nextCh === '*') return { regex: GLOBSTAR, advance: 2 };
+  const token = GLOB_CHAR_TOKENS[ch];
+  if (token) return { regex: token, advance: 1 };
+  // A regex metacharacter is literal in a glob, so it must be escaped.
+  return { regex: REGEX_SPECIALS.includes(ch) ? `\\${ch}` : ch, advance: 1 };
 }
 
 export function simpleGlobMatch(pattern: string, inputPath: string): boolean {
@@ -75,37 +93,29 @@ const NODE_BUILTINS = new Set([
  * @param options - Scan options with boundary patterns
  * @returns `true` if the import is external
  */
+/**
+ * Whether a path is project-INTERNAL by its own shape, before patterns are consulted.
+ *
+ * Three forms, and each is a different reason: a relative path (`./x`, `../x`), the
+ * project's `@/` alias, and an absolute path. None of them can name an npm package.
+ */
+function isInternalPath(importPath: string): boolean {
+  return importPath.startsWith('.') || importPath.startsWith('@/') || isAbsolute(importPath);
+}
+
+/**
+ * Whether a path is an external dependency.
+ *
+ * External when the path is a Node builtin, or when it is neither project-internal by
+ * shape nor covered by a boundary pattern. A boundary pattern wins over the bare-name
+ * heuristic, because a project may legitimately alias a package into its own tree.
+ */
 export function isExternalImport(importPath: string, options: ScanOptions): boolean {
-  // Node.js builtins are always external
-  const bareName = importPath.startsWith('node:') ? importPath.slice(5) : importPath;
-  if (NODE_BUILTINS.has(bareName)) {
-    return true;
-  }
-
-  // Relative imports (starting with .) are internal
-  if (importPath.startsWith('.')) {
-    return false;
-  }
-
-  // @/ alias is internal (project path alias)
-  if (importPath.startsWith('@/')) {
-    return false;
-  }
-
-  // Absolute imports (Unix /... or Windows C:\...) are internal
-  if (isAbsolute(importPath)) {
-    return false;
-  }
-
-  // Check boundary patterns — if any pattern matches, it's within the project boundary
-  for (const pattern of options.boundary) {
-    if (simpleGlobMatch(pattern, importPath)) {
-      return false;
-    }
-  }
-
-  // Bare import (npm package) — external
-  return true;
+  // Node builtins are always external, including the `node:` prefixed form.
+  if (NODE_BUILTINS.has(importPath.replace(/^node:/, ''))) return true;
+  if (isInternalPath(importPath)) return false;
+  // A boundary pattern puts the path inside the project, whatever its shape looks like.
+  return !options.boundary.some((pattern) => simpleGlobMatch(pattern, importPath));
 }
 
 /**
@@ -129,6 +139,33 @@ export function resolveToRealPath(importPath: string, projectRoot: string): stri
  * @param projectRoot - Root of the project
  * @returns Array of external package names
  */
+/** The dependency fields of a `package.json` that name real external packages. */
+const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies'] as const;
+
+/** The `workspace:` protocol marks an INTERNAL monorepo reference, not a package. */
+const WORKSPACE_PROTOCOL = 'workspace:';
+
+/**
+ * The external package names a `package.json` declares.
+ *
+ * All three dependency fields count: a package that is only a devDependency is still
+ * something the project imports. A `workspace:` version is skipped -- it points at a
+ * sibling in the same monorepo, and treating it as external would report the project's
+ * own code as a dependency.
+ */
+function externalPackageNames(pkg: Record<string, unknown>): string[] {
+  // Merged, not concatenated: a package listed in BOTH `dependencies` and
+  // `devDependencies` is one external package, and the scope report must not count it
+  // twice.
+  const merged = DEPENDENCY_FIELDS.reduce<Record<string, string>>(
+    (acc, field) => ({ ...acc, ...((pkg[field] as Record<string, string>) ?? {}) }),
+    {},
+  );
+  return Object.entries(merged)
+    .filter(([, version]) => !String(version).startsWith(WORKSPACE_PROTOCOL))
+    .map(([name]) => name);
+}
+
 export async function loadExternalDependencies(projectRoot: string): Promise<string[]> {
   const pkgPath = join(projectRoot, 'package.json');
 
@@ -140,20 +177,7 @@ export async function loadExternalDependencies(projectRoot: string): Promise<str
     const content = await readFile(pkgPath, 'utf-8');
     const pkg = JSON.parse(content) as Record<string, unknown>;
 
-    const deps: Record<string, string> = pkg.dependencies as Record<string, string> || {};
-    const devDeps: Record<string, string> = pkg.devDependencies as Record<string, string> || {};
-    const peerDeps: Record<string, string> = pkg.peerDependencies as Record<string, string> || {};
-
-    const allDeps = { ...deps, ...devDeps, ...peerDeps };
-    const packages: string[] = [];
-
-    for (const [name, version] of Object.entries(allDeps)) {
-      // Skip workspace:* protocol packages — they are internal monorepo references
-      if (typeof version === 'string' && version.startsWith('workspace:')) {
-        continue;
-      }
-      packages.push(name);
-    }
+    const packages = externalPackageNames(pkg);
 
     return packages.sort();
   } catch {
@@ -206,29 +230,50 @@ function isExternalPackage(importPath: string, packages: string[]): boolean {
  * @param existCache - Cache of filesystem existence checks (path → boolean)
  * @returns The dependency scope classification
  */
+/**
+ * Internal when the file exists, PENDING when a boundary pattern claims it but nothing
+ * is on disk yet.
+ *
+ * The two are deliberately different: "internal but missing" is a path the project owns
+ * and has not written, while "external" would blame a package nobody added. PENDING is
+ * what makes the scope report say "not done yet" instead of "not ours".
+ */
+function classifiedByExistence(
+  importPath: string,
+  options: ScanOptions,
+  existCache: Map<string, boolean>,
+): DependencyScope {
+  const [exists] = checkExists(importPath, options.projectRoot, existCache);
+  return exists ? 'internal' : 'pending';
+}
+
 export function classifyDependency(
   importPath: string,
   scope: ProjectScope,
   options: ScanOptions,
   existCache: Map<string, boolean> = new Map(),
 ): DependencyScope {
+  const declared = declaredScope(importPath, scope);
+  if (declared) return declared;
+  if (options.boundary.some((pattern) => simpleGlobMatch(pattern, importPath))) {
+    return classifiedByExistence(importPath, options, existCache);
+  }
+  if (isExternalImport(importPath, options)) return 'external';
+  return classifiedByExistence(importPath, options, existCache);
+}
+
+/**
+ * The scope a project DECLARATION gives this path, or null when none does.
+ *
+ * Explicit lists win over every heuristic, in this order: implemented modules are
+ * internal, unimplemented ones are pending (declared but not written), known external
+ * packages are external. A declaration is a stronger statement than any pattern.
+ */
+function declaredScope(importPath: string, scope: ProjectScope): DependencyScope | null {
   if (matchesModule(importPath, scope.implementedModules)) return 'internal';
   if (matchesModule(importPath, scope.unimplementedModules)) return 'pending';
   if (isExternalPackage(importPath, scope.externalPackages)) return 'external';
-
-  for (const pattern of options.boundary) {
-    if (simpleGlobMatch(pattern, importPath)) {
-      const [exists] = checkExists(importPath, options.projectRoot, existCache);
-      if (exists) return 'internal';
-      return 'pending';
-    }
-  }
-
-  if (isExternalImport(importPath, options)) return 'external';
-
-  const [exists] = checkExists(importPath, options.projectRoot, existCache);
-  if (exists) return 'internal';
-  return 'pending';
+  return null;
 }
 
 function isAlreadyClassified(
@@ -252,6 +297,22 @@ function isAlreadyClassified(
  * @param options - Scan options
  * @returns The project scope with classified modules
  */
+/**
+ * Whether the import resolves to a file that exists, memoised per resolved path.
+ *
+ * Two imports of the same module must not hit the disk twice, and the cache is keyed by
+ * the RESOLVED path rather than the import string -- `./a` and `./a/index.ts` are one
+ * file, and caching them separately would double the stat calls.
+ */
+function fileExistsCached(importPath: string, projectRoot: string, cache: Map<string, boolean>): boolean {
+  const resolved = resolveToRealPath(importPath, projectRoot);
+  const cached = cache.get(resolved);
+  if (cached !== undefined) return cached;
+  const exists = existsSync(resolved);
+  cache.set(resolved, exists);
+  return exists;
+}
+
 export async function scanProjectScope(options: ScanOptions): Promise<ProjectScope> {
   const { projectRoot, imports, boundary } = options;
   const existCache = new Map<string, boolean>();
@@ -268,9 +329,7 @@ export async function scanProjectScope(options: ScanOptions): Promise<ProjectSco
       continue;
     }
 
-    const resolved = resolveToRealPath(importPath, projectRoot);
-    const exists = existCache.get(resolved) ?? existsSync(resolved);
-    existCache.set(resolved, exists);
+    const exists = fileExistsCached(importPath, projectRoot, existCache);
 
     if (exists) {
       implemented.push(importPath);

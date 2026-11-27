@@ -55,13 +55,31 @@ async function fetchNpmLatestVersion(url: string): Promise<string | null> {
   }
 }
 
-function readCache(file: string): { ts: number; remoteVersion: string; localVersion?: string; status?: string } | null {
+/** A cache entry whose `remoteVersion` is present and whose age is under the TTL. */
+type CacheEntry = { ts: number; remoteVersion: string; localVersion?: string; status?: string }
+
+/**
+ * Whether a parsed cache entry is still usable.
+ *
+ * Both halves are required: an entry older than the TTL would report a stale version,
+ * and one without `remoteVersion` carries no answer at all.
+ */
+function isFreshEntry(data: CacheEntry): boolean {
+  return Date.now() - data.ts < CACHE_TTL_MS && Boolean(data.remoteVersion)
+}
+
+/**
+ * The cached update check, or null when there is nothing usable.
+ *
+ * Null is the ONLY failure answer: a missing file, unreadable content and a stale
+ * entry are all "no cached answer", and the caller then does the real check. Reporting
+ * them differently would move cache mechanics into the update logic.
+ */
+function readCache(file: string): CacheEntry | null {
   try {
     if (!existsSync(file)) return null
-    const raw = readFileSync(file, "utf8")
-    const data = JSON.parse(raw)
-    if (Date.now() - data.ts < CACHE_TTL_MS && data.remoteVersion) return data
-    return null
+    const data = JSON.parse(readFileSync(file, "utf8")) as CacheEntry
+    return isFreshEntry(data) ? data : null
   } catch {
     return null
   }
@@ -127,6 +145,19 @@ function cacheStillDescribes(
   return cached.localVersion === localVersion
 }
 
+/**
+ * Whether this run has nothing to install.
+ *
+ * Two reasons, and both still RECORD "current": the version is already latest, or the
+ * user opted out of auto-upgrade. The opt-out is checked here rather than before the
+ * version comparison on purpose -- skipping the cache write would make the next run
+ * re-query the registry every time.
+ */
+function nothingToInstall(localVersion: string, remoteVersion: string): boolean {
+  const upToDate = !semverLt(localVersion, remoteVersion)
+  const optedOut = readXpGateConfig()?.autoUpgrade === false
+  return upToDate || optedOut
+}
 async function decideUpgrade(): Promise<UpgradeDecision> {
   const localVersion = getLocalXpGateVersion()
   const cached = readCache(XP_GATE_CACHE_FILE)
@@ -140,12 +171,7 @@ async function decideUpgrade(): Promise<UpgradeDecision> {
   const remoteVersion = await fetchNpmLatestVersion(XP_GATE_REGISTRY_URL)
   if (!remoteVersion) return { kind: "noop", localVersion, remoteVersion: null }
 
-  const upToDate = !semverLt(localVersion, remoteVersion)
-  // The opt-out is checked AFTER the version comparison so that recording
-  // "current" is still correct for an opted-out user; skipping it would make the
-  // next run re-query the registry every time.
-  const optedOut = readXpGateConfig()?.autoUpgrade === false
-  if (upToDate || optedOut) {
+  if (nothingToInstall(localVersion, remoteVersion)) {
     writeCache(XP_GATE_CACHE_FILE, { ts: Date.now(), localVersion, remoteVersion, status: "current" })
     return { kind: "noop", localVersion, remoteVersion }
   }
@@ -232,6 +258,23 @@ function readInstalledPluginVersion(pluginDir: string): string | null {
   }
 }
 
+/**
+ * Record the version comparison for the next run.
+ *
+ * The presence or absence of `status: "current"` is the whole message: with it the
+ * caller stays quiet, without it a notice is owed. Expressing that as an if/else-if
+ * that re-tested `remoteVersion && localVersion` in both arms said nothing new --
+ * both are already known non-empty by the time this is called.
+ */
+function recordVersionCheck(localVersion: string, remoteVersion: string): void {
+  const upToDate = !semverLt(localVersion, remoteVersion)
+  const entry: { ts: number; localVersion: string; remoteVersion: string; status?: string } = {
+    ts: Date.now(), localVersion, remoteVersion,
+  }
+  if (upToDate) entry.status = "current"
+  writeCache(OPENCODE_CACHE_FILE, entry)
+}
+
 async function checkPluginUpdate(pluginDir: string): Promise<void> {
   const cached = readCache(OPENCODE_CACHE_FILE)
   if (cached?.status === "current" && cached.remoteVersion) return
@@ -242,16 +285,7 @@ async function checkPluginUpdate(pluginDir: string): Promise<void> {
   const remoteVersion = await fetchNpmLatestVersion(OPENCODE_PLUGIN_REGISTRY)
   if (!remoteVersion) return
 
-  // The presence or absence of `status: "current"` is the whole message: with it
-  // the caller stays quiet, without it a notice is owed. It used to be expressed
-  // as an if/else-if that re-tested `remoteVersion && localVersion` in both arms,
-  // even though both were already known non-empty by this point.
-  const upToDate = !semverLt(localVersion, remoteVersion)
-  const entry: { ts: number; localVersion: string; remoteVersion: string; status?: string } = {
-    ts: Date.now(), localVersion, remoteVersion,
-  }
-  if (upToDate) entry.status = "current"
-  writeCache(OPENCODE_CACHE_FILE, entry)
+  recordVersionCheck(localVersion, remoteVersion)
 }
 
 // ── TUI upgrade notice ──
@@ -272,38 +306,113 @@ function writeUpgradeNotice(notice: UpgradeNotice): void {
 
 // ── Combined background check (runs once on first chat.message) ──
 
+/**
+ * Announce an upgrade outcome and return the message.
+ *
+ * All three outcomes do the same three things -- build a message, write a notice for
+ * the TUI, return the message -- so they share one path and differ only in the text
+ * and the notice kind.
+ *
+ * @param kind what the notice says happened
+ * @param result the update check's findings
+ * @param message what to show the user
+ * @returns the message, so the caller can surface it directly
+ */
+function announceUpgrade(kind: UpgradeNotice["kind"], result: UpgradeResult, message: string): string {
+  writeUpgradeNotice({
+    kind,
+    localVersion: result.localVersion,
+    remoteVersion: result.remoteVersion,
+    message,
+    ts: Date.now(),
+  })
+  return message
+}
+
+/**
+ * Whether this run should tell the user a newer version exists.
+ *
+ * Both versions must be present: a check that could not read either one is not
+ * evidence that an upgrade is available.
+ */
+function isNewerAvailable(result: UpgradeResult): boolean {
+  if (!result.remoteVersion || !result.localVersion) return false
+  return semverLt(result.localVersion, result.remoteVersion)
+}
+
 async function runBackgroundUpdates(pluginDir: string): Promise<string | null> {
   const result = await checkXpGateUpdate()
   await checkPluginUpdate(pluginDir)
 
   if (result.action === "upgraded") {
-    const msg = `[XP-Gate] Auto-upgraded from v${result.localVersion} to v${result.remoteVersion}`
-    writeUpgradeNotice({ kind: "upgraded", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
-    return msg
+    return announceUpgrade("upgraded", result,
+      `[XP-Gate] Auto-upgraded from v${result.localVersion} to v${result.remoteVersion}`)
   }
   if (result.action === "error") {
-    const msg = `[XP-Gate] Upgrade check: v${result.remoteVersion} available (auto-upgrade failed: ${result.error})`
-    writeUpgradeNotice({ kind: "error", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
-    return msg
+    return announceUpgrade("error", result,
+      `[XP-Gate] Upgrade check: v${result.remoteVersion} available (auto-upgrade failed: ${result.error})`)
   }
-  if (result.remoteVersion && result.localVersion && semverLt(result.localVersion, result.remoteVersion)) {
-    const msg = `[XP-Gate] New version v${result.remoteVersion} available (you have v${result.localVersion})`
-    writeUpgradeNotice({ kind: "outdated", localVersion: result.localVersion, remoteVersion: result.remoteVersion, message: msg, ts: Date.now() })
-    return msg
+  if (isNewerAvailable(result)) {
+    return announceUpgrade("outdated", result,
+      `[XP-Gate] New version v${result.remoteVersion} available (you have v${result.localVersion})`)
   }
   return null
 }
 
+/** How long a gate command may run before it is treated as hung. */
+const CMD_TIMEOUT_MS = 30000
+
+/**
+ * What to report when a command fails.
+ *
+ * stderr is preferred over message because it is the tool's own words; `message` is
+ * often the interpreter's paraphrase ("Command failed: xp-gate ...") and repeating it
+ * hides what actually went wrong.
+ */
+function failureText(err: unknown): string {
+  const error = err as { stderr?: string; message?: string }
+  if (error.stderr) return error.stderr
+  if (error.message) return `[XP-Gate] Error: ${error.message}`
+  return "[XP-Gate] Command failed."
+}
+
 async function runCmd(cmd: string, cwd: string): Promise<string> {
   try {
-    const { stdout } = await execAsync(cmd, { cwd, timeout: 30000 })
+    const { stdout } = await execAsync(cmd, { cwd, timeout: CMD_TIMEOUT_MS })
+    // A silent success is still a success; saying so stops it reading as a hang.
     return stdout || "[XP-Gate] Command completed (no output)."
-  } catch (err: unknown) {
-    const error = err as { stderr?: string; message?: string }
-    if (error.stderr) return error.stderr
-    if (error.message) return `[XP-Gate] Error: ${error.message}`
-    return "[XP-Gate] Command failed."
+  } catch (err) {
+    return failureText(err)
   }
+}
+
+/**
+ * Run a command from an argv ARRAY, so no argument ever reaches a shell.
+ *
+ * The tools below used to build one string per call (`check "${target}"${gatesFlag}`),
+ * which meant a `path` or a `gates` entry containing a quote or a semicolon became
+ * COMMAND SYNTAX. Measured: `gates: ['principles; touch /tmp/PWNED']` produced
+ * `xp-gate check "src/a.ts" --gates principles; touch /tmp/PWNED,arch` -- the `gates` value
+ * was never quoted, so the shell split it (review CI-02 / FC-02).
+ */
+function runArgv(file: string, args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve) => {
+    const child = spawn(file, args, { cwd })
+    let stdout = ""
+    let stderr = ""
+    const timer = setTimeout(() => child.kill("SIGTERM"), CMD_TIMEOUT_MS)
+    child.stdout?.on("data", (chunk) => { stdout += String(chunk) })
+    child.stderr?.on("data", (chunk) => { stderr += String(chunk) })
+    child.on("error", (err) => {
+      clearTimeout(timer)
+      resolve(`[XP-Gate] Error: ${err.message}`)
+    })
+    child.on("close", (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve(stdout || "[XP-Gate] Command completed (no output).")
+      else resolve(stderr || `[XP-Gate] Command exited with ${code ?? "no status"}.`)
+    })
+  })
 }
 
 async function runXpGate(subcommand: string, cwd: string): Promise<string> {
@@ -313,6 +422,28 @@ async function runXpGate(subcommand: string, cwd: string): Promise<string> {
     return ""
   }
   return runCmd(`xp-gate ${subcommand}`, cwd)
+}
+
+/** `runXpGate` for arguments that must not be shell-interpreted. */
+async function runXpGateArgv(args: string[], cwd: string): Promise<string> {
+  try {
+    await execAsync("command -v xp-gate", { cwd })
+  } catch {
+    return ""
+  }
+  return runArgv("xp-gate", args, cwd)
+}
+
+/** Gate names are identifiers; anything else is rejected rather than escaped. */
+const GATE_NAME = /^[a-z][a-z0-9-]*$/i
+
+function safeGateNames(gates: string[] | undefined): string[] {
+  if (!gates?.length) return []
+  const accepted = gates.filter((g) => GATE_NAME.test(g))
+  if (accepted.length !== gates.length) {
+    throw new Error(`[XP-Gate] Refusing gate names that are not identifiers: ${gates.filter((g) => !GATE_NAME.test(g)).join(", ")}`)
+  }
+  return accepted
 }
 
 async function getUpgradeSuggestion(cwd: string): Promise<string> {
@@ -364,29 +495,32 @@ function generateSessionTitle(dbPath: string, sessionId: string): string {
   }
 }
 
+/** Action verbs a task description usually opens with. */
+const TASK_MARKER = /(?:implement|add|create|build|develop|fix|refactor|optimize|update|remove|merge|deploy|release|publish|design|review)\s+[^.?!\n]{5,80}/gi
+
+/** Shortest fragment worth showing as a title. */
+const MIN_TITLE_LENGTH = 10
+
+/**
+ * The first phrase that reads like a task ("implement the parser").
+ *
+ * Preferred over the first sentence because a session usually opens with framing
+ * ("I was looking at...") before saying what it is doing.
+ */
+function firstTaskPhrase(text: string): string {
+  const hit = text.match(TASK_MARKER)
+  return hit && hit.length > 0 ? hit[0].trim() : ""
+}
+
+/** The first sentence long enough to say something. */
+function firstUsefulSentence(text: string): string {
+  const sentence = text.split(/[.?!]\s+/).find((part) => part.length > MIN_TITLE_LENGTH)
+  return sentence ? sentence.trim() : ""
+}
+
 function extractTitleFromText(text: string): string {
-  const taskMarkers = [
-    /(?:implement|add|create|build|develop|fix|refactor|optimize|update|remove|merge|deploy|release|publish|design|review)\s+[^.?!\n]{5,80}/gi,
-  ]
-
-  const matches: string[] = []
-  for (const marker of taskMarkers) {
-    const hits = text.matchAll(marker)
-    for (const hit of hits) {
-      matches.push(hit[0].trim())
-    }
-  }
-
-  if (matches.length > 0) {
-    return matches[0].substring(0, 120)
-  }
-
-  const firstSentence = text.split(/[.?!]\s+/).filter(s => s.length > 10)[0]
-  if (firstSentence && firstSentence.length > 5) {
-    return firstSentence.substring(0, 120).trim()
-  }
-
-  return ""
+  const candidate = firstTaskPhrase(text) || firstUsefulSentence(text)
+  return candidate ? candidate.substring(0, MAX_SESSION_TITLE) : ""
 }
 
 // ── Plugin definition ──
@@ -396,6 +530,28 @@ const SQLITE_TIMEOUT_MS = 5_000
 // Boy Scout (#447): XpGatePlugin used to inline five tool({...}) definitions
 // (191 lines, 7-8 brace levels). Each tool now lives in its own factory;
 // XpGatePlugin is pure wiring.
+/** Resolve a user-supplied path against the workspace root. */
+function resolveTarget(path: string, cwd: string): string {
+  return path.startsWith("/") ? path : `${cwd}/${path}`
+}
+
+/**
+ * Prefer the GLOBAL CLI's answer; run the in-repo source only when it gave none.
+ *
+ * The fallback is what makes the tool work before `xp-gate` is installed, and the
+ * upgrade suggestion is appended to whichever answer wins -- a stale global install must
+ * be visible in the same output as the result it produced.
+ */
+async function withUpgradeSuggestion(
+  cwd: string,
+  result: string | null,
+  fallback: () => Promise<string>,
+): Promise<string> {
+  if (!result) return fallback()
+  const upgrade = await getUpgradeSuggestion(cwd)
+  return upgrade ? `${result}\n${upgrade}` : result
+}
+
 function gateCheckTool(directory: string) {
   return tool({
     description: "Run xp-gate quality gates (Gate 4 + Gate 6) on a file or directory. Prefers global xp-gate CLI; falls back to direct checker source.",
@@ -405,15 +561,11 @@ function gateCheckTool(directory: string) {
     },
     async execute(args, ctx) {
       const cwd = ctx.directory || directory
-      const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
-      const gatesFlag = args.gates?.length ? ` --gates ${args.gates.join(",")}` : ""
-      const result = await runXpGate(`check "${target}"${gatesFlag}`, cwd)
-      if (result) {
-        const upgrade = await getUpgradeSuggestion(cwd)
-        return upgrade ? `${result}\n${upgrade}` : result
-      }
-      const cmd = `node ${directory}/src/npm-package/bin/xp-gate.js check "${target}"${gatesFlag}`
-      return runCmd(cmd, cwd)
+      const target = resolveTarget(args.path, cwd)
+      const gates = safeGateNames(args.gates)
+      const gatesArgs = gates.length > 0 ? ["--gates", gates.join(",")] : []
+      return withUpgradeSuggestion(cwd, await runXpGateArgv(["check", target, ...gatesArgs], cwd),
+        () => runArgv("node", [`${directory}/src/npm-package/bin/xp-gate.js`, "check", target, ...gatesArgs], cwd))
     },
   })
 }
@@ -426,14 +578,9 @@ function gatePrinciplesTool(directory: string) {
     },
     async execute(args, ctx) {
       const cwd = ctx.directory || directory
-      const target = args.path.startsWith("/") ? args.path : `${cwd}/${args.path}`
-      const result = await runXpGate(`principles "${target}"`, cwd)
-      if (result) {
-        const upgrade = await getUpgradeSuggestion(cwd)
-        return upgrade ? `${result}\n${upgrade}` : result
-      }
-      const cmd = `npx -y tsx ${directory}/src/principles/index.ts --files "${target}" --format console`
-      return runCmd(cmd, cwd)
+      const target = resolveTarget(args.path, cwd)
+      return withUpgradeSuggestion(cwd, await runXpGateArgv(["principles", target], cwd),
+        () => runArgv("npx", ["-y", "tsx", `${directory}/src/principles/index.ts`, "--files", target, "--format", "console"], cwd))
     },
   })
 }
@@ -454,20 +601,38 @@ function gateArchTool(directory: string) {
       const cwd = ctx.directory || directory
       // #447: default to the built-in-rules path — no --config. Forcing
       // `--config architecture.yaml` hit the pre-0.16 schema archlint rejects.
-      const archArgs = args.config ? `arch --use-config ${args.config}` : "arch"
-      const result = await runXpGate(archArgs, cwd)
-      if (result) {
-        const upgrade = await getUpgradeSuggestion(cwd)
-        return upgrade ? `${result}\n${upgrade}` : result
-      }
-      const fallback = args.config
-        ? `npx -y @archlinter/cli scan . --config ${args.config}`
-        : `npx -y @archlinter/cli scan .`
-      return runCmd(fallback, cwd)
+      //
+      // ARGV, like the other two tools: `args.config` reached a shell string here and was
+      // never quoted, so a value with a `;` ran as a second command. Two seats found it on
+      // the same batch after the identical fix landed for `gate-check` and `principles`
+      // (review CI-01), which is the argument for fixing a pattern everywhere at once.
+      const archArgs = args.config ? ["arch", "--use-config", args.config] : ["arch"]
+      const directArgs = ["-y", "@archlinter/cli", "scan", "."]
+      if (args.config) directArgs.push("--config", args.config)
+      return withUpgradeSuggestion(
+        cwd,
+        await runXpGateArgv(archArgs, cwd),
+        () => runArgv("npx", directArgs, cwd),
+      )
     },
   })
 }
 
+/**
+ * Render a stored model value for display.
+ *
+ * The column holds JSON (`{providerID, id}`), but older rows hold a bare string, and
+ * showing that verbatim is more useful than "unknown".
+ */
+function describeModel(raw: string): string {
+  if (!raw) return "unknown"
+  try {
+    const parsed = JSON.parse(raw)
+    return `${parsed.providerID || "?"}/${parsed.id || "?"}`
+  } catch {
+    return raw
+  }
+}
 function readCurrentSessionModel(dbPath: string, sessionId: string): string {
   try {
     // execFileSync, NOT execSync (#639). `sessionId` comes from the caller's
@@ -488,13 +653,7 @@ function readCurrentSessionModel(dbPath: string, sessionId: string): string {
       encoding: "utf8",
       timeout: SQLITE_TIMEOUT_MS,
     }).trim()
-    if (!currentRaw) return "unknown"
-    try {
-      const parsed = JSON.parse(currentRaw)
-      return `${parsed.providerID || "?"}/${parsed.id || "?"}`
-    } catch {
-      return currentRaw
-    }
+    return describeModel(currentRaw)
   } catch {
     return "unknown"
   }
@@ -533,36 +692,66 @@ type ReloadInputs =
   | { ok: true; dbPath: string; providerID: string; modelID: string }
   | { ok: false; reason: string }
 
+/** Whether `readSisyphusModel` returned a failure message rather than a model id. */
+function isReloadFailure(model: unknown): model is string {
+  return typeof model === "string" && model.startsWith("Session reload failed")
+}
+/**
+ * Split `provider/model` into its two halves, or null when it is not that shape.
+ *
+ * Split on the FIRST slash: model ids may themselves contain slashes
+ * (`openrouter/anthropic/claude`), so splitting on the last would report the wrong
+ * provider.
+ */
+function splitModelRef(model: string): { providerID: string; modelID: string } | null {
+  const at = model.indexOf("/")
+  if (at === -1) return null
+  return { providerID: model.substring(0, at), modelID: model.substring(at + 1) }
+}
+/**
+ * The prerequisite that is missing, or null when everything is in place.
+ *
+ * A reload needs BOTH the session database and the provider config; naming which one
+ * is absent is what turns "reload failed" into something the user can fix.
+ */
+function missingReloadInput(path: string, what: string): string | null {
+  if (existsSync(path)) return null
+  return `Session reload failed: ${what} not found at ${path}`
+}
+
 function readReloadInputs(): ReloadInputs {
   const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-  if (!existsSync(dbPath)) {
-    return { ok: false, reason: "Session reload failed: OpenCode database not found at " + dbPath }
-  }
+  const missingDb = missingReloadInput(dbPath, "OpenCode database")
+  if (missingDb) return { ok: false, reason: missingDb }
 
   const omoConfigPath = join(homedir(), ".config", "opencode", "oh-my-openagent.json")
-  if (!existsSync(omoConfigPath)) {
-    return { ok: false, reason: "Session reload failed: oh-my-openagent.json not found at " + omoConfigPath }
-  }
+  const missingConfig = missingReloadInput(omoConfigPath, "oh-my-openagent.json")
+  if (missingConfig) return { ok: false, reason: missingConfig }
 
   const parsed = parseOmoConfig(omoConfigPath)
   if (typeof parsed === "string") return { ok: false, reason: parsed }
 
-  const model = readSisyphusModel(parsed)
-  if (typeof model === "string" && model.startsWith("Session reload failed")) {
-    return { ok: false, reason: model }
-  }
+  const model = resolveReloadModel(parsed)
+  if (typeof model === "string") return { ok: false, reason: model }
+  return { ok: true, dbPath, providerID: model.providerID, modelID: model.modelID }
+}
 
-  const slashIdx = (model as string).indexOf("/")
-  if (slashIdx === -1) {
-    return { ok: false, reason: `Session reload failed: model "${model}" is not in provider/model format` }
-  }
-
-  return {
-    ok: true,
-    dbPath,
-    providerID: (model as string).substring(0, slashIdx),
-    modelID: (model as string).substring(slashIdx + 1),
-  }
+/**
+ * The provider/model pair to reload onto, or the REASON it cannot be resolved.
+ *
+ * Two failure shapes are collapsed into the string return: `readSisyphusModel` reports its
+ * own failures as a message, and a model ref that is not `provider/model` cannot be split.
+ * Both are "tell the user why" with no partial result to salvage.
+ */
+function resolveReloadModel(parsed: unknown): { providerID: string; modelID: string } | string {
+  // `parsed` is a JSON document read from a file, so its shape is only known at runtime;
+  // the reader guards every field it touches and returns a message on any mismatch.
+  const model = readSisyphusModel(parsed as Record<string, unknown>)
+  // A string that does not start with the failure prefix is a model id.
+  if (isReloadFailure(model)) return model
+  const split = splitModelRef(model)
+  if (split) return split
+  return `Session reload failed: model "${model}" is not in provider/model format`
 }
 
 /** The parsed config object, or the failure message. */
@@ -614,30 +803,52 @@ function sessionReloadModelTool() {
 
 // Boy Scout (#447): same treatment as reloadSessionModel — logic at module
 // scope, execute() is pure wiring.
+/** Longest title the OpenCode UI renders without truncating on its own terms. */
+const MAX_SESSION_TITLE = 120;
+
+/**
+ * Escape a value for a single-quoted SQL literal.
+ *
+ * Doubling the quote is what SQLite understands as an embedded quote; anything
+ * fancier would still have to agree with it.
+ */
+function sqlLiteral(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+/**
+ * The title to use for this rename.
+ *
+ * `||` rather than `??` on purpose: an explicitly EMPTY title falls back to
+ * auto-generation, matching the original if/else. Both "not given" and "given as
+ * nothing" mean the caller wants a generated one.
+ *
+ * @returns the trimmed title, or null when none could be produced
+ */
+function resolveSessionTitle(dbPath: string, sessionId: string, newTitle?: string): string | null {
+  const title = newTitle || generateSessionTitle(dbPath, sessionId)
+  if (!title || title.trim().length === 0) return null
+  return title.trim().substring(0, MAX_SESSION_TITLE)
+}
+
 function renameSession(sessionId: string, newTitle?: string): string {
   const dbPath = join(homedir(), ".local", "share", "opencode", "opencode.db")
-
   if (!existsSync(dbPath)) {
     return "Session rename failed: OpenCode database not found at " + dbPath
   }
 
-  // `||` (not `??`): an explicitly empty title falls back to auto-generation,
-  // matching the original if/else.
-  const title = newTitle || generateSessionTitle(dbPath, sessionId)
-  if (!title || title.trim().length === 0) {
+  const trimmed = resolveSessionTitle(dbPath, sessionId, newTitle)
+  if (!trimmed) {
     return "Session rename failed: could not generate a title (no user messages found)"
   }
 
-  const trimmed = title.trim().substring(0, 120)
-  const escapedTitle = trimmed.replace(/'/g, "''")
-  const escapedId = sessionId.replace(/'/g, "''")
-  const sql = `UPDATE session SET title = '${escapedTitle}', time_updated = ${Date.now()} WHERE id = '${escapedId}'`
+  const sql = `UPDATE session SET title = '${sqlLiteral(trimmed)}', `
+    + `time_updated = ${Date.now()} WHERE id = '${sqlLiteral(sessionId)}'`
   try {
     execFileSync("sqlite3", [dbPath, sql], { timeout: SQLITE_TIMEOUT_MS })
     return `Session renamed to: "${trimmed}"`
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return `Session rename failed: ${msg}`
+    return `Session rename failed: ${err instanceof Error ? err.message : String(err)}`
   }
 }
 
@@ -720,6 +931,9 @@ export const __test = {
   readCache,
   writeCache,
   extractTitleFromText,
+  runCmd,
+  runXpGate,
+  getUpgradeSuggestion,
   getLocalXpGateVersion,
   checkXpGateUpdate,
   checkPluginUpdate,

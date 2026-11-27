@@ -88,17 +88,27 @@ function endSpan(
   status?: SpanStatus,
   errorMessage?: string,
 ): void {
-  span.end_time_ms = Date.now();
-  span.status = status ?? SpanStatus.OK;
-  if (errorMessage) {
-    span.error_message = errorMessage;
-  }
+  finishSpan(span, status ?? SpanStatus.OK, errorMessage);
+  retireSpan(state, span);
+}
 
-  // Remove from active, add to completed.
+/**
+ * Stamp a span as finished.
+ *
+ * The error message is written only when there IS one: assigning `undefined` would leave
+ * the key present with no value, and a reader checking `'error_message' in span` would
+ * then see an error on a span that succeeded.
+ */
+function finishSpan(span: Span, status: SpanStatus, errorMessage?: string): void {
+  span.end_time_ms = Date.now();
+  span.status = status;
+  if (errorMessage) span.error_message = errorMessage;
+}
+
+/** Move a span from active to completed. */
+function retireSpan(state: TracerState, span: Span): void {
   const idx = state.activeSpans.findIndex((s) => s.context.span_id === span.context.span_id);
-  if (idx !== -1) {
-    state.activeSpans.splice(idx, 1);
-  }
+  if (idx !== -1) state.activeSpans.splice(idx, 1);
   state.completedSpans.push(span);
 }
 

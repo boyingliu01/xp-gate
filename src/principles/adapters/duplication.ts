@@ -31,14 +31,31 @@ function normaliseLine(line: string): string {
  * those reports near-100% duplication for perfectly ordinary code, which is how
  * a duplication gate gets switched off.
  */
+/** Lines that carry no signal on their own: a lone brace closing a block. */
+const BRACE_ONLY = new Set(['{', '}', '};', '});']);
+
+/** The comment prefixes whose continuation lines say nothing about the code. */
+const COMMENT_PREFIXES = ['//', '/*', '*'];
+
+/**
+ * Whether a normalised line carries signal worth comparing.
+ *
+ * A blank line, a lone brace and a comment are all duplicates of their counterparts
+ * everywhere in the file -- counting them would make any two functions look alike. This
+ * is the single definition of "significant", used by both the window scan and the block
+ * report so the two cannot disagree about what was compared.
+ */
+function isSignificant(normalised: string): boolean {
+  if (normalised.length === 0) return false;
+  if (BRACE_ONLY.has(normalised)) return false;
+  return !COMMENT_PREFIXES.some((prefix) => normalised.startsWith(prefix));
+}
+
+/** The indexes of the lines worth comparing. */
 function significantLineIndexes(lines: string[]): number[] {
   const indexes: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const text = normaliseLine(lines[i]);
-    if (text.length === 0) continue;
-    if (text === '{' || text === '}' || text === '};' || text === '});') continue;
-    if (text.startsWith('//') || text.startsWith('/*') || text.startsWith('*')) continue;
-    indexes.push(i);
+    if (isSignificant(normaliseLine(lines[i]))) indexes.push(i);
   }
   return indexes;
 }
@@ -93,6 +110,35 @@ function buildBlocks(lines: string[], duplicated: Set<number>): DuplicationBlock
  * remain Gate 2's job — jscpd already does that, and duplicating it here would
  * make two gates disagree about the same word.
  */
+/**
+ * Slide a fixed window over the significant lines, marking every repeat.
+ *
+ * The fingerprint joins NORMALISED lines with a NUL separator, which no source line can
+ * contain: without a separator `ab` + `c` and `a` + `bc` would hash the same.
+ *
+ * @returns the indexes that appear in at least one repeated window, and how many repeats
+ *   were seen
+ */
+function scanWindows(lines: string[], significant: number[]) {
+  const duplicated = new Set<number>();
+  const seen = new Set<string>();
+  let repeatCount = 0;
+  for (let i = 0; i + DUPLICATION_WINDOW <= significant.length; i++) {
+    const window = significant.slice(i, i + DUPLICATION_WINDOW);
+    const fingerprint = window.map((lineIndex) => normaliseLine(lines[lineIndex])).join(NUL_SEPARATOR);
+    if (!seen.has(fingerprint)) {
+      seen.add(fingerprint);
+      continue;
+    }
+    repeatCount++;
+    for (const lineIndex of window) duplicated.add(lineIndex);
+  }
+  return { duplicated, repeatCount };
+}
+
+/** A separator no source line can contain, so two different windows never collide. */
+const NUL_SEPARATOR = '\u0000';
+
 export function measureDuplication(content: string): DuplicationReport {
   const lines = content.split('\n');
   const significant = significantLineIndexes(lines);
@@ -102,20 +148,7 @@ export function measureDuplication(content: string): DuplicationReport {
     return { percentage: 0, blocks: [] };
   }
 
-  const duplicated = new Set<number>();
-  const seen = new Set<string>();
-  let repeatCount = 0;
-
-  for (let i = 0; i + DUPLICATION_WINDOW <= significant.length; i++) {
-    const window = significant.slice(i, i + DUPLICATION_WINDOW);
-    const fingerprint = window.map((lineIndex) => normaliseLine(lines[lineIndex])).join('\u0000');
-    if (!seen.has(fingerprint)) {
-      seen.add(fingerprint);
-      continue;
-    }
-    repeatCount++;
-    for (const lineIndex of window) duplicated.add(lineIndex);
-  }
+  const { duplicated, repeatCount } = scanWindows(lines, significant);
 
   if (duplicated.size === 0) {
     return { percentage: 0, blocks: [] };

@@ -70,4 +70,17 @@ describe('largeFileRule', () => {
     
     expect(() => largeFileRule.check('test.ts', mockAdapterThatThrows)).toThrow('Adapter failed');
   });
+
+  it('treats an adapter that cannot count as zero lines', () => {
+    // No measurement is not evidence AGAINST the file: inventing a violation from a
+    // missing count is the defect this gate exists to prevent.
+    const noCounter = { detectLanguage: () => 'typescript', extractFunctions: () => [] };
+    expect(largeFileRule.check('test.ts', noCounter as never)).toHaveLength(0);
+  });
+
+  it('passes a file exactly AT the ceiling', () => {
+    // The rule is "more than", not "at least": a file at the limit is allowed.
+    const atLimit = { ...mockAdapter, countLines: () => 500 };
+    expect(largeFileRule.check('test.ts', atLimit)).toHaveLength(0);
+  });
 });

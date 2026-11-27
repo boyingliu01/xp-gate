@@ -22,6 +22,36 @@ async function loadReport() {
   }
 }
 
+/** A run's score, or null when it was skipped rather than measured. */
+function numericScore(run) {
+  return typeof run.score === 'number' ? run.score : null;
+}
+
+/**
+ * The average over runs that actually SCORED.
+ *
+ * `null || 0` used to drag SKIP-ALL runs in as fake zeros, which made a dashboard of
+ * unmeasured runs look like a failing one (#507 Delphi round-1 A-MAJOR-3).
+ */
+function averageScore(history) {
+  const scored = history.map(numericScore).filter((score) => score !== null);
+  if (scored.length === 0) return 'N/A';
+  return (scored.reduce((sum, score) => sum + score, 0) / scored.length).toFixed(1);
+}
+
+/**
+ * The CSS class for a score, and the thresholds are the contract.
+ *
+ * A null score is `skip`, NOT `fail`: "all gates skipped" is unmeasured, and painting
+ * it red is the same false verdict the average fix above removed.
+ */
+function scoreClass(score) {
+  if (score === null) return 'skip';
+  if (score >= 8) return 'pass';
+  if (score >= 5) return 'skip';
+  return 'fail';
+}
+
 function renderSummary(history) {
   if (!history.length) return;
 
@@ -31,12 +61,9 @@ function renderSummary(history) {
   // `effectiveTotal`/`skipCount`. Average and display over numeric scores
   // only -- `null || 0` used to drag SKIP-ALL runs in as fake zeros, and a
   // null latest score rendered as a red "fail" (#507 Delphi round-1 A-MAJOR-3).
-  const scored = history.filter(h => typeof h.score === 'number');
-  const avgScore = scored.length
-    ? (scored.reduce((sum, h) => sum + h.score, 0) / scored.length).toFixed(1)
-    : 'N/A';
-  const latestScore = typeof latest.score === 'number' ? latest.score : null;
-  const latestClass = latestScore === null ? 'skip' : latestScore >= 8 ? 'pass' : latestScore >= 5 ? 'skip' : 'fail';
+  const avgScore = averageScore(history);
+  const latestScore = numericScore(latest);
+  const latestClass = scoreClass(latestScore);
   const latestText = latestScore === null ? 'N/A (all gates skipped)' : `${latestScore}/10`;
 
   document.getElementById('summary-cards').innerHTML = `
@@ -72,12 +99,15 @@ function chartOptions(yAxis) {
   };
 }
 
+/** A run's `M/D` label for a chart axis. */
+function runLabel(timestamp) {
+  const date = new Date(timestamp);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 function renderScoreChart(history) {
   const ctx = document.getElementById('score-chart').getContext('2d');
-  const labels = history.map(h => {
-    const d = new Date(h.timestamp);
-    return `${d.getMonth()+1}/${d.getDate()}`;
-  });
+  const labels = history.map((h) => runLabel(h.timestamp));
 
   new Chart(ctx, {
     type: 'line',
@@ -85,7 +115,7 @@ function renderScoreChart(history) {
       labels,
       datasets: [{
         label: 'Quality Score',
-        data: history.map(h => h.score),
+        data: history.map(numericScore),
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
         fill: true,
@@ -222,32 +252,32 @@ function metricsChartConfig(labels, datasets) {
   };
 }
 
+/** One metrics series, or null when every run reported zero for it. */
+function metricsSeries(history, field, label, color) {
+  if (!history.some((h) => h[field] > 0)) return null;
+  return metricsDataset(label, color, history.map((h) => h[field] || 0));
+}
+
+/**
+ * Render the complexity / Boy-Scout chart, or hide the section.
+ *
+ * The section is HIDDEN rather than drawn empty when no run reported either metric: an
+ * axis of zeros claims the two metrics were measured and stayed at zero, which is a
+ * different claim from "this history does not carry them".
+ */
 function renderMetricsChart(history) {
   if (!history.length) return;
 
-  const hasComplexity = history.some(h => h.complexityWarnings > 0);
-  const hasBoyScout = history.some(h => h.boyScoutBlocked > 0);
+  const datasets = [
+    metricsSeries(history, 'complexityWarnings', 'Complexity Warnings', '#f97316'),
+    metricsSeries(history, 'boyScoutBlocked', 'Boy Scout Blocked', '#ef4444'),
+  ].filter(Boolean);
 
-  if (!hasComplexity && !hasBoyScout) {
+  if (datasets.length === 0) {
     document.getElementById('metrics-section').style.display = 'none';
     return;
   }
-
-  const labels = history.map(h => {
-    const d = new Date(h.timestamp);
-    return `${d.getMonth()+1}/${d.getDate()}`;
-  });
-
-  const datasets = [];
-  if (hasComplexity) {
-    datasets.push(metricsDataset('Complexity Warnings', '#f97316',
-      history.map(h => h.complexityWarnings || 0)));
-  }
-  if (hasBoyScout) {
-    datasets.push(metricsDataset('Boy Scout Blocked', '#ef4444',
-      history.map(h => h.boyScoutBlocked || 0)));
-  }
-
+  const labels = history.map((h) => runLabel(h.timestamp));
   const ctx = document.getElementById('metrics-chart').getContext('2d');
   new Chart(ctx, metricsChartConfig(labels, datasets));
 }

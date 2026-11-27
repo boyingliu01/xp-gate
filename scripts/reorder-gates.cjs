@@ -25,20 +25,9 @@ const DRY = process.argv.includes('--dry-run');
 const NL = '\n';
 
 const lines = fs.readFileSync(HOOK, 'utf8').split(NL);
-const BANNER = /^# ={20,}\s*$/;
-const isGateBannerText = (t) => /^# GATE ?\d+[a-c]?:/i.test(t) || /^# Gate 1[2][a-c]?:/i.test(t);
+const { isGateBannerText, keyOf, findGateBanners } = require('./gate-banner-locator.cjs');
 
-const starts = [];
-for (let i = 0; i < lines.length; i++) {
-  if (!BANNER.test(lines[i])) continue;
-  for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-    if (isGateBannerText(lines[j])) {
-      starts.push({ banner: i, text: lines[j].trim() });
-      break;
-    }
-    if (!/^#/.test(lines[j])) break;
-  }
-}
+const starts = findGateBanners(lines);
 
 // Gate 13 has a banner but NO "# GATE 13:" marker line - its header explains the
 // compiler reasoning and only names the gate further down ("TAIL APPEND after
@@ -76,13 +65,6 @@ for (let i = 0; i < lines.length; i++) {
 }
 starts.sort((a, b) => a.banner - b.banner);
 
-function keyOf(t) {
-  const a = t.match(/^# GATE ?(\d+)([a-c]?):/i);
-  if (a) return a[2] ? a[1] + a[2] : a[1];
-  const b = t.match(/^# Gate 12([a-c]?):/i);
-  if (b) return b[1] ? '12' + b[1] : '12';
-  return null;
-}
 
 const sections = [];
 for (let i = 0; i < starts.length; i++) {

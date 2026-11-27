@@ -114,15 +114,21 @@ export function isToolAvailable(tool: string, cwd?: string): ToolAvailability {
   const npxProbe = probeToolNpx(tool, cwd);
   if (npxProbe.available) return npxProbe;
 
-  // Tier 3: Custom path (~/.local/bin/)
-  if (process.platform !== 'win32') {
-    const customPath = path.join(os.homedir(), '.local', 'bin', tool);
-    if (fs.existsSync(customPath)) {
-      return { available: true, path: customPath, via: 'custom' };
-    }
-  }
+  // Tier 3: a hand-installed binary.
+  return probeCustomPath(tool) ?? { available: false, path: '', via: 'none' };
+}
 
-  return { available: false, path: '', via: 'none' };
+/**
+ * Look for the tool under `~/.local/bin`, the usual home for a hand-installed binary.
+ *
+ * POSIX only: on Windows that directory means nothing, and the PATH and npx probes
+ * already cover the platform's own conventions. Returning null rather than an
+ * unavailable result lets the caller keep its single "not found" return.
+ */
+function probeCustomPath(tool: string): ToolAvailability | null {
+  if (process.platform === 'win32') return null;
+  const customPath = path.join(os.homedir(), '.local', 'bin', tool);
+  return fs.existsSync(customPath) ? { available: true, path: customPath, via: 'custom' } : null;
 }
 
 // ── Process Execution ──
@@ -131,27 +137,69 @@ export function isToolAvailable(tool: string, cwd?: string): ToolAvailability {
  * Cross-platform spawnSync wrapper with timeout and error handling.
  * Uses spawnSync (not execSync) to avoid shell injection.
  */
+/** The default budget a child process gets before it is killed. */
+const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
+
+/** The largest output a child may produce before it is truncated. */
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+
+/** A spawn's options, with the defaults a gate needs on every call. */
+function spawnOptions(opts: RunToolOptions = {}) {
+  return {
+    encoding: 'utf-8' as const,
+    cwd: opts.cwd ?? process.cwd(),
+    env: { ...process.env, ...opts.env },
+    // A tool that never answers must FAIL the gate rather than hang it, so a timeout is
+    // not optional -- and the buffer is bounded for the same reason.
+    timeout: opts.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+    maxBuffer: MAX_OUTPUT_BYTES,
+    shell: needsShell(opts.shell),
+  };
+}
+
+/**
+ * Whether to run the command through a shell.
+ *
+ * Windows resolves `.cmd` shims only through a shell; elsewhere a shell would let the OS
+ * re-split a path containing spaces.
+ */
+function needsShell(explicit: boolean | undefined): boolean {
+  return explicit ?? process.platform === 'win32';
+}
+
+/**
+ * The gate's view of a finished spawn.
+ *
+ * A `status` of `null` means the child never exited normally, so it is reported as -1
+ * rather than 0 -- a killed process must not look like a clean run. `ETIMEDOUT` is
+ * TIMED OUT even when a signal was not recorded, because Node reports the timeout
+ * through `error` on some platforms and through `signal` on others.
+ */
+function toToolResult(result: SpawnSyncReturns<string>): ToolResult {
+  return {
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+    exitCode: result.status ?? -1,
+    timedOut: result.signal === 'SIGTERM'
+      || (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT',
+  };
+}
+
+/** What a caller may override about a spawned tool. */
+export interface RunToolOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  shell?: boolean;
+}
+
 export function runTool(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number; shell?: boolean }
+  opts?: RunToolOptions
 ): ToolResult {
   try {
-    const result: SpawnSyncReturns<string> = spawnSync(cmd, args, {
-      encoding: 'utf-8',
-      cwd: opts?.cwd || process.cwd(),
-      env: { ...process.env, ...opts?.env },
-      timeout: opts?.timeoutMs || 120_000,
-      maxBuffer: 10 * 1024 * 1024,
-      shell: opts?.shell || process.platform === 'win32',
-    });
-
-    return {
-      stdout: result.stdout || '',
-      stderr: result.stderr || '',
-      exitCode: result.status ?? -1,
-      timedOut: result.signal === 'SIGTERM' || (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT',
-    };
+    return toToolResult(spawnSync(cmd, args, spawnOptions(opts)));
   } catch (err) {
     // spawnSync throws on ENOENT-class failures; report them as a failed run
     // with the message on stderr instead of crashing every caller.
@@ -191,21 +239,55 @@ export function getChangedFiles(cwd?: string): string[] {
  */
 /** Probe one candidate executable; null when it is not on PATH. */
 function probePowerShellCandidate(exe: string): PowerShellInfo | null {
-  const whichCmd = process.platform === 'win32' ? 'where' : 'which';
   try {
-    const check = spawnSync(whichCmd, [exe], { encoding: 'utf-8', timeout: 5000 });
+    const exePath = resolveOnPath(exe);
+    return exePath ? { available: true, exe: exePath, version: powershellVersionOf(exe) } : null;
+  } catch {
+    // The probe itself failed, so this candidate is not usable -- never a crash.
+    return null;
+  }
+}
+
+/** The command that resolves an executable on PATH, per platform. */
+function whichCommand(): string {
+  return process.platform === 'win32' ? 'where' : 'which';
+}
+
+/**
+ * The absolute path this name resolves to, or null.
+ *
+ * The FIRST line only: `where` prints every match, and probing the second one would
+ * report a version for a binary the gate will not run.
+ */
+function resolveOnPath(exe: string): string | null {
+  try {
+    const check = spawnSync(whichCommand(), [exe], { encoding: 'utf-8', timeout: 5000 });
     if (check.status !== 0 || !check.stdout.trim()) return null;
-    const exePath = check.stdout.trim().split('\n')[0];
-    // Get version
-    const verResult = spawnSync(exe, ['-Command', '$PSVersionTable.PSVersion.ToString()'], {
+    return check.stdout.trim().split('\n')[0];
+  } catch {
+    // A PATH lookup that throws means the name does not resolve here.
+    return null;
+  }
+}
+
+/**
+ * The PowerShell version, or `unknown`.
+ *
+ * `unknown` rather than a failure: the binary RESOLVED, so the gate can use it -- not
+ * knowing its version is a reporting gap, not a reason to pretend it is absent.
+ */
+function powershellVersionOf(exe: string): string {
+  try {
+    const probe = spawnSync(exe, ['-Command', '$PSVersionTable.PSVersion.ToString()'], {
       encoding: 'utf-8',
-      timeout: 10000,
+      timeout: 10_000,
       shell: process.platform === 'win32',
     });
-    const version = verResult.status === 0 ? verResult.stdout.trim() : 'unknown';
-    return { available: true, exe: exePath, version };
-  } catch { /* probe failed → this candidate is not usable */ }
-  return null;
+    return probe.status === 0 ? probe.stdout.trim() : 'unknown';
+  } catch {
+    // The binary resolved but would not run: still a usable candidate, version unknown.
+    return 'unknown';
+  }
 }
 
 export function detectPowerShell(): PowerShellInfo {

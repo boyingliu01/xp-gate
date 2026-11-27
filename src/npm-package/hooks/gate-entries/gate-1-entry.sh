@@ -55,7 +55,13 @@ _shell_changed_files() {
 # STRONGEST verdict any of them produced, never the last one written.
 # Measured 2026-11-24: gate-1 recorded 0 PASS and 19 WARN, every warning being
 # "PSSA module not installed" -- so an eslint pass could never be the verdict.
-_GATE_STATUS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/gate-status.sh"
+# Same relative-path trap as gate-3.sh: from inside githooks/, `dirname ./x-entry.sh` is
+# `.` and `/../lib` climbs to `/lib`. Try the sibling layout first, then githooks/lib.
+_GATE_STATUS_DIR="$(dirname "${BASH_SOURCE[0]}")"
+_GATE_STATUS_LIB="$(cd "$_GATE_STATUS_DIR/../lib" 2>/dev/null && pwd)/gate-status.sh"
+if [ ! -r "$_GATE_STATUS_LIB" ]; then
+  _GATE_STATUS_LIB="$(cd "$_GATE_STATUS_DIR" 2>/dev/null && pwd)/lib/gate-status.sh"
+fi
 if [ -r "$_GATE_STATUS_LIB" ]; then
   # shellcheck source=/dev/null
   . "$_GATE_STATUS_LIB"
@@ -988,6 +994,9 @@ else
 fi
 fi  # End: if ! any_changed_files_match (Issue #312 skip)
 GATE_1_STATUS="${GATE_1_STATUS:-SKIP}"
+# Consumed by gate-13-entry.sh ("tool" in the verdict JSON), which is a different file,
+# so shellcheck cannot see the read and reports SC2034 on the write.
+# shellcheck disable=SC2034
 GATE_1_TOOL="${PROJECT_LANGS}"
 # The java branch may set GATE_1_STATUS=WARN + a GATE_1_DETAIL warn reason
 # (engine unavailable / soft or report downgrade); route it into the audit

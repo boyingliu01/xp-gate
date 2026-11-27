@@ -1,5 +1,5 @@
 // @no-test-required: mutmut wrapper — tested via gate-m integration + pre-push Gate M
-import { spawn, execSync, type ChildProcess } from 'child_process';
+import { execSync } from 'child_process';
 import { writeFileSync, unlinkSync, readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import type {
@@ -8,6 +8,7 @@ import type {
   MutationRunOutcome,
   MutationRunResult,
 } from './types';
+import { runMutationCommand } from './spawn-with-capture';
 
 type Platform = NodeJS.Platform;
 type MutmutRoute = 'native' | 'wsl' | 'unavailable' | 'unresolved';
@@ -31,17 +32,7 @@ type MutmutRoute = 'native' | 'wsl' | 'unavailable' | 'unresolved';
  * accumulation inside an already-long Promise body, and their nesting was part
  * of what made that method exceed both the length and the nesting budget.
  */
-function collectOutput(
-  child: ChildProcess,
-  onChunk: (chunk: string, isStderr: boolean) => void,
-): void {
-  child.stdout?.on('data', (data: Buffer) => onChunk(data.toString(), false));
-  child.stderr?.on('data', (data: Buffer) => onChunk(data.toString(), true));
-}
-
 /** How long a SIGTERMed mutmut gets before it is killed outright. */
-const ESCALATION_DELAY_MS = 5000;
-
 /** Where the pre-run copy of pyproject.toml lives. */
 function pyprojectBackupPath(pyprojectPath: string): string {
   return `${pyprojectPath}.xp-gate-backup`;
@@ -57,52 +48,87 @@ function pyprojectBackupPath(pyprojectPath: string): string {
  */
 function restorePyproject(pyprojectPath: string, hadExisting: boolean): void {
   const backupPath = pyprojectBackupPath(pyprojectPath);
-  try {
-    if (hadExisting && existsSync(backupPath)) {
-      writeFileSync(pyprojectPath, readFileSync(backupPath, 'utf-8'), { encoding: 'utf-8' });
-      unlinkSync(backupPath);
-    } else if (!hadExisting && existsSync(pyprojectPath)) {
-      unlinkSync(pyprojectPath);
-    }
-  } catch {
-    // Best effort cleanup
-  }
-}
-
-/** The tracker shape `settleTracker` returns; only the timeout path uses these. */
-interface SettleTracker {
-  didTimeOut: () => boolean;
-  markTimedOut: () => void;
-  settle: (outcome: MutationRunOutcome) => void;
-  isSettled: () => boolean;
+  restoreFromBackup({ pyprojectPath, backupPath, hadExisting });
 }
 
 /**
- * Arm the run timeout, escalating SIGTERM to SIGKILL once.
+ * Put `pyproject.toml` back the way it was.
  *
- * Extracted from `runMutmut` for the same reason as `collectOutput`: the
- * two-step kill sequence is twelve lines of policy that pushed the method past
- * both budgets. The escalation timer id is handed back through `setEscalation`
- * so the caller's `cancelTimers` closure can still reach it.
- *
- * @returns the primary timer id, to be cleared by the caller.
+ * Two cases, because the file may not have EXISTED before: restoring a backup that was
+ * never taken would leave an empty file, and deleting a file we did not create would
+ * destroy the project's own configuration.
  */
-function armTimeout(
-  child: ChildProcess,
-  timeoutMs: number,
-  tracker: SettleTracker,
-  setEscalation: (id: NodeJS.Timeout) => void,
-): NodeJS.Timeout {
-  const escalationMs = ESCALATION_DELAY_MS;
-  return setTimeout(() => {
-    tracker.markTimedOut();
-    child.kill('SIGTERM');
-    if (tracker.isSettled()) return;
-    // SIGTERM may be ignored; escalate once.
-    setEscalation(setTimeout(() => {
-      if (!tracker.isSettled()) child.kill('SIGKILL');
-    }, escalationMs));
-  }, timeoutMs);
+/** What a restore needs: the file, its backup, and whether the file pre-existed. */
+interface RestoreTarget {
+  pyprojectPath: string;
+  backupPath: string;
+  hadExisting: boolean;
+}
+
+/** The two paths a backup restore needs. */
+type BackupPair = Omit<RestoreTarget, 'hadExisting'>;
+
+function restoreFromBackup({ pyprojectPath, backupPath, hadExisting }: RestoreTarget): void {
+  try {
+    if (hadExisting) restoreExisting({ pyprojectPath, backupPath });
+    else removeCreated(pyprojectPath);
+  } catch (err) {
+    // LOUD, not silent: a failed restore leaves `pyproject.toml` as MUTMUT rewrote it, in
+    // the user's working tree. Swallowing that would let them commit a mutated manifest.
+    // Not thrown, because that would turn a mutation RESULT into a crash -- but the
+    // backup path is named so the content can still be recovered by hand.
+    console.error(
+      `[mutmut] WARNING: could not restore ${pyprojectPath}; it may still carry the `
+        + `mutmut edit. Backup: ${backupPath} (${String(err)})`,
+    );
+  }
+}
+
+/**
+ * Restore the backed-up content, then drop the backup.
+ *
+ * Best-effort: the workspace is left as mutmut left it, and throwing here would turn a
+ * mutation RESULT into a crash.
+ */
+function restoreExisting({ pyprojectPath, backupPath }: BackupPair): void {
+  // A MISSING backup is not "nothing to do". `pyproject.toml` pre-existed (that is why a
+  // backup was taken), so whatever mutmut wrote into it is still there and nothing can put
+  // it back -- the caller must say so instead of returning as though the restore succeeded
+  // (review feasibility FC-01: this was a silent fail-open).
+  if (!existsSync(backupPath)) {
+    throw new Error(`backup ${backupPath} is gone, so ${pyprojectPath} cannot be restored`);
+  }
+  // Each step is guarded on its own rather than wrapped in one try/catch, because they
+  // fail differently and only the CALLER can report usefully (it knows the backup path):
+  //
+  //   - an unreadable backup leaves the workspace untouched -- nothing was written, so
+  //     there is nothing to report beyond the caller's warning;
+  //   - a failed WRITE is the serious one: pyproject.toml still carries mutmut's edit,
+  //     and the backup must survive so the content can be recovered by hand;
+  //   - the backup is unlinked only after the write succeeded, since deleting it first
+  //     would destroy the only copy if the write then failed.
+  //
+  // Failures PROPAGATE to `restoreFromBackup`, which is the one place that can name the
+  // backup path and print a warning.
+  const content = readFileSync(backupPath, 'utf-8');
+  try {
+    writeFileSync(pyprojectPath, content, { encoding: 'utf-8' });
+  } catch (err) {
+    // The write is the step that leaves DAMAGE behind: pyproject.toml keeps mutmut's
+    // edit. Add the backup path here, so the caller's warning tells the reader how to
+    // recover even after the file is gone from the log.
+    throw new Error(`restore of ${pyprojectPath} failed (backup kept at ${backupPath}): ${String(err)}`);
+  }
+  unlinkSync(backupPath);
+}
+
+/** Delete the file this run created, if it is still there. */
+function removeCreated(pyprojectPath: string): void {
+  try {
+    if (existsSync(pyprojectPath)) unlinkSync(pyprojectPath);
+  } catch {
+    // Best effort -- see `restoreExisting`.
+  }
 }
 
 export class MutmutRunner implements MutationRunner {
@@ -153,10 +179,26 @@ export class MutmutRunner implements MutationRunner {
     const sourceDirs = this.extractUniqueDirs(options.files);
 
     const pyprojectPath = join(options.cwd, 'pyproject.toml');
-    const hadExisting = this.backupPyproject(pyprojectPath);
+    // Backing up and writing are OUTSIDE the `finally` on purpose, and both are caught:
+    // a failure to prepare the workspace is a TOOL failure, and this module's contract is
+    // that tool failures arrive as an outcome with `error`, never as a rejected promise
+    // (a rejection reaches the caller's `catch` and reads as "no mutants found").
+    let hadExisting = false;
+    let backedUp = false;
+    try {
+      hadExisting = this.backupPyproject(pyprojectPath);
+      backedUp = true;
+      this.writeMutmutConfig(pyprojectPath, sourceDirs);
+    } catch (err) {
+      // Roll back ONLY what was done. `backedUp` distinguishes "the backup ran but the
+      // write failed" from "the backup itself failed": with `restorePyproject(path,
+      // false)` hardcoded, the first case DELETES a pyproject.toml that was there all
+      // along -- the user's own file -- because `hadExisting` was never consulted.
+      if (backedUp) restorePyproject(pyprojectPath, hadExisting);
+      return { report: null, timedOut: false, error: err instanceof Error ? err.message : String(err) };
+    }
 
     try {
-      this.writeMutmutConfig(pyprojectPath, sourceDirs);
       return await this.runMutmut(options);
     } finally {
       restorePyproject(pyprojectPath, hadExisting);
@@ -190,31 +232,7 @@ export class MutmutRunner implements MutationRunner {
    * back the right shape. Factoring that into a single small object keeps
    * `runMutmut` down to spawning and wiring, which is all it should express.
    */
-  private settleTracker(
-    resolve: (outcome: MutationRunOutcome) => void,
-    cancelTimers: () => void,
-  ): {
-    didTimeOut: () => boolean;
-    markTimedOut: () => void;
-    settle: (outcome: MutationRunOutcome) => void;
-    isSettled: () => boolean;
-  } {
-    let settled = false;
-    let timedOut = false;
-    return {
-      didTimeOut: () => timedOut,
-      markTimedOut: () => {
-        timedOut = true;
-      },
-      isSettled: () => settled,
-      settle: (outcome) => {
-        if (settled) return;
-        settled = true;
-        cancelTimers();
-        resolve(outcome);
-      },
-    };
-  }
+
 
   /**
    * How to invoke `mutmut run` for the current route, or null when a WSL path
@@ -229,73 +247,26 @@ export class MutmutRunner implements MutationRunner {
     return { command: 'wsl', args: ['--cd', wslPath, 'mutmut', 'run'] };
   }
 
-  private async runMutmut(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
-      const invocation = this.buildInvocation(options.cwd);
-      if (invocation === null) {
-        resolve({ report: null, timedOut: false });
-        return;
-      }
-
-      const child = spawn(invocation.command, invocation.args, {
-        stdio: 'pipe',
-        cwd: options.cwd,
-      });
-
-      let stdout = '';
-      let stderr = '';
-      let escalationId: NodeJS.Timeout | undefined;
-
-      // Both timers must be cancelled from three different terminal events
-      // (close, error, timeout). Keeping the pair in one place is what stops the
-      // settle path from drifting out of step with the timeout path.
-      const cancelTimers = (): void => {
-        clearTimeout(timeoutId);
-        if (escalationId) clearTimeout(escalationId);
-      };
-
-      const tracker = this.settleTracker(resolve, cancelTimers);
-
-      const timeoutId = armTimeout(child, options.timeoutMs, tracker, (id) => {
-        escalationId = id;
-      });
-
-      collectOutput(child, (chunk, isErr) => {
-        if (isErr) stderr += chunk;
-        else stdout += chunk;
-      });
-
-      child.on('close', (code) => {
-        tracker.settle(this.outcomeFor(code, stdout, stderr, tracker));
-      });
-
-      child.on('error', (err) => {
-        tracker.settle({ report: null, timedOut: tracker.didTimeOut(), error: err.message });
-      });
-    });
-  }
-
   /**
-   * Turn one `mutmut run` exit into the outcome the caller expects.
+   * Run mutmut through the SHARED spawn/timeout/capture path.
    *
-   * Extracted from `runMutmut`'s close handler to bring that method back under
-   * the length and nesting budgets. A null exit code means the process was
-   * killed -- "timed out" when we did it, "unknown" otherwise -- and there is no
-   * report to parse either way.
+   * This runner used to carry its own `spawn` + `armTimeout` + `collectOutput` +
+   * `settleTracker`: a second definition of the timeout policy, which is how the two
+   * could disagree (and did -- one guarded the SIGKILL escalation on `child.killed`,
+   * which Node sets when `kill()` is CALLED, so the escalation never fired).
+   *
+   * The report parser stays local: reading mutmut's emoji progress is this runner's
+   * business, and the shared path takes it as a callback.
    */
-  private outcomeFor(
-    code: number | null,
-    stdout: string,
-    stderr: string,
-    tracker: SettleTracker,
-  ): MutationRunOutcome {
-    if (code === null) return { report: null, timedOut: tracker.didTimeOut() };
-    return {
-      // Parse results from mutmut run stdout (v3.x emoji progress)
-      report: this.parseEmojiProgress(stdout),
-      timedOut: tracker.didTimeOut(),
-      error: code !== 0 ? stderr || stdout : undefined,
-    };
+  private async runMutmut(options: RunMutationOptions): Promise<MutationRunOutcome> {
+    const invocation = this.buildInvocation(options.cwd);
+    if (invocation === null) return { report: null, timedOut: false };
+    return runMutationCommand(
+      invocation.command,
+      invocation.args,
+      { cwd: options.cwd, timeoutMs: options.timeoutMs },
+      (stdout: string) => this.parseEmojiProgress(stdout),
+    );
   }
 
   private toWslPath(path: string): string | null {
@@ -342,9 +313,15 @@ export class MutmutRunner implements MutationRunner {
     const unknown1 = this.extractEmojiCount(progressLine, '🔇');
     const unknown2 = this.extractEmojiCount(progressLine, '🧙');
 
-    const nrOfKilledMutants = killed;
+    // Any UNREADABLE count makes the whole line untrustworthy: reporting a score built
+    // from a partial parse is worse than reporting that the run could not be read.
+    const counts = [killed, untested, timeout, suspicious, survived, unknown1, unknown2];
+    if (counts.some((n) => n === null)) return null;
+
+    const nrOfKilledMutants = killed as number;
     const nrOfSurvivedMutants =
-      survived + timeout + suspicious + untested + unknown1 + unknown2;
+      (survived as number) + (timeout as number) + (suspicious as number)
+      + (untested as number) + (unknown1 as number) + (unknown2 as number);
     const nrOfMutants = nrOfKilledMutants + nrOfSurvivedMutants;
 
     if (nrOfMutants === 0) return null;
@@ -361,10 +338,21 @@ export class MutmutRunner implements MutationRunner {
    * Extract count after an emoji in a progress line.
    * e.g., "🎉 9" → 9
    */
-  private extractEmojiCount(line: string, emoji: string): number {
-    const escapedEmoji = emoji.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = line.match(new RegExp(`${escapedEmoji}\\s*(\\d+)`));
-    return parseInt(match?.[1] ?? '0', 10);
+  /**
+   * The count after an emoji on mutmut's progress line.
+   *
+   * ABSENT means zero: mutmut omits an emoji whose count is 0, so a line without `🫥`
+   * really did have no untested mutants. That is a measured zero, not an unknown.
+   *
+   * PRESENT BUT UNREADABLE is different, and returns null: if the emoji is there and the
+   * number after it is not, the line was not understood, and calling that 0 would report
+   * a clean run on a parse failure.
+   */
+  private extractEmojiCount(line: string, emoji: string): number | null {
+    const at = line.indexOf(emoji);
+    if (at === -1) return 0;
+    const after = line.slice(at + emoji.length).match(/^\s*(\d+)/);
+    return after ? parseInt(after[1], 10) : null;
   }
 
   /**
@@ -384,12 +372,11 @@ export class MutmutRunner implements MutationRunner {
   }
 
   private writeMutmutConfig(pyprojectPath: string, sourceDirs: string[]): void {
-    const sourcePathsLine = `source_paths = [${sourceDirs.map((d) => `"${d}"`).join(', ')}]`;
     try {
       // Read here so the content builder stays pure: it then has no I/O to
       // fail on, and the one place that can fail is the one that explains why.
       const existing = existsSync(pyprojectPath) ? readFileSync(pyprojectPath, 'utf-8') : null;
-      writeFileSync(pyprojectPath, mutmutConfigContent(existing, sourcePathsLine), {
+      writeFileSync(pyprojectPath, mutmutConfigContent(existing, sourceDirs), {
         encoding: 'utf-8',
       });
     } catch (err) {
@@ -400,23 +387,328 @@ export class MutmutRunner implements MutationRunner {
   }
 }
 
+import { parse as parseToml } from 'smol-toml';
+
 /**
- * pyproject.toml content with `[tool.mutmut] source_paths` set as requested.
+ * pyproject.toml content with `[tool.mutmut] source_paths` set to `sourceDirs`.
  *
- * Pure by design: the caller reads the existing file and passes it in, so this
- * function has no I/O that could fail partway through. Three shapes have to be
- * preserved -- an existing `source_paths` is rewritten in place, a bare
- * `[tool.mutmut]` table gets the key added, and a file without the table gets
- * one appended (a fresh file passes `null`).
+ * THE PARSER DECIDES, THE TEXT IS EDITED. A real TOML parser answers "is there a
+ * `[tool.mutmut]` table, and is its `source_paths` an array?" -- questions that five
+ * rounds of review showed cannot be answered by pattern-matching. A commented header, a
+ * string containing the key, a multi-line string body, an array whose path holds a `]`,
+ * and a scalar followed by another array each defeated a textual check; two of them by
+ * DELETING user content (all measured).
  *
- * @param existing current file content, or null when the file does not exist.
+ * Serialising the parsed document would answer them too, but it rewrites the whole file
+ * -- comments, ordering and spacing included -- which is not ours to discard. So the
+ * parser only SELECTS the branch, and the edit is applied to the original text.
+ *
+ * @param existing the current file content, or null when the file does not exist.
  */
-function mutmutConfigContent(existing: string | null, sourcePathsLine: string): string {
-  if (existing === null) return `[tool.mutmut]\n${sourcePathsLine}\n`;
-  if (!existing.includes('[tool.mutmut]')) {
-    return existing.trimEnd() + `\n\n[tool.mutmut]\n${sourcePathsLine}\n`;
-  }
-  const sourcePathsRegex = /source_paths\s*=\s*\[.*?\]/;
-  if (sourcePathsRegex.test(existing)) return existing.replace(sourcePathsRegex, sourcePathsLine);
-  return existing.replace('[tool.mutmut]', `[tool.mutmut]\n${sourcePathsLine}`);
+export function mutmutConfigContent(existing: string | null, sourceDirs: string[]): string {
+  const line = arrayLine(sourceDirs);
+  if (existing === null) return `[tool.mutmut]\n${line}\n`;
+  const table = findMutmutTable(parseDocument(existing));
+  if (table === null) return withoutTable(existing, line);
+  if (table.source_paths === undefined) return insertKey(existing, line);
+  if (!Array.isArray(table.source_paths)) return existing;
+  return replaceArrayText(existing, line);
 }
+
+/**
+ * Handle a document with no USABLE `[tool.mutmut]` table.
+ *
+ * Two reasons to get here, and they need opposite answers: the file parses and simply has
+ * no table (append one), or it does NOT parse -- in which case a header may well be there
+ * and appending a second `[tool.mutmut]` would leave two, so the text is left alone.
+ */
+function withoutTable(existing: string, line: string): string {
+  return hasMutmutHeader(existing) ? existing : appendTable(existing, line);
+}
+
+/**
+ * A `[tool.mutmut]` header LINE.
+ *
+ * `[ ]` may hold whitespace and a trailing `#` comment is legal TOML --
+ * `[ tool.mutmut ] # note` is a valid header, and a stricter pattern reported "no table"
+ * for it, leaving the array unrewritten (measured). The parser has already confirmed the
+ * table EXISTS; this only has to find where its body starts.
+ */
+const MUTMUT_HEADER = /^[^\S\n]*\[[^\S\n]*tool[^\S\n]*\.[^\S\n]*mutmut[^\S\n]*\][^\n]*$/m;
+
+/** Whether the TEXT has a `[tool.mutmut]` header, parseable or not. */
+function hasMutmutHeader(existing: string): boolean {
+  return MUTMUT_HEADER.test(existing);
+}
+
+/** The `source_paths = [...]` line, as TOML with quoted entries. */
+function arrayLine(sourceDirs: string[]): string {
+  return `source_paths = [${sourceDirs.map((d) => JSON.stringify(d)).join(', ')}]`;
+}
+
+/** The parsed document, or `UNPARSEABLE` when the file is not valid TOML. */
+const UNPARSEABLE = Symbol('unparseable');
+
+/**
+ * Parse the document, tolerating an invalid one.
+ *
+ * A pyproject.toml that does not parse is a file mutmut cannot use either. Returning a
+ * sentinel rather than throwing keeps this function total: the caller appends its table
+ * to whatever is there, which is the same thing a hand edit would do.
+ */
+function parseDocument(existing: string): Record<string, unknown> | typeof UNPARSEABLE {
+  try {
+    return parseToml(existing) as Record<string, unknown>;
+  } catch {
+    return UNPARSEABLE;
+  }
+}
+
+/**
+ * The `[tool.mutmut]` table from a parsed document, or null when there is none.
+ *
+ * Read STRUCTURALLY: `tool.mutmut` is a path in the parsed tree, so a commented header,
+ * a string that mentions the table name, or a `[tool.other]` entry cannot be mistaken
+ * for it. That is the whole reason this function takes a parsed document.
+ */
+function findMutmutTable(parsed: Record<string, unknown> | typeof UNPARSEABLE): Record<string, unknown> | null {
+  if (parsed === UNPARSEABLE) return null;
+  const tool = parsed.tool;
+  if (!isRecord(tool)) return null;
+  const mutmut = tool.mutmut;
+  return isRecord(mutmut) ? mutmut : null;
+}
+
+/** Whether a parsed value is a TOML table. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Append a fresh `[tool.mutmut]` table.
+ *
+ * The table is appended rather than merged because there is no table to merge INTO --
+ * either the file has none, or it does not parse and guessing where a table belongs in
+ * an invalid document is worse than adding one at the end.
+ */
+function appendTable(existing: string, line: string): string {
+  const trimmed = existing.trimEnd();
+  // No stacked blank lines in an otherwise empty file.
+  return trimmed === '' ? `[tool.mutmut]\n${line}\n` : `${trimmed}\n\n[tool.mutmut]\n${line}\n`;
+}
+
+/**
+ * Add `source_paths` to an existing table that does not have it yet.
+ *
+ * Inserted directly after the header, which keeps it inside the table no matter what
+ * follows -- no scan for the next header, so there is nothing to get wrong.
+ */
+function insertKey(existing: string, line: string): string {
+  // The SAME pattern the body scan uses. A second, stricter copy here meant a header
+  // like `[ tool.mutmut ]` was found by one and missed by the other.
+  const header = MUTMUT_HEADER.exec(existing);
+  if (!header) return appendTable(existing, line);
+  const at = header.index + header[0].length;
+  return `${existing.slice(0, at)}\n${line}${existing.slice(at)}`;
+}
+
+/**
+ * Replace the array literal with `line`, keeping the rest of the file byte for byte.
+ *
+ * Only reached when the parser has already confirmed the table and that its
+ * `source_paths` IS an array, so all that remains is finding that array's text. The
+ * search is bounded to the key's own line for the opening bracket and balanced
+ * afterwards, which is what makes a `]` inside a path safe.
+ */
+function replaceArrayText(existing: string, line: string): string {
+  const span = arraySpan(existing);
+  if (span === null) return existing;
+  return existing.slice(0, span.start) + line + existing.slice(span.end);
+}
+
+/** A line that assigns `source_paths`. */
+const KEY_LINE = /^[^\S\n]*source_paths[^\S\n]*=/;
+
+/**
+ * Index where a REAL `source_paths =` key starts, or -1.
+ *
+ * The parser has already confirmed the table HAS the key; this finds its TEXT. A plain
+ * regex cannot, because a multi-line string can hold a line that looks exactly like the
+ * key -- measured: the STRING was rewritten and the real key below it left alone.
+ *
+ * All four TOML string forms are tracked, the multi-line ones included: they legitimately
+ * span the newlines a `^`-anchored regex relies on.
+ */
+function findKeyOutsideStrings(doc: string, from: number, to: number): number {
+  let quote: string | null = null;
+  let offset = from;
+  for (const line of doc.slice(from, to).split('\n')) {
+    if (quote === null && KEY_LINE.test(line)) return offset;
+    quote = scanLineForQuote(line, quote);
+    offset += line.length + 1;
+  }
+  return -1;
+}
+
+/** The string delimiter still open after this line, or null when outside one. */
+function scanLineForQuote(line: string, quote: string | null): string | null {
+  let open: string | null = quote;
+  let i = 0;
+  while (i < line.length) {
+    const skipped = escapedCharacter(line, i, open);
+    if (skipped > 0) { i += skipped; continue; }
+    // A `#` OUTSIDE a string starts a comment to end of line: nothing after it is code,
+    // so a `'` in `# don't touch this` must not open a string -- measured, it swallowed
+    // the rest of the line and the real key below was never found.
+    if (open === null && line[i] === '#') return null;
+    const delimiter = delimiterAt(line, i);
+    open = delimiter === null ? open : nextDelimiter(open, delimiter);
+    i += delimiter === null ? 1 : delimiter.length;
+  }
+  return open;
+}
+
+/**
+ * Characters to skip at `i`, or 0 when the character is ordinary.
+ *
+ * A backslash inside a BASIC string (`"`) escapes the next character, so `\"` is data.
+ * Without this the escaped quote ENDED the string, everything after it read as outside,
+ * and a valid key was skipped (measured with a real file).
+ */
+function escapedCharacter(line: string, i: number, open: string | null): number {
+  return open === '"' && line[i] === '\\' ? 2 : 0;
+}
+
+/** The delimiter still open after one is encountered. */
+function nextDelimiter(open: string | null, delimiter: string): string | null {
+  if (open === null) return delimiter;
+  return open === delimiter ? null : open;
+}
+
+/** The TOML string delimiter starting at `i`, or null. LONGEST first, so `\"\"\"` wins. */
+function delimiterAt(line: string, i: number): string | null {
+  return QUOTE_DELIMITERS.find((d) => line.startsWith(d, i)) ?? null;
+}
+
+/** The TOML string delimiters, longest first so the triple forms win. */
+const QUOTE_DELIMITERS = ['"""', "'''", '"', "'"];
+
+/** Where the `source_paths = [...]` value sits in the text, or null. */
+function arraySpan(doc: string): { start: number; end: number } | null {
+  const body = mutmutBodyRange(doc);
+  if (body === null) return null;
+  const keyIndex = findKeyOutsideStrings(doc, body.start, body.end);
+  if (keyIndex === -1) return null;
+  const close = bracketOnKeyLine(doc, keyIndex);
+  return close === -1 ? null : { start: keyIndex, end: close + 1 };
+}
+
+/**
+ * Where the table body ends: the next TABLE HEADER, skipping string content.
+ *
+ * A plain `^\[` scan stops at a `[x]` line INSIDE a multi-line string, so the body was
+ * cut short and the real key fell outside it -- the array was never rewritten (measured).
+ * The line is only a header when it is not inside a string.
+ */
+function nextTableStart(doc: string, from: number): number {
+  let quote: string | null = null;
+  let offset = from;
+  for (const line of doc.slice(from).split('\n')) {
+    const isHeader = quote === null && TABLE_HEADER.test(line);
+    quote = scanLineForQuote(line, quote);
+    if (isHeader && quote === null) return offset;
+    offset += line.length + 1;
+  }
+  return doc.length;
+}
+
+/** Any TOML table header line. */
+const TABLE_HEADER = /^[^\S\n]*\[/;
+
+/**
+ * The character range of the `[tool.mutmut]` table body.
+ *
+ * BOTH bounds matter: without them the search finds the first `source_paths` in the FILE
+ * -- another table's, or a fake one inside a multi-line string -- and rewrote the wrong
+ * value (measured).
+ */
+function mutmutBodyRange(doc: string): { start: number; end: number } | null {
+  const header = MUTMUT_HEADER.exec(doc);
+  if (!header) return null;
+  const start = header.index + header[0].length;
+  return { start, end: nextTableStart(doc, start) };
+}
+
+/**
+ * Index of the `]` closing the array that starts on the key's own line; -1 when there is
+ * no array there.
+ *
+ * The bracket must be on THAT line: searching forward found the next assignment's `[`
+ * and replaced everything up to its `]`, DELETING `other = ["a", "b"]` (measured).
+ */
+function bracketOnKeyLine(doc: string, keyIndex: number): number {
+  const open = doc.indexOf('[', keyIndex);
+  if (open === -1) return -1;
+  const lineEnd = doc.indexOf('\n', keyIndex);
+  if (lineEnd !== -1 && open > lineEnd) return -1;
+  return matchingBracket(doc, open);
+}
+
+/** Index of the `]` balancing the `[` at `open`, skipping quoted strings; -1 if none. */
+function matchingBracket(doc: string, open: number): number {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = open; i < doc.length; i += 1) {
+    const step = bracketStep(doc, i, quote);
+    if (step.escape) i += 1;
+    else quote = endCommentAt(doc[i], step.quote);
+    depth += step.delta;
+    if (depth === 0) return i;
+  }
+  return -1;
+}
+
+/** What one character does to the bracket scan. */
+interface BracketStep {
+  quote: string | null;
+  /** +1 for `[`, -1 for `]`, 0 otherwise. */
+  delta: number;
+  /** A backslash inside a string, so the NEXT character is data. */
+  escape: boolean;
+}
+
+/** Classify one character for the bracket scan. */
+function bracketStep(doc: string, i: number, quote: string | null): BracketStep {
+  const ch = doc[i];
+  if (quote === COMMENT) return { quote: COMMENT, delta: 0, escape: false };
+  if (quote === null) return outsideString(ch);
+  return { quote: ch === quote ? null : quote, delta: 0, escape: ch === '\\' };
+}
+
+/** What a character does when the scan is OUTSIDE a string. */
+function outsideString(ch: string): BracketStep {
+  if (isQuote(ch)) return { quote: ch, delta: 0, escape: false };
+  // A `#` starts a comment that runs to the end of the LINE, and a `]` inside one is
+  // prose. Without this the array closed EARLY and the rest of it was left in the file as
+  // garbage -- measured: `source_paths = ["new"] tricky` followed by orphaned entries.
+  if (ch === '#') return { quote: COMMENT, delta: 0, escape: false };
+  return { quote: null, delta: BRACKET_DELTA[ch] ?? 0, escape: false };
+}
+
+/** Pseudo-quote standing for "inside a comment", cleared at the newline. */
+const COMMENT = '#';
+
+/** End the comment pseudo-quote at a newline; comments do not span lines. */
+function endCommentAt(lineBreak: string, quote: string | null): string | null {
+  return quote === COMMENT && lineBreak === '\n' ? null : quote;
+}
+
+/** Whether a character opens a TOML string. */
+function isQuote(ch: string): boolean {
+  return ch === '"' || ch === "'";
+}
+
+/** How each bracket moves the depth, in one place. */
+const BRACKET_DELTA: Record<string, number> = { '[': 1, ']': -1 };
+
+/** How each bracket moves the depth, in one place. */

@@ -236,6 +236,11 @@ write_pre_push_report() {
     printf '%s\n' "    {'id': 'M-Java', 'name': 'Mutation Testing (Java)', 'status': '${GATE_M_JAVA_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_JAVA_SKIP_REASON:-}'}},"
     printf '%s\n' "    {'id': 'M-Kotlin', 'name': 'Mutation Testing (Kotlin)', 'status': '${GATE_M_KOTLIN_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_M_KOTLIN_SKIP_REASON:-}'}},"
     printf '%s\n' "    {'id': 'MW', 'name': 'Code Walkthrough', 'status': '${GATE_DELPHI_STATUS:-SKIP}', 'details': {'remote': '$REMOTE', 'url': '$URL', 'skip_reason': '${GATE_DELPHI_SKIP_REASON:-}'}},"
+    # The two inline arms. Listing them here is what lets the registry check find a report
+    # row for them; setting the variable alone left the pair "declared but unreported",
+    # which reads exactly like a gate that is absent from the chain.
+    printf '%s\n' "    {'id': 'ML', 'name': 'Mock Layering', 'status': '${GATE_ML_STATUS:-SKIP}', 'details': {}},"
+    printf '%s\n' "    {'id': 'UI', 'name': 'UI Sprint', 'status': '${GATE_UI_STATUS:-SKIP}', 'details': {}},"
     printf '%s\n' "    {'id': 'S', 'name': 'Sprint Flow Enforcement', 'status': '${GATE_S_STATUS:-SKIP}', 'details': {'skip_reason': '${GATE_S_SKIP_REASON:-}'}}"
     printf '%s\n' ']'
     printf '%s\n' 'for _g in _gates:'
@@ -1413,6 +1418,9 @@ fi
 # Validates mock policies based on test layer and dependency scope
 # Runs only in non-main branches, TypeScript projects with the module available
 # ============================================================================
+# Same reason as Gate UI: the registry declares this an inline arm, so the hook
+# must set a status or the two disagree about whether it ran.
+GATE_ML_STATUS="PASS"
 run_gate_m3() {
   local changed_files="$1"
   # shellcheck disable=SC2034  # read from the caller via positional arg; kept for parity
@@ -1488,6 +1496,12 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "   GATE UI: UI SPRINT QUALITY GATES"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# The registry names `UI` as an inline arm, which means the hook itself must own
+# a status variable for it. Without one the registry and the code disagree about
+# whether the gate ran at all -- and "not checked" then looks like "absent from
+# the registry" rather than a gate that deliberately did nothing.
+GATE_UI_STATUS="PASS"
 
 if [[ "$XP_GATE_SKIP_UI_GATES" == "1" ]]; then
   # #578: this guard used `${#XP_GATE_BYPASS_REASON// /}`, which stacks "length"

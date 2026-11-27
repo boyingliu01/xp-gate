@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import { joinImportStatement, hasCodeAfterLeadingComment } from './gate-10-lines';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as fsNative from 'fs';
@@ -323,67 +324,6 @@ function scanImportAt(
   return statement.consumed;
 }
 
-/**
- * Assemble a multi-line `import`/`export ... from '...'` statement starting at
- * `start`, or return null when that line does not open one.
- *
- * Returns the joined text and how many FOLLOWING lines were consumed, so the
- * caller can advance past them. The joining character is a space, which keeps
- * `from` adjacent to its quotes without disturbing `['"]` matching; the text is
- * only used for matching, never for the reported line number, so collapsing
- * newlines cannot shift a position that is reported.
- */
-function joinImportStatement(
-  lines: string[],
-  start: number,
-): { text: string; consumed: number } | null {
-  const first = lines[start];
-  // Only a line that BEGINS a static import/export can open a statement, and
-  // only a statement without its path yet needs joining.
-  if (!/^\s*(?:import|export)\b/.test(first)) return null;
-  if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(first)) return null; // already complete
-  const parts: string[] = [first];
-  for (let k = start + 1; k < lines.length && parts.length <= 40; k++) {
-    parts.push(lines[k]);
-    if (/\bfrom\s*['"]|^\s*(?:import|export)\s*['"]/.test(lines[k])) {
-      return { text: parts.join(' '), consumed: k - start };
-    }
-  }
-  return null; // not a statement after all (or absurdly long): leave it alone
-}
-
-/**
- * Does any CODE follow the comment that starts this line?
- *
- * Returns true when the line does not start with a comment at all, so callers
- * can treat it as the single "should this line be scanned?" question. Only
- * three prefixes can begin a comment line and each closes in exactly one way,
- * so this needs no lexer — the masker has already established that the line is
- * not inside a literal or template.
- *
- * Skipping on the raw prefix alone was a real MISS: `/* eslint-disable *&#47;
- * import real from './real';` starts with `/*`, so the whole line was dropped
- * and the genuine import on it was never checked — the one direction a
- * compliance gate must not fail in. Measured before this fix: `[]`.
- *
- *   `//...`      -> nothing can follow on the same line
- *   `/* ... *&#47;`  -> whatever follows the first `*&#47;` is code
- *   `* ...`      -> a JSDoc continuation; `*&#47;` ends it, else nothing follows
- */
-function hasCodeAfterLeadingComment(originalLine: string): boolean {
-  const trimmed = originalLine.trim();
-  if (trimmed.startsWith('//')) return false; // nothing can follow on this line
-  if (trimmed.startsWith('/*') || trimmed.startsWith('*')) {
-    // A `/*` opener and a JSDoc `*` continuation both end at the first `*/`.
-    const close = trimmed.indexOf('*/');
-    // An unterminated block comment runs to the end of the file: no code here.
-    if (close === -1) return false;
-    const rest = trimmed.slice(close + 2).trim();
-    return rest.length > 0 && !rest.startsWith('//');
-  }
-  return true;
-}
-
 /** Apply one pattern to a single line; every relative hit is pushed with its line number. */
 function scanLine(
   line: string,
@@ -688,20 +628,28 @@ async function missingDeclaredArtifacts(
   projectRoot: string,
   files: unknown[]
 ): Promise<string | null> {
-  const declaredEntries = files.filter(
-    (entry): entry is string =>
-      typeof entry === 'string' && entry !== '' && !entry.startsWith('!') && !entry.includes('*')
-  );
-  if (declaredEntries.length === 0) {
-    return null;
-  }
-  const presence = await Promise.all(
-    declaredEntries.map((entry) => pathExists(path.join(projectRoot, entry)))
-  );
-  if (presence.some(Boolean)) {
-    return null;
-  }
+  const declaredEntries = files.filter(isDeclaredArtifact);
+  if (declaredEntries.length === 0) return null;
+  if (await anyExists(declaredEntries, projectRoot)) return null;
   return `package.json files entries (${declaredEntries.join(', ')}) do not exist on disk — run the build that produces them, then re-run`;
+}
+
+/**
+ * Whether this `files` entry names one CONCRETE artifact.
+ *
+ * A NEGATION (`!dist/`) and a GLOB (`dist/*`) are rules about other paths, not artifacts
+ * of their own: neither can be checked for existence, and testing a glob literally would
+ * report a missing file for a directory that is perfectly fine.
+ */
+function isDeclaredArtifact(entry: unknown): entry is string {
+  if (typeof entry !== 'string' || entry === '') return false;
+  return !entry.startsWith('!') && !entry.includes('*');
+}
+
+/** Whether any of these entries exists under the project root. */
+async function anyExists(entries: string[], projectRoot: string): Promise<boolean> {
+  const presence = await Promise.all(entries.map((entry) => pathExists(path.join(projectRoot, entry))));
+  return presence.some(Boolean);
 }
 
 /** Existence probe that reports absence instead of throwing. */
@@ -729,12 +677,29 @@ const MAX_PACK_DETAIL = 2000;
 const packFailureResult = (error: unknown, timeoutMs: number): CheckResult => {
   const err = error as PackFailure;
   const durationMs = 0;
-  if (err.killed || err.signal === 'SIGTERM') {
-    return { status: 'skip', message: `npm pack timeout after ${timeoutMs}ms`, durationMs };
-  }
-  const detail = (err.stderr || err.stdout || err.message || '').slice(0, MAX_PACK_DETAIL);
-  return { status: 'fail', message: `npm pack failed: ${detail}`, durationMs };
+  if (wasKilled(err)) return { status: 'skip', message: `npm pack timeout after ${timeoutMs}ms`, durationMs };
+  return { status: 'fail', message: `npm pack failed: ${failureDetail(err)}`, durationMs };
 };
+
+/**
+ * Whether npm pack was KILLED rather than failing on its own.
+ *
+ * A killed run measured nothing, so it is a SKIP: reporting FAIL would blame the package
+ * for a process that never finished examining it.
+ */
+function wasKilled(err: PackFailure): boolean {
+  return Boolean(err.killed) || err.signal === 'SIGTERM';
+}
+
+/**
+ * The most specific detail npm reported, truncated.
+ *
+ * stderr first, then stdout, then the message: stderr is where npm puts the reason, and
+ * the message is often just "Command failed".
+ */
+function failureDetail(err: PackFailure): string {
+  return (err.stderr || err.stdout || err.message || '').slice(0, MAX_PACK_DETAIL);
+}
 
 /**
  * The operator-facing message when a manifest names files the tarball lacks, or
@@ -827,12 +792,13 @@ function resolveGate10Status(
   pack: CheckResult,
   imp: ImportCheckResult
 ): { status: Gate10Status; exitCode: number } {
-  const anyFail = tsc.status === 'fail' || pack.status === 'fail' || imp.status === 'fail';
-  if (anyFail) return { status: 'block', exitCode: 1 };
-
-  const anyPass = tsc.status === 'pass' || pack.status === 'pass' || imp.status === 'pass';
-  if (!anyPass) return { status: 'skip', exitCode: 0 };
-
+  const statuses = [tsc.status, pack.status, imp.status];
+  // ANY failure blocks: a manifest that does not compile or does not ship is a defect
+  // regardless of what the other checks found.
+  if (statuses.includes('fail')) return { status: 'block', exitCode: 1 };
+  // Nothing passed and nothing failed: every check was skipped, which is UNMEASURED and
+  // must not read as a pass.
+  if (!statuses.includes('pass')) return { status: 'skip', exitCode: 0 };
   return { status: 'pass', exitCode: 0 };
 }
 
@@ -897,37 +863,60 @@ function splitChangedFiles(changedFilesStr: string): string[] {
     : [];
 }
 
+/** The default build-check budget, in milliseconds. */
+const GATE10_DEFAULT_TIMEOUT_MS = 60000;
+
+/** Flags that ask for help rather than configuring a run. */
+const GATE10_HELP_FLAGS = new Set(['--help', '-h']);
+
+/**
+ * How each value-taking flag stores its argument.
+ *
+ * A table, because the branches are INDEPENDENT: an if/else chain would count as
+ * nesting and put this function over the depth limit, which blocked every commit that
+ * touched this file while its warning count stayed at or below the "clear to zero"
+ * threshold.
+ */
+const GATE10_VALUE_FLAGS: Record<string, (state: Gate10ArgsDraft, value: string) => void> = {
+  '--changed-files': (state, value) => { state.changedFilesStr = value; },
+  '--project-root': (state, value) => { state.projectRoot = value || process.cwd(); },
+  '--timeout': (state, value) => { state.timeoutMs = parseInt(value || String(GATE10_DEFAULT_TIMEOUT_MS), 10); },
+};
+
+/** The mutable shape the parser builds before it returns. */
+interface Gate10ArgsDraft {
+  changedFilesStr: string;
+  projectRoot: string;
+  timeoutMs: number;
+  help: boolean;
+}
+
 export function parseGate10Args(args: string[]): Gate10Args {
-  let changedFilesStr = '';
-  let projectRoot = process.cwd();
-  let timeoutMs = 60000;
-  let help = false;
+  const state: Gate10ArgsDraft = {
+    changedFilesStr: '',
+    projectRoot: process.cwd(),
+    timeoutMs: GATE10_DEFAULT_TIMEOUT_MS,
+    help: false,
+  };
 
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    // `else if` chains count as nesting depth, which put this function one over
-    // the limit (5 > 4) and blocked every commit that touched this file until it
-    // cleared -- the rule for files at ≤5 warnings is "clear to zero", not "do
-    // not increase". Each branch is independent, so `continue` states that
-    // directly and keeps the depth at 2.
-    if (arg === '--help' || arg === '-h') {
-      help = true;
+    if (GATE10_HELP_FLAGS.has(args[i])) {
+      state.help = true;
       continue;
     }
-    if (arg === '--changed-files') {
-      changedFilesStr = args[++i] || '';
-      continue;
-    }
-    if (arg === '--project-root') {
-      projectRoot = args[++i] || process.cwd();
-      continue;
-    }
-    if (arg === '--timeout') {
-      timeoutMs = parseInt(args[++i] || '60000', 10);
-    }
+    const apply = GATE10_VALUE_FLAGS[args[i]];
+    if (!apply) continue;
+    // The value is consumed from the NEXT position, so it is never re-read as a flag.
+    apply(state, args[i + 1] || '');
+    i++;
   }
 
-  return { changedFiles: splitChangedFiles(changedFilesStr), projectRoot, timeoutMs, help };
+  return {
+    changedFiles: splitChangedFiles(state.changedFilesStr),
+    projectRoot: state.projectRoot,
+    timeoutMs: state.timeoutMs,
+    help: state.help,
+  };
 }
 
 // ─── CLI Result Formatting ─────────────────────────────────────────────────────

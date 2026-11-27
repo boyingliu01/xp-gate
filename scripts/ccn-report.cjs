@@ -15,12 +15,31 @@
 'use strict';
 
 const { execFile, execFileSync } = require('child_process');
+const { stripNonCode, skipQuoted } = require('./ccn-strip-noncode.cjs');
+const { findSourceFiles } = require('./ccn-find-sources.cjs');
+const { printReport, productionOverThreshold } = require('./ccn-report-render.cjs');
+const {
+  ccnOfBody,
+  verifyRowCcn,
+  readSourceLines,
+  classifyUnverifiedRow,
+  rewriteCsvRow,
+  parseCsvRowIdentity,
+  stripBlockComments,
+  memoizedSourceReader,
+  findFunctionBody,
+  locateBodyAtRow,
+  parseCsvLine,
+  firstNonEmpty,
+  intOrZero,
+  verifyCcnForRow,
+  rescueBodyLines,
+} = require('./ccn-verify.cjs');
 const path = require('path');
+const { requireEmptyOutputIsReal, requireNotTruncated } = require('./ccn-report-guards.cjs');
 const fs = require('fs');
 
-const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|kt|swift|cpp|cc|c|h|hpp|m|mm|dart|php|phtml)$/i;
-// Test-file classification. Keep equivalent to the exclusion regex in
-// githooks/gate-3.sh: the gate grades exactly the population this writer
+// Test-file classification. Keep equivalent to the exclusion regex in githooks/gate-3.sh: the gate grades exactly the population this writer
 // records, so a divergence makes the ratchet report pre-existing code as new
 // (a false BLOCK that no repair can clear).
 //
@@ -39,6 +58,19 @@ const MIRROR_PREFIX = /^src\/npm-package\//;
 // Vendored plugin bundles are build outputs of plugins/*/src (same rule as
 // the npm-package mirror: fix canonical, prepack regenerates the copy).
 const PLUGIN_BUNDLE_PREFIX = /^plugins\/[^/]+\/src\//;
+// A hand-written client entry that the HOST's module loader requires to be ONE
+// closure. `plugins/dsh/client/client.js` must be a single
+// `window.__ModuleLoader__.load({ id, factory })` call -- the loader evaluates exactly
+// that shape and a bundler that added a prelude would register nothing (the file's own
+// header says so, citing a third-party plugin that got it wrong).
+//
+// lizard reports the ENTIRE file's branches as `factory`'s complexity: measured at 95
+// for a function whose own logic is 108 NLOC, because the inner helpers are nested
+// inside the closure. That is a measurement artefact of the required shape, not a
+// function anyone can split -- so it is bucketed rather than refactored.
+// The reason -- a host loader requiring ONE closure, so lizard charges the whole file to
+// `factory` -- applies to that entry file, not everything under `client/` (review FC-06).
+const HOST_CLOSURE_PREFIX = /^plugins\/[^/]+\/client\/client\.js$/;
 const ANOMALY_MAX_MS = 2 * 3600 * 1000; // anything above a 2h gate run is poisoned bookkeeping
 
 // A lizard row whose reported span exceeds this is not a real function extent:
@@ -58,10 +90,32 @@ const CCN_BLOCK_THRESHOLD = 10;
 // threshold would disagree about the same row.
 const RESCUE_WINDOW_LINES = 400;
 
+/**
+ * Which population a file belongs to, in TEST order.
+ *
+ * A table rather than a chain of `if`s: the order matters (a test under a mirror
+ * prefix is still not production), and adding a bucket should not move the enclosing
+ * function's complexity.
+ */
+/**
+ * Where a row's file belongs, first match wins.
+ *
+ * `TEST_PATH` must stay FIRST: the rules after it are LOCATION prefixes, so with any of
+ * them ahead, `plugins/dsh/client/client.test.js` is bucketed `host-closure` -- exempt
+ * from the production threshold -- and the test pattern is never consulted. Grouping the
+ * prefix rules together for tidiness reintroduces that bug (review CI-01 / FC-01).
+ */
+const BUCKET_RULES = [
+  [TEST_PATH, 'test'],
+  [MIRROR_PREFIX, 'mirror'],
+  [PLUGIN_BUNDLE_PREFIX, 'mirror'],
+  [HOST_CLOSURE_PREFIX, 'host-closure'],
+];
+
 function bucketFor(relPath) {
   const p = relPath.replace(/\\/g, '/');
-  if (MIRROR_PREFIX.test(p) || PLUGIN_BUNDLE_PREFIX.test(p)) return 'mirror';
-  return TEST_PATH.test(p) ? 'test' : 'production';
+  const match = BUCKET_RULES.find(([pattern]) => pattern.test(p));
+  return match ? match[1] : 'production';
 }
 
 // One positional target only — never a directory, never a batch list.
@@ -85,68 +139,6 @@ function taggedError(code, message) {
   return err;
 }
 
-function findSourceFiles(root) {
-  const out = [];
-  // #731: `vendor` is composer's dependency tree, and it is NOT gitignored by
-  // default in PHP projects -- a committed vendor/ (which composer recommends
-  // for applications) is tracked, so the `tracked` filter below does not exclude
-  // it. Measured while onboarding PHP: a two-file fixture with a normal
-  // composer install produced baseline rows for
-  // `vendor/phpunit/php-code-coverage/.../bootstrap.bundle.min.js`, i.e. a third
-  // party's minified JS was being graded as the project's own production code.
-  // Same reasoning as node_modules; the name is just spelled differently.
-  const skipDirs = new Set(['.git', 'node_modules', 'dist', 'vendor', '.worktrees', '.codegraph', '.sprint-state', '.xp-gate']);
-  // Git-untracked files are not repo content: scratch dirs, .stryker-tmp
-  // sandboxes and .qoder reports would otherwise flood the report with
-  // phantom "production" functions that no gate can even see.
-  let tracked = null;
-  try {
-    tracked = new Set(
-      execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((p) => path.normalize(p))
-    );
-  } catch { /* outside a git repo: fall back to walking everything */ }
-  (function walk(dir) {
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (!skipDirs.has(e.name)) walk(full);
-      } else if (SOURCE_EXT.test(e.name)) {
-        const rel = path.relative(root, full);
-        if (!tracked || tracked.has(path.normalize(rel))) out.push(rel);
-      }
-    }
-  })(root);
-  return out;
-}
-
-function parseCsvLine(line) {
-  // lizard CSV rows: fields quoted where they contain commas; no embedded newlines.
-  const fields = [];
-  let cur = '';
-  let q = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (q) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; } else q = false;
-      } else cur += ch;
-    } else if (ch === '"') q = true;
-    else if (ch === ',') { fields.push(cur); cur = ''; }
-    else cur += ch;
-  }
-  fields.push(cur);
-  return fields;
-}
-
 // long_name (field 5, "name@start-end@path") is the AUTHORITATIVE name: field 8
 // is only trustworthy when it carries no '@'. A C operator function
 // ("operator,@12-18@f.cpp") would otherwise be keyed as "@12" and vanish from the
@@ -155,24 +147,42 @@ function parseCsvLine(line) {
 //
 // Named so the three-branch precedence has one home and processSourceFile() does
 // not carry it inline (see the ratchet note on that function).
+/**
+ * The name to report from lizard's `long_name` field.
+ *
+ * A C operator function ("operator,@12-18@f.cpp") yields "@12" as its name, so a
+ * remaining `@` means the split hit the wrong delimiter -- and field 8 is the one that
+ * carries no `@` at all.
+ */
+function splitLongName(loc) {
+  const [rawName, rawSpan] = loc.split('@');
+  return { rawName, span: (rawSpan || '').split('-') };
+}
+
+/** A name is usable when it is non-empty and survived the split intact. */
+function usableName(rawName, fieldName) {
+  return !rawName || rawName.includes('@') ? fieldName || '(anon)' : rawName;
+}
+
+/** Parse the span's end, defaulting to 0 for a missing or unparseable value. */
+function endLineOf(rawEnd) {
+  return parseInt(rawEnd, 10) || 0;
+}
+
 function parseLongName(fields) {
   const fieldName = (fields[7] || '').trim();
   const loc = fields[5] || '';
   // No '@' in long_name: field 8 is the name, and an empty one is anonymous.
-  if (!loc.includes('@')) return { name: fieldName || '(anon)', lineNo: '', endNo: 0 };
-  const [rawName, rawSpan] = loc.split('@');
-  const span = (rawSpan || '').split('-');
-  // A C operator function ("operator,@12-18@f.cpp") yields "@12" as its name, so
-  // a remaining '@' means the split hit the wrong delimiter -- fall back to
-  // field 8, which carries no '@'.
-  const name = !rawName || rawName.includes('@') ? fieldName || '(anon)' : rawName;
-  return { name, lineNo: span[0], endNo: parseInt(span[1], 10) || 0 };
+  if (!loc.includes('@')) return { name: usableName('', fieldName), lineNo: '', endNo: 0 };
+  const { rawName, span } = splitLongName(loc);
+  return { name: usableName(rawName, fieldName), lineNo: span[0], endNo: endLineOf(span[1]) };
 }
 
 // Decide whether a lizard run's stdout is a measurement to trust. Shared by the
 // execFile callback so the failure rules live in one place instead of nesting
 // four conditions inside it (which the ratchet caught as CCN 9 for a callback
 // that used to be 7).
+
 function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
   const out = stdout || '';
   const withStderr = stderr ? `: ${String(stderr).trim().slice(0, 200)}` : '';
@@ -184,10 +194,7 @@ function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
   // is not a usable signal here, so confirm the file exists and is readable
   // before believing an empty result.
   if (out.trim() === '') {
-    if (err) throw new Error(`no measurable output for ${relPath} (lizard exited ${err.code || 'with an error'})${withStderr}`);
-    if (!isReadableFile(path.join(root, relPath))) {
-      throw new Error(`lizard reported nothing for ${relPath}, which is not a readable file — treating as measurement failure, not a zero-function file`);
-    }
+    requireEmptyOutputIsReal({ err, root, relPath, withStderr });
     return out;
   }
 
@@ -196,9 +203,7 @@ function evaluateLizardOutput({ stdout, stderr, err, root, relPath }) {
   // warnings come with complete output, so a kill/timeout signal is the signal to
   // distrust the rows: accepting them would silently drop every function lizard
   // had not reached yet.
-  if (err && (err.killed || err.signal)) {
-    throw new Error(`lizard was killed while measuring ${relPath} (${err.signal || 'timeout'}); output is truncated`);
-  }
+  requireNotTruncated({ err, relPath });
   return out;
 }
 
@@ -236,386 +241,75 @@ function isReadableFile(target) {
 }
 
 // Lizard's TS parser loses brace balance on generic-arrow fields such as
-// `const handlers: Record<string, (p: X, n?: Y) => boolean> = {` — the `<...>`
-// reads as comparison operators and the `{` goes uncounted. From that line to
-// EOF every reported function span swallows everything in between, so CCN is
-// charged across neighbours (measured: showHelp body is 687-706 real, lizard
-// reports 687-763 with CCN=77). The scary numbers are exactly the broken ones.
-// Recompute CCN over the brace-balanced body instead. Branch tokens, counted
-// outside strings/comments/templates.
-//
-// `?:` ternaries ARE counted, matching lizard: verified against lizard 1.21.3,
-// `return a ? b : c;` scores 2 and `return a ?? b;` scores 3. An earlier comment
-// here claimed ternaries were deliberately excluded — it was wrong, and the
-// regex was right. `\?[^.]` is what makes it right: it counts `?` unless it
-// begins `?.` (optional chaining, which is not a branch — `a?.b` stays at 1).
-// `else` is NOT a branch token at all. lizard does not count it: measured on
-// lizard 1.26.1, `function a(x){ if(x){} else {} }` and `function a(x){ if(x){} }`
-// both score CCN 2, and `if / else if` scores 3 with or without a trailing `else`.
-// Counting `else` charged every function that has one an extra point. On
-// src/principles/adapters/java.ts that read as a uniform CCN baseline+1 across
-// the file (braceDepth 5->6, maskCode 1->2, lineOf 1->2, extractBracedBlock 6->7)
-// while lizard's own CSV matched the baseline exactly. A uniform offset is the
-// signature of a counting rule, not of code getting more complex.
-const BRANCH_RE = /\b(if|for|while|case|catch)\b|\?\?|&&|\|\||\belif\b|\?[^.]/g;
-
-// Skip a quoted run starting at `i` (which points at the opening quote) and
-// return the index just past the closing quote. Unterminated runs consume the
-// rest of the line, which is what a single-line scanner can honestly do.
-function skipQuoted(line, i, quote) {
-  let k = i + 1;
-  while (k < line.length) {
-    if (line[k] === '\\') { k += 2; continue; }
-    if (line[k] === quote) return k + 1;
-    k++;
-  }
-  return line.length;
-}
-
-function stripNonCode(line) {
-  // Remove string/template/comment/regex content so keywords and braces inside
-  // them do not count.
-  //
-  // REGEX LITERALS ARE LOAD-BEARING, not a nicety. A regex such as
-  // `/(?:interface)\s*\{/g` contains a `{` that is part of its text, and leaving
-  // it in made the brace scan believe a function opened a block it never closed.
-  // Measured on src/principles/adapters/java.ts: extractInterfaces opened its
-  // body, then this line added an unbalanced `{`, so balancedExtentFrom ran to the
-  // END OF THE FILE and ccnOfBody summed ~90 lines -- reporting CCN 24 for a
-  // function lizard and the baseline both say is 3. Every function below a regex
-  // containing a brace inherited the same wrong body.
-  let out = '';
-  let i = 0;
-  // The last character emitted as real code, used to tell a regex literal from a
-  // division operator: a `/` can only START a regex where an expression is
-  // expected (after `(`, `,`, `=`, `:`, `[`, `!`, `&`, `|`, `?`, `{`, `;`, or
-  // the start of the line), never after an identifier, literal or closing bracket.
-  let prev = '';
-  while (i < line.length) {
-    const ch = line[i], nx = line[i + 1];
-    if (ch === '/' && nx === '/') break;
-    if (ch === '/' && nx === '*') {
-      const end = line.indexOf('*/', i + 2);
-      i = end < 0 ? line.length : end + 2;
-      continue;
-    }
-    if (ch === '/' && REGEX_PRECEDERS.has(prev)) {
-      const end = skipRegexLiteral(line, i);
-      if (end > i) {
-        i = end;
-        out += ' ';
-        prev = ' ';
-        continue;
-      }
-    }
-    if (ch === '"' || ch === "'" || ch === '`') {
-      i = skipQuoted(line, i, ch);
-      out += ' ';
-      prev = ' ';
-      continue;
-    }
-    out += ch;
-    if (!/\s/.test(ch)) prev = ch;
-    i++;
-  }
-  return out;
-}
-
-// Characters after which a `/` opens a regex literal rather than dividing.
-const REGEX_PRECEDERS = new Set([
-  '', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*',
-  '<', '>', '~', '^', '%',
-]);
-
-// Index just past a regex literal starting at `start` (which points at `/`), or
-// -1 when the run does not look like one (no unescaped closing `/` on this line).
-/**
- * Index just past a regex literal's flag run (g, i, m, u, s, y, d).
- *
- * Its own function so the character walk below stays flat: folding the flags
- * into it put the branch chain five levels deep for no gain.
- */
-function skipRegexFlags(line, from) {
-  let k = from;
-  while (k < line.length && /[a-z]/i.test(line[k])) k++;
-  return k;
-}
-
-function skipRegexLiteral(line, start) {
-  let k = start + 1;
-  let inClass = false;
-  while (k < line.length) {
-    const ch = line[k];
-    if (ch === '\\') { k += 2; continue; }
-    if (ch === '[') inClass = true;
-    else if (ch === ']') inClass = false;
-    else if (ch === '/' && !inClass) return skipRegexFlags(line, k + 1);
-    k++;
-  }
-  return -1;
-}
-
-// Copy `text` through, replacing any block comment with a single space. Returns
-// { kept, open } where `open` reports a comment that runs past end of line.
-function stripBlockCommentOnce(text) {
-  let kept = '';
-  let i = 0;
-  while (i < text.length) {
-    const ch = text[i];
-    if (ch === '"' || ch === "'" || ch === '`') {
-      const next = skipQuoted(text, i, ch);
-      kept += text.slice(i, next);
-      i = next;
-      continue;
-    }
-    if (ch === '/' && text[i + 1] === '*') {
-      const close = text.indexOf('*/', i + 2);
-      if (close < 0) return { kept, open: true };
-      i = close + 2;
-      kept += ' ';
-      continue;
-    }
-    kept += ch;
-    i++;
-  }
-  return { kept, open: false };
-}
-
-// Remove comment bodies across LINES, leaving line count intact so branch
-// counting is unaffected.
-//
-// stripNonCode handles comments within a single line only. A block comment can
-// span several, and its body was therefore counted as code: measured, a body of
-// `return 1` scored CCN 1, and the same body under a
-// `/* ... if (x) { for (y) { while (z) ... */` comment scored 11. This repo has
-// 438 multi-line block comments across 159 files, so the leak inflated real
-// counts. Quoted strings are respected so a `/*` inside one does not open a
-// comment.
-function stripBlockComments(bodyLines) {
-  const out = [];
-  let open = false;
-  for (const line of bodyLines) {
-    let text = line;
-    if (open) {
-      const close = text.indexOf('*/');
-      if (close < 0) { out.push(''); continue; }
-      text = text.slice(close + 2);
-      open = false;
-    }
-    const res = stripBlockCommentOnce(text);
-    open = res.open;
-    out.push(res.kept);
-  }
-  return out;
-}
-
-function ccnOfBody(bodyLines) {
-  let ccn = 1;
-  for (const raw of stripBlockComments(bodyLines)) {
-    const hits = stripNonCode(raw).match(BRANCH_RE);
-    if (hits) ccn += hits.length;
-  }
-  return ccn;
-}
-
-// Shared by the report loop and the Gate 3 csv path (#544): lizard's CCN is
-// only trustworthy after the span has been verified against brace-balanced
-// source. Returns { ccn, inflated, corrected }.
-function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
-  const startLine = Number(lineNo) || 0;
-  const reportedSpan = endNo > startLine ? endNo - startLine + 1 : 0;
-  const out = { ccn, inflated: false, corrected: false };
-  // Verify EVERY row, not just ccn > 10. Measured on this repo: of 3449 functions
-  // lizard reports at CCN <= 10, 521 are actually higher once the body is read
-  // properly — renderGatePassRateChart is reported at 4 and is really 15. Gating
-  // verification on ccn > 10 therefore meant the ratchet compared raw
-  // UNDER-counts for the overwhelming majority of functions, and a function could
-  // rise from an under-reported 4 to a genuine 15 without the ratchet noticing.
-  // The cost is one extra body lookup per row, which is what makes the numbers
-  // mean anything.
-  if (!srcLines || startLine <= 0 || ccn <= 0) return out;
-  const body = locateBodyAtRow(srcLines, name, startLine);
-  let recomputed;
-  if (body) {
-    recomputed = ccnOfBody(srcLines.slice(body.start, body.end + 1));
-  } else if (reportedSpan > SPAN_ARTEFACT_MAX_LINES) {
-    // Unlocatable body AND an implausibly long span: recompute over the
-    // reported window rather than trust a number with a broken span.
-    recomputed = ccnOfBody(srcLines.slice(startLine - 1, startLine - 1 + reportedSpan));
-  } else {
-    out.unlocatable = true;
-    return out;
-  }
-  if (recomputed !== ccn) {
-    out.inflated = recomputed < ccn;
-    out.ccn = recomputed;
-    out.corrected = true;
-  }
-  return out;
-}
-
-// Read a source file as lines, or null when unreadable (caller keeps lizard's
-// number and says so — an unverified row must never look verified).
-function readSourceLines(root, relPath) {
-  // lizard echoes back whatever path it was handed in the CSV path column, so an
-  // absolute target produces an absolute path here. Joining that onto root would
-  // seek <root>/<absolute>, which never exists — every row then reads as
-  // unlocatable, which is either a hard failure or (with allowUnverified) a pass
-  // on unverified numbers. Resolve absolute paths as themselves and confirm a
-  // relative one still lives under root.
-  const target = path.isAbsolute(relPath) ? relPath : path.join(root, relPath);
-  try {
-    return fs.readFileSync(target, 'utf8').split(/\r?\n/);
-  } catch {
-    return null;
-  }
-}
-
-// The "verifyRowCcn could not pin the body" branch of csvRows, extracted so
-// csvRows stays inside the complexity ratchet. All three outcomes are about
-// CLASSIFYING an unverified row, not about the CSV rewrite itself, so they read
-// as one decision: rescue by name, or count against a category.
-//
-// Returns { ccn, corrected } when the row was rescued, otherwise only the
-// category it belongs to. The caller owns the counters, so this function stays
-// free of side effects it cannot report.
-function classifyUnverifiedRow({ body, ccn, reportedSpan }) {
-  if (body) {
-    // `corrected` must mean "the number leaving this function was read from
-    // source", not "the number changed". When verification happens to agree
-    // with the linter, the row is still VERIFIED — reporting it as unverified
-    // would be a false accusation. The feasibility seat caught that the
-    // `res.ccn !== ccn` test collapsed those two meanings.
-    return { ccn: ccnOfBody(body), corrected: true, category: 'rescued' };
-  }
-  if (reportedSpan > SPAN_ARTEFACT_MAX_LINES) {
-    // Unlocatable AND an implausibly long span: the known lizard brace-loss
-    // artefact. Counting it as unverified would blame the code for a parser
-    // defect; discarding it silently would hide a real number. Recorded as a
-    // distinct, visible category.
-    //
-    // This category is OBSERVABILITY ONLY and deliberately does not fail the
-    // gate — matching the pre-refactor behaviour, where the exit condition was
-    // `unverified > 0` and the artefact counter never appeared in it. The
-    // feasibility seat read the old "the caller decides" wording as a promise the
-    // code did not keep; the honest statement is that the gate does NOT block on
-    // a parser artefact, and the count is surfaced on stderr so it cannot be
-    // mistaken for a clean run.
-    return { category: 'span_artefact' };
-  }
-  // Only rows the GATE would act on are allowed to fail the gate. A row at or
-  // below the block threshold has no verdict riding on it, and lizard emits
-  // rows for non-declarations (`String`, `clearTimeout`, anonymous callbacks)
-  // that are unlocatable by construction — counting those would block every
-  // commit on noise.
-  return { category: ccn > CCN_BLOCK_THRESHOLD ? 'unverified' : 'unverified_low' };
-}
-
-// Rewrite ONE `lizard --csv` row so its CCN column carries the VERIFIED value,
-// or return the row unchanged when it is not a row / not verifiable. Extracted
-// from csvRows so the loop there is a loop, not a parser.
-//
-// Returns the row text to emit. `tally` is mutated with the classification of an
-// unverified row; csvRows aggregates it and decides whether to fail.
-function rewriteCsvRow(line, { srcPath, root, sourceLines, tally }) {
-  if (/^NLOC\b/.test(line) || !/^\d+,/.test(line)) return line;
-  const row = parseCsvRowIdentity(line, srcPath, root);
-  if (!row) return line;
-  const verified = verifyCcnForRow({ sourceLines, ...row, tally });
-  if (!verified.corrected) return line;
-  const cols = parseCsvLine(line);
-  // Field 1 is the CCN column — writing to field 4 would silently overwrite
-  // location_size and leave the wrong complexity in place.
-  cols[1] = String(verified.ccn);
-  return cols.map((c) => (/[",]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',');
-}
-
-// Decode one CSV row into the fields the verifier needs, or null when the row
-// does not carry a usable CCN + location.
-//
-// Column order (lizard 1.21.3 --csv, NO header row, 11 fields):
-//   0 NLOC | 1 CCN | 2 token_len | 3 param_count | 4 location_size
-//   5 "name@start-end@path" | 6 path | 7 name | 8 signature | 9 start | 10 end
-// The signature column contains commas, so it must be parsed quote-aware —
-// parseCsvLine does that. CCN is field 1; field 4 is the span SIZE and
-// reading it as CCN understates nothing but is simply a different number.
-function parseCsvRowIdentity(line, srcPath, root) {
-  const f = parseCsvLine(line);
-  const ccn = parseInt(f[1], 10);
-  const loc = f[5] || '';
-  if (!Number.isFinite(ccn) || !loc.includes('@')) return null;
-  const at = loc.split('@');
-  const span = (at[1] || '').split('-');
-  return {
-    name: firstNonEmpty(at[0], f[7], '(anon)'),
-    ccn,
-    lineNo: intOrZero(span[0]),
-    endNo: intOrZero(span[1]),
-    // The CSV path field lizard prints is the path it was handed; resolve it
-    // against the repo root so cached lines match the measured file.
-    rowPath: firstNonEmpty(f[6], path.relative(root, srcPath)),
-  };
-}
-
-// First value that is a non-empty string after trimming, else ''.
-function firstNonEmpty(...candidates) {
-  for (const c of candidates) {
-    const trimmed = (c || '').trim();
-    if (trimmed) return trimmed;
-  }
-  return '';
-}
-
-function intOrZero(value) {
-  return parseInt(value, 10) || 0;
-}
-
-// The rescue body's LINES, or null.
-//
-// #848: findFunctionBody returns a [startIdx, endIdx] PAIR, but
-// classifyUnverifiedRow counts CCN over the body's LINES. Handing the pair
-// straight through made ccnOfBody iterate two numbers instead of source text; a
-// number matches no branch, so the count fell back to its initial value of 1.
-// Measured before this fix: a Go function lizard reports at CCN 8, whose body
-// genuinely sums to 8, was rewritten to 1 -- while the stderr tally still said
-// "rescued by name", so the row looked MORE verified than the rows it was
-// silently corrupting. Every brace-balanced language was affected; Python, Java
-// and C# happened to pass only because their rows were corrected before reaching
-// this path.
-function rescueBodyLines(srcLines, name, lineNo) {
-  const window = (srcLines || []).slice(lineNo - 1, lineNo - 1 + RESCUE_WINDOW_LINES);
-  const span = findFunctionBody(window, name);
-  return span ? window.slice(span[0], span[1] + 1) : null;
-}
-
-// Verify one row's CCN, falling back to findFunctionBody when verifyRowCcn
-// cannot pin the body. The architecture seat caught that this second search
-// previously only decided whether to count the row as unverified — if it FOUND
-// the body, the row kept its unvalidated CCN and passed through as if it had
-// been verified.
-function verifyCcnForRow({ sourceLines, rowPath, name, ccn, lineNo, endNo, tally }) {
-  // Read the file ONCE. Calling sourceLines(rowPath) separately for the verify and
-  // for the rescue would let the two see different text if the cache missed
-  // between the calls, so a rescue could be computed against source the verifier
-  // never saw.
-  const srcLines = sourceLines(rowPath);
-  const res = verifyRowCcn({ srcLines, name, ccn, lineNo, endNo });
-  if (res.corrected) return res;
-  const body = rescueBodyLines(srcLines, name, lineNo);
-  const reportedSpan = endNo > lineNo ? endNo - lineNo + 1 : 0;
-  const verdict = classifyUnverifiedRow({ body, ccn, reportedSpan });
-  tally[verdict.category] += 1;
-  if (verdict.category === 'rescued') {
-    res.ccn = verdict.ccn;
-    res.corrected = true;
-  }
-  return res;
-}
+// `const handlers: Record<string, (p: X, n?: Y) => boolean> = {`: `<...>` reads as
+// comparison operators, the `{` goes uncounted, and every span from there to EOF swallows
+// its neighbours (measured: showHelp body 687-706 real, lizard reports 687-763 at CCN=77).
+// So CCN is recomputed over the brace-balanced body, counting branch tokens outside
+// strings/comments/templates. Verified against lizard 1.21.3: `a ? b : c` scores 2 and
+// `a ?? b` scores 3, so ternaries ARE counted -- `\?[^.]` counts `?` unless it begins
+// `?.` (chaining is not a branch). `else` is NOT a token: measured on lizard 1.26.1,
+// `if(x){} else {}` and `if(x){}` both score 2, so counting it charged every function an
+// extra point -- on java.ts that read as a uniform baseline+1 while lizard's CSV matched.
 
 // Gate 3 (#544): rewrite `lizard --csv` rows with the VERIFIED CCN so the gate
 // and the ratchet baseline speak the same numbers. Fatal (exit 1) on a row
 // whose span cannot be verified above threshold — Gate 3 is fail-closed, so an
 // unverifiable hotspot must BLOCK instead of passing on an unvalidated count.
+/**
+ * A source-line reader that reads each file once.
+ *
+ * A CSV row repeats its file, so the naive reader re-reads the same source tens of
+ * times per run; the cache is what keeps verification proportional to the number of
+ * FILES rather than the number of functions.
+ *
+ * @param {string} root repo root
+ * @returns {(rel: string) => string[]|null}
+ */
+
+/**
+ * Exit rather than emit a complexity number nobody verified.
+ *
+ * An unverified row above the threshold is the case where a wrong number would drive
+ * a wrong decision, and the caller cannot tell it from a verified one.
+ */
+/** The default refusal: print and exit. Tests pass `opts.fail` instead. */
+function exitWithFailure(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+function refuseUnverifiedRows(tally, srcPath, allowUnverified, fail) {
+  if (tally.unverified === 0) return;
+  if (allowUnverified) {
+    // Say so: without the warning these rows are indistinguishable from verified ones.
+    console.error(
+      `WARN - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be `
+        + `span-verified in ${srcPath}; --allow-unverified was given, so they are emitted UNVERIFIED`,
+    );
+    return;
+  }
+  // Injected so the refusal path is testable (review technical CI-02).
+  fail(unverifiedFailure(tally.unverified, srcPath));
+}
+
+/** What a run without the flag says before refusing. */
+function unverifiedFailure(count, srcPath) {
+  return `FAIL - ${count} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified `
+    + `(${srcPath}); refusing to emit unverified complexity`;
+}
+
+/**
+ * Say what the verification actually did.
+ *
+ * These counters were incremented and thrown away, so "0 unverified" could not be told
+ * apart from "the guard never examined anything". Reported on stderr so stdout stays
+ * exactly the rewritten CSV.
+ */
+function reportTally(tally, srcPath, wanted) {
+  if (!wanted) return;
+  console.error(`[ccn-report] ${srcPath}: ${tally.rescued} row(s) rescued by name, ${tally.span_artefact} span artefact(s), ${tally.unverified} unverified`);
+}
+
 function csvRows(srcPath, root, opts = {}) {
   // The CSV is the input contract of this whole function. Failing to read it
   // must name the file, or the caller sees an empty row set and reads that as
@@ -626,11 +320,7 @@ function csvRows(srcPath, root, opts = {}) {
   } catch (err) {
     throw taggedError('ENOCSV', `cannot read lizard CSV at ${srcPath}: ${err.message}`);
   }
-  const lineCache = new Map();
-  const sourceLines = (rel) => {
-    if (!lineCache.has(rel)) lineCache.set(rel, readSourceLines(root, rel));
-    return lineCache.get(rel);
-  };
+  const sourceLines = memoizedSourceReader(root);
   const out = [];
   // One counter per classification, so the tally in the row loop is a lookup
   // instead of a four-way branch chain — the chain was part of what pushed this
@@ -644,204 +334,11 @@ function csvRows(srcPath, root, opts = {}) {
     const rewritten = rewriteCsvRow(line, { srcPath, root, sourceLines, tally });
     out.push(rewritten);
   }
-  if (tally.unverified > 0 && !opts.allowUnverified) {
-    console.error(`FAIL - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified (${srcPath}); refusing to emit unverified complexity`);
-    process.exit(1);
-  }
-  // Say what the verification actually did. These counters were incremented and
-  // thrown away, so "0 unverified" could not be told apart from "the guard never
-  // examined anything" — the same unobservable-state problem this sprint exists
-  // to remove. Reported on stderr so stdout stays exactly the rewritten CSV.
-  if (opts.reportStats) {
-    console.error(`[ccn-report] ${srcPath}: ${tally.rescued} row(s) rescued by name, ${tally.span_artefact} span artefact(s), ${tally.unverified} unverified`);
-  }
+  refuseUnverifiedRows(tally, srcPath, opts.allowUnverified, opts.fail ?? exitWithFailure);
+  reportTally(tally, srcPath, opts.reportStats);
   // Only rows were rewritten; the trailing summary table is emitted by lizard
   // on a separate stream (stderr) when no --csv, so nothing else to fix here.
   return out.join('\n');
-}
-
-// Locate a function body by name via brace balance. Returns [startIdx, endIdx]
-// inclusive over `lines`, or null when no balanced body matches. Anonymous
-// callbacks — the `(anonymous)` rows lizard emits for arrow/function literals —
-// are located positionally: their row's start line IS the literal's line, so
-// the first balanced `{...}` body at or after it is theirs.
-function findFunctionBody(lines, name) {
-  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (name === '(anonymous)' || name === '(anon)') {
-    // Positional: find the first line that opens a brace and close it.
-    for (let i = 0; i < lines.length; i++) {
-      const span = balancedExtentFrom(lines, i);
-      if (span) return [i, span];
-    }
-    return null;
-  }
-  // "export const ocpRule: Rule = {" / "const handler = (a) => {" / class
-  // methods: lizard names the row after the binding, so the declaration has to
-  // count as "the function starts here" too. Without this the row was simply
-  // unlocatable and its raw (span-inflated) count survived verification.
-  // NOTE: this comment must never contain a backtick. A stray backtick opens a
-  // template literal for lizard's parser and it emits phantom rows for the rest
-  // of the function (measured: a bogus "=" row at CCN 24 for this very file).
-  // Same for single quotes in the paragraphs around it — keep them paired.
-  const re = new RegExp(
-    '(function\\s+' + esc + '\\s*[(<]' +
-    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=]' +
-    // TypeScript class properties: `public readonly handler = (a) => {`,
-    // `private _handler: Handler = ...`. Any run of visibility/readonly/static
-    // modifiers may precede the name. Without this the body is unlocatable and
-    // the row keeps its raw count — verified by probe that both forms failed
-    // before this alternative existed.
-    '|\\b(?:(?:public|private|protected|readonly|static|override|declare|abstract)\\s+)*' + esc + '\\s*[:=]' +
-    // A bare `name(` / `name:` on a line is a declaration only when it STARTS the
-    // line (optionally behind modifiers). Without the `^\\s*` anchor this branch
-    // matched every USE of the name anywhere in the file, and because the scan
-    // takes the first hit, a call above the declaration won: measured on
-    // src/principles/analyzer.ts, `if (!isRuleEnabled(rule.id)) return;` on line
-    // 189 anchored isRuleEnabled to the helper it is called from, and the row was
-    // graded at that neighbour's CCN 6 instead of its own 2.
-    '|^\\s*(?:(?:public|private|protected|readonly|static|override|declare|abstract|async|get|set)\\s+)*' + esc + '\\s*[:(]' +
-    ')'
-  );
-  for (let i = 0; i < lines.length; i++) {
-    if (!re.test(stripNonCode(lines[i]))) continue;
-    const span = balancedExtentFrom(lines, i);
-    if (span !== null) return [i, span];
-  }
-  return null;
-}
-
-// Close the first brace opened at/after `startIdx`. Returns the index of the
-// balancing `}` (or null) so both the named and positional searches share one
-// definition of "the body".
-function balancedExtentFrom(lines, startIdx) {
-  let depth = 0, started = false;
-  for (let j = startIdx; j < lines.length; j++) {
-    const code = stripNonCode(lines[j]);
-    for (const ch of code) {
-      if (ch === '{') { depth++; started = true; }
-      else if (ch === '}') depth--;
-    }
-    if (started && depth === 0) return j;
-  }
-  return null;
-}
-
-// Lizard reports a row's start as the DECLARATION of the parsed entity, so for
-// `export const fn: Rule = { ... }` the CCN-31 row can point at `check:` while
-// the binding it is named after starts a few lines ABOVE. Searching only
-// downward left those rows unverified — and an unverified row keeps lizard's
-// span-inflated number (measured: srpRule 31 vs real 8). Look a few lines up
-// first, then fall back to the original downward search.
-//
-// The upward search is only valid when the reported line is part of that
-// entity. A row can also name a function purely because a CALL to it happens
-// inside a different, badly-scoped entity: lizard filed the body of `main()`
-// under `resolvePromptBudgetBytes` (CCN 7 at line 885 of
-// scripts/delphi-external-review.cjs, where the real function is a CCN-6
-// one-liner 400 lines above). Blindly accepting the enclosing function gave two
-// same-named baseline keys and let a bogus count look verified. So an upward hit
-// is only taken when the reported line itself is not a bare mention of the name
-// — i.e. the reported text is a declaration of it, or opens a body.
-function isBareMention(line, name) {
-  const code = stripNonCode(line);
-  // The reported line need not contain the name at all: lizard names a row after
-  // the enclosing binding and can file it under a member, e.g. `check: (a) => {`
-  // for a row named `rule`. Such a line declares a member and is legitimate.
-  const declaresMember = /[A-Za-z_$][\w$]*\s*(:\s*[([{])|\([^()]*\)\s*:\s*[^=]*=>/;
-  if (declaresMember.test(code)) return false;
-  if (!code.includes(name)) return true;
-  // A declaration of `name` — the thing a row SHOULD point at. Two shapes:
-  //   function name(...)  /  const name = ...
-  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const declaration = new RegExp(
-    '(function\\s+' + esc + '\\s*[(<]' +
-    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=])'
-  );
-  if (declaration.test(code)) return false;
-  // A call site declares nothing: `maxBytes: name(x),` invokes the name, and the
-  // brace it sits in belongs to the enclosing construct — so an upward hit is
-  // not this row's body.
-  return true;
-}
-
-const DECL_LOOKBACK = 6;
-function locateBodyAtRow(lines, name, startLine) {
-  const from = startLine - 1;
-  const reported = lines[from] === undefined ? '' : lines[from];
-  const mentionOnly = isBareMention(reported, name);
-
-  // A row is filed against a line that is often NOT where the function starts:
-  // lizard reports one line late for `export`ed declarations, and it also files
-  // a whole later construct under a name that is merely CALLED near it
-  // (measured: the 60-line `main()` body was reported as
-  // `resolvePromptBudgetBytes`, a 6-line helper 400 lines above). The row's
-  // reported line therefore only decides WHEN there is no declaration to
-  // anchor on. A real declaration always wins — that is the body the row is
-  // about, and its own extent is the only trustworthy span.
-  const declIdx = findDeclarationLine(lines, name);
-  if (declIdx !== null) {
-    const span = balancedExtentFrom(lines, declIdx);
-    if (span !== null) return { start: declIdx, end: span };
-  }
-
-  // No declaration in this file (`(anonymous)` callbacks, class methods named
-  // only in a parent, ...). Fall back to the balanced body at the reported line,
-  // which is exact when the row starts ON a literal and merely approximate for
-  // member rows — either way it beats trusting an unverified span.
-  for (let k = from; k >= 0 && k >= from - DECL_LOOKBACK; k--) {
-    const span = findFunctionBody(lines.slice(k, Math.min(lines.length, k + RESCUE_WINDOW_LINES)), name);
-    if (!span) continue;
-    const absStart = k + span[0];
-    if (absStart >= from && mentionOnly) continue;
-    return { start: absStart, end: k + span[1] };
-  }
-
-  return null;
-}
-
-// Index of the line that DECLARES `name` (function/const/let/var/class-method
-// form), or null.
-// Scan stops at the first match: a file may mention a helper many times, but it
-// declares it once (hoisted duplicates would be a separate bug).
-function findDeclarationLine(lines, name) {
-  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(
-    '(function\\s+' + esc + '\\s*[(<]' +
-    '|\\b(?:const|let|var)\\s+' + esc + '\\s*[:=]' +
-    // Class-method form: `  extractInterfaces(): Array<...> {`, `  maskCode(x) {`.
-    //
-    // Without this branch a method row could not be anchored to its declaration,
-    // so locateBodyAtRow fell through to "balanced body at the reported line".
-    // That fallback trusts lizard's line number, and lizard files some rows one
-    // line off: measured on src/principles/adapters/java.ts, whose lizard CSV and
-    // its .ccn-baseline.json entry AGREE that extractInterfaces is CCN 3, while
-    // this file rewrote it to 24 -- the CCN of `extract`, further down, that the
-    // drifted scan ran into. Five functions in that one file were reported as
-    // ratchet regressions that did not exist, blocking every commit that touched
-    // it with no repair available except faking the baseline.
-    //
-    // The name is anchored so a prefix cannot match: `extract` is a prefix of
-    // `extractInterfaces`, and an unanchored branch would anchor the short name to
-    // the long method's declaration and re-derive the same wrong body.
-    //
-    // `(?<![.!])` excludes MEMBER ACCESS and NEGATED CALLS. The declaration of a
-    // name is preceded by nothing meaningful; a USE of it is preceded by the
-    // object it is called on (`.`) or by an operator (`!`, `(`, `,`, `=`, `&`,
-    // `|`, `?`, `:`) in the expression containing it. Without this, usages won the
-    // race against the declaration:
-    //   - the doc comment above a method -- "reads `adapter.extractInterfaces()`" --
-    //     anchored the span on the comment (extractInterfaces read as CCN 24);
-    //   - `if (!isRuleEnabled(rule.id)) return;` on line 189 anchored
-    //     isRuleEnabled to the function it is CALLED from, so its body was taken as
-    //     that neighbour's and the row graded at the neighbour's CCN 6 instead of 2.
-    // Both are the same mistake: a mention is not a declaration.
-    '|^\\s*(?:(?:public|private|protected|static|readonly|override|async|get|set|abstract)\\s+)*' +
-      esc + '\\s*(?=\\()(?!\\w))'
-  );
-  for (let i = 0; i < lines.length; i++) {
-    if (re.test(stripNonCode(lines[i]))) return i;
-  }
-  return null;
 }
 
 // The CSV column positions in this file are that of lizard 1.21.3 (11 fields,
@@ -941,12 +438,9 @@ function mergeDuplicateRow({ functions, byRowKey, rowKey, ccn, nloc }) {
   return true;
 }
 
-// Turn one file's lizard CSV into rows, recording the two facts that separate
-// "no functions here" from "nothing ran": whether any data row was seen and
-// whether lizard printed its header at all.
-//
-// Split out of processSourceFile so the per-line parsing lives on its own; the
-// two flags it reports back are the caller's silent-zero guard.
+// Turn one file's lizard CSV into rows, recording the two facts that separate "no
+// functions here" from "nothing ran": whether any data row was seen, and whether lizard
+// printed its header at all. Those two flags are the caller's silent-zero guard.
 // What a raw CSV line is, before any parsing.
 //   'skip'   -- blank or not a data row
 //   'header' -- lizard's column header (`NLOC,CCN,...`); printed once per file
@@ -1051,12 +545,35 @@ async function processSourceFile({ rel, lizard, root, functions, byRowKey, unver
  * 2026-11-23: 175.2s sequential vs 60.3s pooled.
  */
 async function scanFiles({ files, lizard, root, functions, byRowKey, unverifiedRows }) {
-  // XP_GATE_CCN_CONCURRENCY exists so a test can pin the pool width; the default
-  // tracks the machine, because the cost is process startup and not CPU analysis.
+  const collected = await collectAll(files, { lizard, root });
+  mergeCollected(collected, { functions, byRowKey, unverifiedRows });
+}
+
+/**
+ * How many files to scan at once.
+ *
+ * XP_GATE_CCN_CONCURRENCY exists so a test can pin the pool width; the default tracks
+ * the machine, because the cost is process startup and not CPU analysis.
+ *
+ * @returns {number}
+ */
+function scanWidth() {
   const parsed = parseInt(process.env.XP_GATE_CCN_CONCURRENCY || '', 10);
   const defaultWidth = Math.max(1, Math.min(require('os').cpus().length || 4, 8));
-  const width = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 32) : defaultWidth;
+  if (!Number.isFinite(parsed) || parsed <= 0) return defaultWidth;
+  return Math.min(parsed, 32);
+}
 
+/**
+ * Scan every file, `width` at a time, keeping results in INPUT ORDER.
+ *
+ * The order matters: the report and the baseline are compared as text, so a scan
+ * that emitted files in completion order would churn the diff on every refresh.
+ *
+ * @returns {Promise<Array<{ownFunctions: object[], ownUnverified: object[]} | null>>}
+ */
+async function collectAll(files, ctx) {
+  const width = scanWidth();
   const collected = new Array(files.length);
   let cursor = 0;
   async function worker() {
@@ -1067,7 +584,7 @@ async function scanFiles({ files, lizard, root, functions, byRowKey, unverifiedR
       const ownByKey = new Map();
       const ownUnverified = [];
       await processSourceFile({
-        rel: files[index], lizard, root,
+        rel: files[index], ...ctx,
         functions: ownFunctions, byRowKey: ownByKey, unverifiedRows: ownUnverified,
       });
       collected[index] = { ownFunctions, ownUnverified };
@@ -1076,7 +593,16 @@ async function scanFiles({ files, lizard, root, functions, byRowKey, unverifiedR
   const workers = [];
   for (let i = 0; i < Math.min(width, files.length); i += 1) workers.push(worker());
   await Promise.all(workers);
+  return collected;
+}
 
+/**
+ * Fold the per-file batches into the caller's accumulators.
+ *
+ * An empty slot means a file produced no batch; skipping it is correct, and the
+ * alternative -- writing nulls into the accumulators -- would break every consumer.
+ */
+function mergeCollected(collected, { functions, byRowKey, unverifiedRows }) {
   for (const batch of collected) {
     if (!batch) continue;
     for (const fn of batch.ownFunctions) {
@@ -1149,11 +675,22 @@ async function run(options = {}) {
  *
  * `nameCounts` maps `${file}::${name}` to how many rows carried that name.
  */
+/** Names that identify a row positionally, because they repeat within a file. */
+const ANONYMOUS_NAMES = new Set(['(anonymous)', '(anon)']);
+
+/**
+ * The baseline key for one function.
+ *
+ * A key is `file::name` UNLESS the name cannot identify the row on its own -- an
+ * anonymous function, or a name that appears twice in the same file -- in which case
+ * the line is appended. Without that, moving a duplicate silently reassigns one
+ * function's ceiling to the other.
+ */
 function baselineKey(f, nameCounts) {
-  const isAnon = f.name === '(anonymous)' || f.name === '(anon)';
-  if (isAnon) return `${f.file}::(anonymous)@${f.line}`;
-  const seen = nameCounts ? nameCounts.get(`${f.file}::${f.name}`) || 1 : 1;
-  return seen > 1 ? `${f.file}::${f.name}@${f.line}` : `${f.file}::${f.name}`;
+  const base = `${f.file}::${f.name}`;
+  if (ANONYMOUS_NAMES.has(f.name)) return `${f.file}::(anonymous)@${f.line}`;
+  const seen = nameCounts?.get(base) ?? 1;
+  return seen > 1 ? `${base}@${f.line}` : base;
 }
 
 /** Count how many rows carry each `${file}::${name}` pair. */
@@ -1244,19 +781,11 @@ function ratchetFindings(report, baseline, warnThreshold = 5, blockThreshold = 1
 // byte-identical file; an unordered declaration would churn the diff on every
 // refresh and make "did the population change?" unreadable.
 //
-// Both axes are derived from f.file, NOT from the baseline KEY: keys embed `::`
-// and `@line` (baselineKey), so path.extname() on a key would read the suffix of
-// a symbol name as an extension.
-//
-// Named rather than inlined: the two chains used to sit directly in main() as
-// four arrow callbacks, and lizard scores each callback as its own anonymous
-// function -- six of them above the CCN-10 block threshold, in the tool whose job
-// is to report exactly that. A named helper is also where the "which functions
-// count" predicate belongs; it now has one definition instead of two copies that
-// could drift apart.
-// Sorted + de-duplicated: a re-run on unchanged inputs must produce a
-// byte-identical file, or the diff churns on every refresh and "did the
-// population change?" becomes unreadable.
+// Both axes are derived from f.file, NOT from the baseline KEY: keys embed `::` and
+// `@line` (baselineKey), so path.extname() on a key reads a symbol suffix as an extension.
+// Named rather than inlined: the two chains sat in main() as four arrow callbacks, and
+// lizard scores each as its own anonymous function -- six of them over the CCN-10
+// threshold, in the tool whose job is to report exactly that.
 function uniqueSorted(values) {
   return [...new Set(values)].sort();
 }
@@ -1289,7 +818,9 @@ function baselinePopulation(functions) {
 // main()'s own CCN past the threshold this file exists to report.
 function writeBaseline(report) {
   if (report.unverified_rows.length) {
-    console.error(`FAIL - ${report.unverified_rows.length} function(s) above CCN 10 could not be span-verified; refusing to write a baseline that would record an unverified complexity as its ceiling:`);
+    // Same reason as `refuseUnverifiedRows`: a baseline is a CEILING, so recording an
+    // unverified number there decides future verdicts on a measurement nobody checked.
+    console.error(unverifiedFailure(report.unverified_rows.length, 'baseline write'));
     for (const row of report.unverified_rows.slice(0, 20)) console.error(`  ${row}`);
     process.exit(1);
   }
@@ -1319,13 +850,11 @@ function writeBaseline(report) {
   // Which analyzer produced these numbers. Without it a baseline is
   // indistinguishable from one written by any other lizard release, and the
   // ratchet happily compares across versions that disagree about the same
-  // functions (see checkLizardVersion). Recorded as `null` when the version
-  // probe is unsupported; the reader treats null as "unknown, compare anyway"
-  // rather than as a mismatch, so an older toolchain still works.
+  // functions (see checkLizardVersion). `null` when the version probe is unsupported; the
+  // reader treats null as "unknown, compare anyway" so an older toolchain still works.
   const document = { analyzer: { tool: 'lizard', version: report.lizardVersion ?? null }, population, entries: baseline };
-  // A refused write must be loud. Silently continuing would print "wrote N
-  // entries" for a file that does not exist, and the next gate run would then
-  // grade against the previous baseline while believing it was refreshed.
+  // A refused write must be loud: otherwise "wrote N entries" prints for a file that does
+  // not exist, and the next gate grades the OLD baseline believing it was refreshed.
   try {
     fs.writeFileSync(target, JSON.stringify(document, null, 2) + '\n');
   } catch (err) {
@@ -1333,8 +862,8 @@ function writeBaseline(report) {
   }
   console.log(`wrote ${Object.keys(baseline).length} entries -> ${target}`);
   console.log(`  analyzer: lizard ${report.lizardVersion ?? '(version unknown)'}`);
-  // The reader accepts both shapes (see ccn-ratchet.sh), so an older gate can
-  // still load this file: a flat map and {population, entries} both parse.
+  // Both shapes parse (ccn-ratchet.sh): a flat map and {population, entries}, so an
+  // older gate still loads a file this version wrote.
 }
 
 // A ratchet is only sound if the same analyzer wrote the ceiling and took today's
@@ -1351,11 +880,20 @@ function writeBaseline(report) {
 // The version the baseline was written with, or null when the file predates the
 // record or the writer could not probe one. Kept separate from the comparison so
 // the shape-handling (three nested optional reads) is not folded into it.
+/**
+ * A plain object, or null.
+ *
+ * Sprinkled through the readers below because a baseline is USER-EDITABLE JSON: every
+ * level can be absent, and a missing level means "not recorded", never a crash.
+ */
+function asObject(value) {
+  return value && typeof value === 'object' ? value : null;
+}
+
+/** The lizard version a baseline records, or null when it records none. */
 function recordedLizardVersion(baselineRaw) {
-  if (!baselineRaw || typeof baselineRaw !== 'object') return null;
-  const recordedAnalyzer = baselineRaw.analyzer;
-  if (!recordedAnalyzer || typeof recordedAnalyzer !== 'object') return null;
-  return recordedAnalyzer.version ?? null;
+  const analyzer = asObject(asObject(baselineRaw)?.analyzer);
+  return analyzer?.version ?? null;
 }
 
 function assertAnalyzerMatches(baselineRaw, baselinePath, report) {
@@ -1437,72 +975,6 @@ function checkAgainstBaseline(report, get) {
   console.log(`OK — ${report.functions.filter((f) => f.bucket === 'production').length} production function(s) within the ratchet`);
 }
 
-/**
- * Per-gate timing statistics from the audit log, keyed by gate name.
- *
- * Split out of main() so the three arrow functions it needs stop sitting inside
- * main's span: the brace-verification pass charges an enclosing function's
- * corrected complexity to the arrows nested within it, which reported each of
- * them at CCN 6 instead of 1 (measured through the gate's own --csv-verified
- * path). The behaviour is unchanged.
- */
-function collectGateTimings(report) {
-  const audit = readAuditRows(path.join(report.root, '.xp-gate', 'audit.jsonl'));
-  const byGate = {};
-  const gatesSeen = new Set([]);
-  for (const row of audit) {
-    if (row.gate_name) gatesSeen.add(row.gate_name);
-  }
-  for (const g of gatesSeen) {
-    byGate[g] = gateTimingStats(audit.filter((row) => row.gate_name === g));
-  }
-  return { audit, byGate };
-}
-
-/** Production functions above the report's display threshold. */
-function productionOverThreshold(functions) {
-  return functions.filter((f) => f.bucket === 'production' && f.ccn > 10);
-}
-
-/**
- * Build and print the human/JSON report.
- *
- * Extracted from main() for readability, and load-bearing for a second reason:
- * the brace-verification pass assigns an enclosing function's corrected span to
- * the arrows nested inside it. When these filters lived inline in main(), the
- * three arrows were each charged main()'s complexity and reported CCN 6 instead
- * of 1 (measured through the gate's own --csv-verified path).
- */
-function printReport(report, get) {
-  const { byGate } = collectGateTimings(report);
-  const prodOver = productionOverThreshold(report.functions);
-  const summary = {
-    files_scanned: report.filesScanned,
-    production_functions_gt10: prodOver.length,
-    test_functions_gt10: report.functions.filter((f) => f.bucket === 'test' && f.ccn > 10).length,
-    mirror_functions_gt10: report.functions.filter((f) => f.bucket === 'mirror' && f.ccn > 10).length,
-    worst_production: prodOver.sort((a, b) => b.ccn - a.ccn).slice(0, parseInt(get('--top') || '20', 10)),
-    gate_timing: byGate,
-  };
-  if (process.argv.includes('--json')) {
-    console.log(JSON.stringify(summary, null, 2));
-    return;
-  }
-  console.log(`files scanned:            ${summary.files_scanned}`);
-  console.log(`production funcs CCN>10:  ${summary.production_functions_gt10}   (canonical tree only)`);
-  console.log(`test funcs CCN>10:        ${summary.test_functions_gt10}`);
-  console.log(`mirror funcs CCN>10:      ${summary.mirror_functions_gt10}   (src/npm-package copies — fixed via canonical + prepack)`);
-  console.log('\nworst production functions:');
-  for (const f of summary.worst_production) {
-    console.log(`  CCN=${String(f.ccn).padStart(4)}  ${f.file}:${f.line}  ${f.name}`);
-  }
-  console.log('\ngate timing (ms, anomalies filtered):');
-  const ordered = Object.entries(byGate).sort((a, b) => (b[1].p50 || 0) - (a[1].p50 || 0));
-  for (const [g, st] of ordered) {
-    console.log(`  ${g.padEnd(26)} n=${String(st.count).padStart(4)}  p50=${st.p50 ?? '-'}  p95=${st.p95 ?? '-'}`);
-  }
-}
-
 async function main() {
   const argv = process.argv.slice(2);
   const get = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i + 1] : undefined; };
@@ -1534,7 +1006,7 @@ async function main() {
   // treated as new code — moving debt around must not launder it.
   if (argv.includes('--write-baseline')) return writeBaseline(report);
 
-  printReport(report, get);
+  printReport(report, get, { readAuditRows, gateTimingStats });
 }
 
 // baselineKey/countNames are exported so the bats cross-check can prove the
@@ -1560,13 +1032,13 @@ if (require.main === module) {
     process.stdin.on('data', (c) => { input += c; });
     process.stdin.on('end', () => {
       // csvRows reads the CSV from srcPath, and the measured source paths are
-      // resolved against `root`, so the temp CSV is only a carrier for stdin.
       const tmp = path.join(require('os').tmpdir(), `ccn-verified-${process.pid}.csv`);
       fs.writeFileSync(tmp, input);
       try {
-        // Always report what verification did; stderr only, so the gate's parser
-        // still sees nothing but rewritten CSV on stdout.
-        process.stdout.write(csvRows(tmp, root, { reportStats: true }));
+        // stderr only: the gate's parser must see nothing but rewritten CSV on stdout.
+        // Dead until now: nothing ever set `allowUnverified` (review FC-02).
+        const allowUnverified = process.argv.slice(2).includes('--allow-unverified');
+        process.stdout.write(csvRows(tmp, root, { reportStats: true, allowUnverified }));
       } finally {
         try { fs.unlinkSync(tmp); } catch { /* best effort */ }
       }

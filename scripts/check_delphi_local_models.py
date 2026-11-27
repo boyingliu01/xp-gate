@@ -19,31 +19,9 @@ import os
 import sys
 import urllib.request
 
-LOCAL_PREFIX = "local-"
+from check_delphi_seat_probe import probe, seat_model, seat_verdict
 
-MODEL_ALLOWLIST: set[str] = {
-    # Kept as an explicit list, not a wildcard, so a future seat change still
-    # requires an intentional edit here. Two separate decisions put entries in
-    # this set, and both stay:
-    #
-    # #717 (2026-11-04): the guard had drifted behind the config and reported
-    # SEAT VIOLATION on the very seats a review had just run on -- the failure
-    # mode this list exists to prevent, one level up. The guard complained first,
-    # so the sanctioned seats are recorded here.
-    "s-qwen3.8-flash",
-    # 2026-11-04: all three seats moved to hosted FLASH-tier models on the same
-    # WhaleCloud gateway. The local deployments are re-tuned often enough that a
-    # pinned local seat goes stale faster than a sprint, and a review whose seat
-    # silently changes model mid-sprint cannot be trusted. Three DIFFERENT flash
-    # models were chosen for cost while keeping the multi-model invariant: the ids
-    # resolve to three distinct backends (deepseek-flash / glm-5-3-flash-260828 /
-    # Ling-3.1-flash-DTMaaS), verified through the gateway-reported
-    # `resolved_model` rather than the id text, because two distinct ids can alias
-    # to one backend and quietly reduce the review to two models.
-    "s-deepseek-v4.1-flash",
-    "s-glm-5.3-flash",
-    "g-ling-3.1-flash",
-}
+from check_delphi_seat_policy import LOCAL_PREFIX, MODEL_ALLOWLIST, active_profile, seat_items
 
 CONFIGS = [
     os.path.expanduser("~/.config/xp-gate/.delphi-config.json"),
@@ -58,85 +36,47 @@ CONFIGS = [
 ]
 
 
-def iter_seats(cfg):
+def profile_names(cfg):
+    """The profiles to inspect: the active one when present, else ALL of them.
+
+    The fallback is deliberate: a config whose `active_profile` names nothing still has
+    seats worth checking, and checking NONE would report it as clean.
+    """
     profiles = cfg.get("profiles", {})
     active = cfg.get("active_profile")
-    names = [active] if active in profiles else list(profiles)
-    for name in names:
-        prof = profiles[name]
-        experts = prof.get("experts", {})
-        if isinstance(experts, dict):
-            items = experts.items()
-        else:
-            items = [(e.get("role", i), e) for i, e in enumerate(experts)]
-        for role, seat in items:
+    return [active] if active in profiles else list(profiles)
+
+
+
+
+def iter_seats(cfg):
+    profiles = cfg.get("profiles", {})
+    for name in profile_names(cfg):
+        for role, seat in seat_items(profiles[name].get("experts", {})):
             yield name, role, seat
+
+
+
+
 
 
 def check_file(path, cfg):
     ok = True
+    label = os.path.basename(os.path.dirname(path))
     for profile, role, seat in iter_seats(cfg):
-        model = str(seat.get("model") or seat.get("requested_model") or "")
-        local = model.lower().startswith(LOCAL_PREFIX)
-        allowed = local or model in MODEL_ALLOWLIST
-        mark = "OK  " if allowed else "FAIL"
-        if not allowed:
-            ok = False
-        note = "" if local else (" (allowlisted)" if allowed else "")
-        print(
-            f"{mark} [{os.path.basename(os.path.dirname(path))}] profile={profile} role={role} model={model}{note}"
-        )
+        model = seat_model(seat)
+        allowed, note = seat_verdict(model)
+        ok = ok and allowed
+        print(f"{'OK  ' if allowed else 'FAIL'} [{label}] profile={profile} role={role} model={model}{note}")
     return ok
 
 
-def probe_one_seat(base, key, role, model):
-    """One chat completion proving the seat resolves. Returns ok."""
-    body = json.dumps(
-        {
-            "model": model,
-            "messages": [{"role": "user", "content": "reply OK"}],
-            "max_tokens": 4,
-        }
-    ).encode()
-    req = urllib.request.Request(
-        base.rstrip("/") + "/v1/chat/completions",
-        data=body,
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + key},
-    )
-    try:
-        # timeout is mandatory (R9 FC-02): an unresponsive gateway must
-        # fail the check, never hang a CI pipeline.
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-        # A 200 whose body carries no model id means the seat did not
-        # actually resolve — status alone is not proof (R9 MA-01).
-        resolved = payload.get("model") or payload.get("data", [{}])[0].get("id", "")
-        print(
-            f"PROBE OK   role={role} model={model} -> resolved={resolved or 'NO-MODEL-FIELD'}"
-        )
-        return bool(resolved)
-    except urllib.error.HTTPError as exc:
-        # 401/403 = credential problem, not a missing model; report it
-        # distinctly so one misconfigured key does not read as 3 dead
-        # seats (R9 MA-01).
-        kind = "AUTH" if exc.code in (401, 403) else f"HTTP {exc.code}"
-        print(f"PROBE FAIL role={role} model={model} -> {kind}")
-        return False
-    except Exception as exc:  # noqa: BLE001 - report any transport failure
-        print(f"PROBE FAIL role={role} model={model} -> ERR {exc}")
-        return False
 
 
-def active_profile(cfg):
-    """Resolve the active profile exactly like the loaders do. Probing every
-    profile iterated wrong gateways and stale seat lists — a 401 from an
-    inactive profile used to fail the whole guard while its real target never
-    got tested (R9 CI-01 follow-up)."""
-    profiles = cfg.get("profiles", {})
-    active_name = cfg.get("active_profile") or (
-        "default" if "default" in profiles else None
-    )
-    return profiles.get(active_name)
+
+
+
+
 
 
 def load_json(path):
@@ -153,57 +93,32 @@ def load_json(path):
         return False
 
 
-def probe(cfg_by_path):
-    key = (os.environ.get("WHALECLOUD_API_KEY") or "").strip()
-    if not key:
-        print("PROBE SKIP: WHALECLOUD_API_KEY not set")
-        return True
-    ok = True
-    for path, cfg in cfg_by_path.items():
-        prof = active_profile(cfg)
-        if not prof:
-            print(
-                f"PROBE SKIP {path}: no resolvable active profile (active_profile={cfg.get('active_profile')!r})"
-            )
-            continue
-        providers = prof.get("providers", {})
-        experts = prof.get("experts", {})
-        items = (
-            experts.items()
-            if isinstance(experts, dict)
-            else [(e.get("role", i), e) for i, e in enumerate(experts)]
-        )
-        for role, seat in items:
-            # Route each seat through ITS OWN provider (R10 CI-01); only when
-            # the profile declares exactly ONE provider may a seat without an
-            # explicit provider inherit it. With several providers an
-            # unspecified seat is a FAIL — guessing could probe (or ship)
-            # against the wrong gateway (R11 MA-01).
-            name = seat.get("provider") or prof.get("provider") or ""
-            base = providers.get(name, {}).get("base_url")
-            if not base:
-                bases = {
-                    p.get("base_url") for p in providers.values() if p.get("base_url")
-                }
-                if len(bases) == 1:
-                    base = bases.pop()
-                else:
-                    print(
-                        f"PROBE FAIL role={role}: provider {name!r} unresolved among {len(providers)} providers"
-                    )
-                    ok = False
-                    continue
-            ok = probe_one_seat(base, key, role, str(seat.get("model") or "")) and ok
-    return ok
 
 
-def main():
+
+
+
+
+
+
+
+
+
+
+def unique_config_paths():
+    """The config paths to inspect, de-duplicated by REAL path.
+
+    The cwd config usually IS the repo-root or global file, so reading it twice would
+    report the same seats twice and make one verdict look like two (R9 CI-01).
+    """
+    return list(dict.fromkeys(os.path.realpath(p) for p in CONFIGS))
+
+
+def scan_configs():
+    """Load and check every present config. Returns (ok, loaded configs)."""
     ok = True
     found = {}
-    # Dedupe: the cwd config usually IS the repo-root or global file (R9 CI-01
-    # flagged the empty allowlist as making a second rule look permissive — one
-    # read path, one verdict source keeps guard semantics unambiguous).
-    for path in dict.fromkeys(os.path.realpath(p) for p in CONFIGS):
+    for path in unique_config_paths():
         cfg = load_json(path)
         if cfg is None:  # absent: nothing to check here
             print(f"SKIP {path} (absent)")
@@ -213,6 +128,11 @@ def main():
             continue
         found[path] = cfg
         ok = check_file(path, cfg) and ok
+    return ok, found
+
+
+def main():
+    ok, found = scan_configs()
     if "--probe" in sys.argv:
         ok = probe(found) and ok
     print("RESULT:", "ALL SEATS ALLOWED" if ok else "SEAT VIOLATION FOUND")

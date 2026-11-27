@@ -18,80 +18,102 @@ const CANONICAL_REGISTRY_HOST = 'registry.npmjs.org';
 // Path layout matches the canonical registry, so a host swap is valid.
 const AUTO_FIXABLE_HOSTS = ['registry.npmmirror.com'];
 
+/**
+ * The identity of a URL that could not be parsed at all.
+ *
+ * Every field is null/false so comparing two unusable values yields "same shape, no
+ * information" rather than a partial match on one field.
+ */
+function unparsableIdentity(parseError) {
+  return {
+    host: null,
+    hostWithPort: null,
+    authority: null,
+    protocol: null,
+    hasCredentials: false,
+    hasQueryOrFragment: false,
+    tail: null,
+    textTail: null,
+    parseError,
+  };
+}
+
+/**
+ * The identity fields of a URL that parsed.
+ *
+ * Two independent readings of the same TAIL are kept: the parsed one is what npm would
+ * fetch, and the text slice is what a host swap can re-attach verbatim -- a lockfile
+ * differing only in quoting must not look like a registry change.
+ */
+function identityOfParsedUrl(resolved) {
+  const url = new URL(resolved);
+  const start = resolved.indexOf('//') + 2;
+  const pathStart = resolved.indexOf('/', start);
+  // hostname (not host) keeps credentials out of any reported value.
+  return {
+    host: url.hostname,
+    hostWithPort: url.host,
+    authority: pathStart === -1 ? resolved.slice(start) : resolved.slice(start, pathStart),
+    protocol: url.protocol,
+    hasCredentials: Boolean(url.username || url.password),
+    hasQueryOrFragment: Boolean(url.search || url.hash),
+    tail: `${url.pathname}${url.search}${url.hash}`,
+    textTail: pathStart === -1 ? '' : resolved.slice(pathStart),
+    parseError: null,
+  };
+}
+
 function urlIdentity(resolved) {
-  if (typeof resolved !== 'string') {
-    return {
-      host: null,
-      hostWithPort: null,
-      authority: null,
-      protocol: null,
-      hasCredentials: false,
-      hasQueryOrFragment: false,
-      tail: null,
-      textTail: null,
-      parseError: 'not-a-string',
-    };
-  }
+  if (typeof resolved !== 'string') return unparsableIdentity('not-a-string');
   try {
-    const url = new URL(resolved);
-    const start = resolved.indexOf('//') + 2;
-    const pathStart = resolved.indexOf('/', start);
-    // hostname (not host) keeps credentials out of any reported value.
-    return {
-      host: url.hostname,
-      hostWithPort: url.host,
-      authority: pathStart === -1 ? resolved.slice(start) : resolved.slice(start, pathStart),
-      protocol: url.protocol,
-      hasCredentials: Boolean(url.username || url.password),
-      hasQueryOrFragment: Boolean(url.search || url.hash),
-      // Two independent readings of the same tail: the parsed one is what npm
-      // would fetch, the text slice is what a host swap can re-attach verbatim.
-      tail: `${url.pathname}${url.search}${url.hash}`,
-      textTail: pathStart === -1 ? '' : resolved.slice(pathStart),
-      parseError: null,
-    };
+    return identityOfParsedUrl(resolved);
   } catch {
-    return {
-      host: null,
-      hostWithPort: null,
-      authority: null,
-      protocol: null,
-      hasCredentials: false,
-      hasQueryOrFragment: false,
-      tail: null,
-      textTail: null,
-      parseError: 'unparseable',
-    };
+    return unparsableIdentity('unparseable');
   }
 }
 
+/**
+ * Whether a metadata value is PRESENT.
+ *
+ * A present-but-non-string `resolved` is corruption, not absence: it is collected so
+ * the classifier reports it, instead of the entry being certified clean.
+ */
+function isPresent(meta) {
+  return meta !== undefined && meta !== null;
+}
+
+/**
+ * Every `resolved` entry in a lockfile, flattened to `name` + `resolved`.
+ *
+ * Both lockfile shapes carry the field, so the "worth reporting" rule is stated once
+ * here rather than twice with different names.
+ */
 function eachResolved(lock) {
   const entries = [];
-  // A present-but-non-string value is corruption, not absence: collect it so the
-  // classifier reports it instead of certifying the entry clean.
-  const isPresent = (meta) => meta !== undefined && meta !== null;
-
-  // Both lockfile shapes collect entries the same way; only the naming differs,
-  // so the "is this a resolved entry worth reporting" rule is stated once.
-  const collect = (name, meta) => {
-    if (isPresent(meta.resolved)) entries.push({ name, resolved: meta.resolved });
-  };
-
-  for (const [name, meta] of Object.entries(lock.packages || {})) {
-    if (meta) collect(name, meta);
-  }
-
-  // lockfileVersion 1/2 keep a legacy tree with the same field.
-  const walk = (deps, prefix) => {
-    for (const [name, meta] of Object.entries(deps || {})) {
-      const full = prefix ? `${prefix}/${name}` : name;
-      if (!meta || typeof meta !== 'object') continue;
-      collect(full, meta);
-      if (meta.dependencies) walk(meta.dependencies, full);
-    }
-  };
-  walk(lock.dependencies, '');
+  collectResolved(entries, lock.packages || {}, '');
+  collectResolved(entries, lock.dependencies, '');
   return entries;
+}
+
+/**
+ * Walk one dependency tree, pushing every present `resolved`.
+ *
+ * The tree is keyed by NAME at each level, so the reporting name is the PATH to the
+ * entry (`a/b/c`). Without the prefix, two packages sharing a name at different depths
+ * would collapse into one report line and the reader could not tell which carries a
+ * bad URL.
+ *
+ * @param {Array} entries mutated
+ * @param {object|undefined} deps the tree at this level
+ * @param {string} prefix path so far, '' at the root
+ */
+function collectResolved(entries, deps, prefix) {
+  for (const [name, meta] of Object.entries(deps || {})) {
+    if (!meta || typeof meta !== 'object') continue;
+    const full = prefix ? `${prefix}/${name}` : name;
+    if (isPresent(meta.resolved)) entries.push({ name: full, resolved: meta.resolved });
+    collectResolved(entries, meta.dependencies, full);
+  }
 }
 
 // The invariant is narrower than "the hostname looks right": a resolved entry
@@ -106,29 +128,42 @@ function isClean(identity) {
   );
 }
 
+
+/** The schemes that are REGISTRY downloads; everything else is not one. */
+const REGISTRY_SCHEMES = new Set(['https:', 'http:']);
+
+/**
+ * The offender record for one entry, or null when it is not one.
+ *
+ * Three outcomes, in this order:
+ *
+ *  - a non-registry scheme (`git+ssh:`, `file:`) is not a download at all, so it is
+ *    neither clean nor an offender -- the tool must not rewrite a git URL;
+ *  - an unparseable URL is an offender whose `host` carries the PARSE ERROR, because
+ *    the reader needs to know why rather than see a blank host;
+ *  - anything else is an offender only when it fails the cleanliness check.
+ */
+function classifyEntry(entry) {
+  const identity = urlIdentity(entry.resolved);
+  if (identity.protocol !== null && !REGISTRY_SCHEMES.has(identity.protocol)) return null;
+  if (identity.parseError !== null) {
+    return { ...entry, host: identity.parseError, authority: null };
+  }
+  if (isClean(identity)) return null;
+  return {
+    ...entry,
+    host: identity.host,
+    authority: identity.authority,
+    tail: identity.tail,
+    textTail: identity.textTail,
+  };
+}
+
 function collectOffenders(lock) {
   const offenders = [];
   for (const entry of eachResolved(lock)) {
-    const identity = urlIdentity(entry.resolved);
-    // git+ssh://, git://, file: etc. are not registry downloads.
-    const isRegistryScheme = identity.protocol === 'https:' || identity.protocol === 'http:';
-    if (identity.protocol !== null && !isRegistryScheme) {
-      continue;
-    }
-    if (identity.parseError !== null) {
-      offenders.push({ ...entry, host: identity.parseError, authority: null });
-      continue;
-    }
-    if (isClean(identity)) {
-      continue;
-    }
-    offenders.push({
-      ...entry,
-      host: identity.host,
-      authority: identity.authority,
-      tail: identity.tail,
-      textTail: identity.textTail,
-    });
+    const offender = classifyEntry(entry);
+    if (offender) offenders.push(offender);
   }
   return offenders;
 }
@@ -179,26 +214,48 @@ function fixableOffender(offender) {
 
 // Every differing leaf path must be a "resolved" value: this is what makes the
 // "host-and-source-only rewrite" claim checkable instead of structural luck.
+/**
+ * Collect the paths at which two JSON documents differ.
+ *
+ * Compared LEAF by leaf rather than as text: a textual diff cannot say WHICH field
+ * changed, and the whole claim being checked is "only `resolved` values moved".
+ *
+ * @param {unknown} a
+ * @param {unknown} b
+ * @param {string[]} trail keys from the root to this node
+ * @param {string[][]} out accumulated differing paths
+ */
+
+/** Whether both values are non-null objects, so their keys can be compared. */
+function isBothObjects(a, b) {
+  return typeof a === 'object' && a !== null && typeof b === 'object' && b !== null;
+}
+
+function collectDeltaPaths(a, b, trail, out) {
+  if (!isBothObjects(a, b)) {
+    if (a !== b) out.push(trail);
+    return;
+  }
+  // The UNION of keys: a key present on only one side is a change too.
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    collectDeltaPaths(a[key], b[key], [...trail, key], out);
+  }
+}
+
+/**
+ * Throw unless the rewrite touched ONLY `resolved` values.
+ *
+ * This is what makes the "host-and-source-only rewrite" claim checkable instead of
+ * structural luck: every differing leaf path must end in `resolved`.
+ */
 function assertOnlyResolvedChanged(before, after) {
   const deltas = [];
-  const walk = (a, b, trail) => {
-    if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
-      if (a !== b) {
-        deltas.push(trail);
-      }
-      return;
-    }
-    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-      walk(a[key], b[key], [...trail, key]);
-    }
-  };
-  walk(before, after, []);
+  collectDeltaPaths(before, after, [], deltas);
   const unexpected = deltas.filter((trail) => trail[trail.length - 1] !== 'resolved');
-  if (unexpected.length > 0) {
-    throw new Error(
-      `rewrite touched non-resolved fields: ${unexpected.slice(0, 3).map((t) => t.join('.'))}`,
-    );
-  }
+  if (unexpected.length === 0) return;
+  throw new Error(
+    `rewrite touched non-resolved fields: ${unexpected.slice(0, 3).map((t) => t.join('.'))}`,
+  );
 }
 
 function normalizeLockRegistry(text) {
@@ -250,35 +307,49 @@ function main() {
 
   let failures = 0;
   for (const target of targets) {
-    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
-      console.error(`not a lockfile: ${target}`);
-      failures += 1;
-      continue;
-    }
-    let changed;
-    let remaining;
-    try {
-      ({ changed, remaining } = normalizeFile(target));
-    } catch (error) {
-      // One unreadable target must not abort the remaining arguments, and a
-      // stack trace is not an actionable message at a terminal.
-      console.error(`${target}: not processed — ${error.message}`);
-      failures += 1;
-      continue;
-    }
-    console.log(`${target}: ${changed} resolved source(s) rewritten`);
-    if (remaining.length > 0) {
-      failures += 1;
-      console.error(
-        `  ${remaining.length} offender(s) left, not auto-fixable:\n` +
-          '  rewrite by hand only after verifying each tarball against registry.npmjs.org metadata',
-      );
-      console.error(`    ${remaining.slice(0, 5).join('\n    ')}`);
-    }
+    if (!processTarget(target)) failures += 1;
   }
-  if (failures > 0) {
-    process.exitCode = 1;
+  if (failures > 0) process.exitCode = 1;
+}
+
+/**
+ * Normalise one lockfile, reporting what it did.
+ *
+ * Returns whether this target counted as a FAILURE. One bad target must not abort the
+ * remaining arguments, and a stack trace is not an actionable message at a terminal --
+ * so every failure path prints a sentence and moves on.
+ */
+function processTarget(target) {
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+    console.error(`not a lockfile: ${target}`);
+    return false;
   }
+  let changed;
+  let remaining;
+  try {
+    ({ changed, remaining } = normalizeFile(target));
+  } catch (error) {
+    console.error(`${target}: not processed — ${error.message}`);
+    return false;
+  }
+  console.log(`${target}: ${changed} resolved source(s) rewritten`);
+  if (remaining.length === 0) return true;
+  reportRemaining(remaining);
+  return false;
+}
+
+/**
+ * Report offenders the tool could NOT fix.
+ *
+ * Prints at most five: the list is for "what is left", and a wall of paths buries the
+ * instruction that most of them need a hand rewrite verified against the real registry.
+ */
+function reportRemaining(remaining) {
+  console.error(
+    `  ${remaining.length} offender(s) left, not auto-fixable:\n` +
+      '  rewrite by hand only after verifying each tarball against registry.npmjs.org metadata',
+  );
+  console.error(`    ${remaining.slice(0, 5).join('\n    ')}`);
 }
 
 if (require.main === module) {

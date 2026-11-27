@@ -21,9 +21,6 @@ const VALID_MODES = ['design', 'code-walkthrough', 'requirements'];
 const DEFAULT_TIMEOUT_MS = 30000;
 
 // Shared by CLI --timeout-ms and provider timeout_ms validation.
-function isValidTimeoutMs(value) {
-  return Number.isInteger(value) && value >= 1000 && value <= 600000;
-}
 
 // Flag -> args key. `null` marks flags that take no value. Keeping this as data
 // means a new flag is one table row instead of one more switch arm (the switch
@@ -39,21 +36,86 @@ const VALUE_FLAGS = {
   '--other-experts-file': 'otherExpertsFile',
 };
 const BOOLEAN_FLAGS = { '--fallback-local': 'fallbackLocal' };
-const INTEGER_FLAGS = { '--round': (v) => parseInt(v) };
+/**
+ * Integer flags, each rejecting a value that is not an integer.
+ *
+ * `parseInt('abc')` is NaN, and NaN is falsy -- so the "was it supplied?" checks saw a
+ * missing flag and reported THAT, hiding the real problem (the value is not a number)
+ * behind the wrong diagnosis (review FC-04).
+ */
+const INTEGER_FLAGS = {
+  '--round': (v) => {
+    const parsed = Number(v);
+    if (!Number.isInteger(parsed)) {
+      console.error(`[delphi-review] ERROR: --round needs an integer, got ${JSON.stringify(v)}`);
+      process.exit(2);
+    }
+    return parsed;
+  },
+};
+
+/**
+ * Record one flag's value, advancing past it when it consumes the next token.
+ *
+ * Three shapes, in the order they are tried: `--timeout-ms` is held aside for its own
+ * validation, a BOOLEAN flag takes no value, and a VALUE flag takes the next token --
+ * converted when an integer parser is registered for it.
+ *
+ * @returns the index of the last token consumed
+ */
+function applyRawFlag(argv, i, args, state) {
+  const flag = argv[i];
+  if (flag === '--timeout-ms') {
+    state.timeoutMsRaw = requireFlagValue(argv, i, flag);
+    return i + 1;
+  }
+  if (BOOLEAN_FLAGS[flag]) {
+    args[BOOLEAN_FLAGS[flag]] = true;
+    return i;
+  }
+  const key = VALUE_FLAGS[flag];
+  if (!key) {
+    // UNKNOWN flag: fail rather than ignore. Silently skipping it means a typo like
+    // `--expert` -> `--experts` falls back to the default behaviour instead of the
+    // caller's intent, which is the fail-open this gate exists to prevent (review FC-01).
+    if (flag.startsWith('-')) {
+      console.error(`[delphi-review] ERROR: unknown option ${flag}`);
+      process.exit(2);
+    }
+    return i;
+  }
+  const value = requireFlagValue(argv, i, flag);
+  args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
+  return i + 1;
+}
+
+/**
+ * The value that follows a flag, or a message naming the flag.
+ *
+ * Reading `argv[i + 1]` unchecked put `undefined` into the arguments, and the run then
+ * failed LATER with a message about something else -- a missing API key, in the case
+ * measured -- so the operator fixed the wrong thing (all three seats, same finding).
+ */
+function requireFlagValue(argv, i, flag) {
+  const value = argv[i + 1];
+  // ABSENT only. A leading `--` is NOT treated as "missing": `-1` and a path like
+  // `--my-config.json` are legal values, and rejecting them broke working call sites
+  // (review CI-01 / FC-03, two seats). A flag whose value was forgotten still fails --
+  // at the point where the value is USED, with a message about that value.
+  if (value === undefined) {
+    console.error(`[delphi-review] ERROR: ${flag} needs a value`);
+    process.exit(2);
+  }
+  return value;
+}
 
 function collectRawArgs(argv) {
   const args = {};
-  let timeoutMsRaw;
+  const state = { timeoutMsRaw: undefined };
   for (let i = 0; i < argv.length; i++) {
-    const flag = argv[i];
-    if (flag === '--timeout-ms') { timeoutMsRaw = argv[++i]; continue; }
-    if (BOOLEAN_FLAGS[flag]) { args[BOOLEAN_FLAGS[flag]] = true; continue; }
-    const key = VALUE_FLAGS[flag];
-    if (!key) continue;
-    const value = argv[++i];
-    args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
+    i = applyRawFlag(argv, i, args, state);
   }
-  return { args, timeoutMsRaw };
+  return { args, timeoutMsRaw: state.timeoutMsRaw };
 }
 
 function fail(message) {
@@ -63,13 +125,27 @@ function fail(message) {
 
 // Every rejection path used to inline its own console.error + exit. Collected
 // here so the rules read as rules and each message stays verbatim.
+/**
+ * The arguments a review cannot start without, and how each is satisfied.
+ *
+ * A table so a new required argument is a row. `--input` has TWO acceptable spellings,
+ * which is why the requirement is a predicate rather than a key name: reporting
+ * "missing --input" when the caller passed `--input-file` would send them to fix the
+ * wrong thing.
+ */
+const REQUIRED_ARGS = [
+  { satisfied: (a) => Boolean(a.expert), label: '--expert' },
+  { satisfied: (a) => Boolean(a.input || a.inputFile), label: '--input or --input-file' },
+  // NOT `Boolean(a.round)`: round 0 is a legal value and Boolean(0) is false, so the
+  // check reported "--round is missing" for a value that was supplied (review CI-01).
+  // Numbers are tested for presence, strings for emptiness.
+  { satisfied: (a) => a.round !== undefined && a.round !== null, label: '--round' },
+  { satisfied: (a) => Boolean(a.config), label: '--config' },
+];
+
+/** The arguments that are absent, by the label to show the user. */
 function missingArgumentList(args) {
-  const missing = [];
-  if (!args.expert) missing.push('--expert');
-  if (!args.input && !args.inputFile) missing.push('--input or --input-file');
-  if (!args.round) missing.push('--round');
-  if (!args.config) missing.push('--config');
-  return missing;
+  return REQUIRED_ARGS.filter((req) => !req.satisfied(args)).map((req) => req.label);
 }
 
 function applyTimeoutFlag(args, timeoutMsRaw) {
@@ -115,312 +191,41 @@ function parseArgs(argv) {
 // only surfaced at runtime (a bad timeout_ms fell back to the default). The
 // whole profile is checked here instead, at the system boundary, naming the
 // provider so the fix is obvious (#429).
-function validateProviders(providers, profileName) {
-  for (const [name, provider] of Object.entries(providers)) {
-    const providerPath = `profiles.${profileName}.providers.${name}`;
-    const fail = (detail) => {
-      console.error(`[delphi-review] ERROR: ${providerPath} ${detail}`);
-      process.exit(1);
-    };
 
-    if (!isPlainObject(provider)) fail('must be an object.');
-    if (typeof provider.base_url !== 'string' || provider.base_url.trim() === '') fail('must define a non-empty base_url.');
-    if (typeof provider.api_key !== 'string' || provider.api_key.trim() === '') fail('must define a non-empty api_key.');
-    if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
-      fail('timeout_ms must be an integer between 1000 and 600000.');
-    }
-  }
-}
 
-function readConfig(configPath, profileOverride) {
-  // Global fallback: a relative --config that this cwd does not have resolves
-  // to the machine-wide ~/.config/xp-gate/.delphi-config.json. This is what
-  // makes `--config .delphi-config.json` work from ANY project without each
-  // repo carrying its own (drifting, differently-priced) copy — reading a
-  // foreign project's config used to route calls to expensive models
-  // (2026-10-03 quota incident). An existing local file always wins.
-  // Fallback fires ONLY when the project file is genuinely absent: statSync
-  // distinguishes ENOENT from EACCES/EISDIR, and any other error aborts here
-  // rather than silently routing this run to another config — matching the
-  // TS loader's ENOENT-only semantics (walkthrough R10 FC-01).
-  const missingHere = (() => {
-    try { fs.statSync(configPath); return false; } catch (e) { return e.code === 'ENOENT'; }
-  })();
-  if (missingHere && !path.isAbsolute(configPath)) {
-    // r16 MA-01 disposition: XDG_CONFIG_HOME is an accepted override for the
-    // global config location. The CLI lib (shared-paths/doctor) intentionally
-    // pins ~/.config/xp-gate — overriding only this loader would make the two
-    // disagree. On Linux, $HOME/.config IS the XDG default, so behaviour there
-    // is identical; the env var only matters for non-default setups.
-    // Extracted so all three resolution points share one definition (REQ-636).
-    const globalPath = globalConfigPath(process.env);
-    if (fs.existsSync(globalPath)) {
-      console.error(`[delphi-review] ${configPath} not found here — using global config ${globalPath}`);
-      configPath = globalPath;
-    }
-  }
-  if (!fs.existsSync(configPath)) {
-    console.error(`[delphi-review] ERROR: Config file not found: ${configPath}`);
-    console.error('[delphi-review] Copy .delphi-config.json.example to .delphi-config.json and fill in your API keys.');
-    process.exit(1);
-  }
+/**
+ * Resolve and parse the config file.
+ *
+ * Split out of `readConfig`, which had grown past the 50-line bound by holding
+ * two jobs: decide WHICH file, then decide what it means. The first job carries
+ * a real hazard worth testing on its own -- a relative `--config` that this cwd
+ * lacks resolves to the machine-wide config, but only when the project file is
+ * genuinely ABSENT. Any other stat error aborts rather than silently routing the
+ * run to another config, which once routed calls to expensive models.
+ *
+ * @param {string} configPath
+ * @returns {object} the parsed config
+ */
 
-  let raw;
-  try {
-    raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (err) {
-    console.error(`[delphi-review] ERROR: Failed to parse config: ${err.message}`);
-    process.exit(1);
-  }
-
-  const profileName = profileOverride || raw.active_profile || 'default';
-  const profile = raw.profiles?.[profileName];
-
-  if (!profile) {
-    console.error(`[delphi-review] ERROR: Profile "${profileName}" not found in config.`);
-    console.error(`[delphi-review] Available profiles: ${Object.keys(raw.profiles || {}).join(', ')}`);
-    process.exit(1);
-  }
-
-  // Resolve ${ENV_VAR} references in provider api_key fields
-  const providers = profile.providers || {};
-  validateProviders(providers, profileName);
-  for (const [name, prov] of Object.entries(providers)) {
-    if (prov.api_key && prov.api_key.startsWith('${') && prov.api_key.endsWith('}')) {
-      const envName = prov.api_key.slice(2, -1);
-      const envVal = process.env[envName];
-      if (envVal) {
-        prov.api_key = envVal;
-      } else {
-        // A missing variable used to be a WARNING, after which the runner sent the
-        // literal `Bearer ${NAME}` and reported the 401 as "check API key" — the
-        // diagnosis pointed at a wrong key while the real cause was the shell.
-        console.error(`[delphi-review] ERROR: Environment variable ${envName} is not set (profiles.${profileName}.providers.${name}.api_key). Export it or point that provider at a literal key.`);
-        process.exit(1);
-      }
-    }
-
-    // (#707) base_url supports ${VAR} for the same reason api_key does: writing a
-    // gateway address as a placeholder is the natural way to keep an internal
-    // endpoint out of version control. Without expansion the placeholder is a
-    // perfectly valid non-empty string, so validation passed and the literal text
-    // `${PG_GATEWAY}/v1/chat/completions` went out as a URL — failing at the
-    // NETWORK layer with a DNS/connection error while the config looked correct.
-    // A caller (whale-sql-audit) had to hardcode its gateway into a distributed
-    // repo because of this.
-    //
-    // Failing here, at config load, names the variable; falling back to the
-    // literal is exactly what caused the original misdiagnosis, so it does not.
-    if (typeof prov.base_url === 'string'
-        && prov.base_url.startsWith('${') && prov.base_url.endsWith('}')) {
-      const envName = prov.base_url.slice(2, -1);
-      const envVal = process.env[envName];
-      if (!envVal) {
-        console.error(`[delphi-review] ERROR: Environment variable ${envName} is not set (profiles.${profileName}.providers.${name}.base_url). Export it or point that provider at a literal URL.`);
-        process.exit(1);
-      }
-      prov.base_url = envVal;
-    }
-  }
-
-  const experts = Object.fromEntries(Object.entries(profile.experts || {}).map(([role, expert]) => [
-    role,
-    {
-      ...expert,
-      model: typeof expert.model === 'string' ? expert.model.trim() : expert.model,
-    },
-  ]));
-  const warnings = [];
-  if (raw.consensus?.distinct_models_required === false) {
-    warnings.push('distinct_models_required_forced');
-  }
-  const configuredThreshold = raw.consensus?.threshold_percent;
-  const thresholdPercent = typeof configuredThreshold === 'number' && Number.isFinite(configuredThreshold)
-    ? Math.max(90, configuredThreshold)
-    : 90;
-  if (configuredThreshold !== undefined && configuredThreshold !== thresholdPercent) {
-    warnings.push('threshold_percent_clamped');
-  }
-  const configuredRounds = raw.consensus?.max_review_rounds;
-  const maxReviewRounds = typeof configuredRounds === 'number' && Number.isFinite(configuredRounds)
-    ? Math.min(5, Math.max(1, Math.trunc(configuredRounds)))
-    : 5;
-  if (configuredRounds !== undefined && configuredRounds !== maxReviewRounds) {
-    warnings.push('max_review_rounds_clamped');
-  }
-
-  return {
-    active_profile: profileName,
-    providers,
-    experts,
-    consensus: {
-      ...(raw.consensus || {}),
-      threshold_percent: thresholdPercent,
-      max_review_rounds: maxReviewRounds,
-      distinct_models_required: true,
-    },
-    warnings,
-  };
-}
-
-// ── Distinct-model validation ───────────────────────────────────────────
-const REQUIRED_EXPERT_ROLES = ['architecture', 'technical', 'feasibility'];
-
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim() !== '';
-}
-
-// Roles must be EXACTLY the three required ones: a missing role means the
-// review would silently run with two experts, an extra one means the config
-// no longer matches the three-model policy. One pass reports both.
-function collectModelAssignments(expertMap) {
-  const assignments = [];
-  for (const role of REQUIRED_EXPERT_ROLES) {
-    const expert = expertMap[role];
-    if (!expert) return { error: `Missing required expert role: ${role}.` };
-    if (!isNonEmptyString(expert.model)) {
-      return { error: `Expert ${role} must define a non-empty model.` };
-    }
-    assignments.push({ role, model: expert.model.trim() });
-  }
-  const unexpectedRole = Object.keys(expertMap).find(role => !REQUIRED_EXPERT_ROLES.includes(role));
-  if (unexpectedRole) return { error: `Unsupported expert role: ${unexpectedRole}.` };
-  return { assignments };
-}
-
-function findDuplicateModel(assignments) {
-  const seen = new Map();
-  for (const { role, model } of assignments) {
-    const previousRole = seen.get(model);
-    if (previousRole) {
-      return `duplicate model "${model}" assigned to ${previousRole} and ${role}.`;
-    }
-    seen.set(model, role);
-  }
-  return null;
-}
-
-// Everything an expert's provider must carry to be callable. Returns the
-// human-readable reason instead of throwing, so the caller keeps one shape.
-function providerConfigError(role, expert, providerMap) {
-  if (!isNonEmptyString(expert.provider) || expert.provider === 'local') {
-    return `Expert ${role} must define a non-local callable provider.`;
-  }
-  const provider = providerMap[expert.provider];
-  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
-    return `Expert ${role} provider configuration must be an object.`;
-  }
-  if (!isNonEmptyString(provider.base_url)) {
-    return `Expert ${role} provider must define a non-empty base_url.`;
-  }
-  if (!isNonEmptyString(provider.api_key)) {
-    return `Expert ${role} provider must define a non-empty api_key.`;
-  }
-  if (provider.timeout_ms !== undefined && !isValidTimeoutMs(provider.timeout_ms)) {
-    return `Expert ${role} provider ${expert.provider} timeout_ms must be an integer between 1000 and 600000.`;
-  }
-  return null;
-}
-
-function validateDistinctModels(experts, providers, consensus = {}) {
-  const expertMap = experts && typeof experts === 'object' ? experts : {};
-  const providerMap = providers && typeof providers === 'object' ? providers : {};
-
-  const collected = collectModelAssignments(expertMap);
-  if (collected.error) return { valid: false, reason: collected.error };
-
-  const duplicate = findDuplicateModel(collected.assignments);
-  if (duplicate) return { valid: false, reason: duplicate };
-
-  for (const role of REQUIRED_EXPERT_ROLES) {
-    const error = providerConfigError(role, expertMap[role], providerMap);
-    if (error) return { valid: false, reason: error };
-  }
-
-  if (consensus.cross_provider_required === true) {
-    return {
-      valid: true,
-      warning: 'cross_provider_required_ignored',
-    };
-  }
-
-  return { valid: true };
-}
+const {
+  isNonEmptyString,
+  collectModelAssignments,
+  findDuplicateModel,
+  providerConfigError,
+  validateDistinctModels,
+  isValidTimeoutMs,
+  parseExpertVerdict,
+  clampConsensusSetting,
+  expandEnvPlaceholder,
+} = require('./delphi-model-validation.cjs');
+const { readConfig, globalConfigPath } = require('./delphi-config-read.cjs');
+const { converseWithTools } = require('./delphi-repo-tools.cjs');
 
 // ── JSON extraction (4-layer fallback) ─────────────────────────────────
-function extractJsonFromResponse(content) {
-  if (!content || typeof content !== 'string') {
-    return { parse_error: true, raw_content: String(content || '') };
-  }
-
-  const trimmed = content.trim();
-
-  // Layer 1: Direct parse
-  try {
-    return JSON.parse(trimmed);
-  } catch { /* continue */ }
-
-  // Layer 2: Strip markdown code block
-  const codeBlockMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  if (codeBlockMatch) {
-    try {
-      return JSON.parse(codeBlockMatch[1].trim());
-    } catch { /* continue */ }
-  }
-
-  // Layer 3: Extract first JSON object
-  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0]);
-    } catch { /* continue */ }
-  }
-
-  // Layer 4: Fallback
-  return { parse_error: true, raw_content: trimmed };
-}
+const { extractJsonFromResponse } = require('./delphi-json-extract.cjs');
 
 // ── System prompt templates ────────────────────────────────────────────
-const SYSTEM_PROMPTS = {
-  architecture: `你是架构评审专家（Delphi Method - Architecture Expert）。
-
-你的评审关注维度：
-1) 需求对齐度 — 设计是否完整覆盖所有需求
-2) 系统一致性 — 与现有架构风格、模式是否一致
-3) 模块边界清晰度 — 职责划分是否明确，耦合度是否合理
-4) 架构演进性 — 是否为未来扩展留有空间
-5) 技术选型合理性 — 技术栈选择是否有充分依据
-
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "CI-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
-
-  technical: `你是技术实现评审专家（Delphi Method - Technical Expert）。
-
-你的评审关注维度：
-1) 实现正确性 — 逻辑是否正确，边界条件是否处理
-2) 代码质量和设计模式 — 是否遵循 SOLID 原则，代码是否清晰
-3) 边界情况和错误处理 — 异常路径是否覆盖，错误处理是否健壮
-4) 性能影响 — 是否有性能瓶颈或资源泄漏风险
-5) 可测试性 — 代码是否易于编写单元测试
-
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "MC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
-
-  feasibility: `你是可行性分析专家（Delphi Method - Feasibility Expert）。
-
-你的评审关注维度：
-1) 实际约束（时间/资源/依赖）— 是否在现有约束下可行
-2) 风险识别和缓解 — 主要风险是否已识别，缓解措施是否充分
-3) 执行复杂度 — 实现难度是否被低估，依赖链是否清晰
-4) 替代方案 — 是否有更简单或更可靠的替代方案
-5) 回滚策略 — 如果实施失败，是否有退路
-
-输出要求：返回结构化 JSON，包含 verdict (APPROVED/REQUEST_CHANGES/REJECTED)、confidence (1-10，整数，10 为最高)、summary (字符串)。critical_issues、major_concerns、minor_concerns 必须是字符串数组（string[]），每项是一句自包含的完整描述（可加 "FC-01: " 前缀，但整体必须是字符串，不是对象）。不要把问题写成 {id, title, description} 对象。`,
-};
-
-const MODE_FOCUS_PROMPTS = {
-  design: '',
-  'code-walkthrough': '\n\n本次评审聚焦已实现代码的正确性、风险和可验证结果。',
-  requirements: '\n\n本次评审聚焦需求陈述的完整性、一致性、可验收性和约束清晰度。',
-};
+const { SYSTEM_PROMPTS, MODE_FOCUS_PROMPTS } = require('./delphi-prompts.cjs');
 
 function buildSystemPrompt(role, mode = 'design') {
   const rolePrompt = SYSTEM_PROMPTS[role] || SYSTEM_PROMPTS.architecture;
@@ -441,11 +246,18 @@ function buildUserPrompt(reviewContent, otherExpertsJson, round) {
 // ── Input content resolution ───────────────────────────────────────────
 function resolveInputContent(args) {
   if (args.inputFile) {
-    if (!fs.existsSync(args.inputFile)) {
-      console.error(`[delphi-review] ERROR: Input file not found: ${args.inputFile}`);
+    // One read, not exists-then-read: the check-then-use pair has a window in
+    // which the file can vanish, and the ENOENT that follows would surface as an
+    // unhandled throw instead of the message below.
+    try {
+      return fs.readFileSync(args.inputFile, 'utf8');
+    } catch (err) {
+      console.error(`[delphi-review] ERROR: Cannot read input file ${args.inputFile}: ${err.message}`);
+      // `process.exit` does not return. No statement follows it: a `throw` here is
+      // unreachable in production AND a live exception under a test that mocks
+      // `process.exit`, which is worse than dead code (review CI-02, twice).
       process.exit(1);
     }
-    return fs.readFileSync(args.inputFile, 'utf8');
   }
   return args.input || '';
 }
@@ -463,17 +275,19 @@ function resolveTimeoutMs(args, providerConfig) {
 // answered normally, a 50 KB one killed the seat with no usable error, and a
 // dead expert seat blocks the whole review. The ceiling is therefore checked
 // before the request is made, where the message can say what to narrow.
-const DEFAULT_PROMPT_BUDGET_BYTES = 40000;
 
 // A seat-level override (`max_prompt_bytes` on the expert entry) exists because
 // the ceiling is a property of the model behind the seat, not of the runner.
 // Values that cannot be honoured fall back to the default rather than disabling
 // the guard -- `max_prompt_bytes: 0` reads as "no limit" and is not.
+/** Whether a configured prompt budget can be honoured. */
+function isUsableBudget(configured) {
+  return typeof configured === 'number' && Number.isFinite(configured) && configured > 0;
+}
+
 function resolvePromptBudgetBytes(expertConfig) {
   const configured = expertConfig && expertConfig.max_prompt_bytes;
-  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-    return Math.trunc(configured);
-  }
+  if (isUsableBudget(configured)) return Math.trunc(configured);
   if (configured !== undefined) {
     // Silently falling back is how a raised ceiling looks like a still-broken
     // guard: the operator edits the config, the run still refuses, and nothing
@@ -505,113 +319,18 @@ function describePromptBudgetFailure({ bytes, maxBytes, expert }) {
 }
 
 // ── Seat prompt calibration (#481) ─────────────────────────────────────
-// The R1-R4 sprint review proved the ceiling is a seat × model route
-// property: g-glm-5.3-flash dropped 32-39 KB requests six times with
-// "Network error." while the same gateway served 36 KB to a differently
-// routed seat, and a ~60 byte smoke probe on the "dead" seat passed in 7s.
-// The optional per-seat `prompt_calibration` record carries the measured
-// bounds so failures can be classified against evidence instead of guessed.
-// A calibration record is only usable when it carries a measured PASS bound
-// and, if it also carries a FAIL bound, that bound is strictly larger. Each
-// broken shape names itself so the operator knows which field to correct.
-const CALIBRATION_SHAPE_HINT = 'needs measured_at and a finite last_pass_bytes > 0 (last_fail_bytes, if present, must be larger)';
-
-function isPositiveFinite(value) {
-  return Number.isFinite(value) && value > 0;
-}
-
-function calibrationProblem(raw) {
-  if (!isPlainObject(raw)) return 'must be an object';
-  const pass = raw.last_pass_bytes;
-  const fail = raw.last_fail_bytes;
-  const failOk = fail === undefined || isPositiveFinite(fail);
-  if (!isPositiveFinite(pass) || !failOk) return CALIBRATION_SHAPE_HINT;
-  if (fail !== undefined && !(fail > pass)) return 'has last_fail_bytes <= last_pass_bytes';
-  if (!isNonEmptyString(raw.measured_at)) return CALIBRATION_SHAPE_HINT;
-  return null;
-}
-
-function resolveSeatCalibration(expertConfig) {
-  const raw = expertConfig && expertConfig.prompt_calibration;
-  if (raw === undefined) return { calibration: null };
-  const problem = calibrationProblem(raw);
-  if (problem) {
-    console.error(`[delphi-review] WARNING: prompt_calibration ${problem}; ignoring the record.`);
-    return { calibration: null, warning: 'prompt_calibration_malformed' };
-  }
-  return {
-    calibration: {
-      measured_at: raw.measured_at,
-      model_id: typeof raw.model_id === 'string' ? raw.model_id : undefined,
-      gateway: typeof raw.gateway === 'string' ? raw.gateway : undefined,
-      last_pass_bytes: Math.trunc(raw.last_pass_bytes),
-      last_fail_bytes: raw.last_fail_bytes !== undefined ? Math.trunc(raw.last_fail_bytes) : undefined,
-    },
-  };
-}
-
-// Classify a failed expert call. A drop before any response on a payload above
-// the seat's calibrated passing size is a size ceiling, not a transient fault:
-// retrying the same payload cannot succeed, and reporting "Network error."
-// sends operators chasing a cause that is not there (#481). Everything else
-// gets a stable error_type so orchestrators can assert on the class instead of
-// parsing prose.
-// The calibrated ceiling for a seat, or null when the seat carries no usable
-// record. Null is meaningful: it is the "no evidence to reclassify on" branch.
-function calibratedCeiling(calibration) {
-  if (calibration && Number.isFinite(calibration.last_pass_bytes)) return calibration.last_pass_bytes;
-  return null;
-}
-
-// `error_kind` is the primary signal; the message literal stays as a
-// backward-compatible fallback for callers that hand-build results.
-function isPreResponseDrop(result) {
-  return !result.retryable
-    && (result.error_kind === 'pre_response_drop' || result.message === 'Network error.');
-}
-
-function sizeExceededResult(result, promptBytes, threshold) {
-  return {
-    ...result,
-    error_type: 'SIZE_EXCEEDED',
-    retryable: false,
-    bytes: promptBytes,
-    calibrated_pass_bytes: threshold,
-    message: `Request dropped before any response: ${promptBytes} bytes exceeds this seat's calibrated passing size `
-      + `(${threshold} bytes). Classified SIZE_EXCEEDED, not a network fault — trim the payload or recalibrate the seat.`,
-  };
-}
-
-// No calibration means no evidence to reclassify on — but an uncalibrated
-// seat dying on a full-budget payload is exactly how #481 started. Keep the
-// class honest (network_error) and point the operator at the protocol.
-function uncalibratedBudgetHint(result, promptBytes) {
-  return {
-    ...result,
-    error_type: 'network_error',
-    bytes: promptBytes,
-    message: `${result.message} Note: this seat has no prompt_calibration record and the payload is at the `
-      + 'default budget — this pattern matches an uncalibrated size ceiling. Recalibrate per the #481 protocol.',
-  };
-}
-
-function classifySeatFailure({ result, promptBytes, calibration }) {
-  if (!result || !result.error) return result;
-  if (!isPreResponseDrop(result)) {
-    return { ...result, error_type: result.retryable ? 'retryable_error' : 'network_error' };
-  }
-  const threshold = calibratedCeiling(calibration);
-  if (!Number.isFinite(promptBytes)) {
-    return { ...result, error_type: 'network_error' };
-  }
-  if (threshold !== null && promptBytes > threshold) {
-    return sizeExceededResult(result, promptBytes, threshold);
-  }
-  if (threshold === null && promptBytes >= DEFAULT_PROMPT_BUDGET_BYTES) {
-    return uncalibratedBudgetHint(result, promptBytes);
-  }
-  return { ...result, error_type: 'network_error' };
-}
+const {
+  isPlainObject,
+  DEFAULT_PROMPT_BUDGET_BYTES,
+  isPositiveFinite,
+  calibrationProblem,
+  resolveSeatCalibration,
+  calibratedCeiling,
+  isPreResponseDrop,
+  sizeExceededResult,
+  uncalibratedBudgetHint,
+  classifySeatFailure,
+} = require('./delphi-seat-calibration.cjs');
 
 // ── Schema retry (#414 REQ-5) ──────────────────────────────────────────
 // g-qwen3.8-flash occasionally answers in prose or malformed JSON (measured
@@ -711,33 +430,47 @@ async function classifyRateLimitResponse(response) {
  * previous retryable=true, and an unparseable body keeps the previous behaviour
  * entirely — reading the body must not change the verdict on its own.
  */
+/** A provider's error detail, and whether it is a CONTENT-dependent failure. */
+/** The gateway's `error` object, or null when the body has none. */
+function providerErrorOf(body) {
+  return body && body.error && typeof body.error === 'object' ? body.error : null;
+}
+
+/** A field the error object carries, or '' when it is absent or not a string. */
+function stringField(holder, key) {
+  return typeof holder[key] === 'string' ? holder[key] : '';
+}
+
+function readProviderError(body) {
+  const error = providerErrorOf(body);
+  if (!error) return { detail: '', processingError: false };
+
+  const type = stringField(error, 'type');
+  const parts = [type, stringField(error, 'param')].filter(Boolean);
+  return {
+    detail: parts.length > 0 ? ` Provider reported: ${parts.join('/')}.` : '',
+    processingError: type === 'response_processing_error',
+  };
+}
+
 async function classifyServerErrorResponse(response) {
-  let detail = '';
-  let processingError = false;
+  let provider = { detail: '', processingError: false };
   try {
-    const body = await response.json();
-    if (body && body.error && typeof body.error === 'object') {
-      const type = typeof body.error.type === 'string' ? body.error.type : '';
-      const param = typeof body.error.param === 'string' ? body.error.param : '';
-      if (type === 'response_processing_error') {
-        processingError = true;
-      }
-      const parts = [type, param].filter(Boolean);
-      if (parts.length > 0) {
-        detail = ` Provider reported: ${parts.join('/')}.`;
-      }
-    }
+    provider = readProviderError(await response.json());
   } catch {
-    // body is not JSON; keep the previous behaviour untouched
+    // Body is not JSON; the plain status message is all there is to report.
   }
-  if (processingError) {
+  // A `response_processing_error` is CONTENT-dependent: the same prompt fails the same
+  // way every time, so retrying it only burns three timeouts. That distinction is what
+  // makes this retryable-false rather than a generic 5xx retry.
+  if (provider.processingError) {
     return {
       error: true,
       retryable: false,
-      message: `Server error (${response.status}).${detail} This is a content-dependent upstream processing failure, so retrying the same prompt will fail the same way.`,
+      message: `Server error (${response.status}).${provider.detail} This is a content-dependent upstream processing failure, so retrying the same prompt will fail the same way.`,
     };
   }
-  return { error: true, retryable: true, message: `Server error (${response.status}).${detail}` };
+  return { error: true, retryable: true, message: `Server error (${response.status}).${provider.detail}` };
 }
 
 /**
@@ -748,18 +481,41 @@ async function classifyServerErrorResponse(response) {
  * model count as a successful expert call (#423). Fail at the source instead,
  * so the evidence never records an unverifiable expert.
  */
+/**
+ * The text of the first choice, or null when the shape is not what a chat completion
+ * looks like.
+ *
+ * Read defensively at every level: this parses a GATEWAY's response, and a gateway
+ * that returns a different shape must produce "invalid response" rather than a
+ * TypeError deep in the caller.
+ */
+/** The `message` of a chat-completion choice, or null when it has none. */
+function choiceMessage(choice) {
+  return isPlainObject(choice) ? choice.message : null;
+}
+
+/** The non-empty text of a message, or null. */
+function messageText(message) {
+  const content = isPlainObject(message) ? message.content : null;
+  if (typeof content !== 'string') return null;
+  const trimmed = content.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function firstChoiceContent(data) {
+  if (!isPlainObject(data) || !Array.isArray(data.choices)) return null;
+  return messageText(choiceMessage(data.choices[0]));
+}
+
 async function readSuccessfulResponse(response) {
   const data = await response.json();
-  if (!isPlainObject(data) || !Array.isArray(data.choices)) {
-    return { error: true, message: 'Invalid response from model.' };
-  }
-  const firstChoice = data.choices[0];
-  const message = isPlainObject(firstChoice) ? firstChoice.message : null;
-  const content = isPlainObject(message) ? message.content : null;
-  if (typeof content !== 'string' || content.trim() === '') {
-    return { error: true, message: 'Invalid response from model.' };
-  }
+  const content = firstChoiceContent(data);
+  if (!content) return { error: true, message: 'Invalid response from model.' };
 
+  // The gateway must echo which model actually served the request. Writing `null` here
+  // used to be tolerated downstream, which let a run that never resolved a model count
+  // as a successful expert call (#423). Fail at the source so the evidence never
+  // records an unverifiable expert.
   const resolvedModel = typeof data.model === 'string' ? data.model.trim() : '';
   if (resolvedModel === '') {
     return {
@@ -767,12 +523,7 @@ async function readSuccessfulResponse(response) {
       message: 'Gateway response did not include a resolved model id; cannot prove which model ran.',
     };
   }
-
-  return {
-    success: true,
-    content: content.trim(),
-    resolved_model: resolvedModel,
-  };
+  return { success: true, content, resolved_model: resolvedModel };
 }
 
 /**
@@ -788,8 +539,49 @@ function buildChatBody(model, systemPrompt, userPrompt) {
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    response_format: { type: 'json_object' },
+    // The JSON shape is asked for in the SYSTEM PROMPT, not via response_format: a
+    // response_format forces the model to answer immediately, which the tool rounds below
+    // make impossible (a tool call is not a JSON object).
   };
+}
+
+/**
+ * Turn an HTTP response into the runner's result shape.
+ *
+ * The status ladder lived inline in `callModelAPI` (58 lines, over the bound).
+ * It is a policy about which failures are worth retrying and which need the
+ * operator -- 401/403 is a key problem the code cannot fix, 429 and 5xx may pass
+ * on their own, and anything else is reported without echoing the provider body.
+ *
+ * @param {Response} response
+ * @returns {Promise<object>}
+ */
+async function classifyHttpResponse(response) {
+  if (response.status === 401 || response.status === 403) {
+    return { error: true, message: `Authentication failed (${response.status}). Check API key in .delphi-config.json.` };
+  }
+  if (response.status === 429) {
+    return await classifyRateLimitResponse(response);
+  }
+  if (response.status >= 500) {
+    return await classifyServerErrorResponse(response);
+  }
+  if (!response.ok) {
+    return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
+  }
+  return await readSuccessfulResponse(response);
+}
+
+
+
+
+
+/** The tool conversation, given the same arguments as the single-shot call. */
+function withRepoTools(providerConfig, model, systemPrompt, userPrompt, options) {
+  const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
+  return converseWithTools(providerConfig, model, systemPrompt, userPrompt, {
+    ...options, url, body: buildChatBody(model, systemPrompt, userPrompt),
+  });
 }
 
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
@@ -815,23 +607,7 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
     });
     responseReceived = true;
 
-    if (response.status === 401 || response.status === 403) {
-      return { error: true, message: `Authentication failed (${response.status}). Check API key in .delphi-config.json.` };
-    }
-
-    if (response.status === 429) {
-      return await classifyRateLimitResponse(response);
-    }
-
-    if (response.status >= 500) {
-      return await classifyServerErrorResponse(response);
-    }
-
-    if (!response.ok) {
-      return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
-    }
-
-    return await readSuccessfulResponse(response);
+    return await classifyHttpResponse(response);
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       return { error: true, retryable: true, message: `Request timed out (${timeoutMs}ms). Raise --timeout-ms or the provider's timeout_ms.` };
@@ -851,37 +627,8 @@ async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, opt
   }
 }
 
-function isPlainObject(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
-function parseExpertVerdict(value) {
-  if (!isPlainObject(value)) return { valid: false, message: 'Invalid expert verdict.' };
-  const verdicts = ['APPROVED', 'REQUEST_CHANGES', 'REJECTED'];
-  if (!verdicts.includes(value.verdict)) return { valid: false, message: 'Invalid expert verdict.' };
-  if (!Number.isFinite(value.confidence) || value.confidence < 1 || value.confidence > 10) {
-    return { valid: false, message: 'Invalid expert verdict.' };
-  }
-  for (const field of ['critical_issues', 'major_concerns', 'minor_concerns']) {
-    if (!Array.isArray(value[field]) || !value[field].every(item => typeof item === 'string')) {
-      return { valid: false, message: 'Invalid expert verdict.' };
-    }
-  }
-  if (typeof value.summary !== 'string') return { valid: false, message: 'Invalid expert verdict.' };
-  return {
-    valid: true,
-    verdict: {
-      verdict: value.verdict,
-      confidence: value.confidence,
-      critical_issues: value.critical_issues,
-      major_concerns: value.major_concerns,
-      minor_concerns: value.minor_concerns,
-      summary: value.summary,
-    },
-  };
-}
+/** The verdicts an expert may return. */
 
 function buildReviewOutput(verdict, args, provenance) {
   const parsed = parseExpertVerdict(verdict);
@@ -906,74 +653,175 @@ function buildReviewOutput(verdict, args, provenance) {
 }
 
 // ── Retry logic ────────────────────────────────────────────────────────
+/** The first retry waits this long; each subsequent one doubles it. */
+const RETRY_BASE_DELAY_MS = 1000;
+
+/** Wait `ms` without blocking the event loop. */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Announce and take the back-off before retry number `attempt`.
+ *
+ * Exponential from a named base: 1 s, 2 s, 4 s. The wait is ANNOUNCED first, because a
+ * silent two-second pause reads as a hang, and the operator's next move (wait, or kill
+ * it) depends on knowing a retry is in progress.
+ *
+ * @param {number} attempt zero-based retry index
+ * @param {string} reason why the previous call is being retried
+ */
+async function backOffBeforeRetry(attempt, reason) {
+  const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt);
+  console.error(`[delphi-review] Retryable error: ${reason}. Retrying in ${delay}ms...`);
+  await sleep(delay);
+}
+
+/**
+ * Call the model, retrying only the failures worth retrying.
+ *
+ * `retryable` is the PROVIDER's answer, not ours: a configuration error retried three
+ * times just wastes three timeouts, and the caller needs the first failure reported
+ * rather than the last one's symptoms.
+ */
 async function callWithRetry(providerConfig, model, systemPrompt, userPrompt, maxRetries = 2, timeoutMs = DEFAULT_TIMEOUT_MS) {
   let lastResult;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const result = await callModelAPI(providerConfig, model, systemPrompt, userPrompt, { timeoutMs });
+    // The repository the reviewer may consult. Passed here rather than inside
+    // `callModelAPI` so that function keeps one shape: the tool conversation is a sibling
+    // entry point, and adding a branch to the single-shot path pushed its CCN over the
+    // ceiling the ratchet records.
+    const result = await withRepoTools(providerConfig, model, systemPrompt, userPrompt, {
+      timeoutMs,
+      repoRoot: process.cwd(),
+    });
 
     if (result.success) return result;
     if (!result.retryable) return result;
 
     lastResult = result;
-    if (attempt < maxRetries) {
-      const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
-      console.error(`[delphi-review] Retryable error: ${result.message}. Retrying in ${delay}ms...`);
-      await new Promise(r => setTimeout(r, delay));
-    }
+    if (attempt < maxRetries) await backOffBeforeRetry(attempt, result.message);
   }
   return lastResult;
 }
 
-// ── Main execution ─────────────────────────────────────────────────────
-async function main() {
-  checkNodeVersion();
+/**
+ * Read a file if it exists, else return null. Optional context, so a read failure
+ * is not fatal -- but it must not throw either.
+ *
+ * @param {string|undefined} filePath
+ * @returns {string|null}
+ */
+function readOptionalFile(filePath) {
+  if (!filePath) return null;
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    // The caller asked for optional context; an unreadable file means there is
+    // none, not that the review should abort.
+    return null;
+  }
+}
 
-  const args = parseArgs(process.argv.slice(2));
-  const config = readConfig(args.config, args.profile);
-
-  // Validate the complete expert map before fallback or provider lookup.
+/**
+ * Validate the expert map, then hand back the requested seat and its provider.
+ *
+ * Extracted from `main` (123 lines). The validation runs BEFORE the lookup on
+ * purpose: a duplicate-model config should be reported as that, not as "expert
+ * not found" because the seat it names happens to be the one that was shadowed.
+ *
+ * @param {object} config
+ * @param {string} expertName
+ * @returns {{expertConfig: object, provider: object}}
+ */
+/**
+ * Validate the config and report its warnings, exiting on an invalid one.
+ *
+ * Warnings are printed even when the config is valid: they record decisions the operator
+ * should see (a raised ceiling that could not be honoured, a setting that was ignored),
+ * and swallowing them would make those decisions invisible.
+ */
+function assertConfigValid(config) {
   const validation = validateDistinctModels(config.experts, config.providers, config.consensus);
   if (!validation.valid) {
     console.error(`[delphi-review] ERROR: ${validation.reason}`);
     process.exit(1);
   }
-  if (validation.warning) {
-    console.error(`[delphi-review] WARNING: ${validation.warning}`);
-  }
+  if (validation.warning) console.error(`[delphi-review] WARNING: ${validation.warning}`);
   for (const warning of config.warnings) {
     console.error(`[delphi-review] WARNING: ${warning}`);
   }
+}
 
-  // Get expert config
-  const expertConfig = config.experts[args.expert];
+function resolveSeat(config, expertName) {
+  assertConfigValid(config);
+
+  const expertConfig = config.experts[expertName];
   if (!expertConfig) {
-    console.error(`[delphi-review] ERROR: Expert "${args.expert}" not found in config.`);
+    console.error(`[delphi-review] ERROR: Expert "${expertName}" not found in config.`);
     process.exit(1);
   }
-
-  // Get provider config
   const provider = config.providers[expertConfig.provider];
   if (!provider) {
     console.error(`[delphi-review] ERROR: Provider "${expertConfig.provider}" not found in config.`);
     process.exit(1);
   }
+  return { expertConfig, provider };
+}
 
-  // Resolve input
-  const reviewContent = resolveInputContent(args);
-
-  // Resolve other experts context
-  let otherExpertsContent = null;
-  if (args.otherExpertsFile && fs.existsSync(args.otherExpertsFile)) {
-    otherExpertsContent = fs.readFileSync(args.otherExpertsFile, 'utf8');
+/**
+ * Shape the JSON a failed seat reports.
+ *
+ * Pure: everything it needs is an argument. The `bytes` fields are attached only
+ * when classification produced them, because a null byte count reads as a real
+ * measurement of zero.
+ *
+ * @param {object} outcome
+ * @param {string} expertName
+ * @param {{bytes: number}} budget
+ * @param {object} seatCalibration
+ * @returns {object}
+ */
+function buildErrorOutput(outcome, expertName, budget, seatCalibration) {
+  const classified = classifySeatFailure({
+    result: outcome,
+    promptBytes: budget.bytes,
+    calibration: seatCalibration.calibration,
+  });
+  const errorOutput = {
+    error: true,
+    error_type: classified.error_type,
+    expert_role: expertName,
+    message: classified.message,
+    retryable: classified.retryable || false,
+  };
+  if (classified.bytes !== undefined) {
+    errorOutput.bytes = classified.bytes;
+    errorOutput.calibrated_pass_bytes = classified.calibrated_pass_bytes;
   }
+  return errorOutput;
+}
 
-  // Build prompts
+/**
+ * Build the prompts and refuse the call if they exceed the prompt budget.
+ *
+ * The refusal happens BEFORE the request, not after the gateway kills it, and it
+ * writes the same JSON stdout contract as an API failure: an orchestrator reading
+ * that stream has to be able to tell "we never asked" from "the model answered
+ * wrongly". `resolveSeatCalibration` prints its own warning, so it is not echoed
+ * here (#414 R1 MN-03).
+ *
+ * @param {object} args
+ * @param {object} expertConfig
+ * @returns {{systemPrompt: string, userPrompt: string, budget: object, seatCalibration: object}}
+ */
+function preparePrompt(args, expertConfig) {
+  const reviewContent = resolveInputContent(args);
+  const otherExpertsContent = readOptionalFile(args.otherExpertsFile);
+
   const systemPrompt = buildSystemPrompt(args.expert, args.mode);
   const userPrompt = buildUserPrompt(reviewContent, otherExpertsContent, args.round);
 
-  // Refuse before the request, not after the gateway kills it.
-  // resolveSeatCalibration already printed its own warning, if any — do not
-  // echo it a second time (#414 R1 MN-03).
   const seatCalibration = resolveSeatCalibration(expertConfig);
   const budget = checkPromptBudget({
     systemPrompt,
@@ -983,8 +831,6 @@ async function main() {
   if (!budget.ok) {
     const message = describePromptBudgetFailure({ ...budget, expert: args.expert });
     console.error(`[delphi-review] ERROR: ${message}`);
-    // Same stdout contract as an API failure: an orchestrator parsing this stream
-    // must be able to tell "we never asked" from "the model answered wrongly".
     console.log(JSON.stringify({
       error: true,
       error_type: 'prompt_budget_exceeded',
@@ -996,6 +842,19 @@ async function main() {
     }));
     process.exit(1);
   }
+  return { systemPrompt, userPrompt, budget, seatCalibration };
+}
+
+// ── Main execution ─────────────────────────────────────────────────────
+async function main() {
+  checkNodeVersion();
+
+  const args = parseArgs(process.argv.slice(2));
+  const config = readConfig(args.config, args.profile);
+
+  const { expertConfig, provider } = resolveSeat(config, args.expert);
+
+  const { systemPrompt, userPrompt, budget, seatCalibration } = preparePrompt(args, expertConfig);
 
   // Call API with retry; one schema-restating retry recovers malformed JSON
   // without ever faking a verdict (#414 REQ-5).
@@ -1009,23 +868,7 @@ async function main() {
   });
 
   if (outcome.error) {
-    const classified = classifySeatFailure({
-      result: outcome,
-      promptBytes: budget.bytes,
-      calibration: seatCalibration.calibration,
-    });
-    const errorOutput = {
-      error: true,
-      error_type: classified.error_type,
-      expert_role: args.expert,
-      message: classified.message,
-      retryable: classified.retryable || false,
-    };
-    if (classified.bytes !== undefined) {
-      errorOutput.bytes = classified.bytes;
-      errorOutput.calibrated_pass_bytes = classified.calibrated_pass_bytes;
-    }
-    console.log(JSON.stringify(errorOutput));
+    console.log(JSON.stringify(buildErrorOutput(outcome, args.expert, budget, seatCalibration)));
     process.exit(1);
   }
 
@@ -1054,9 +897,12 @@ if (require.main !== module) {
   module.exports = {
     parseArgs,
     readConfig,
+    expandEnvPlaceholder,
+    clampConsensusSetting,
     globalConfigPath,
     validateDistinctModels,
     extractJsonFromResponse,
+    classifyHttpResponse,
     buildSystemPrompt,
     buildUserPrompt,
     resolveInputContent,
@@ -1083,24 +929,3 @@ if (require.main !== module) {
   });
 }
 
-/**
- * Machine-wide `.delphi-config.json` path: `$XDG_CONFIG_HOME/xp-gate/`, or
- * `~/.config/xp-gate/` when the variable is unset.
- *
- * Exported so the path-parity test can hold this loader, the Gate MW validator
- * and the DSH plugin to one definition instead of three restatements.
- *
- * Deliberately declared at the END of the file. Function declarations hoist, so
- * readConfig above can call it, but placing it here keeps every line before the
- * old EOF byte-identical — which matters because `.ccn-baseline.json` anchors
- * anonymous functions by line number (`file::(anonymous)@657`). Adding these
- * lines near the top shifted that anchor to 676 and Gate 3 then read a
- * pre-existing CCN=24 function as a brand-new violation.
- *
- * @param {NodeJS.ProcessEnv} env
- * @returns {string}
- */
-function globalConfigPath(env) {
-  const configHome = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(configHome, 'xp-gate', '.delphi-config.json');
-}

@@ -36,19 +36,27 @@ function countMockReferences(content: string): number {
   return count;
 }
 
+/** The calls that open a test case or a suite, by prefix. */
+const TEST_CALL_PREFIXES = ['it(', 'test(', 'describe('];
+
+/** The table-driven variants of the same calls. */
+const TEST_EACH_PREFIXES = ['it.each(', 'test.each(', 'describe.each('];
+
+/**
+ * Whether this trimmed line opens a test case or suite.
+ *
+ * TWO lists rather than six `||` tests: the `.each` forms are a separate family, and
+ * keeping them apart is what makes "does the `.each` variant get counted" answerable by
+ * reading one line instead of six.
+ */
+function opensTestCase(trimmed: string): boolean {
+  const prefixes = [...TEST_CALL_PREFIXES, ...TEST_EACH_PREFIXES];
+  return prefixes.some((prefix) => trimmed.startsWith(prefix));
+}
+
+/** How many lines open a test case or suite. */
 function countTestLines(content: string): number {
-  const lines = content.split('\n');
-  return lines.filter(line => {
-    const trimmed = line.trim();
-    return (
-      trimmed.startsWith('it(') ||
-      trimmed.startsWith('test(') ||
-      trimmed.startsWith('describe(') ||
-      trimmed.startsWith('it.each(') ||
-      trimmed.startsWith('test.each(') ||
-      trimmed.startsWith('describe.each(')
-    );
-  }).length;
+  return content.split('\n').filter((line) => opensTestCase(line.trim())).length;
 }
 
 const LAYER_PATTERNS: Array<[TestLayer, string[]]> = [

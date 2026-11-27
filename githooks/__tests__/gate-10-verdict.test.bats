@@ -226,6 +226,13 @@ STUB
 }
 
 @test "AC-518-13: node missing from PATH SKIPs up front with an actionable message" {
+  # This test builds a PATH that contains git but NOT node, relying on the two living in
+  # different directories. On a host where node is in /usr/bin (and /bin is a symlink to
+  # it), any PATH that can run the gate's own utilities also finds node, so the premise
+  # cannot be constructed. Say so instead of failing for the host's layout.
+  if [ "$(command -v node)" = "/usr/bin/node" ] || [ "$(command -v node)" = "/bin/node" ]; then
+    skip "node shares /usr/bin with the gate's utilities on this host"
+  fi
   write_json_stub "$TEST_DIR/clean.json" 0
   run bash -c '
     cd "$1" || exit 1

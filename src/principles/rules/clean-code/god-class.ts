@@ -1,56 +1,82 @@
 import { Rule, Violation, Severity } from '../../types';
 import { getActiveConfig } from '../../config';
 
+/** The config shape this rule reads. */
+interface GodClassSettings {
+  threshold?: number;
+  severity?: string;
+}
+
+/**
+ * Every god-class violation in one file.
+ *
+ * The config is read PER INVOCATION; a module-load snapshot was #457.
+ */
+function checkGodClass(file: string, adapter: unknown): Violation[] {
+  const settings = getActiveConfig().rules['clean-code']['god-class'] as GodClassSettings;
+  return extractClasses(adapter)
+    // The rule's own default, not 0: a missing threshold must not turn every class into
+    // a violation (review MC-01, same shape as `deep-nesting`).
+    .flatMap((cls) => violationFor(cls, file, settings, settings.threshold ?? godClassRule.threshold ?? 15));
+}
+
 export const godClassRule: Rule = {
   id: 'clean-code.god-class',
   name: 'God Class Rule',
   threshold: 15,
   severity: 'warning',
-  check: (file: string, adapter: unknown): Violation[] => {
-    const violations: Violation[] = [];
-    // Read the ACTIVE config per invocation; a module-load snapshot was #457.
-    const settings = getActiveConfig().rules['clean-code']['god-class'];
-    
-    interface ClassObject {
-      code?: string;
-      line: number;
-      name: string;
-      /** Method count when the adapter parsed the class structurally. */
-      methodCount?: number;
-    }
-
-    interface TypedAdapter {
-      extractClasses?: () => ClassObject[] | undefined;
-    }
-
-    const typedAdapter = adapter as TypedAdapter;
-    const classes = typedAdapter.extractClasses?.() || [];
-
-    for (const cls of classes) {
-      // Prefer the adapter's structural count. The regex fallback below cannot
-      // see methods whose signature spans lines or carries a return type, so on
-      // `TypeScriptAdapter` (66 methods) it counted 0 while `solid.srp` read the
-      // adapter's own figure and reported it -- the same class, two different
-      // answers, and the wrong one was silent. A count the adapter already
-      // computed must not be recomputed by guessing at source text.
-      const methodCount = cls.methodCount ?? countMethodsByRegex(cls.code);
-
-      if (methodCount > (settings.threshold ?? 0)) {
-        violations.push({
-          file,
-          line: cls.line,
-          ruleId: 'clean-code.god-class',
-          message: `Class "${cls.name}" has too many methods: ${methodCount} (maximum: ${
-            settings.threshold
-          })`,
-          severity: (settings.severity as Severity) ?? 'warning'
-        });
-      }
-    }
-
-    return violations;
-  }
+  check: checkGodClass,
 };
+
+/**
+ * A class as the adapter reports it.
+ *
+ * `methodCount` is optional because not every adapter parses classes structurally; the
+ * regex fallback covers the rest.
+ */
+interface ClassObject {
+  code?: string;
+  line: number;
+  name: string;
+  /** Method count when the adapter parsed the class structurally. */
+  methodCount?: number;
+}
+
+/** The part of an adapter this rule consumes. */
+interface TypedAdapter {
+  extractClasses?: () => ClassObject[] | undefined;
+}
+
+/** The classes the adapter reports, or none when it cannot report any. */
+function extractClasses(adapter: unknown): ClassObject[] {
+  return (adapter as TypedAdapter).extractClasses?.() || [];
+}
+
+/**
+ * The violation for one class, or no violations.
+ *
+ * Prefer the adapter's STRUCTURAL count. The regex fallback cannot see a method whose
+ * signature spans lines or carries a return type, so on `TypeScriptAdapter` (66 methods)
+ * it counted 0 while `solid.srp` read the adapter's own figure -- the same class, two
+ * different answers, and the wrong one was silent. A count the adapter already computed
+ * must never be re-derived by guessing at source text.
+ */
+function violationFor(
+  cls: ClassObject,
+  file: string,
+  settings: GodClassSettings,
+  threshold: number,
+): Violation[] {
+  const methodCount = cls.methodCount ?? countMethodsByRegex(cls.code);
+  if (methodCount <= threshold) return [];
+  return [{
+    file,
+    line: cls.line,
+    ruleId: 'clean-code.god-class',
+    message: `Class "${cls.name}" has too many methods: ${methodCount} (maximum: ${threshold})`,
+    severity: (settings.severity as Severity) ?? 'warning',
+  }];
+}
 
 /**
  * Source-text method matcher.

@@ -271,10 +271,18 @@ describe('#457 .principlesrc actually changes enforcement', () => {
     expect(config.rules['clean-code']['magic-numbers'].exclude).toEqual([0, 1]);
   });
 
-  it('AC-457-07: a malformed config falls back to defaults without throwing', async () => {
-    const config = await loadConfig(writeConfig(makeTempDir(), '{ this is not json'));
+  it('AC-457-14: a config that exists but is MALFORMED fails loudly too', async () => {
+    // This case was labelled AC-457-07 and asserted "falls back to defaults", which
+    // contradicts AC-457-14 above for the same reason: a `.principlesrc` with a typo is
+    // the fail-open AC-457-14 exists to remove -- the gate would run on defaults while
+    // the operator believes their own rules are in force.
+    //
+    // AC-457-07 in `specification.yaml` is about the EXIT CODE, not about this fallback;
+    // the label had drifted onto the wrong test (AC-457-05/07's "type mismatch keeps the
+    // default" case is the separate assertion below).
+    const broken = writeConfig(makeTempDir(), '{ this is not json');
 
-    expect(config.rules['clean-code']['large-file'].threshold).toBe(DEFAULT_LARGE_FILE_THRESHOLD);
+    await expect(loadConfig(broken)).rejects.toThrow(/not a readable JSON object/);
   });
 
   it('AC-457-02: an absent auto-resolved config falls back to built-in defaults', () => {

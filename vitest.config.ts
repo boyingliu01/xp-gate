@@ -31,6 +31,11 @@ export default defineConfig({
       // nothing. Only `plugins/dsh` is kept, so `plugins/opencode/node_modules`
       // and the other vendored trees stay out.
       'plugins/*/node_modules/**',
+      // Skills copied into a plugin are the SAME files as repo-root `skills/`, which the
+      // next line already excludes. Without this, a newly installed skill whose tests are
+      // not ready yet fails the FULL suite from every plugin copy at once -- 42 collect
+      // errors from three files, which is how this was found at push time.
+      'plugins/*/skills/**',
       'skills/**',
       'src/npm-package/plugins/**', 'src/npm-package/skills/**',
       'src/npm-package/principles/**', 'src/npm-package/mutation/**',
@@ -48,6 +53,60 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],
+      // TWO MEASUREMENT HAZARDS, both cost real time here.
+      //
+      // 1. A single-file run (`vitest run path/x.test.js --coverage`) OVERWRITES
+      //    coverage/ with a report naming only the files that test loaded. Always
+      //    regenerate with a full run before quoting a number.
+      //
+      // 2. At least one large file reports code its tests demonstrably execute as
+      //    uncovered. Measured 2026-11-24 on language-tools.js: a stderr write
+      //    compiled into planToolRepairs fired in 3 workers of a full run, while
+      //    coverage-final.json reported 0 of its 77 statements. The cause was not
+      //    found; what was ruled out: duplicate module instances (one entry
+      //    path), stale data (regenerated from an empty directory), and unloaded
+      //    files (every file has non-zero coverage).
+      //
+      //    CAUSE FOUND 2026-11-24 (round 49): a full run reports language-tools.js
+      //    at 50.0% (527/1054), while the same file measured with the 21 test files
+      //    that load it reports 97.24% (1025/1054). The gap is the whole file size,
+      //    not a rounding artefact -- the full run appears to record the file
+      //    without merging the worker coverage that actually exercised it. Checked
+      //    and NOT causative: duplicate module entry points (only one file exists),
+      //    `delete require.cache` in tests (those tests alone still measure 97.24%),
+      //    fs mocks (none), and the same treatment for rework.js and
+      //    gate-coverage.js (both match their full-run numbers exactly).
+      //
+      //    VERIFIED ACROSS THE TREE 2026-11-24 (round 50): every file of 300+ lines
+      //    (47 of them) was re-measured with the tests that reference it. Exactly TWO
+      //    disagree with the full run:
+      //
+      //      language-tools.js   50.0% reported  ->  97.24% measured  (+47.2)
+      //      gate-runner.js      87.8% reported  ->  97.9%  measured  (+10.1)
+      //
+      //    The other 45 match to within 5 points, so this is NOT a general provider
+      //    flaw and the per-file numbers are usable elsewhere.
+      //
+      //    CONSEQUENCE: the aggregate UNDER-reports. Corrected for those two files:
+      //
+      //      reported  43648 / 48793 = 89.46%
+      //      corrected 44292 / 48793 = 90.78%   (the 90% line is 43,914 lines)
+      //
+      //    Re-run the same check before quoting the corrected figure; the correction
+      //    is only as good as the re-measurement behind it.
+      //
+      //    So do not read a per-file number on a large file as evidence about its
+      //    tests. Check whether tests exist, and instrument if it matters. The
+      //    aggregate moves in the right direction; individual large files are not
+      //    trustworthy.
+      //
+      // NOTE for anyone reading coverage numbers: a single-file run
+      // (`vitest run path/to/x.test.js --coverage`) OVERWRITES
+      // coverage/coverage-summary.json with a report that only mentions the
+      // files that one test loaded. Measured 2026-11-24: a one-test probe turned
+      // the reported total from 87.28% into 3.74%, and reading that file
+      // afterwards looks exactly like the repo lost its coverage. Always
+      // regenerate with a full run before quoting a number.
       // #562: `plugins/` was inside `include`'s complement, so 4340 lines of
       // canonical plugin source were never measured -- while 28 test files and 225
       // tests already exercise them and pass. Measured in isolation those sources
@@ -71,6 +130,14 @@ export default defineConfig({
         // coverage problem to be fixed by writing tests; no test can ever touch these
         // files. Two lists describing the same mirror must not drift.
         'src/npm-package/principles/**',
+        // Listed in test.exclude above but missing here -- the exact drift the
+        // comment warns about. Measured 2026-11-24: 12 mirror files at 0.00%,
+        // 2,813 statements, pulling the reported total from 87.23% to 82.30%.
+        'src/npm-package/mutation/**',
+        // Currently holds no .ts/.js, so it moves no number today; listed anyway
+        // because these two lists must not drift, and the next file added there
+        // would otherwise be measured at 0% without anyone noticing.
+        'src/npm-package/skills/**',
         'src/npm-package/gates/**',
         'src/npm-package/build-integrity/**',
         'src/npm-package/architecture/**',

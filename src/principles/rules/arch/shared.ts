@@ -111,29 +111,33 @@ export function isUnrecognisedJavaLayout(filePath: string): boolean {
 }
 
 /** The class names an adapter reports, skipping entries without a usable name. */
-export function classNamesOf(adapter: unknown): Array<{ name: string; line?: number }> {
-  const raw = (adapter as { extractClasses?: () => unknown[] }).extractClasses?.() ?? [];
-  const named: Array<{ name: string; line?: number }> = [];
-  for (const entry of raw) {
-    const facts = entry as ClassFacts;
-    if (typeof facts?.name === 'string' && facts.name.length > 0) {
-      named.push({ name: facts.name, line: facts.line });
-    }
-  }
-  return named;
+/** An entry that names something, with the line it was found on. */
+interface NamedFact {
+  name: string;
+  line?: number;
+}
+
+/**
+ * Keep the entries that carry a USABLE name.
+ *
+ * An entry with no name, an empty name, or a non-string name is dropped: every caller
+ * filters on the name, and an empty one would match the empty prefix of every path.
+ */
+function namedFacts(raw: unknown[]): NamedFact[] {
+  return raw
+    .map((entry) => entry as ClassFacts | ImportFacts)
+    .filter((facts): facts is NamedFact => typeof facts?.name === 'string' && facts.name.length > 0)
+    .map((facts) => ({ name: facts.name, line: facts.line }));
+}
+
+/** The classes an adapter reports, skipping entries without a usable name. */
+export function classNamesOf(adapter: unknown): NamedFact[] {
+  return namedFacts((adapter as { extractClasses?: () => unknown[] }).extractClasses?.() ?? []);
 }
 
 /** The imports an adapter reports, skipping entries without a usable name. */
-export function importsOf(adapter: unknown): Array<{ name: string; line?: number }> {
-  const raw = (adapter as { imports?: unknown[] }).imports ?? [];
-  const named: Array<{ name: string; line?: number }> = [];
-  for (const entry of raw) {
-    const facts = entry as ImportFacts;
-    if (typeof facts?.name === 'string' && facts.name.length > 0) {
-      named.push({ name: facts.name, line: facts.line });
-    }
-  }
-  return named;
+export function importsOf(adapter: unknown): NamedFact[] {
+  return namedFacts((adapter as { imports?: unknown[] }).imports ?? []);
 }
 
 /**

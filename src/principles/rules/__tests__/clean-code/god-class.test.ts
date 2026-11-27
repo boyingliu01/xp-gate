@@ -106,4 +106,21 @@ class DataClass {
     
     expect(() => godClassRule.check('test.ts', mockAdapterThatThrows as never)).toThrow('Adapter failed');
   });
+
+  it('reports nothing when the adapter cannot list classes', () => {
+    // `extractClasses` is OPTIONAL: an adapter may not implement it at all, and the rule
+    // must read that as "no classes", not throw.
+    const bare = { detectLanguage: () => 'java', extractFunctions: () => [] };
+    expect(godClassRule.check('test.java', bare as never)).toHaveLength(0);
+  });
+
+  it('skips a class whose source the adapter did not provide', () => {
+    // Without a body there is nothing to count, and guessing from an empty string would
+    // report a zero-method class as fine -- a confident false negative.
+    const noSource = {
+      ...mockAdapter,
+      extractClasses: () => [{ name: 'Empty', line: 1 }],
+    };
+    expect(godClassRule.check('test.ts', noSource as never)).toHaveLength(0);
+  });
 });

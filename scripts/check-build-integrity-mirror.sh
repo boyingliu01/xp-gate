@@ -27,16 +27,11 @@ validate_regular_tree() {
 validate_regular_tree "$canonical"
 validate_regular_tree "$mirror"
 
-if [ "${1:-}" = "--post-sync" ]; then
-  status=$(git status --porcelain --untracked-files=all -- "$mirror")
-  if [ -n "$status" ]; then
-    printf '%s\n' "FAIL: sync changed committed $mirror mirror" >&2
-    printf '%s\n' "$status" >&2
-    exit 1
-  fi
-  printf '%s\n' "PASS: sync left committed $mirror unchanged"
-  exit 0
-fi
+# The shared --post-sync check; see scripts/lib/mirror-post-sync.sh for why it is
+# separate from the default "does the mirror match" verifier.
+# shellcheck source=scripts/lib/mirror-post-sync.sh
+. "$(dirname "$0")/lib/mirror-post-sync.sh"
+xp_gate_assert_post_sync "$mirror" "$@" || [ $? -eq 2 ] || exit $?
 
 # `__tests__/` is deliberately absent from the mirror: it holds the source tree's
 # own vitest suites, which the npm package neither ships nor runs. Before P1-E

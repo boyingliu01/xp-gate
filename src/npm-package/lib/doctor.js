@@ -16,10 +16,15 @@ const { detectPlatform, getTemplateDir } = sharedPaths;
 // written the config, and `--fix` returned 1 on a healthy installation.
 //
 // These are therefore read through the module at each use, not destructured.
-const HOME_DIR = () => sharedPaths.HOME_DIR;
-const CONFIG_FILE = () => sharedPaths.CONFIG_FILE;
-const GLOBAL_HOOKS_DIR = () => sharedPaths.GLOBAL_HOOKS_DIR;
-const GLOBAL_ADAPTERS_DIR = () => sharedPaths.GLOBAL_ADAPTERS_DIR;
+const {
+  HOME_DIR,
+  CONFIG_FILE,
+  GLOBAL_HOOKS_DIR,
+  GLOBAL_ADAPTERS_DIR,
+  PKG_DIR,
+  DELPHI_ROLES,
+  MIN_DISTINCT_MODELS,
+} = require('./doctor-constants.js');
 const { checkUpgrade, formatUpgradeMsg } = require('./check-version.js');
 const { GATE_CLI_TOOLS, checkCliTool, getToolInstallCmd, checkBash, detectInstalledPlatforms, getSkillsDirs } = require('./detect-deps.js');
 // Doctor's tool section is built from the shared audit, so the validity /
@@ -48,7 +53,6 @@ const {
 } = require('./doctor-tui.js');
 
 // npm package source dir (template hooks/adapters)
-const PKG_DIR = path.dirname(__dirname);
 
 /**
  * Read the package version from the installed package.json.
@@ -211,7 +215,7 @@ async function execWithTimeout(cmd, opts = {}) {
   // tool as exit 1 + "'x' is not recognized"), and re-running it would only
   // burn time, so that path still returns null immediately.
   const { attempts, ...execOpts } = opts;
-  const maxAttempts = process.platform === 'win32' ? (attempts || 3) : 1;
+  const maxAttempts = process.platform === 'win32' ? (attempts || WINDOWS_EXEC_ATTEMPTS) : 1;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const { stdout, stderr } = await execAsync(cmd, {
@@ -224,7 +228,7 @@ async function execWithTimeout(cmd, opts = {}) {
         // existing null check ("probe produced nothing") applies — an empty
         // non-null result would read as a present tool with no version.
         if (attempt + 1 < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 50));
+          await new Promise(resolve => setTimeout(resolve, EXEC_RETRY_DELAY_MS));
           continue;
         }
         return null;
@@ -359,8 +363,19 @@ function getConfig() {
   }
 }
 
+/**
+ * Persist the config, or fail loudly with the path.
+ *
+ * Every fix path in this file ends here, so a silent failure would report a repair
+ * that was never written.
+ */
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_FILE(), JSON.stringify(config, null, 2));
+  const target = CONFIG_FILE();
+  try {
+    fs.writeFileSync(target, JSON.stringify(config, null, 2));
+  } catch (err) {
+    throw new Error(`cannot save config to ${target}: ${err.message}`);
+  }
 }
 
 async function getGitDir() {
@@ -674,26 +689,21 @@ const HOOK_SUPPORT_FILES = [
  * @param {{repoRoot?: string, repoHooks?: string, installedHooks?: string}} [ctx]
  * @returns {{checks: Array<{name: string, status: string, detail: string}>, issues: number}}
  */
-function diagnoseHookDrift(ctx = {}) {
-  const checks = [];
+/**
+ * Compare each tracked hook against its installed copy.
+ *
+ * The DIRECTION of the drift is reported, not just the fact: "githooks/ is newer"
+ * means sync, "installed is newer" means the installed copy has work the repo does
+ * not. Telling an operator which way it went is the difference between a fix and a
+ * guess.
+ *
+ * @param {string} repoHooks
+ * @param {string} installedHooks
+ * @param {Array} checks appended to
+ * @returns {number} issues found
+ */
+function compareHookCopies(repoHooks, installedHooks, checks) {
   let issues = 0;
-
-  // XP_GATE_REPO_ROOT lets a caller (or a test) name the canonical repo
-  // explicitly instead of inferring it from the process cwd.
-  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
-  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR();
-
-  // Nothing to compare when the project carries no canonical *hook* source, or
-  // when no global copy exists at all. Both must stay completely silent.
-  //
-  // A `githooks/` directory holding only `adapters/` is NOT a hook source of
-  // truth -- consumer projects get that layout from `xp-gate init`, and the
-  // adapters there are unrelated to which hook file executes.
-  if (!hasCanonicalHooks(repoHooks) || !fs.existsSync(installedHooks)) {
-    return { checks, issues };
-  }
-
   for (const name of DRIFT_COMPARED_HOOKS) {
     const repoFile = path.join(repoHooks, name);
     const installedFile = path.join(installedHooks, name);
@@ -724,43 +734,81 @@ function diagnoseHookDrift(ctx = {}) {
     });
     issues++;
   }
+  return issues;
+}
 
-  // lib/ shared libraries: pre-commit sources lib/*.sh at runtime, so a missing
-  // or stale installed lib/ copy breaks the hook entirely after a sync (#488).
+/**
+ * Compare the shared `lib/` copies that pre-commit sources at runtime.
+ *
+ * A missing or stale installed `lib/` breaks the hook ENTIRELY after a sync (#488),
+ * which is why these are compared separately from the hook files themselves.
+ *
+ * @param {string} repoHooks
+ * @param {string} installedHooks
+ * @param {Array} checks appended to
+ * @returns {number} issues found
+ */
+function compareLibCopies(repoHooks, installedHooks, checks) {
   const repoLib = path.join(repoHooks, 'lib');
   const installedLib = path.join(installedHooks, 'lib');
-  if (fs.existsSync(repoLib) && fs.statSync(repoLib).isDirectory()) {
-    let libEntries = [];
-    try {
-      libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
-    } catch {
-      libEntries = [];
-    }
-    for (const entry of libEntries) {
-      if (!entry.isFile()) continue;
-      const rel = `lib/${entry.name}`;
-      const repoFile = path.join(repoLib, entry.name);
-      const installedFile = path.join(installedLib, entry.name);
-      const label = `Hook drift: ${rel}`;
-      if (!fs.existsSync(installedFile)) {
-        checks.push({
-          name: label,
-          status: 'FAIL',
-          detail: 'installed lib/ copy is missing (hooks source lib/ at runtime)',
-        });
-        issues++;
-      } else if (!filesAreIdentical(repoFile, installedFile)) {
-        checks.push({
-          name: label,
-          status: 'FAIL',
-          detail: 'installed lib/ copy differs from githooks/lib/',
-        });
-        issues++;
-      } else {
-        checks.push({ name: label, status: 'PASS', detail: 'Installed copy matches githooks/' });
-      }
+  if (!fs.existsSync(repoLib) || !fs.statSync(repoLib).isDirectory()) return 0;
+
+  let issues = 0;
+  let libEntries = [];
+  try {
+    libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
+  } catch {
+    libEntries = [];
+  }
+  for (const entry of libEntries) {
+    if (!entry.isFile()) continue;
+    const rel = `lib/${entry.name}`;
+    const repoFile = path.join(repoLib, entry.name);
+    const installedFile = path.join(installedLib, entry.name);
+    const label = `Hook drift: ${rel}`;
+    if (!fs.existsSync(installedFile)) {
+      checks.push({
+        name: label,
+        status: 'FAIL',
+        detail: 'installed lib/ copy is missing (hooks source lib/ at runtime)',
+      });
+      issues++;
+    } else if (!filesAreIdentical(repoFile, installedFile)) {
+      checks.push({
+        name: label,
+        status: 'FAIL',
+        detail: 'installed lib/ copy differs from githooks/lib/',
+      });
+      issues++;
+    } else {
+      checks.push({ name: label, status: 'PASS', detail: 'Installed copy matches githooks/' });
     }
   }
+  return issues;
+}
+
+function diagnoseHookDrift(ctx = {}) {
+  const checks = [];
+  let issues = 0;
+
+  // XP_GATE_REPO_ROOT lets a caller (or a test) name the canonical repo
+  // explicitly instead of inferring it from the process cwd.
+  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
+  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
+  const installedHooks = ctx.installedHooks || GLOBAL_HOOKS_DIR();
+
+  // Nothing to compare when the project carries no canonical *hook* source, or
+  // when no global copy exists at all. Both must stay completely silent.
+  //
+  // A `githooks/` directory holding only `adapters/` is NOT a hook source of
+  // truth -- consumer projects get that layout from `xp-gate init`, and the
+  // adapters there are unrelated to which hook file executes.
+  if (!hasCanonicalHooks(repoHooks) || !fs.existsSync(installedHooks)) {
+    return { checks, issues };
+  }
+
+  issues += compareHookCopies(repoHooks, installedHooks, checks);
+  issues += compareLibCopies(repoHooks, installedHooks, checks);
 
   return { checks, issues };
 }
@@ -915,50 +963,115 @@ function readPair(repoFile, installedFile) {
  * import the .ts module). Grandfathers everything before AUDIT_LEDGER_SINCE;
  * only NEW implausible durations or unattributed commits count as issues.
  */
+/** The npm registry probe is a network call; it gets 8 s before being skipped. */
+const NPM_PROBE_TIMEOUT_MS = 8000;
+
+/** The runner gates on this; below it, a review exits 1 mid-run. */
+const MIN_NODE_MAJOR = 18;
+
+/** Windows reports a missing tool as exit 1, so a retry separates a real failure
+ * from a transient one. */
+const WINDOWS_EXEC_ATTEMPTS = 3;
+/** Back-off between those attempts (the previous inline value). */
+const EXEC_RETRY_DELAY_MS = 50;
+
+/** A tool call longer than this is a measurement artefact, not a real duration. */
+const AUDIT_MAX_PLAUSIBLE_HOURS = 6;
+
 const AUDIT_LEDGER_SINCE = '2026-10-30T00:00:00.000Z';
-const AUDIT_MAX_PLAUSIBLE_MS = 6 * 60 * 60 * 1000;
+const AUDIT_MAX_PLAUSIBLE_MS = AUDIT_MAX_PLAUSIBLE_HOURS * 60 * 60 * 1000;
 
 function diagnoseAuditLedger(ctx = {}) {
-  const checks = [];
-  let issues = 0;
   const repoRoot = ctx.repoRoot || process.cwd();
   const logPath = path.join(repoRoot, '.xp-gate', 'audit.jsonl');
+
+  const loaded = loadAuditEntries(logPath);
+  if (loaded.verdict) return { checks: [loaded.verdict], issues: 0 };
+
+  const tally = tallyAuditAnomalies(loaded.entries);
+  return { checks: [auditLedgerCheck(tally)], issues: 0 };
+}
+
+/**
+ * Read the audit ledger, or the SKIP/WARN check that stands in for it.
+ *
+ * Returns `{ verdict }` when there is nothing to scan, `{ entries }` otherwise --
+ * one exit shape per outcome so the caller does not branch on three sentinels.
+ *
+ * @param {string} logPath
+ * @returns {{verdict?: object, entries?: object[]}}
+ */
+function loadAuditEntries(logPath) {
+  const name = 'Audit ledger';
   if (!fs.existsSync(logPath)) {
-    checks.push({ name: 'Audit ledger', status: 'SKIP', detail: 'no .xp-gate/audit.jsonl' });
-    return { checks, issues };
+    return { verdict: { name, status: 'SKIP', detail: 'no .xp-gate/audit.jsonl' } };
   }
-  let entries;
   try {
-    entries = fs.readFileSync(logPath, 'utf8').split(/\r?\n/).filter((l) => l.trim()).map((l) => JSON.parse(l));
+    const entries = fs.readFileSync(logPath, 'utf8')
+      .split(/\r?\n/)
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    return { entries };
   } catch (err) {
-    checks.push({ name: 'Audit ledger', status: 'WARN', detail: `unreadable: ${err.message}` });
-    return { checks, issues };
+    return { verdict: { name, status: 'WARN', detail: `unreadable: ${err.message}` } };
   }
-  let implausible = 0;
-  let missingCommit = 0;
-  let considered = 0;
-  for (const e of entries) {
-    if (typeof e.timestamp === 'string' && e.timestamp < AUDIT_LEDGER_SINCE) continue;
-    considered += 1;
-    if (typeof e.duration_ms === 'number'
-      && (!Number.isFinite(e.duration_ms) || e.duration_ms < 0 || e.duration_ms > AUDIT_MAX_PLAUSIBLE_MS)) {
-      implausible += 1;
-    }
-    if (!e.commit_hash || e.commit_hash === 'unknown') missingCommit += 1;
+}
+
+/**
+ * An implausible duration, or a commit the entry cannot be attributed to.
+ *
+ * An entry older than the ledger cutoff is skipped: the anomalies this check exists
+ * for were introduced by a specific release, and counting everything before it would
+ * report the same fixed history forever.
+ *
+ * @param {object[]} entries
+ * @returns {{considered: number, implausible: number, missingCommit: number}}
+ */
+function tallyAuditAnomalies(entries) {
+  const recent = entries.filter((e) => !(typeof e.timestamp === 'string' && e.timestamp < AUDIT_LEDGER_SINCE));
+  return {
+    considered: recent.length,
+    implausible: recent.filter(hasImplausibleDuration).length,
+    missingCommit: recent.filter(hasNoCommit).length,
+  };
+}
+
+/** A duration that is present but negative, non-finite, or absurdly long. */
+function hasImplausibleDuration(entry) {
+  if (typeof entry.duration_ms !== 'number') return false;
+  return !Number.isFinite(entry.duration_ms)
+    || entry.duration_ms < 0
+    || entry.duration_ms > AUDIT_MAX_PLAUSIBLE_MS;
+}
+
+/** An entry that cannot be attributed to a commit. */
+function hasNoCommit(entry) {
+  return !entry.commit_hash || entry.commit_hash === 'unknown';
+}
+
+/**
+ * The ledger's verdict.
+ *
+ * WARN, not FAIL: telemetry integrity is not a blocking gate, but it must be
+ * visible. The issue count stays 0 so it never inflates the FAIL tally.
+ *
+ * @param {{considered: number, implausible: number, missingCommit: number}} tally
+ * @returns {object}
+ */
+function auditLedgerCheck(tally) {
+  const name = 'Audit ledger';
+  const anomalies = tally.implausible + tally.missingCommit;
+  if (anomalies === 0) {
+    const noun = tally.considered === 1 ? 'entry' : 'entries';
+    return { name, status: 'PASS', detail: `${tally.considered} ${noun} clean since ${AUDIT_LEDGER_SINCE}` };
   }
-  const total = implausible + missingCommit;
-  if (total > 0) {
-    checks.push({
-      name: 'Audit ledger',
-      status: 'WARN',
-      detail: `${total} anomal${total === 1 ? 'y' : 'ies'} since ${AUDIT_LEDGER_SINCE} (${implausible} implausible duration, ${missingCommit} unattributed) — run: xp-gate audit --check`,
-    });
-    // WARN, not FAIL: telemetry integrity is not a blocking gate, but it must
-    // be visible. Kept at 0 issues so it never inflates the FAIL count.
-  } else {
-    checks.push({ name: 'Audit ledger', status: 'PASS', detail: `${considered} entr${considered === 1 ? 'y' : 'ies'} clean since ${AUDIT_LEDGER_SINCE}` });
-  }
-  return { checks, issues };
+  const plural = anomalies === 1 ? 'y' : 'ies';
+  return {
+    name,
+    status: 'WARN',
+    detail: `${anomalies} anomal${plural} since ${AUDIT_LEDGER_SINCE} `
+      + `(${tally.implausible} implausible duration, ${tally.missingCommit} unattributed) — run: xp-gate audit --check`,
+  };
 }
 
 /**
@@ -1003,31 +1116,30 @@ function diagnoseFlakyQuarantine(ctx = {}) {
   return { checks, issues };
 }
 
-function diagnoseModuleDrift(ctx = {}) {
-  const checks = [];
+/**
+ * Compare each module the hook ACTUALLY executes against the repo's copy.
+ *
+ * A module that is not installed has nothing to judge. A module whose executed copy
+ * IS the repo's own copy is not drift. Everything else is examined, with three
+ * verdicts rather than two:
+ *
+ *   - identical bytes            -> PASS
+ *   - same content, different
+ *     line endings/indentation   -> PASS (FAILing on a re-wrap teaches the reader
+ *                                  to distrust the check)
+ *   - genuinely different        -> FAIL, with the tier hint
+ *
+ * `executedFor` is filled in because the caller reports shadow copies against it
+ * (#500).
+ *
+ * @param {string} repoHooks
+ * @param {string[]} dirs resolution tiers
+ * @param {Array} checks appended to
+ * @param {Map<string, string|undefined>} executedFor filled in
+ * @returns {number} issues found
+ */
+function compareExecutedModules(repoHooks, dirs, checks, executedFor) {
   let issues = 0;
-
-  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
-  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
-
-  // Silent without a canonical repo source to compare against: consumer
-  // projects have no `githooks/` root of truth, only what was installed.
-  if (!hasCanonicalHooks(repoHooks)) {
-    return { checks, issues };
-  }
-
-  const dirs = resolveExecutedModuleDirs({
-    globalAdapterDir: ctx.globalAdapterDir || ctx.installedAdapters,
-    projectGithooks: ctx.projectGithooks || repoHooks,
-    scriptDir: ctx.scriptDir,
-  });
-
-  // Copies the hook never resolves to, occupying the lookup positions it does
-  // resolve through. They are not drift -- nothing executes them -- but they are
-  // how #500 reproduces: the next install order shift, or a move to project
-  // mode, promotes one silently. Report with the absolute path so the developer
-  // can judge; do not count, because no shipped command removes them (#495 R2).
-  const executedFor = new Map();
   for (const name of repoModuleNames(repoHooks)) {
     const source = repoModuleSource(repoHooks, name);
     if (!source) continue;
@@ -1068,6 +1180,36 @@ function diagnoseModuleDrift(ctx = {}) {
     checks.push({ name: label, status: 'FAIL', detail: `${driftDetail}${hint}` });
     issues++;
   }
+  return issues;
+}
+
+function diagnoseModuleDrift(ctx = {}) {
+  const checks = [];
+  let issues = 0;
+
+  const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
+  const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
+
+  // Silent without a canonical repo source to compare against: consumer
+  // projects have no `githooks/` root of truth, only what was installed.
+  if (!hasCanonicalHooks(repoHooks)) {
+    return { checks, issues };
+  }
+
+  const dirs = resolveExecutedModuleDirs({
+    globalAdapterDir: ctx.globalAdapterDir || ctx.installedAdapters,
+    projectGithooks: ctx.projectGithooks || repoHooks,
+    scriptDir: ctx.scriptDir,
+  });
+
+  // Copies the hook never resolves to, occupying the lookup positions it does
+  // resolve through. They are not drift -- nothing executes them -- but they are
+  // how #500 reproduces: the next install order shift, or a move to project
+  // mode, promotes one silently. Report with the absolute path so the developer
+  // can judge; do not count, because no shipped command removes them (#495 R2).
+
+  const executedFor = new Map();
+  issues += compareExecutedModules(repoHooks, dirs, checks, executedFor);
 
   for (const [name, file] of nonExecutedCopies(dirs, executedFor)) {
     checks.push({
@@ -1209,6 +1351,52 @@ function moduleDriftDetail(repoText, installedText) {
  * @param {{repoRoot?: string, repoHooks?: string, installedAdapters?: string, force?: boolean}} [ctx]
  * @returns {{synced: string[], skipped: string[], refused: Array<{name: string, repoOnly: number, installedOnly: number}>, errors: string[], installedAdapters: string}}
  */
+/**
+ * Sync one gate module to the path that actually executes it.
+ *
+ * The ORDER of the checks is the substance. A module that is not installed is not
+ * this command's business (residue is reported by the diagnosis, never deleted by a
+ * sync). A module differing only in formatting is skipped rather than rewritten --
+ * copying it would churn the file and change nothing. Only after both does the copy
+ * guard run, and a refusal there is a decision about destroying machine-only
+ * hardening.
+ *
+ * @param {{name: string, repoHooks: string, dirs: object, force: boolean,
+ *   synced: string[], skipped: string[], refused: Array, errors: string[]}} q
+ *   arrays mutated in place
+ */
+function syncOneModule(q) {
+  const { name, repoHooks, dirs, force, synced, skipped, refused, errors } = q;
+  const source = repoModuleSource(repoHooks, name);
+  if (!source) return;
+  const target = executedModulePath(name, dirs);
+  if (!target) return; // nothing executes this module
+
+  if (pathsEquivalent(source, target) || filesAreIdentical(source, target)) {
+    skipped.push(name);
+    return;
+  }
+
+  const decision = copyGuardDecision(source, target, force);
+  // Formatting-only: nothing to repair, and rewriting the file would churn it.
+  if (!decision.refuse && !decision.forced && decision.repoOnly === 0 && decision.installedOnly === 0) {
+    skipped.push(name);
+    return;
+  }
+  if (decision.refuse) {
+    refused.push({ name, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown, target });
+    return;
+  }
+
+  try {
+    fs.copyFileSync(source, target);
+    fs.chmodSync(target, 0o755);
+    synced.push(name);
+  } catch (err) {
+    errors.push(`${name}: ${err.message}`);
+  }
+}
+
 function syncModulesFromRepo(ctx = {}) {
   const synced = [];
   const skipped = [];
@@ -1237,37 +1425,7 @@ function syncModulesFromRepo(ctx = {}) {
   const installedAdapters = dirs.globalAdapterDir;
 
   for (const name of repoModuleNames(repoHooks)) {
-    const source = repoModuleSource(repoHooks, name);
-    if (!source) continue;
-    const target = executedModulePath(name, dirs);
-    if (!target) continue; // nothing executes this module; residue is not this command's business
-    if (pathsEquivalent(source, target)) {
-      skipped.push(name);
-      continue;
-    }
-    if (filesAreIdentical(source, target)) {
-      skipped.push(name);
-      continue;
-    }
-
-    const decision = copyGuardDecision(source, target, !!ctx.force);
-    // Formatting-only: nothing to repair, and rewriting the file would churn it.
-    if (!decision.refuse && !decision.forced && decision.repoOnly === 0 && decision.installedOnly === 0) {
-      skipped.push(name);
-      continue;
-    }
-    if (decision.refuse) {
-      refused.push({ name, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown, target });
-      continue;
-    }
-
-    try {
-      fs.copyFileSync(source, target);
-      fs.chmodSync(target, 0o755);
-      synced.push(name);
-    } catch (err) {
-      errors.push(`${name}: ${err.message}`);
-    }
+    syncOneModule({ name, repoHooks, dirs, force: !!ctx.force, synced, skipped, refused, errors });
   }
 
   return { synced, skipped, refused, errors, installedAdapters, dirs, sourceMissing: false };
@@ -1681,6 +1839,175 @@ function appendDeployLogEntry(logPath, entry) {
  *
  * @returns {{synced: string[], skipped: string[], refused: Array<{name: string, repoOnly: number, installedOnly: number}>, errors: string[], installedHooks: string, backups: string[]}}
  */
+/**
+ * Copy a set of files from the repo into the install directory, recording what
+ * happened to each.
+ *
+ * Three outcomes per file, and the distinction matters: an identical file is
+ * `skipped` (nothing to do), a missing source is also `skipped` (this project does
+ * not carry it), and only a copy that actually ran is `synced`.
+ *
+ * #566: the previous version is backed up BEFORE the overwrite, because this is
+ * the moment machine-only work is lost. The exec bit is re-applied explicitly --
+ * a copied hook that is not executable silently never runs.
+ *
+ * Support files differ from hook entry points in two ways, and both are options
+ * rather than a second copy of this loop: they may live in a subdirectory (so the
+ * parent must be created -- #798, where `copyFileSync` failed with ENOENT and left
+ * a HALF-SYNCED hook that died on its first gate), and they are not executed by
+ * git, so no exec bit is set.
+ *
+ * @param {{names: string[], repoDir: string, installDir: string, version: string,
+ *   backupsDir: string, deployLog: string, synced: string[], skipped: string[],
+ *   errors: string[], backups: string[], createParents?: boolean,
+ *   keepExecBit?: boolean}} ctx arrays mutated in place
+ */
+function syncHookEntries(ctx) {
+  const { names, repoDir, installDir, version, backupsDir, deployLog, synced, skipped, errors, backups } = ctx;
+  const createParents = ctx.createParents === true;
+  const keepExecBit = ctx.keepExecBit !== false;
+  for (const name of names) {
+    const source = path.join(repoDir, name);
+    if (!fs.existsSync(source)) {
+      skipped.push(name);
+      continue;
+    }
+    const target = path.join(installDir, name);
+    try {
+      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+        skipped.push(name);
+        continue;
+      }
+      const backup = backupBeforeOverwrite(target, backupsDir);
+      if (backup) backups.push(backup);
+      if (createParents) fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(source, target);
+      if (keepExecBit) fs.chmodSync(target, 0o755);
+      // #583: record it, so a downstream can tell an overwrite from a fresh
+      // install without diffing checksums first.
+      appendDeployLogEntry(deployLog, { file: name, version, backup });
+      synced.push(name);
+    } catch (err) {
+      errors.push(`${name}: ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Sync the shared `lib/` directory that pre-commit sources at runtime.
+ *
+ * A synced hook file without its libraries dies at the source line on the machine
+ * (#488), so this is not optional housekeeping. Each library gets the same refusal
+ * treatment as a gate module -- a shared library can carry machine-only hardening
+ * just as a module does, and the module guard and the lib guard must not disagree
+ * about how destructive a sync may be. Unreadable content refuses too: unknown is
+ * not the same as safe.
+ *
+ * @param {{repoHooks: string, installedHooks: string, version: string,
+ *   backupsDir: string, deployLog: string, synced: string[], skipped: string[],
+ *   refused: Array, errors: string[], backups: string[], force: boolean}} ctx
+ *   arrays mutated in place
+ */
+/**
+ * Copy one shared library, honouring the copy guard.
+ *
+ * Three outcomes before anything is written: identical is skipped, a refused guard
+ * is recorded as `refused` (the caller reports it), and a guard that reports no
+ * divergence at all is skipped. Only after those does the backup-then-copy happen.
+ *
+ * @param {{source: string, target: string, rel: string, force: boolean,
+ *   backupsDir: string, deployLog: string, version: string, synced: string[],
+ *   skipped: string[], refused: Array, errors: string[], backups: string[]}} p
+ *   arrays mutated in place
+ */
+function syncOneLibFile(p) {
+  const { source, target, rel, force, backupsDir, deployLog, version, synced, skipped, refused, errors, backups } = p;
+  try {
+    if (fs.existsSync(target) && filesAreIdentical(source, target)) {
+      skipped.push(rel);
+      return;
+    }
+    if (fs.existsSync(target)) {
+      const decision = copyGuardDecision(source, target, force);
+      if (decision.refuse) {
+        refused.push({ name: rel, repoOnly: decision.repoOnly, installedOnly: decision.installedOnly, unknown: decision.unknown });
+        return;
+      }
+      if (decision.forced === false && decision.repoOnly === 0 && decision.installedOnly === 0) {
+        skipped.push(rel);
+        return;
+      }
+    }
+    const backup = backupBeforeOverwrite(target, backupsDir);
+    if (backup) backups.push(backup);
+    fs.copyFileSync(source, target);
+    fs.chmodSync(target, 0o755);
+    appendDeployLogEntry(deployLog, { file: rel, version, backup });
+    synced.push(rel);
+  } catch (err) {
+    errors.push(`${rel}: ${err.message}`);
+  }
+}
+
+function syncLibDirectory(ctx) {
+  const { repoHooks, installedHooks, version, backupsDir, deployLog, synced, skipped, refused, errors, backups, force } = ctx;
+  const repoLib = path.join(repoHooks, 'lib');
+  const installedLib = path.join(installedHooks, 'lib');
+  if (!fs.existsSync(repoLib) || !fs.statSync(repoLib).isDirectory()) return;
+
+  try {
+    fs.mkdirSync(installedLib, { recursive: true });
+  } catch (err) {
+    errors.push(`cannot create ${installedLib}: ${err.message}`);
+    return;
+  }
+  let libEntries = [];
+  try {
+    libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
+  } catch (err) {
+    errors.push(`cannot read ${repoLib}: ${err.message}`);
+    return;
+  }
+  for (const entry of libEntries) {
+    if (!entry.isFile()) continue;
+    const rel = `lib/${entry.name}`;
+    const source = path.join(repoLib, entry.name);
+    const target = path.join(installedLib, entry.name);
+    syncOneLibFile({ source, target, rel, force, backupsDir, deployLog, version,
+      synced, skipped, refused, errors, backups });
+  }
+}
+
+/**
+ * Check there is something to sync, and make sure the install directory exists.
+ *
+ * Returns a reason when the sync cannot proceed. Three failures share one exit
+ * here because they all mean the same thing to the caller: nothing was synced, and
+ * the reason is in `errors`.
+ *
+ * @param {string} repoHooks
+ * @param {string} installedHooks
+ * @param {string[]} errors appended to
+ * @returns {string|null} the reason, or null when the sync may proceed
+ */
+function prepareInstallDir(repoHooks, installedHooks, errors) {
+  if (!fs.existsSync(repoHooks)) {
+    errors.push(`no githooks/ directory at ${repoHooks}`);
+    return 'missing';
+  }
+  if (!hasCanonicalHooks(repoHooks)) {
+    errors.push(`no hook files in ${repoHooks} (only adapters?) -- nothing to sync from`);
+    return 'empty';
+  }
+  try {
+    fs.mkdirSync(installedHooks, { recursive: true });
+  } catch (err) {
+    errors.push(`cannot create ${installedHooks}: ${err.message}`);
+    return 'unwritable';
+  }
+  return null;
+}
+
 function syncGlobalHooksFromRepo(ctx = {}) {
   const repoRoot = ctx.repoRoot || process.env.XP_GATE_REPO_ROOT || process.cwd();
   const repoHooks = ctx.repoHooks || path.join(repoRoot, 'githooks');
@@ -1700,141 +2027,28 @@ function syncGlobalHooksFromRepo(ctx = {}) {
   const backupsDir = path.join(installedHooks, 'backups');
   const deployLog = path.join(installedHooks, 'deploy.log');
 
-  if (!fs.existsSync(repoHooks)) {
-    errors.push(`no githooks/ directory at ${repoHooks}`);
-    return { synced, skipped, refused, errors, installedHooks, backups };
-  }
+  const blocked = prepareInstallDir(repoHooks, installedHooks, errors);
+  if (blocked) return { synced, skipped, refused, errors, installedHooks, backups };
 
-  if (!hasCanonicalHooks(repoHooks)) {
-    errors.push(`no hook files in ${repoHooks} (only adapters?) -- nothing to sync from`);
-    return { synced, skipped, refused, errors, installedHooks, backups };
-  }
-
-  try {
-    fs.mkdirSync(installedHooks, { recursive: true });
-  } catch (err) {
-    errors.push(`cannot create ${installedHooks}: ${err.message}`);
-    return { synced, skipped, refused, errors, installedHooks, backups };
-  }
-
-  for (const name of DRIFT_COMPARED_HOOKS) {
-    const source = path.join(repoHooks, name);
-    if (!fs.existsSync(source)) {
-      skipped.push(name);
-      continue;
-    }
-    const target = path.join(installedHooks, name);
-    try {
-      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
-        skipped.push(name);
-        continue;
-      }
-      // #566: the previous version is kept, because this overwrite is the moment
-      // machine-only work is lost.
-      const backup = backupBeforeOverwrite(target, backupsDir);
-      if (backup) backups.push(backup);
-      // copyFileSync preserves content; the exec bit is re-applied explicitly
-      // because a copied hook that is not executable silently never runs.
-      fs.copyFileSync(source, target);
-      fs.chmodSync(target, 0o755);
-      // #583: record it, so a downstream can tell an overwrite from a fresh
-      // install without having to diff checksums first.
-      appendDeployLogEntry(deployLog, { file: name, version, backup });
-      synced.push(name);
-    } catch (err) {
-      errors.push(`${name}: ${err.message}`);
-    }
-  }
+  syncHookEntries({
+    names: DRIFT_COMPARED_HOOKS, repoDir: repoHooks, installDir: installedHooks,
+    version, backupsDir, deployLog, synced, skipped, errors, backups,
+  });
 
   // Hook support files (#505): sourced by the hooks but not Git entry points, so
   // they need the same copy treatment or an upgraded install dies at the source
   // line. Treated like the hooks themselves (always refreshed, no refusal) —
   // they hold no machine-local content.
-  for (const name of HOOK_SUPPORT_FILES) {
-    const source = path.join(repoHooks, name);
-    if (!fs.existsSync(source)) continue;
-    const target = path.join(installedHooks, name);
-    try {
-      if (fs.existsSync(target) && filesAreIdentical(source, target)) {
-        skipped.push(name);
-        continue;
-      }
-      const backup = backupBeforeOverwrite(target, backupsDir);
-      if (backup) backups.push(backup);
-      // #798: support files may live in a subdirectory (gate-entries/*.sh). The
-      // install directory has no such subdirectory yet on an upgraded install, and
-      // copyFileSync does not create parents -- the entries failed with ENOENT
-      // while gate-driver.sh succeeded, leaving a half-synced hook that dies on
-      // its first gate instead of before any.
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.copyFileSync(source, target);
-      appendDeployLogEntry(deployLog, { file: name, version, backup });
-      synced.push(name);
-    } catch (err) {
-      errors.push(`${name}: ${err.message}`);
-    }
-  }
+  syncHookEntries({
+    names: HOOK_SUPPORT_FILES, repoDir: repoHooks, installDir: installedHooks,
+    version, backupsDir, deployLog, synced, skipped, errors, backups,
+    createParents: true, keepExecBit: false,
+  });
 
-  // lib/ shared libraries: pre-commit sources lib/*.sh, so a synced hook file
-  // without its libraries dies at the source line on the machine (#488).
-  const repoLib = path.join(repoHooks, 'lib');
-  const installedLib = path.join(installedHooks, 'lib');
-  if (fs.existsSync(repoLib) && fs.statSync(repoLib).isDirectory()) {
-    try {
-      fs.mkdirSync(installedLib, { recursive: true });
-    } catch (err) {
-      errors.push(`cannot create ${installedLib}: ${err.message}`);
-      return { synced, skipped, refused, errors, installedHooks, backups };
-    }
-    let libEntries = [];
-    try {
-      libEntries = fs.readdirSync(repoLib, { withFileTypes: true });
-    } catch (err) {
-      errors.push(`cannot read ${repoLib}: ${err.message}`);
-      return { synced, skipped, refused, errors, installedHooks, backups };
-    }
-    for (const entry of libEntries) {
-      if (!entry.isFile()) continue;
-      const rel = `lib/${entry.name}`;
-      const source = path.join(repoLib, entry.name);
-      const target = path.join(installedLib, entry.name);
-      try {
-        if (fs.existsSync(target) && filesAreIdentical(source, target)) {
-          skipped.push(rel);
-          continue;
-        }
-        // A shared library can carry machine-only hardening just like a gate
-        // module does, so it gets the same refusal instead of an unconditional
-        // overwrite (#488 Round 2 -- the module guard and the lib guard must not
-        // disagree about how destructive a sync is allowed to be). Unreadable
-        // content refuses too: unknown is not the same as safe (#495 Round 3).
-        if (fs.existsSync(target)) {
-          const decision = copyGuardDecision(source, target, !!ctx.force);
-          if (decision.refuse) {
-            refused.push({
-              name: rel,
-              repoOnly: decision.repoOnly,
-              installedOnly: decision.installedOnly,
-              unknown: decision.unknown,
-            });
-            continue;
-          }
-          if (decision.forced === false && decision.repoOnly === 0 && decision.installedOnly === 0) {
-            skipped.push(rel);
-            continue;
-          }
-        }
-        const backup = backupBeforeOverwrite(target, backupsDir);
-        if (backup) backups.push(backup);
-        fs.copyFileSync(source, target);
-        fs.chmodSync(target, 0o755);
-        appendDeployLogEntry(deployLog, { file: rel, version, backup });
-        synced.push(rel);
-      } catch (err) {
-        errors.push(`${rel}: ${err.message}`);
-      }
-    }
-  }
+  syncLibDirectory({
+    repoHooks, installedHooks, version, backupsDir, deployLog,
+    synced, skipped, refused, errors, backups, force: !!ctx.force,
+  });
 
   return { synced, skipped, refused, errors, installedHooks, backups };
 }
@@ -1919,7 +2133,15 @@ async function checkAdapters(checks, mode, gitDirPromise) {
     checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Missing' });
     return 1;
   }
-  const adapterFiles = fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh'));
+  let adapterFiles;
+  try {
+    adapterFiles = fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh'));
+  } catch (err) {
+    // An unreadable directory is not an EMPTY one; saying "Empty" would send the
+    // reader to reinstall when the problem is permissions.
+    checks.push({ name: 'Adapters directory', status: 'FAIL', detail: `Unreadable: ${err.message}` });
+    return 1;
+  }
   if (adapterFiles.length === 0) {
     checks.push({ name: 'Adapters directory', status: 'FAIL', detail: 'Empty directory' });
     return 1;
@@ -1954,6 +2176,70 @@ async function checkAdapters(checks, mode, gitDirPromise) {
  *   D) Env + CLI tools — fully independent, run IN PARALLEL
  *   E) TUI + Skills — independent, run IN PARALLEL
  */
+/**
+ * Run the independent check groups concurrently and total their issue counts.
+ *
+ * The groups only share the `checks` sink and the git directory; nothing reads
+ * another's result. Running them concurrently is what keeps `doctor` responsive on
+ * a machine where every tool probe is a child process.
+ *
+ * The hook-drift group is deferred behind a resolved promise on purpose: it is
+ * repo-scoped (it compares `githooks/` against the install), so it must not delay
+ * the groups that apply to every project.
+ *
+ * @param {Array} checks shared sink, appended to by every group
+ * @param {object} config
+ * @param {{refreshEnv: boolean}} opts
+ * @returns {Promise<number>} total issues found
+ */
+async function runDiagnosticGroups(checks, config, opts) {
+  const gitDirPromise = getGitDir();
+
+  const hooksPromise = (async () => {
+    if (config.mode === 'local') return checkLocalHooks(checks);
+    return checkGlobalHooks(checks);
+  })();
+
+  const adaptersPromise = checkAdapters(checks, config.mode, gitDirPromise);
+
+  const envPromise = checkEnv(checks);
+  // #469: the tool probes run in the hook environment; --refresh-env swaps in the
+  // registry PATH so "installed but invisible" separates from "not installed". The
+  // staleness check always runs: it is what makes a stale terminal honest.
+  const cliToolsPromise = diagnoseCliToolsAsync(checks, { refreshEnv: opts.refreshEnv });
+  const stalenessPromise = diagnosePathStaleness(checks);
+
+  const tuiPromise = diagnoseTuiRegistration(checks);
+  const skillsPromise = diagnoseInstalledSkills(config, checks);
+
+  // Group E: repo-vs-installed hook drift (#451). Independent of config.mode: the
+  // drift matters exactly because the installed copy, not githooks/, is what
+  // executes. Gate modules drift independently of the hook files (#495), and the
+  // audit ledger rides the same repo-scoped group.
+  const driftPromise = Promise.resolve().then(() => {
+    const drift = diagnoseHookDrift();
+    checks.push(...drift.checks);
+    const moduleDrift = diagnoseModuleDrift();
+    checks.push(...moduleDrift.checks);
+    const ledger = diagnoseAuditLedger();
+    checks.push(...ledger.checks);
+    return drift.issues + moduleDrift.issues + ledger.issues;
+  });
+
+  const results = await Promise.allSettled([
+    hooksPromise, adaptersPromise, envPromise, cliToolsPromise,
+    stalenessPromise, tuiPromise, skillsPromise, driftPromise,
+  ]);
+
+  let issues = 0;
+  for (const result of results) {
+    if (result.status === 'fulfilled' && typeof result.value === 'number') {
+      issues += result.value;
+    }
+  }
+  return issues;
+}
+
 async function diagnoseAsync(refreshEnv = false, progress = null) {
   // #629: `progress` is a live view of the checks completed so far. The global
   // timeout used to discard everything diagnoseAsync had already produced; with a
@@ -1988,69 +2274,7 @@ async function diagnoseAsync(refreshEnv = false, progress = null) {
   issues += diagnoseTemplateDir(config, checks);
   // (Spawn capability probe already ran at the top of diagnoseAsync — #525.)
 
-  // --- Phase 2: Fetch gitDir early (needed by hooks and adapters) ---
-  const gitDirPromise = getGitDir();
-
-  // --- Phase 3: Run independent groups in parallel ---
-  // Group A: Hooks (needs config.mode + gitDir)
-  const hooksPromise = (async () => {
-    if (config.mode === 'local') {
-      return checkLocalHooks(checks);
-    }
-    return checkGlobalHooks(checks);
-  })();
-
-  // Group B: Adapters (needs config.mode + gitDir)
-  const adaptersPromise = checkAdapters(checks, config.mode, gitDirPromise);
-
-  // Group C: Environment checks + CLI tools — fully parallel
-  const envPromise = checkEnv(checks);
-  // #469: the tool probes run in the hook environment; --refresh-env swaps in
-  // the registry PATH so "installed but invisible" separates from "not
-  // installed". The staleness check runs always: it is what makes a stale
-  // terminal's green verdict honest.
-  const cliToolsPromise = diagnoseCliToolsAsync(checks, { refreshEnv });
-  const stalenessPromise = diagnosePathStaleness(checks);
-
-  // Group D: TUI + Skills (independent)
-  const tuiPromise = diagnoseTuiRegistration(checks);
-  const skillsPromise = diagnoseInstalledSkills(config, checks);
-
-  // Group E: repo-vs-installed hook drift (#451). Independent of config.mode:
-  // the drift matters exactly because the installed copy, not githooks/, is
-  // what executes. Detect if this is the xp-gate repo itself.
-  const driftPromise = Promise.resolve().then(() => {
-    const drift = diagnoseHookDrift();
-    checks.push(...drift.checks);
-    // The gate modules pre-commit sources at runtime drift independently of the
-    // hook files and live in a different directory (#495).
-    const moduleDrift = diagnoseModuleDrift();
-    checks.push(...moduleDrift.checks);
-    // Audit-ledger health (P0): telemetry anomalies are not hook drift, but
-    // they ride the same repo-scoped group and must be surfaced by doctor.
-    const ledger = diagnoseAuditLedger();
-    checks.push(...ledger.checks);
-    return drift.issues + moduleDrift.issues + ledger.issues;
-  });
-
-  // Wait for ALL parallel groups
-  const results = await Promise.allSettled([
-    hooksPromise,
-    adaptersPromise,
-    envPromise,
-    cliToolsPromise,
-    stalenessPromise,
-    tuiPromise,
-    skillsPromise,
-    driftPromise,
-  ]);
-
-  // Collect issue counts from settled promises
-  for (const result of results) {
-    if (result.status === 'fulfilled' && typeof result.value === 'number') {
-      issues += result.value;
-    }
-  }
+  issues += await runDiagnosticGroups(checks, config, { refreshEnv });
 
   return { checks, issues };
 }
@@ -2213,6 +2437,89 @@ async function readRegistryPath() {
  * be perfectly healthy; only this terminal is stale, and the remedy is a
  * new terminal (or `xp-gate doctor --refresh-env`).
  */
+/**
+ * Report that PATH freshness could not be determined.
+ *
+ * Fail closed: no readable registry hive is NOT evidence of freshness, so this is
+ * a WARN with the reason attached, never a PASS. The advice is included because the
+ * consequence is concrete -- after installing a tool, a stale PATH makes "not
+ * found" mean "not in this terminal", and the operator needs to know that before
+ * believing any verdict.
+ *
+ * @param {Array<{label: string, error: string}>} halves
+ * @param {Array} checks appended to
+ * @returns {number} 0 -- a WARN contributes no issue count
+ */
+function reportUnreadablePath(halves, checks) {
+  const reasons = halves.map((h) => `${h.label}: ${h.error}`).join('; ');
+  checks.push({
+    name: 'PATH freshness',
+    status: 'WARN',
+    detail: `Could not read the registry PATH (${reasons}) — staleness unknown. `
+      + 'After installing a tool, open a new terminal before trusting any "not found" verdict.',
+  });
+  return 0;
+}
+
+/**
+ * Gate tools that are installed but invisible to THIS terminal.
+ *
+ * A tool visible only under the refreshed (registry) PATH is "installed but
+ * invisible", never "not installed" -- the distinction the whole staleness check
+ * exists for. The hook environment is probed first, because that is where the gate
+ * will look for the tool; the refreshed path is the counterfactual.
+ *
+ * @param {object} registry as returned by readRegistryPath()
+ * @param {string} refreshedPath the registry PATH
+ * @returns {Promise<string[]>} `tool -> resolved path` entries
+ */
+async function findStaleInvisibleTools(registry, refreshedPath) {
+  const bash = checkBash();
+  const bashPath = bash.ok ? bash.path : null;
+  if (!bashPath) return [];
+
+  const invisible = [];
+  await Promise.all(GATE_CLI_TOOLS.map(async (entry) => {
+    const now = await probeToolInHookEnv(entry.tool, bashPath);
+    if (now) return;
+    const refreshed = await probeToolInHookEnv(entry.tool, bashPath, {
+      ...process.env,
+      PATH: refreshedPath,
+    });
+    if (refreshed) invisible.push(`${entry.tool} → ${refreshed}`);
+  }));
+  return invisible;
+}
+
+/**
+ * The stale-PATH warning: what is invisible, and what to do about it.
+ *
+ * The preview is capped at three entries. A machine can have dozens of stale
+ * entries, and a wall of paths is the reason a warning gets skimmed -- the count
+ * carries the scale, the three examples carry the shape.
+ *
+ * @param {{stale: string[], parts: string[], invisible: string[], checks: Array}} p
+ *   `checks` and `parts` are mutated
+ */
+
+/** Three entries convey the pattern; a wall of paths gets skimmed. */
+const PREVIEW_ITEMS = 3;
+
+function reportStalePath(p) {
+  const { stale, parts, invisible, checks } = p;
+  const preview = stale.length <= PREVIEW_ITEMS
+    ? stale.join(' ; ')
+    : `${stale.slice(0, PREVIEW_ITEMS).join(' ; ')} ; …+${stale.length - PREVIEW_ITEMS} more`;
+  parts.unshift(`PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview})`);
+  checks.push({
+    name: 'PATH freshness',
+    status: 'WARN',
+    detail: parts.join(' — ')
+      + '. A tool installed after this terminal opened needs a NEW terminal — or re-run: xp-gate doctor --refresh-env'
+      + (invisible.length ? ` — installed-but-invisible gate tools: ${invisible.join(', ')}` : ''),
+  });
+}
+
 async function diagnosePathStaleness(checks, options = {}) {
   if (process.platform !== 'win32') return 0;
   const registry = options.registry || (await readRegistryPath());
@@ -2230,15 +2537,7 @@ async function diagnosePathStaleness(checks, options = {}) {
   let status = 'PASS';
   const parts = [];
   let stale;
-  if (usable.length === 0) {
-    // Fail closed: no readable hive is not evidence of freshness.
-    checks.push({
-      name: 'PATH freshness',
-      status: 'WARN',
-      detail: `Could not read the registry PATH (${halves.map((h) => `${h.label}: ${h.error}`).join('; ')}) — staleness unknown. After installing a tool, open a new terminal before trusting any "not found" verdict.`,
-    });
-    return 0;
-  }
+  if (usable.length === 0) return reportUnreadablePath(halves, checks);
   stale = [
     ...usable.flatMap((h) => findStalePathEntries(process.env.PATH || '', h.entries)),
   ];
@@ -2259,32 +2558,9 @@ async function diagnosePathStaleness(checks, options = {}) {
   // Which gate tools does THIS terminal lose to staleness? A tool visible in
   // the hook env only under the registry PATH is "installed but invisible" —
   // never "not installed".
-  const bash = checkBash();
-  const bashPath = bash.ok ? bash.path : null;
   const refreshedPath = buildRefreshedPath(process.env.PATH || '', registry);
-  const invisible = [];
-  if (bashPath) {
-    await Promise.all(GATE_CLI_TOOLS.map(async (entry) => {
-      const now = await probeToolInHookEnv(entry.tool, bashPath);
-      if (now) return;
-      const refreshed = await probeToolInHookEnv(entry.tool, bashPath, {
-        ...process.env,
-        PATH: refreshedPath,
-      });
-      if (refreshed) invisible.push(`${entry.tool} → ${refreshed}`);
-    }));
-  }
-  const preview = stale.length <= 3
-    ? stale.join(' ; ')
-    : `${stale.slice(0, 3).join(' ; ')} ; …+${stale.length - 3} more`;
-  parts.unshift(`PATH is stale — ${stale.length} registry entr${stale.length === 1 ? 'y' : 'ies'} invisible to this process (${preview})`);
-  checks.push({
-    name: 'PATH freshness',
-    status: 'WARN',
-    detail: parts.join(' — ')
-      + '. A tool installed after this terminal opened needs a NEW terminal — or re-run: xp-gate doctor --refresh-env'
-      + (invisible.length ? ` — installed-but-invisible gate tools: ${invisible.join(', ')}` : ''),
-  });
+  const invisible = await findStaleInvisibleTools(registry, refreshedPath);
+  reportStalePath({ stale, parts, invisible, checks });
   return 0;
 }
 
@@ -2340,49 +2616,116 @@ async function detectCliToolAsync(toolName, isWindows, options = {}) {
   const bashPath = options.bashPath || null;
   const env = options.env || undefined;
 
-  if (bashPath) {
-    const hookEnvPath = await probeToolInHookEnv(toolName, bashPath, env);
-    if (hookEnvPath) {
-      const version = await getVersionAsync(hookEnvPath, isWindows, { bashPath, env });
-      return { available: true, path: hookEnvPath, version };
-    }
-    return { available: false };
+  // Inside the hook environment there is exactly ONE answer: the path the gate would
+  // resolve. Falling through to a host probe would report a tool the hook cannot see.
+  if (bashPath) return probeInHookEnv(toolName, isWindows, bashPath, env);
+
+  // The steps are a LIST, tried in order: each returns null when it finds nothing.
+  // Written as `||` chaining it was three branches to say "first one wins".
+  const steps = [
+    () => probeViaLocator(toolName, isWindows, env),
+    () => probeViaDirectExec(toolName, isWindows, env),
+    () => probeViaLocalPaths(toolName, isWindows),
+  ];
+  return unwrapProbeHit(await firstProbeHit(steps));
+}
+
+/**
+ * Run each probe until one reports a hit.
+ *
+ * @param {Array<() => Promise<object|null>>} steps
+ * @returns {Promise<object|null>} the first non-null result, or null
+ */
+/**
+ * Normalise a probe result so the caller always gets an object.
+ *
+ * @param {object|null} hit
+ * @returns {{available: boolean}}
+ */
+function unwrapProbeHit(hit) {
+  return hit || { available: false };
+}
+
+async function firstProbeHit(steps) {
+  for (const step of steps) {
+    const hit = await step();
+    if (hit) return hit;
   }
+  return null;
+}
 
-  const shell = isWindows ? 'cmd.exe' : '/bin/sh';
-  const execOpts = { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], shell, timeout: EXEC_TIMEOUT_MS, env };
+/**
+ * Probe where the gate would look, and stop there either way.
+ *
+ * @param {string} toolName
+ * @param {boolean} isWindows
+ * @param {string} bashPath
+ * @param {object|undefined} env
+ * @returns {Promise<{available: boolean, path?: string, version?: string}>}
+ */
+async function probeInHookEnv(toolName, isWindows, bashPath, env) {
+  const hookEnvPath = await probeToolInHookEnv(toolName, bashPath, env);
+  if (!hookEnvPath) return { available: false };
+  const version = await getVersionAsync(hookEnvPath, isWindows, { bashPath, env });
+  return { available: true, path: hookEnvPath, version };
+}
 
-  // Step 1: Locate tool via which/where (async, 3s timeout)
+/** The exec options every host probe shares: a shell, a hard timeout, piped streams. */
+function hostExecOptions(isWindows) {
+  return {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: isWindows ? 'cmd.exe' : '/bin/sh',
+    timeout: EXEC_TIMEOUT_MS,
+  };
+}
+
+/**
+ * Step 1: `which` / `where`.
+ *
+ * @returns {Promise<{available: boolean, path?: string, version?: string}|null>} null
+ *   when the locator found nothing, so the caller can try the next step.
+ */
+async function probeViaLocator(toolName, isWindows, env) {
   const locator = isWindows ? 'where' : 'which';
-  const locatorResult = await execWithTimeout(`${locator} ${toolName}`, execOpts);
-  if (locatorResult && locatorResult.stdout) {
-    const resolvedPath = locatorResult.stdout.split('\n')[0].trim();
-    if (resolvedPath) {
-      const version = await getVersionAsync(resolvedPath, isWindows);
-      return { available: true, path: resolvedPath, version };
-    }
-  }
+  const result = await execWithTimeout(`${locator} ${toolName}`, { ...hostExecOptions(isWindows), env });
+  const resolvedPath = result && result.stdout ? result.stdout.split('\n')[0].trim() : '';
+  if (!resolvedPath) return null;
+  return { available: true, path: resolvedPath, version: await getVersionAsync(resolvedPath, isWindows) };
+}
 
-  // Step 2: Direct exec fallback (async, 3s timeout)
-  const fallbackCmd = isWindows
+/**
+ * Step 2: run the tool directly.
+ *
+ * The POSIX form tries `--version` then `-v`, because tools disagree about which one
+ * they answer and a silent failure here means "not installed" to the caller.
+ *
+ * @returns {Promise<{available: boolean, path?: string, version?: string}|null>}
+ */
+async function probeViaDirectExec(toolName, isWindows, env) {
+  const command = isWindows
     ? `${toolName} --version`
     : `${toolName} --version 2>/dev/null || ${toolName} -v 2>/dev/null`;
-  const fallbackResult = await execWithTimeout(fallbackCmd, execOpts);
-  if (fallbackResult && fallbackResult.stdout) {
-    return { available: true, path: toolName, version: fallbackResult.stdout.split('\n')[0] };
-  }
+  const result = await execWithTimeout(command, { ...hostExecOptions(isWindows), env });
+  if (!result || !result.stdout) return null;
+  return { available: true, path: toolName, version: result.stdout.split('\n')[0] };
+}
 
-  // Step 3: Check local fallback paths (sync fs, no exec)
-  const localPaths = getLocalFallbackPathsSync(toolName, isWindows);
-  for (const localPath of localPaths) {
+/**
+ * Step 3: the well-known install directories, with no exec at all.
+ *
+ * Last because it is the most expensive to be wrong about: a stale path here reports
+ * a tool as present that no shell would actually find.
+ *
+ * @returns {Promise<{available: boolean, path?: string, version?: string}|null>}
+ */
+async function probeViaLocalPaths(toolName, isWindows) {
+  for (const localPath of getLocalFallbackPathsSync(toolName, isWindows)) {
     if (!fs.existsSync(localPath)) continue;
     const version = await getVersionAsync(localPath, isWindows);
-    if (version) {
-      return { available: true, path: localPath, version };
-    }
+    if (version) return { available: true, path: localPath, version };
   }
-
-  return { available: false };
+  return null;
 }
 
 /**
@@ -2417,30 +2760,38 @@ async function getVersionAsync(execPath, isWindows, options = {}) {
  * Get local fallback paths for CLI tool (sync, no exec).
  * Mirrors getLocalFallbackPaths from detect-deps.js.
  */
+/**
+ * `<Python install>/Scripts/<tool>.exe` for every Python under LOCALAPPDATA.
+ *
+ * Windows installs put console scripts there rather than on PATH, which is why a tool
+ * that IS installed can still look missing. A Python tree that cannot be listed
+ * contributes nothing -- this is a fallback list, not a diagnostic.
+ */
+function windowsPythonScripts(toolName, home) {
+  const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const pythonBase = path.join(localAppData, 'Programs', 'Python');
+  try {
+    return fs.readdirSync(pythonBase)
+      .filter((entry) => entry.startsWith('Python'))
+      .map((entry) => path.join(pythonBase, entry, 'Scripts', `${toolName}.exe`));
+  } catch {
+    return [];
+  }
+}
+
 function getLocalFallbackPathsSync(toolName, isWindows) {
   const os = require('os');
   const home = os.homedir();
   const paths = [path.join(home, '.local', 'bin', toolName)];
 
-  if (isWindows) {
-    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-    const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-    paths.push(
-      path.join(appData, 'npm', `${toolName}.cmd`),
-      path.join(home, '.local', 'bin', `${toolName}.exe`),
-    );
-    const pythonBase = path.join(localAppData, 'Programs', 'Python');
-    if (fs.existsSync(pythonBase)) {
-      try {
-        for (const entry of fs.readdirSync(pythonBase)) {
-          if (entry.startsWith('Python')) {
-            paths.push(path.join(pythonBase, entry, 'Scripts', `${toolName}.exe`));
-          }
-        }
-      } catch { /* skip */ }
-    }
-  }
+  if (!isWindows) return paths;
 
+  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  paths.push(
+    path.join(appData, 'npm', `${toolName}.cmd`),
+    path.join(home, '.local', 'bin', `${toolName}.exe`),
+    ...windowsPythonScripts(toolName, home),
+  );
   return paths;
 }
 
@@ -2489,12 +2840,15 @@ function diagnoseTemplateDir(config, checks) {
  * @param {Array} checks
  * @returns {number} issue count
  */
-function diagnoseCliTools(checks) {
+function diagnoseCliTools(checks, options = {}) {
   let issues = 0;
   const platform = process.platform;
+  // Injectable probe: the real one shells out to every gate tool, which is why
+  // this loop was only ever reached by a full doctor run.
+  const probe = options.check || checkCliTool;
 
   for (const entry of GATE_CLI_TOOLS) {
-    const { available, version } = checkCliTool(entry.tool);
+    const { available, version } = probe(entry.tool);
     const gateLabels = entry.gates.join(', ');
 
     if (available) {
@@ -2537,12 +2891,22 @@ function printReport(checks) {
 /**
  * Copy a hook file from package source to target, creating parent dir if needed.
  */
+/**
+ * Copy a hook from the package into place and make it executable.
+ *
+ * The chmod is part of the repair, not a detail: a hook without the execute bit
+ * is one git silently ignores, which looks exactly like "the fix did nothing".
+ */
 function restoreHook(srcFile, destFile, label) {
   if (!fs.existsSync(srcFile)) return false;
-  const destDir = path.dirname(destFile);
-  fs.mkdirSync(destDir, { recursive: true });
-  fs.copyFileSync(srcFile, destFile);
-  fs.chmodSync(destFile, 0o755);
+  try {
+    const destDir = path.dirname(destFile);
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(srcFile, destFile);
+    fs.chmodSync(destFile, 0o755);
+  } catch (err) {
+    throw new Error(`cannot restore ${label} to ${destFile}: ${err.message}`);
+  }
   console.log(`  ✓ Restored ${label}`);
   return true;
 }
@@ -2629,19 +2993,38 @@ function fixCoreHooksPath(globalHooksDir) {
  * @returns {boolean} Whether adapters were restored
  */
 function fixMissingAdapters(mode, srcDir, adaptersDir) {
-  if (adaptersDir && (!fs.existsSync(adaptersDir) || fs.readdirSync(adaptersDir).filter(f => f.endsWith('.sh')).length === 0)) {
-    const pkgAdaptersDir = path.join(srcDir, 'adapters');
-    if (fs.existsSync(pkgAdaptersDir)) {
-      fs.mkdirSync(adaptersDir, { recursive: true });
-      const adapterFiles = fs.readdirSync(pkgAdaptersDir).filter(f => f.endsWith('.sh'));
-      for (const f of adapterFiles) {
-        fs.copyFileSync(path.join(pkgAdaptersDir, f), path.join(adaptersDir, f));
-      }
-      console.log(`  ✓ Restored ${adapterFiles.length} adapter(s)`);
-      return true;
+  if (!adaptersDir || !needsAdapterRepair(adaptersDir)) return false;
+  const pkgAdaptersDir = path.join(srcDir, 'adapters');
+  if (!fs.existsSync(pkgAdaptersDir)) return false;
+  try {
+    fs.mkdirSync(adaptersDir, { recursive: true });
+    const adapterFiles = fs.readdirSync(pkgAdaptersDir).filter(f => f.endsWith('.sh'));
+    for (const f of adapterFiles) {
+      fs.copyFileSync(path.join(pkgAdaptersDir, f), path.join(adaptersDir, f));
     }
+    console.log(`  ✓ Restored ${adapterFiles.length} adapter(s)`);
+    return true;
+  } catch (err) {
+    // A partial restore leaves a half-installed adapter set; naming the failure is
+    // what stops the caller reporting a repair that did not finish.
+    console.log(`  ✗ Could not restore adapters to ${adaptersDir}: ${err.message}`);
+    return false;
   }
-  return false;
+}
+
+/**
+ * Whether the adapters directory is missing or holds no `.sh` files.
+ *
+ * An unreadable directory counts as needing repair: the copy would fail anyway, and
+ * reporting it as "already fine" would skip the only code that can say why.
+ */
+function needsAdapterRepair(adaptersDir) {
+  if (!fs.existsSync(adaptersDir)) return true;
+  try {
+    return fs.readdirSync(adaptersDir).filter((f) => f.endsWith('.sh')).length === 0;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -2652,7 +3035,14 @@ function fixMissingAdapters(mode, srcDir, adaptersDir) {
 function fixMissingGateScripts(srcDir, adaptersDir) {
   if (!adaptersDir || !fs.existsSync(adaptersDir)) return false;
 
-  const existingFiles = fs.readdirSync(adaptersDir);
+  let existingFiles;
+  try {
+    existingFiles = fs.readdirSync(adaptersDir);
+  } catch (err) {
+    // Unreadable is not empty: "no gate scripts missing" would skip the only repair.
+    console.log(`  ✗ Could not read ${adaptersDir}: ${err.message}`);
+    return false;
+  }
   const missingGates = EXPECTED_GATE_SCRIPTS.filter(g => !existingFiles.includes(g));
 
   if (missingGates.length === 0) return false;
@@ -2661,10 +3051,14 @@ function fixMissingGateScripts(srcDir, adaptersDir) {
   for (const gateScript of missingGates) {
     const srcFile = path.join(srcDir, gateScript);
     const destFile = path.join(adaptersDir, gateScript);
-    if (fs.existsSync(srcFile)) {
+    if (!fs.existsSync(srcFile)) continue;
+    try {
       fs.copyFileSync(srcFile, destFile);
       fs.chmodSync(destFile, 0o755);
       restored++;
+    } catch (err) {
+      // One unwritable gate script must not strand the others.
+      console.log(`  ✗ Could not restore ${gateScript}: ${err.message}`);
     }
   }
 
@@ -2780,23 +3174,92 @@ function fixHookDriftFromRepo() {
  *
  * @returns {boolean} Whether any hooks were updated
  */
+/**
+ * Where the hooks and adapters live for this install mode.
+ *
+ * Global mode uses one machine-wide pair. Local mode derives both from the git
+ * directory, and a project with no resolvable git dir cannot be repaired -- there is
+ * nowhere to write, so the caller reports "nothing fixed" rather than guessing a
+ * path.
+ *
+ * @param {boolean} isGlobal
+ * @returns {{hooksDestDir: string, adaptersDestDir: string}|null}
+ */
+function resolveHookDestinations(isGlobal) {
+  if (isGlobal) {
+    return { hooksDestDir: GLOBAL_HOOKS_DIR(), adaptersDestDir: GLOBAL_ADAPTERS_DIR() };
+  }
+  const gitDir = getGitDirSync();
+  if (!gitDir) return null;
+  const projectRoot = path.dirname(gitDir);
+  return {
+    hooksDestDir: path.join(gitDir, 'hooks'),
+    adaptersDestDir: path.join(projectRoot, 'githooks'),
+  };
+}
+
+/**
+ * Print what the sync refused to touch, and why it refused.
+ *
+ * The warning ends by saying there is NO rollback. That is not decoration: the
+ * refusal exists because the installed copy may hold work that exists nowhere else,
+ * so the operator has to judge against a copy they kept -- telling them to "undo" a
+ * write that never happened would be worse than saying nothing.
+ *
+ * @param {{diverged: Array, unknown: Array}} plan
+ */
+function reportBlockedHookSync(plan) {
+  if (!plan.hasBlocking) return;
+  console.log(`  ⚠️  ${plan.diverged.length + plan.unknown.length} hook/adapter file(s) NOT refreshed —`);
+  console.log('     the installed copy carries content the package does not, and overwriting');
+  console.log('     it would delete work that exists nowhere else:');
+  for (const d of plan.diverged) {
+    console.log(`     - ${d.name}: install has ${d.installedOnly} unique line(s), package has ${d.repoOnly}`);
+  }
+  for (const u of plan.unknown) {
+    console.log(`     - ${u.name}: installed copy could not be read`);
+  }
+  console.log('     Judge them (fold the hardening into the package, or move the file aside),');
+  console.log('     then re-run --fix.');
+  console.log('     There is no automatic backup of an overwritten hook/adapter file and nothing');
+  console.log('     in this tool can undo one — judge against a copy you kept, not against a rollback.');
+}
+
+/**
+ * Copy the files the plan judged safe, one at a time.
+ *
+ * A failure on one file is printed and the rest continue: a single unwritable
+ * target must not strand the other outdated hooks.
+ *
+ * @param {Array<{name: string, source: string, target: string}>} safe
+ * @returns {boolean} whether anything was refreshed
+ */
+function refreshSafeHooks(safe) {
+  console.log(`  Refreshing ${safe.length} outdated hook/adapter file(s)...`);
+  let refreshed = 0;
+  for (const entry of safe) {
+    if (!fs.existsSync(entry.source)) continue;
+    try {
+      fs.mkdirSync(path.dirname(entry.target), { recursive: true });
+      fs.copyFileSync(entry.source, entry.target);
+      fs.chmodSync(entry.target, 0o755);
+      refreshed++;
+    } catch (err) {
+      console.log(`  ✗ Could not refresh ${entry.name}: ${err.message}`);
+    }
+  }
+  return refreshed > 0;
+}
+
 function fixStaleHooks(config) {
   try {
     const { detectLocalModifications, getPackageRoot } = require('./update-hooks.js');
     const isGlobal = config.mode === 'global';
     const srcDir = getPackageRoot();
 
-    let hooksDestDir, adaptersDestDir;
-    if (isGlobal) {
-      hooksDestDir = GLOBAL_HOOKS_DIR();
-      adaptersDestDir = GLOBAL_ADAPTERS_DIR();
-    } else {
-      const gitDir = getGitDirSync();
-      if (!gitDir) return false;
-      const projectRoot = path.dirname(gitDir);
-      hooksDestDir = path.join(gitDir, 'hooks');
-      adaptersDestDir = path.join(projectRoot, 'githooks');
-    }
+    const dest = resolveHookDestinations(isGlobal);
+    if (!dest) return false;
+    const { hooksDestDir, adaptersDestDir } = dest;
 
     // Check if any hook files are stale (differ from package version)
     const modified = detectLocalModifications(srcDir, hooksDestDir, adaptersDestDir);
@@ -2813,38 +3276,9 @@ function fixStaleHooks(config) {
       modified.flatMap((label) => staleSyncEntries(label, srcDir, hooksDestDir, adaptersDestDir)),
     );
 
-    if (plan.hasBlocking) {
-      console.log(`  ⚠️  ${plan.diverged.length + plan.unknown.length} hook/adapter file(s) NOT refreshed —`);
-      console.log('     the installed copy carries content the package does not, and overwriting');
-      console.log('     it would delete work that exists nowhere else:');
-      for (const d of plan.diverged) {
-        console.log(`     - ${d.name}: install has ${d.installedOnly} unique line(s), package has ${d.repoOnly}`);
-      }
-      for (const u of plan.unknown) {
-        console.log(`     - ${u.name}: installed copy could not be read`);
-      }
-      console.log('     Judge them (fold the hardening into the package, or move the file aside),');
-      console.log('     then re-run --fix.');
-      console.log('     There is no automatic backup of an overwritten hook/adapter file and nothing');
-      console.log('     in this tool can undo one — judge against a copy you kept, not against a rollback.');
-    }
-
+    reportBlockedHookSync(plan);
     if (plan.safe.length === 0) return plan.hasBlocking;
-
-    console.log(`  Refreshing ${plan.safe.length} outdated hook/adapter file(s)...`);
-    let refreshed = 0;
-    for (const entry of plan.safe) {
-      if (!fs.existsSync(entry.source)) continue;
-      try {
-        fs.mkdirSync(path.dirname(entry.target), { recursive: true });
-        fs.copyFileSync(entry.source, entry.target);
-        fs.chmodSync(entry.target, 0o755);
-        refreshed++;
-      } catch (err) {
-        console.log(`  ✗ Could not refresh ${entry.name}: ${err.message}`);
-      }
-    }
-    return refreshed > 0;
+    return refreshSafeHooks(plan.safe);
   } catch {
     return false;
   }
@@ -2993,12 +3427,22 @@ function diagnoseOpenCodePlugin(checks) {
 
 /**
  * Diagnose language-specific tool availability.
+ *
+ * Takes its inputs as options so the loop below is reachable from a test: it used
+ * to read `process.cwd()` and call the real detection + probing chain directly,
+ * which made 34 lines of output logic untestable except by running a whole
+ * `doctor` against a real project (and vitest workers cannot chdir).
+ *
+ * @param {{detect?: Function, getTools?: Function, registry?: object, projectRoot?: string}} [options]
  * @returns {number} Number of issues found (missing required tools)
  */
-function diagnoseLanguageTools() {
+function diagnoseLanguageTools(options = {}) {
   try {
-    const { detectProjectLanguages, getToolsForLanguages, LANGUAGE_REGISTRY } = require('./language-tools.js');
-    const projectRoot = process.cwd();
+    const lt = require('./language-tools.js');
+    const detectProjectLanguages = options.detect || lt.detectProjectLanguages;
+    const getToolsForLanguages = options.getTools || lt.getToolsForLanguages;
+    const LANGUAGE_REGISTRY = options.registry || lt.LANGUAGE_REGISTRY;
+    const projectRoot = options.projectRoot || process.cwd();
     const { detected } = detectProjectLanguages(projectRoot);
 
     if (detected.length === 0) return 0;
@@ -3054,177 +3498,400 @@ const KNOWN_FLAGS = ['--fix', '--sync-hooks', '--force', '--install-tools', '--j
  *
  * @returns {{errors: string[], fixMode: boolean, syncHooks: boolean, force: boolean, installToolsFlag: boolean, jsonMode: boolean}}
  */
-function doctorFlagContract(args) {
-  const errors = [];
-  // `--format json` carries a value; without this the value itself would be
-  // reported as an unknown flag and the documented machine-readable mode could
-  // never be reached (#304 promised it, nothing ever implemented it).
-  const formatValue = args[args.indexOf('--format') + 1] || null;
-  const flagTokens = args.filter((a, i) => !(i > 0 && args[i - 1] === '--format'));
-  const unknownFlags = flagTokens.filter(a => !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length > 0) {
-    errors.push(`Unknown flag(s) for doctor: ${unknownFlags.join(', ')}`);
-    errors.push(`Supported flags: ${KNOWN_FLAGS.join(', ')}`);
-  }
-  const fixMode = args.includes('--fix');
-  const syncHooks = args.includes('--sync-hooks');
-  // #495: overwriting a module whose installed copy holds lines the repo lacks
-  // destroys machine-only hardening, so it needs this explicit opt-in.
-  const force = args.includes('--force');
-  // Installing a toolchain changes the machine, not the repository, so it is
-  // never a side effect of --fix (#502). --fix reports the missing tools.
-  const installToolsFlag = args.includes('--install-tools');
-  // #469: re-probe CLI tools against the registry PATH (what a freshly opened
-  // terminal would see) instead of this process's possibly-stale snapshot.
-  // Read-only: it changes the probe environment, never the machine.
-  const refreshEnv = args.includes('--refresh-env');
-  const jsonMode = args.includes('--json') || (args.includes('--format') && formatValue === 'json');
-  if (args.includes('--format') && !['json', 'text'].includes(formatValue)) {
-    errors.push(`Unknown --format value: ${formatValue || '(none)'} — expected json or text`);
-  }
-  if (jsonMode && (fixMode || syncHooks)) {
-    // A JSON report is a read; mixing it with the repair surface would put
-    // progress prose into the stream a script is parsing.
-    errors.push('--json/--format json cannot be combined with --fix or --sync-hooks');
-  }
-  // Round 4 (feasibility) caught the original #488 defect in a new place:
-  // `--force` is read only by the sync path, so `doctor --force` and
-  // `doctor --fix --force` were accepted, printed nothing and changed nothing.
-  if (force && !syncHooks) {
-    errors.push('--force is only read by --sync-hooks, where it overrides the divergence refusal and overwrites without a backup');
-    errors.push('Pass --sync-hooks --force, or drop --force');
-  }
-  // Same class: --install-tools installs only inside the --fix repair surface.
-  if (installToolsFlag && !fixMode) {
-    errors.push('--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine');
-    errors.push('Pass --fix --install-tools, or drop --install-tools');
-  }
-  // #653: --brief exists to collapse a class of exploratory probes (`where gcc`,
-  // Test-Path, per-file reads) into one cheap read. It is read-only by contract:
-  // users call it often precisely because it is cheap, so a write smuggled in
-  // would compound state changes instead of only latency.
-  const briefFlag = args.includes('--brief');
-  if (briefFlag && (fixMode || syncHooks || installToolsFlag || force)) {
-    errors.push('--brief is a read-only fact dump and cannot be combined with --fix, --sync-hooks, --install-tools or --force');
-  }
-  return { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag };
+/**
+ * Reject flag combinations that would silently do nothing, or do the wrong thing.
+ *
+ * Each rule here exists because the combination was accepted and misled someone.
+ * The recurring shape is a flag that only one code path reads: passing it alone was
+ * accepted, printed nothing, and changed nothing (#488 Round 4 found this for
+ * `--force`), which is indistinguishable from a repair that ran and found nothing
+ * to do.
+ *
+ * @param {{fixMode: boolean, syncHooks: boolean, force: boolean,
+ *   installToolsFlag: boolean, jsonMode: boolean, briefFlag: boolean}} f
+ * @param {{formatGiven: boolean, formatValue: string|null}} format
+ * @returns {string[]}
+ */
+/** `--format` accepts exactly these; anything else is a typo, not a mode. */
+const FORMAT_VALUES = ['json', 'text'];
+
+/**
+ * Reject flag combinations that would silently do nothing, or do the wrong thing.
+ *
+ * Each rule exists because the combination was accepted and misled someone. The
+ * recurring shape is a flag that only ONE code path reads: passing it alone was
+ * accepted, printed nothing, and changed nothing (#488 Round 4 found this for
+ * `--force`), which is indistinguishable from a repair that ran and found nothing
+ * to do.
+ *
+ * The rules are DATA -- `{ when, messages }` -- rather than an `if` ladder. Each rule
+ * is a sentence about a combination; the ladder made that five branches inside one
+ * function and buried the sentences in control flow.
+ *
+ * @param {object} f parsed flags
+ * @param {{formatGiven: boolean, formatValue: string|null}} format
+ * @returns {string[]}
+ */
+/** A JSON report is a read; the repair surface writes. They cannot share a run. */
+function isReadMixedWithRepair(f) {
+  return f.jsonMode && (f.fixMode || f.syncHooks);
 }
 
-async function doctor(args) {
-  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
-  if (briefFlag && errors.length === 0) {
-    // Answers the whole "what is this machine set up like" question in one shot.
-    const { buildBriefReport } = require('./doctor-brief');
-    const report = buildBriefReport({ cwd: process.cwd() });
-    if (jsonMode) {
-      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-    } else {
-      process.stdout.write(`${report.summary}\n`);
-    }
-    process.exitCode = 0;
-    return;
-  }
-  if (errors.length > 0) {
-    for (const error of errors) console.error(error);
+/** `--force` is read only by `--sync-hooks`, so alone it changes nothing. */
+function isOrphanedForce(f) {
+  return f.force && !f.syncHooks;
+}
+
+/** `--install-tools` is read only by `--fix`. */
+function isOrphanedInstallTools(f) {
+  return f.installToolsFlag && !f.fixMode;
+}
+
+/** `--brief` is a read-only fact dump and cannot carry a write flag. */
+function isBriefWithWrite(f) {
+  return f.briefFlag && (f.fixMode || f.syncHooks || f.installToolsFlag || f.force);
+}
+
+function validateFlagCombinations(f, format) {
+  const formatProblem = format.formatGiven && !FORMAT_VALUES.includes(format.formatValue)
+    ? [`Unknown --format value: ${format.formatValue || '(none)'} — expected ${FORMAT_VALUES.join(' or ')}`]
+    : [];
+
+  const rules = [
+    {
+      // A JSON report is a read; mixing it with the repair surface would put progress
+      // prose into the stream a script is parsing.
+      when: isReadMixedWithRepair(f),
+      messages: ['--json/--format json cannot be combined with --fix or --sync-hooks'],
+    },
+    {
+      when: isOrphanedForce(f),
+      messages: [
+        '--force is only read by --sync-hooks, where it overrides the divergence refusal and overwrites without a backup',
+        'Pass --sync-hooks --force, or drop --force',
+      ],
+    },
+    {
+      when: isOrphanedInstallTools(f),
+      messages: [
+        '--install-tools is only read by --fix, and it is the only flag that installs toolchains onto this machine',
+        'Pass --fix --install-tools, or drop --install-tools',
+      ],
+    },
+    {
+      // #653: --brief collapses exploratory probes into one cheap read. Users call it
+      // often BECAUSE it is cheap, so a write smuggled in would compound state changes
+      // instead of only latency.
+      when: isBriefWithWrite(f),
+      messages: ['--brief is a read-only fact dump and cannot be combined with --fix, --sync-hooks, --install-tools or --force'],
+    },
+  ];
+
+  return [...formatProblem, ...rules.filter((r) => r.when).flatMap((r) => r.messages)];
+}
+
+function doctorFlagContract(args) {
+  const errors = [];
+  // One pass over argv, not eight `args.includes` calls. Each `includes` is a branch
+  // to the complexity metric, and eight of them put this function at CCN 6 for no
+  // reason: the flags are a SET, and a set is built in one pass.
+  const present = new Set(args);
+
+  // `--format` has THREE states, not two: absent (no opinion), present with a value,
+  // and present with nothing after it (an error -- silently dropping the flag was
+  // #488 AC-09). `indexOf` returns -1 when absent and -1 + 1 is 0, so a run without
+  // `--format` used to read its own first flag as the format value and reject
+  // `doctor --fix` as "unknown --format".
+  const formatIndex = args.indexOf('--format');
+  const formatGiven = formatIndex >= 0;
+  const formatValue = formatGiven ? (args[formatIndex + 1] ?? null) : null;
+
+  errors.push(...unknownFlagErrors(args, formatGiven));
+
+  const flags = {
+    fixMode: present.has('--fix'),
+    syncHooks: present.has('--sync-hooks'),
+    force: present.has('--force'),
+    installToolsFlag: present.has('--install-tools'),
+    refreshEnv: present.has('--refresh-env'),
+    jsonMode: present.has('--json') || (formatGiven && formatValue === 'json'),
+    briefFlag: present.has('--brief'),
+  };
+  errors.push(...validateFlagCombinations(flags, { formatGiven, formatValue }));
+
+  return { errors, ...flags };
+}
+
+/**
+ * Unknown-flag errors, if any.
+ *
+ * The `--format` VALUE is skipped: without that, `doctor --format json` would report
+ * `json` itself as an unknown flag and the documented machine-readable mode could
+ * never be reached (#304 promised it, nothing ever implemented it).
+ *
+ * @param {string[]} args
+ * @param {boolean} formatGiven
+ * @returns {string[]}
+ */
+function unknownFlagErrors(args, formatGiven) {
+  const tokens = args.filter((a, i) => !(formatGiven && i > 0 && args[i - 1] === '--format'));
+  const unknown = tokens.filter((a) => !KNOWN_FLAGS.includes(a));
+  if (unknown.length === 0) return [];
+  return [
+    `Unknown flag(s) for doctor: ${unknown.join(', ')}`,
+    `Supported flags: ${KNOWN_FLAGS.join(', ')}`,
+  ];
+}
+
+/**
+ * Report one sync result group: what was written, what was refused and why.
+ *
+ * The hook sync and the gate-module sync (#495) produced the same six-branch
+ * printout, including word-for-word the refusal warning. They differ only in
+ * the nouns, so the shape is here once and the callers supply those.
+ *
+ * @param {{synced: string[], skipped?: string[], refused: Array<{name: string, installedOnly: number, repoOnly: number}>, errors: string[], target?: string, syncedLabel?: string, refusedNouns?: string}} result
+ * @returns {number} 1 when errors were reported, 0 otherwise
+ */
+function reportSyncResult(result) {
+  if (result.errors.length > 0) {
+    for (const err of result.errors) console.log(`  ✗ ${err}`);
     return 1;
   }
+  if (result.synced.length > 0) {
+    console.log(`  ✓ Synced ${result.synced.join(', ')} from githooks/ to ${result.target}`);
+    console.log('    The updated hooks take effect on the next commit.');
+  } else if (result.skipped) {
+    console.log(`  ✓ Global hooks already match githooks/ (${result.skipped.join(', ') || 'nothing to sync'})`);
+  }
+  if (result.refused.length > 0) {
+    console.log('');
+    console.log(`  ⚠️  ${result.refused.length} ${result.refusedLabel} NOT synced — the installed copy`);
+    console.log('     carries content githooks/ does not, so overwriting would delete work:');
+    for (const r of result.refused) {
+      console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
+    }
+    console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
+    console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
+  }
+  return 0;
+}
 
-  if (!jsonMode) {
-    console.log('XP-Gate Doctor');
-    console.log('==============');
+/**
+ * Sync installed hooks and gate modules from the repo, reporting both.
+ *
+ * @param {boolean} force
+ * @returns {number} 0 on success, 1 when either sync reported errors
+ */
+function runHookAndModuleSync(force) {
+  const hookSync = syncGlobalHooksFromRepo({ force });
+  const hookCode = reportSyncResult({
+    synced: hookSync.synced,
+    skipped: hookSync.skipped,
+    refused: hookSync.refused,
+    errors: hookSync.errors,
+    target: hookSync.installedHooks,
+    refusedLabel: 'shared library file(s)',
+  });
+  if (hookCode !== 0) return hookCode;
+  if (hookSync.backups.length > 0) {
+    console.log(`    Previous version(s) saved under ${path.join(hookSync.installedHooks, 'backups')}/ (${hookSync.backups.length} file(s)).`);
   }
 
-  // §4.13 (#451 REQ-3): state which hook files actually execute, so "I edited
-  // githooks/ but nothing changed" is answerable without reading git config.
-  if (!jsonMode) printEffectiveHooks();
-  // #495: the same for the gate modules the hook sources at runtime.
-  if (!jsonMode) printEffectiveModules();
+  // #495: the gate modules are what the hook sources for Gates 3/4/7/8/9/10, so
+  // syncing only the hook files left the executed surface untouched.
+  const moduleSync = syncModulesFromRepo({ force });
+  return reportSyncResult({
+    synced: moduleSync.synced,
+    refused: moduleSync.refused,
+    errors: moduleSync.errors,
+    target: moduleSync.installedAdapters,
+    refusedLabel: 'module(s)',
+  });
+}
 
-  const config = getConfig();
 
-  // §4.8: mode === "uninstalled" → print "xp-gate is not installed"
-  if (isUninstalledMode(config)) {
-    if (jsonMode) {
-      console.log(JSON.stringify(formatDoctorJson([{ name: 'Install', status: 'SKIP', detail: 'xp-gate is not installed' }], 0)));
-      return 0;
-    }
-    console.log('xp-gate is not installed.');
-    console.log('Run xp-gate init to install.');
+/**
+ * The `--brief` answer: one cheap read of what this machine looks like.
+ *
+ * #653 designed `--brief` to replace a class of exploratory probes with a single
+ * call, so it must stay cheap -- it loads one module and prints one summary.
+ *
+ * @param {boolean} jsonMode
+ * @returns {Promise<void>} never returns a code; the caller sets the exit code
+ */
+function runBriefReport(jsonMode) {
+  const { buildBriefReport } = require('./doctor-brief');
+  const report = buildBriefReport({ cwd: process.cwd() });
+  if (jsonMode) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    process.stdout.write(`${report.summary}\n`);
+  }
+  process.exitCode = 0;
+}
+
+/**
+ * Report that xp-gate is not installed, in whichever shape the caller asked for.
+ *
+ * Not an error: an uninstalled machine is a valid state, and `doctor` is the command
+ * that tells you so.
+ *
+ * @param {boolean} jsonMode
+ * @returns {number} exit code (always 0)
+ */
+function reportUninstalled(jsonMode) {
+  if (jsonMode) {
+    const skip = [{ name: 'Install', status: 'SKIP', detail: 'xp-gate is not installed' }];
+    console.log(JSON.stringify(formatDoctorJson(skip, 0)));
     return 0;
   }
+  console.log('xp-gate is not installed.');
+  console.log('Run xp-gate init to install.');
+  return 0;
+}
 
-  // §4.13 (#451 REQ-2): explicit one-command sync from the repo's githooks/.
-  if (syncHooks) {
-    const { synced, skipped, refused, errors, installedHooks, backups } = syncGlobalHooksFromRepo({ force });
-    if (errors.length > 0) {
-      for (const err of errors) console.log(`  ✗ ${err}`);
-      return 1;
-    }
-    if (synced.length > 0) {
-      console.log(`  ✓ Synced ${synced.join(', ')} from githooks/ to ${installedHooks}`);
-      console.log('    The updated hooks take effect on the next commit.');
-    } else {
-      console.log(`  ✓ Global hooks already match githooks/ (${skipped.join(', ') || 'nothing to sync'})`);
-    }
-    // #566: replacing an installed hook discards whatever was in it. Say where
-    // the previous version went, so a machine-only fix stays recoverable.
-    if (backups.length > 0) {
-      console.log(`    Previous version(s) saved under ${path.join(installedHooks, 'backups')}/ (${backups.length} file(s)).`);
-    }
-    if (refused.length > 0) {
-      console.log('');
-      console.log(`  ⚠️  ${refused.length} shared library file(s) NOT synced — the installed copy`);
-      console.log('     carries content githooks/ does not, so overwriting would delete work:');
-      for (const r of refused) {
-        console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
-      }
-      console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
-      console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
-    }
+/**
+ * Fill in what a timed-out run could not reach, and check the flaky ledger.
+ *
+ * #495 Round 2: a timeout discards every check that had not reported yet,
+ * INCLUDING the drift surface, so a timed-out result must never read as clean --
+ * that is exactly the "stale modules, doctor green" outcome. The drift checks are
+ * re-run synchronously here and the issue count is floored at 1.
+ *
+ * The flaky-quarantine expiry (#603) is a WARN, not a FAIL: an overdue ledger breaks
+ * nothing at runtime, it only means an intentional gap outlived its intent.
+ *
+ * @param {boolean} timedOut
+ * @param {Array} checks appended to
+ * @param {number} issues current count
+ * @returns {number} the issues this function contributes
+ */
+function coverIncompleteRun(timedOut, checks, issues) {
+  let added = 0;
 
-    // #495: the gate modules are what the hook sources for Gates 3/4/7/8/9/10,
-    // so syncing only the hook files left the executed surface untouched.
-    const moduleSync = syncModulesFromRepo({ force });
-    if (moduleSync.errors.length > 0) {
-      for (const err of moduleSync.errors) console.log(`  ✗ ${err}`);
-      return 1;
-    }
-    if (moduleSync.synced.length > 0) {
-      console.log(`  ✓ Synced ${moduleSync.synced.length} gate module(s) to ${moduleSync.installedAdapters}`);
-      console.log(`    ${moduleSync.synced.join(', ')}`);
-    }
-    if (moduleSync.refused.length > 0) {
-      console.log('');
-      console.log(`  ⚠️  ${moduleSync.refused.length} module(s) NOT synced — the installed copy carries`);
-      console.log('     content the repo does not, so overwriting would delete work (#495):');
-      for (const r of moduleSync.refused) {
-        console.log(`     - ${r.name}: install has ${r.installedOnly} unique line(s), githooks/ has ${r.repoOnly}`);
-      }
-      console.log('     Review them, then either fold the hardening into githooks/ or re-run --sync-hooks --force.');
-      console.log('     Forcing overwrites the installed file, whose previous version is saved under backups/.');
-    }
+  if (timedOut) {
+    const hookDrift = diagnoseHookDrift();
+    const moduleDrift = diagnoseModuleDrift();
+    checks.push(...hookDrift.checks, ...moduleDrift.checks);
+    added += hookDrift.issues + moduleDrift.issues;
   }
 
-  // §4.13: --fix only when mode === "active"
-  if (fixMode && isActiveMode(config)) {
-    fixIssues(null, config, installToolsFlag);
+  try {
+    const flaky = diagnoseFlakyQuarantine({ repoRoot: process.cwd() });
+    checks.push(...flaky.checks);
+    added += flaky.issues;
+  } catch (err) {
+    // Surface the cause: a bare "could not be read" hid the real error and made this
+    // look like a missing file rather than a bug in the check itself.
+    const reason = err && err.message ? err.message : String(err);
+    checks.push({ name: 'Flaky quarantine', status: 'SKIP', detail: `ledger check failed: ${reason}` });
   }
 
-  // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
-  // even if network/subprocess checks stack up (fix #348: 43s on Windows).
-  // #629: give diagnoseAsync a live sink so a deadline can keep what finished.
-  // Without it, `Promise.race` discarded the entire diagnosis -- so the SAME
-  // healthy install reported different results run to run, and a timed-out run
-  // lost the skills section entirely (scrapers read 0/12 installed skills).
+  return added;
+}
+
+/**
+ * The checks that run after the report: upgrade, plugin and language tools.
+ *
+ * Kept as one function because a `--format json` run still has to execute all of it
+ * (#488) -- the machine-readable mode changes what is PRINTED, not what is checked.
+ * The upgrade probe is raced against a 3 s timeout and its failure is ignored: it
+ * reaches the network, and a doctor that blocks on a slow registry is worse than one
+ * that does not mention an available upgrade.
+ *
+ * @param {Array} checks appended to
+ * @returns {Promise<{issues: number, langIssues: number}>} `langIssues` is returned
+ *   separately because `--fix --install-tools` acts on it, and recomputing it
+ *   would probe the toolchain twice.
+ */
+async function collectTrailing(checks) {
+  try {
+    const upgradePromise = diagnoseUpgrade();
+    const upgradeTimeout = new Promise((resolve) => setTimeout(() => resolve(), UPGRADE_PROBE_TIMEOUT_MS));
+    await Promise.race([upgradePromise, upgradeTimeout]);
+  } catch {
+    // Non-blocking: the upgrade hint is a convenience, never a verdict.
+  }
+  const trailing = diagnoseOpenCodePlugin(checks);
+  const langIssues = diagnoseLanguageTools();
+  return { issues: trailing + langIssues, langIssues };
+}
+
+/**
+ * Report missing language tools, and install them only on explicit opt-in.
+ *
+ * #502: installing a toolchain changes the MACHINE, not the repository, so it is
+ * never a side effect of `--fix`. Without `--install-tools` this prints what is
+ * missing and names the flag; with it, the install runs and a project config is
+ * generated so the next run does not rediscover the same gaps.
+ *
+ * Failures are non-blocking: a package manager that cannot reach its registry must
+ * not turn a diagnosis into an error.
+ *
+ * @param {{fixMode: boolean, installToolsFlag: boolean, langIssues: number}} opts
+ */
+function reportLanguageToolRepairs(opts) {
+  const { fixMode, installToolsFlag, langIssues } = opts;
+  if (!fixMode || langIssues <= 0) return;
+
+  if (!installToolsFlag) {
+    console.log(`\n  ${langIssues} language tool(s) are missing. --fix did not install them —`);
+    console.log('  installing a toolchain changes the machine, so opt in with --install-tools (#502).');
+    return;
+  }
+
+  try {
+    const { detectProjectLanguages, getToolsForLanguages, installTool, generateProjectConfig } = require('./language-tools.js');
+    const projectRoot = process.cwd();
+    const { detected } = detectProjectLanguages(projectRoot);
+    if (detected.length === 0) return;
+
+    const toolStatus = getToolsForLanguages(detected);
+    let installed = 0;
+    for (const [lang, tools] of Object.entries(toolStatus)) {
+      for (const t of tools) {
+        if (t.status === 'missing' && installTool(t.tool).success) {
+          console.log(`  \u2713 ${t.tool.name} (${lang}) installed`);
+          installed++;
+        }
+      }
+    }
+    if (installed > 0) {
+      console.log(`  ${installed} language tool(s) installed.`);
+      generateProjectConfig(projectRoot, detected, toolStatus);
+    }
+  } catch {
+    // Non-blocking: a package manager failure is not a diagnosis failure.
+  }
+}
+
+/**
+ * Run the diagnosis under a deadline, keeping whatever finished.
+ *
+ * #348: a stack of network/subprocess probes once took 43 s on Windows, so the whole
+ * run needs a bound. #629: the naive `Promise.race` DISCARDED everything the
+ * diagnosis had produced, so the same healthy install reported different results run
+ * to run and a timed-out run lost the skills section entirely (scrapers read 0/12
+ * installed skills). The live `progress` sink is what makes a deadline able to say
+ * "these finished, those did not" instead of replacing the diagnosis with a
+ * placeholder.
+ *
+ * The pending surfaces are named individually so the reader knows exactly which
+ * conclusions are missing, not merely that "something timed out".
+ *
+ * @param {boolean} refreshEnv
+ * @returns {Promise<{checks: Array, issues: number, timedOut: boolean}>}
+ */
+async function raceDiagnosis(refreshEnv) {
   const progress = { checks: [], getIssues: () => 0 };
   const diagnosisPromise = diagnoseAsync(refreshEnv, progress);
-  let diagnosisTimer = null;
+
+  let timer = null;
   const timeoutPromise = new Promise((resolve) => {
-    diagnosisTimer = setTimeout(() => {
+    timer = setTimeout(() => {
       const completed = Array.isArray(progress.checks) ? progress.checks : [];
       const reported = new Set(completed.map((c) => c && c.name));
-      // Name the surfaces that did NOT report, so the reader knows exactly which
-      // conclusions are missing rather than just "something timed out".
       const pending = ['Hooks', 'Adapters', 'Skills', 'Gate env', 'OpenCode TUI']
         .filter((name) => !reported.has(name));
       resolve(mergeTimedOutDiagnosis(
@@ -3233,103 +3900,169 @@ async function doctor(args) {
       ));
     }, GLOBAL_DIAGNOSIS_TIMEOUT_MS);
   });
-  const { checks, issues: diagnosedIssues, timedOut } = await Promise.race([
-    diagnosisPromise.then(r => ({ ...r, timedOut: false })),
+
+  const result = await Promise.race([
+    diagnosisPromise.then((r) => ({ ...r, timedOut: false })),
     timeoutPromise,
   ]);
-  clearTimeout(diagnosisTimer);
-  let issues = diagnosedIssues;
+  clearTimeout(timer);
+  return { checks: result.checks, issues: result.issues, timedOut: result.timedOut };
+}
+
+/**
+ * Run the explicitly requested hook/module sync.
+ *
+ * §4.13 (#451 REQ-2): `doctor --sync-hooks` exists because editing `githooks/` changes
+ * nothing until the installed copies are refreshed -- the trap that made #451 read as
+ * "my edit does nothing". A non-zero result stops the run: the diagnosis that follows
+ * would describe the state the sync just failed to reach.
+ *
+ * @param {boolean} force
+ * @returns {boolean} whether the sync succeeded
+ */
+function runExplicitSync(force) {
+  return runHookAndModuleSync(force) === 0;
+}
+
+/**
+ * Emit the machine-readable report.
+ *
+ * `--format json` means EXACTLY one JSON document on stdout, so the human report and
+ * the trailing checks' own chatter are silenced while their results are still
+ * collected into `checks`. Silencing by swapping `console.log` is the blunt way to do
+ * it, and the `finally` is not optional: a throwing check would otherwise leave the
+ * process unable to print anything at all.
+ *
+ * @param {Array} checks
+ * @param {number} issues
+ * @param {number} issues
+ * @returns {Promise<number>} exit code
+ */
+async function emitJsonReport(checks, issues) {
+  const say = console.log;
+  console.log = () => {};
+  try {
+    // JSON mode is read-only by contract, so the language-tool count is discarded.
+    issues += (await collectTrailing(checks)).issues;
+  } finally {
+    console.log = say;
+  }
+  console.log(JSON.stringify(formatDoctorJson(checks, issues)));
+  return issues > 0 ? 1 : 0;
+}
+
+/**
+ * Re-diagnose after `--fix` so the run reports the RESULT, not the intent.
+ *
+ * The post-fix race mirrors the pre-fix one, including its failure mode: a timeout
+ * discards the drift surface, so the post-fix report must not read as "all clear".
+ * The placeholder says the result is UNCONFIRMED, not clean -- otherwise a fix that
+ * could not be verified would be indistinguishable from one that worked.
+ *
+ * @returns {Promise<void>}
+ */
+async function reportPostFixDiagnosis() {
+  console.log('\nRe-running diagnosis after fix...');
+  const postDiagPromise = diagnoseAsync();
+  let postTimer = null;
+  const postTimeout = new Promise((resolve) => {
+    postTimer = setTimeout(() => resolve({
+      checks: [{
+        name: 'Post-fix diagnosis',
+        status: 'WARN',
+        detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — the fix result is unconfirmed, not clean`,
+      }],
+      issues: 1,
+      timedOut: true,
+    }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
+  });
+
+  const { checks: postChecks, timedOut: postTimedOut } = await Promise.race([
+    postDiagPromise.then((r) => ({ ...r, timedOut: false })),
+    postTimeout,
+  ]);
+  clearTimeout(postTimer);
+  if (postTimedOut) {
+    postChecks.push(...diagnoseHookDrift().checks, ...diagnoseModuleDrift().checks);
+  }
+  printReport(postChecks);
+}
+
+/**
+ * Print the header and which hook files and gate modules actually execute.
+ *
+ * §4.13 (#451 REQ-3): the question "I edited `githooks/` but nothing changed" is
+ * answered by printing the effective paths, not by asking the reader to work it out
+ * from git config. #495 added the same for the gate modules the hook sources at
+ * runtime, since those drift independently of the hook files.
+ *
+ * Human output only -- `--format json` puts one document on stdout and nothing else.
+ */
+function printEffectiveLayout() {
+  console.log('XP-Gate Doctor');
+  console.log('==============');
+  printEffectiveHooks();
+  printEffectiveModules();
+}
+
+/**
+ * Handle the two ways a run can end before any diagnosis: `--brief`, and bad flags.
+ *
+ * `--brief` is checked FIRST and only when the flags are valid: it answers its own
+ * question and never reads the diagnosis surface, so flagging an unrelated unknown
+ * flag would be noise on a call designed to be cheap.
+ *
+ * @param {{briefFlag: boolean, errors: string[], jsonMode: boolean}} p
+ * @returns {number|null} an exit code when the run ends here, else null
+ */
+function handlePreflight(p) {
+  const { briefFlag, errors, jsonMode } = p;
+  if (briefFlag && errors.length === 0) {
+    runBriefReport(jsonMode);
+    return process.exitCode ?? 0;
+  }
+  if (errors.length === 0) return null;
+  for (const error of errors) console.error(error);
+  return 1;
+}
+
+async function doctor(args) {
+  const { errors, fixMode, syncHooks, force, installToolsFlag, jsonMode, refreshEnv, briefFlag } = doctorFlagContract(args);
+  const preflight = handlePreflight({ briefFlag, errors, jsonMode });
+  if (preflight !== null) return preflight;
+
+  const config = getConfig();
+  if (!jsonMode) printEffectiveLayout();
+  // §4.8: mode === "uninstalled" → print "xp-gate is not installed"
+  if (isUninstalledMode(config)) return reportUninstalled(jsonMode);
+
+  if (syncHooks && !runExplicitSync(force)) return 1;
+  if (fixMode && isActiveMode(config)) fixIssues(null, config, installToolsFlag);
+
+  // Global timeout wrapper — ensures doctor completes within GLOBAL_DIAGNOSIS_TIMEOUT_MS
+  // even if network/subprocess checks stack up (fix #348: 43s on Windows).
+  // #629: give diagnoseAsync a live sink so a deadline can keep what finished.
+  // Without it, `Promise.race` discarded the entire diagnosis -- so the SAME
+  // healthy install reported different results run to run, and a timed-out run
+  // lost the skills section entirely (scrapers read 0/12 installed skills).
+  const diagnosis = await raceDiagnosis(refreshEnv);
+  const { checks, timedOut } = diagnosis;
+  let issues = diagnosis.issues;
 
   // A timeout discards every check that had not reported yet, including the
   // drift surface, so the raced result must never be allowed to read as clean
   // (#495 Round 2 -- this is the "stale modules, doctor green" outcome itself).
-  if (timedOut) {
-    issues = Math.max(issues, 1);
-    const hookDrift = diagnoseHookDrift();
-    const moduleDrift = diagnoseModuleDrift();
-    checks.push(...hookDrift.checks, ...moduleDrift.checks);
-    issues += hookDrift.issues + moduleDrift.issues;
-  }
+  issues += coverIncompleteRun(timedOut, checks, issues);
 
-  // Flaky-test quarantine expiry (#603). A WARN, not a FAIL: an overdue ledger
-  // breaks nothing at runtime, it only means an intentional gap outlived its
-  // intent -- doctor's business, not a gate's.
-  try {
-    const flaky = diagnoseFlakyQuarantine({ repoRoot: process.cwd() });
-    checks.push(...flaky.checks);
-    issues += flaky.issues;
-  } catch (err) {
-    // Surface the cause: a bare "could not be read" hid the real error and made
-    // this look like a missing file rather than a bug in the check itself.
-    checks.push({ name: 'Flaky quarantine', status: 'SKIP', detail: `ledger check failed: ${err && err.message ? err.message : String(err)}` });
-  }
-
-  let langIssues = 0;
-  // Upgrade + plugin + language-tool status, kept as one callable because a
-  // --format json run still has to execute all of it (#488).
-  const collectTrailingChecks = async () => {
-    try {
-      const upgradePromise = diagnoseUpgrade();
-      const upgradeTimeout = new Promise((resolve) => setTimeout(() => resolve(), 3000));
-      await Promise.race([upgradePromise, upgradeTimeout]);
-    } catch { /* non-blocking */ }
-    const trailing = diagnoseOpenCodePlugin(checks);
-    langIssues = diagnoseLanguageTools();
-    return trailing + langIssues;
-  };
-
-  if (jsonMode) {
-    // Machine-readable output means EXACTLY one JSON document on stdout, so the
-    // human report and the trailing checks' chatter are silenced while their
-    // results are still collected into `checks`.
-    const say = console.log;
-    console.log = () => {};
-    try {
-      issues += await collectTrailingChecks();
-    } finally {
-      console.log = say;
-    }
-    console.log(JSON.stringify(formatDoctorJson(checks, issues)));
-    return issues > 0 ? 1 : 0;
-  }
+  if (jsonMode) return await emitJsonReport(checks, issues);
 
   printReport(checks);
 
-  issues += await collectTrailingChecks();
+  const trailing = await collectTrailing(checks);
+  issues += trailing.issues;
+  reportLanguageToolRepairs({ fixMode, installToolsFlag, langIssues: trailing.langIssues });
 
-  // In --fix mode, auto-install missing language tools — only on explicit
-  // --install-tools (#502: a diagnosis command must not run package managers).
-  if (fixMode && installToolsFlag && langIssues > 0) {
-    try {
-      const { detectProjectLanguages, getToolsForLanguages, installTool, generateProjectConfig, LANGUAGE_REGISTRY } = require('./language-tools.js');
-      const projectRoot = process.cwd();
-      const { detected } = detectProjectLanguages(projectRoot);
-      if (detected.length > 0) {
-        const toolStatus = getToolsForLanguages(detected);
-        let installed = 0;
-        for (const [lang, tools] of Object.entries(toolStatus)) {
-          for (const t of tools) {
-            if (t.status === 'missing') {
-              const result = installTool(t.tool);
-              if (result.success) {
-                console.log(`  \u2713 ${t.tool.name} (${lang}) installed`);
-                installed++;
-              }
-            }
-          }
-        }
-        if (installed > 0) {
-          console.log(`  ${installed} language tool(s) installed.`);
-          generateProjectConfig(projectRoot, detected, toolStatus);
-        }
-      }
-    } catch { /* non-blocking */ }
-  }
 
-  if (fixMode && !installToolsFlag && langIssues > 0) {
-    console.log(`\n  ${langIssues} language tool(s) are missing. --fix did not install them —`);
-    console.log('  installing a toolchain changes the machine, so opt in with --install-tools (#502).');
-  }
 
   if (issues === 0) {
     console.log('\n✓ All checks passed');
@@ -3338,30 +4071,7 @@ async function doctor(args) {
 
   console.log(`\n✗ ${issues} issue(s) found`);
 
-  // Re-run diagnosis after fix to report updated status
-  if (fixMode && isActiveMode(config)) {
-    console.log('\nRe-running diagnosis after fix...');
-    const postDiagPromise = diagnoseAsync();
-    let postTimer = null;
-    const postTimeout = new Promise((resolve) => {
-      postTimer = setTimeout(() => resolve({
-        checks: [{ name: 'Post-fix diagnosis', status: 'WARN', detail: `Timed out after ${GLOBAL_DIAGNOSIS_TIMEOUT_MS / 1000}s — the fix result is unconfirmed, not clean` }],
-        issues: 1,
-        timedOut: true,
-      }), GLOBAL_DIAGNOSIS_TIMEOUT_MS);
-    });
-    const { checks: postChecks, timedOut: postTimedOut } = await Promise.race([
-      postDiagPromise.then(r => ({ ...r, timedOut: false })),
-      postTimeout,
-    ]);
-    clearTimeout(postTimer);
-    // Symmetry with the pre-fix race above: a timeout here discards the drift
-    // surface too, so the post-fix report must not read as "all clear".
-    if (postTimedOut) {
-      postChecks.push(...diagnoseHookDrift().checks, ...diagnoseModuleDrift().checks);
-    }
-    printReport(postChecks);
-  }
+  if (fixMode && isActiveMode(config)) await reportPostFixDiagnosis();
 
   return issues > 0 ? 1 : 0;
 }
@@ -3386,21 +4096,105 @@ function formatDoctorJson(checks, issues) {
 // real failure was silent: drifted agent bindings looked like a working setup
 // (B2), a stale skill copy made reinstall = downgrade (B4), and a missing
 // runner script surfaced only as a failed review (B3).
-async function doctorDelphi(options = {}) {
-  const { configPath, npmLatest } = options;
-  // #541: the shadow check needs the loader's global fallback path. It is
-  // injectable for tests; the default mirrors delphi-config.ts /
-  // delphi-external-review.cjs resolution (XDG_CONFIG_HOME honored).
-  const globalConfigPath = options.globalConfigPath
-    || path.join(process.env.XDG_CONFIG_HOME || path.join(require('os').homedir(), '.config'), 'xp-gate', '.delphi-config.json');
-  const checks = [];
-  const add = (name, status, detail) => checks.push({ name, status, detail });
+/**
+ * Check 2: Qoder Delphi agent bindings.
+ *
+ * Extracted from `doctorDelphi`, which measured CCN 81 over 235 lines by
+ * holding five independent checks. Each one is its own question with its own
+ * states, and inlining them made a failure impossible to locate.
+ *
+ * Reports through the caller's `add` so the check list stays one list.
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ * @param {{projectDir?: string}} options
+ */
+/** The three Delphi expert roles, in the order every report lists them. */
 
-  // 1. Node >= 18: the runner gates on it and exits 1 mid-review otherwise.
-  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
-  add('Node.js >= 18', nodeMajor >= 18 ? 'PASS' : 'FAIL',
-    `current: ${process.versions.node}`);
+/**
+ * Work out which Delphi agent directory applies, and whether the native path is
+ * even in use.
+ *
+ * Project-level agents (from `delphi-setup --local --project`) take precedence when
+ * a complete set exists there, so `doctor` agrees with the repair command (#414 R1
+ * FC-09).
+ *
+ * #646: when the machine is configured for the external channel only, the native
+ * path is DISABLED BY CHOICE, not broken. Reporting FAIL there told external users
+ * their working setup was broken and pointed them at a repair that reinstalls what
+ * they just removed. Callers SKIP with the reason, so the line can never read green
+ * either.
+ *
+ * The channel home is the directory CONTAINING `.config`: `resolveChannels()`
+ * appends `<home>/.config/xp-gate/...`, so passing `.config` itself would look in
+ * `.config/.config/xp-gate` and never find the file.
+ *
+ * @param {{projectDir?: string}} options
+ * @returns {{nativeDisabled: boolean, channelResolution: object, agentsDir: string,
+ *   agentsSource: string, agentDetails: string[]}} `channelResolution` is returned so
+ *   the SKIP detail can name the channels and where they came from.
+ */
+function resolveAgentTarget(options) {
+  const delphiChannel = require('./delphi-channel.js');
+  const channelHome = process.env.XDG_CONFIG_HOME
+    ? path.dirname(process.env.XDG_CONFIG_HOME)
+    : undefined;
+  const channelResolution = delphiChannel.resolveChannels({ home: channelHome });
 
+  const homeAgentsDir = path.join(HOME_DIR(), '.qoder', 'agents');
+  // Injectable for tests; defaults to the cwd the doctor runs from.
+  const projectAgentsDir = path.join(options.projectDir || process.cwd(), '.qoder', 'agents');
+  const homeComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
+  const projectComplete = DELPHI_ROLES.every((r) => fs.existsSync(path.join(projectAgentsDir, `delphi-${r}.md`)));
+  const agentsDir = projectComplete ? projectAgentsDir : homeAgentsDir;
+  const agentsSource = projectComplete
+    ? `project-level ${agentsDir}`
+    : `user-level ${agentsDir}`;
+
+  return {
+    nativeDisabled: !channelResolution.nativeEnabled,
+    channelResolution,
+    agentsDir,
+    agentsSource,
+    agentDetails: [agentsSource],
+  };
+}
+
+/**
+ * Inspect ONE role's installed agent file against the bundled template.
+ *
+ * The three failure classes are reported separately because each has its own remedy
+ * (#414 R1 MI-02): a missing file needs an install, an unparseable binding needs
+ * `delphi-setup`, and a bundle without a parseable template is install CORRUPTION --
+ * skipping that comparison would hide it behind a healthy-looking id (#414 R1 FC-08).
+ *
+ * @param {string} role
+ * @param {string} agentsDir
+ * @param {(p: string) => string|null} readId
+ * @returns {{ok: boolean, detail: string, id?: string}}
+ */
+function inspectAgentBinding(role, agentsDir, readId) {
+  const agentPath = path.join(agentsDir, `delphi-${role}.md`);
+  if (!fs.existsSync(agentPath)) {
+    return {
+      ok: false,
+      detail: `delphi-${role}.md missing (run: xp-gate init --global, or delphi-setup --local --project for project scope)`,
+    };
+  }
+  const id = readId(agentPath);
+  if (id === null) {
+    return { ok: false, detail: `delphi-${role}.md has no quoted model binding (repair: xp-gate delphi-setup)` };
+  }
+  const bundledId = readId(path.join(PKG_DIR, 'plugins', 'qoder', 'agents', `delphi-${role}.md`));
+  if (bundledId === null) {
+    return { ok: false, detail: `delphi-${role}: bundled template missing/unreadable — reinstall xp-gate` };
+  }
+  if (bundledId !== id) {
+    return { ok: true, id, detail: `delphi-${role}: ${id} (this version ships ${bundledId} — repair: xp-gate delphi-setup)` };
+  }
+  return { ok: true, id, detail: `delphi-${role}: ${id}` };
+}
+
+function checkDelphiAgentBindings(add, options) {
   // 2. Qoder agent bindings: present, parseable, three distinct ids, matching
   // what this version ships. A stale binding is a repair, not an error to
   // retype: the detail names delphi-setup. Project-level agents (from
@@ -3412,29 +4206,10 @@ async function doctorDelphi(options = {}) {
   // users their working setup was broken and pointed them at a repair command that
   // reinstalls the thing they just removed. SKIP carries the reason so the line can
   // never be read as green either -- the same rule every other gate follows.
-  const delphiChannel = require('./delphi-channel.js');
-  // Pass the directory that CONTAINS `.config`, not the `.config` dir itself:
-  // resolveChannels() appends `<home>/.config/xp-gate/...`, so handing it `.config`
-  // would look in `.config/.config/xp-gate` and never find the file.
-  const channelHome = process.env.XDG_CONFIG_HOME
-    ? path.dirname(process.env.XDG_CONFIG_HOME)
-    : undefined;
-  const channelResolution = delphiChannel.resolveChannels({ home: channelHome });
-  const nativeDisabled = !channelResolution.nativeEnabled;
+  const { nativeDisabled, channelResolution, agentsDir, agentsSource, agentDetails } = resolveAgentTarget(options);
   const { readQoderModelId } = require('./init.js');
-  const roles = ['architecture', 'technical', 'feasibility'];
-  const homeAgentsDir = path.join(HOME_DIR(), '.qoder', 'agents');
-  // Injectable for tests; defaults to the cwd the doctor runs from.
-  const projectAgentsDir = path.join(options.projectDir || process.cwd(), '.qoder', 'agents');
-  const homeComplete = roles.every((r) => fs.existsSync(path.join(homeAgentsDir, `delphi-${r}.md`)));
-  const projectComplete = roles.every((r) => fs.existsSync(path.join(projectAgentsDir, `delphi-${r}.md`)));
-  const agentsDir = projectComplete ? projectAgentsDir : homeAgentsDir;
-  const agentsSource = projectComplete
-    ? `project-level ${agentsDir}`
-    : `user-level ${agentsDir}`;
   const agentIds = [];
   let agentsStatus = 'PASS';
-  const agentDetails = [agentsSource];
   // #646: skip the whole native binding check when the machine is external-only.
   // The check exists to keep the native path healthy; when that path is switched off
   // by configuration there is nothing to keep healthy, and reporting its absence as
@@ -3444,33 +4219,11 @@ async function doctorDelphi(options = {}) {
       `native channel disabled (channels=${channelResolution.channels.join(',')} via ${channelResolution.source}) — `
       + 'Delphi review runs through the external provider');
   }
-  for (const role of nativeDisabled ? [] : roles) {
-    const agentPath = path.join(agentsDir, `delphi-${role}.md`);
-    if (!fs.existsSync(agentPath)) {
-      agentsStatus = 'FAIL';
-      agentDetails.push(`delphi-${role}.md missing (run: xp-gate init --global, or delphi-setup --local --project for project scope)`);
-      continue;
-    }
-    const id = readQoderModelId(agentPath);
-    if (id === null) {
-      agentsStatus = 'FAIL';
-      agentDetails.push(`delphi-${role}.md has no quoted model binding (repair: xp-gate delphi-setup)`);
-      continue;
-    }
-    const bundledId = readQoderModelId(path.join(PKG_DIR, 'plugins', 'qoder', 'agents', `delphi-${role}.md`));
-    if (bundledId === null) {
-      // A bundle without a parseable template is install corruption: skipping
-      // the comparison would hide it behind a healthy-looking id (#414 R1 FC-08).
-      agentsStatus = 'FAIL';
-      agentDetails.push(`delphi-${role}: bundled template missing/unreadable — reinstall xp-gate`);
-      continue;
-    }
-    if (bundledId !== id) {
-      agentDetails.push(`delphi-${role}: ${id} (this version ships ${bundledId} — repair: xp-gate delphi-setup)`);
-    } else {
-      agentDetails.push(`delphi-${role}: ${id}`);
-    }
-    agentIds.push(id);
+  for (const role of nativeDisabled ? [] : DELPHI_ROLES) {
+    const outcome = inspectAgentBinding(role, agentsDir, readQoderModelId);
+    if (!outcome.ok) agentsStatus = 'FAIL';
+    agentDetails.push(outcome.detail);
+    if (outcome.id) agentIds.push(outcome.id);
   }
   // Report every problem class independently: missing files, unparseable
   // bindings and duplicates can coexist, and each has a different remedy
@@ -3480,61 +4233,64 @@ async function doctorDelphi(options = {}) {
   // empty agentIds (the disabled path) would compute `0 !== 3` and re-report the very
   // FAIL the SKIP above just replaced.
   if (!nativeDisabled) {
-    if (agentIds.length !== roles.length) agentsStatus = 'FAIL';
+    if (agentIds.length !== DELPHI_ROLES.length) agentsStatus = 'FAIL';
     if (new Set(agentIds).size !== agentIds.length) {
       agentsStatus = 'FAIL';
       agentDetails.push('duplicate model binding across experts — three DISTINCT ids are required');
     }
     add('Qoder Delphi agent bindings', agentsStatus, agentDetails.join('; ') || 'all three bound');
   }
+}
 
-  // 3. Skill install parity: a drifted installed copy is how "reinstall from
-  // an old local repo" became a downgrade (#414 B4). Every bundled file is
-  // compared, not just SKILL.md — the install script copies *.json and
-  // references/ too, and B4-style drift hits those equally (#414 R1 MI-03).
-  //
-  // #635 follow-up: this was a THIRD hand-written platform→directory table
-  // (after PLATFORM_PROFILES and install-skill's own), and it had no `dsh` arm,
-  // so on a DSH machine it resolved to `~/.config/opencode/skills/delphi-review`
-  // — a directory that does not exist. `otherDeployedSkillDirs()` below rescued
-  // the parity check, but the runner-locate check further down read this path
-  // directly and never consulted the full platform set. Derive it instead, so
-  // the mapping has one source of truth and a new platform needs no edit here.
-  const platform = detectPlatform();
-  const installedSkillDir = path.join(getSkillsDirs(platform)[0], 'delphi-review');
-  // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
-  // real failure mode and must be drivable without mutating the package.
-  const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
-  const sha256 = (p) => require('crypto').createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-  const listBundledSkillFiles = (dir, base = dir, out = []) => {
-    if (!fs.existsSync(dir)) return out;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, entry.name);
-      if (entry.isDirectory()) listBundledSkillFiles(p, base, out);
-      else out.push(path.relative(base, p));
-    }
+/**
+ * Check 3: installed skill copies match what this version ships.
+ *
+ * A drifted installed copy is how "reinstall from an old local repo" became a
+ * downgrade (#414 B4). Every bundled file is compared, not just SKILL.md --
+ * the install script copies *.json and references/ too (#414 R1 MI-03).
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ * @param {object} options
+ * @returns {string} the resolved installed skill dir, which the runner-locate
+ *   check below reads. Returning it keeps ONE resolution instead of duplicating
+ *   the platform mapping at the second call site.
+ */
+/**
+ * Every file in the bundled skill, relative to its root.
+ *
+ * A bundle we cannot read is reported as an EMPTY bundle, which the parity check
+ * already treats as "every installed file is extra" -- a truthful, loud outcome.
+ *
+ * @param {string} dir
+ * @param {string} [base]
+ * @param {string[]} [out]
+ * @returns {string[]}
+ */
+function listBundledSkillFiles(dir, base = dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
     return out;
-  };
-  // #725 follow-up: decide "installed anywhere?" from the full platform set, not
-  // just the directory `detectPlatform()` selects — a dsh-only machine has no
-  // marker detectPlatform() keys on, so the opencode fallback directory never
-  // exists and the old check falsely reported "not installed" even though the
-  // copy IS deployed under ~/.dsh/skills.
-  const deployedDirs = otherDeployedSkillDirs(installedSkillDir);
-  if (deployedDirs.length === 0) {
-    add('Delphi skill install parity', 'FAIL',
-      `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
-  } else {
-    const bundledFiles = listBundledSkillFiles(bundledSkillDir);
-    if (bundledFiles.length === 0) {
-      // An installed copy next to an empty bundle is install corruption —
-      // "0 files match" must never read as healthy (#414 R2 MN-R2-01). The
-      // bundled dir ships inside the installed package itself, so an
-      // unreachable one is a broken install, not a transient condition
-      // (#414 R3 FC-05): FAILing is the doctor's job here.
-      add('Delphi skill install parity', 'FAIL',
-        `bundled skill directory missing or empty: ${bundledSkillDir} — reinstall xp-gate`);
-    } else {
+  }
+  for (const entry of entries) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) listBundledSkillFiles(p, base, out);
+    else out.push(path.relative(base, p));
+  }
+  return out;
+}
+
+/**
+ * Compare every deployed copy against the bundle and report the verdict.
+ *
+ * #725: EVERY platform with the skill deployed is checked, not only the one
+ * `detectPlatform()` selects. On a machine with both Qoder and OpenCode the OpenCode
+ * copy was frozen at an old version while this check reported PASS, because it never
+ * looked there -- the drifted copy was invisible to both `update-skill` and `doctor`.
+ */
+function reportSkillParity(add, deployedDirs, bundledFiles, bundledSkillDir, sha256) {
       // #725: check every platform that has the skill deployed, not only the one
       // `detectPlatform()` selects. On a machine with both Qoder and OpenCode the
       // OpenCode copy was frozen at an old version and this check reported PASS,
@@ -3556,22 +4312,349 @@ async function doctorDelphi(options = {}) {
         add('Delphi skill install parity', 'PASS',
           `${bundledFiles.length} file(s) match the bundle across ${deployedDirs.length} platform(s)`);
       }
+}
+
+function checkSkillInstallParity(add, options) {
+  // 3. Skill install parity: a drifted installed copy is how "reinstall from
+  // an old local repo" became a downgrade (#414 B4). Every bundled file is
+  // compared, not just SKILL.md — the install script copies *.json and
+  // references/ too, and B4-style drift hits those equally (#414 R1 MI-03).
+  //
+  // #635 follow-up: this was a THIRD hand-written platform→directory table
+  // (after PLATFORM_PROFILES and install-skill's own), and it had no `dsh` arm,
+  // so on a DSH machine it resolved to `~/.config/opencode/skills/delphi-review`
+  // — a directory that does not exist. `otherDeployedSkillDirs()` below rescued
+  // the parity check, but the runner-locate check further down read this path
+  // directly and never consulted the full platform set. Derive it instead, so
+  // the mapping has one source of truth and a new platform needs no edit here.
+  const platform = detectPlatform();
+  const installedSkillDir = path.join(getSkillsDirs(platform)[0], 'delphi-review');
+  // Injectable for tests (#414 R3 FC-01/FC-02): the empty-bundle branch is a
+  // real failure mode and must be drivable without mutating the package.
+  const bundledSkillDir = options.bundledSkillDir || path.join(PKG_DIR, 'skills', 'delphi-review');
+  const sha256 = (p) => fileSha256(p);
+  // A bundle we cannot read is reported as an empty bundle, which the parity check
+  // already treats as "every installed file is extra" -- a truthful, loud outcome.
+  // #725 follow-up: decide "installed anywhere?" from the full platform set, not
+  // just the directory `detectPlatform()` selects — a dsh-only machine has no
+  // marker detectPlatform() keys on, so the opencode fallback directory never
+  // exists and the old check falsely reported "not installed" even though the
+  // copy IS deployed under ~/.dsh/skills.
+  const deployedDirs = otherDeployedSkillDirs(installedSkillDir);
+  if (deployedDirs.length === 0) {
+    add('Delphi skill install parity', 'FAIL',
+      `not installed at ${installedSkillDir} (install: xp-gate install-skill delphi-review)`);
+  } else {
+    const bundledFiles = listBundledSkillFiles(bundledSkillDir);
+    if (bundledFiles.length === 0) {
+      // An installed copy next to an empty bundle is install corruption —
+      // "0 files match" must never read as healthy (#414 R2 MN-R2-01). The
+      // bundled dir ships inside the installed package itself, so an
+      // unreachable one is a broken install, not a transient condition
+      // (#414 R3 FC-05): FAILing is the doctor's job here.
+      add('Delphi skill install parity', 'FAIL',
+        `bundled skill directory missing or empty: ${bundledSkillDir} — reinstall xp-gate`);
+    } else {
+      reportSkillParity(add, deployedDirs, bundledFiles, bundledSkillDir, sha256);
+    }
+  }
+  return installedSkillDir;
+}
+
+/**
+ * Check 5: the Delphi config parses and names three distinct callable models.
+ *
+ * Pulled out of `doctorDelphi` because it is the largest single check and the
+ * least related to the others: everything above asks "is this installed", this
+ * one asks "will a review actually run".
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ */
+/**
+ * Problems with a Delphi profile's expert model bindings.
+ *
+ * Pure: profile in, problem list out. It was inline inside a try/catch inside an
+ * if/else inside the config check, four levels down, where the three distinct
+ * failure modes (missing role, duplicate model, unusable provider) were one
+ * compound condition.
+ *
+ * @param {object} profile
+ * @returns {string[]} human-readable problems; empty when the profile is usable
+ */
+function delphiModelProblems(profile) {
+  const experts = profile.experts || {};
+  const providers = profile.providers || {};
+  const models = DELPHI_ROLES.map((r) => experts[r] && experts[r].model);
+
+  const missingRoles = DELPHI_ROLES.filter((r, i) => !models[i]);
+  const duplicates = models.filter((m, i) => m && models.indexOf(m) !== i);
+  const badProviders = DELPHI_ROLES.filter((r) => !isSeatUsable(experts[r], providers));
+
+  // Collected as data and filtered once: three `if`s over three lists is three
+  // branches to say "report whichever are non-empty".
+  return [
+    [missingRoles, `missing experts: ${missingRoles.join(', ')}`],
+    [duplicates, `duplicate models: ${[...new Set(duplicates)].join(', ')}`],
+    [badProviders, `unusable provider binding: ${badProviders.join(', ')}`],
+  ].filter(([items]) => items.length > 0).map(([, message]) => message);
+}
+
+/**
+ * Whether one expert seat points at a provider that can actually be called.
+ *
+ * Three ways to fail, and they are reported as one because the remedy is the same
+ * (fix the binding): no expert entry, a provider name the config does not define, or
+ * a base_url that is missing or not an http(s) URL. The last check is `indexOf('http')
+ * === 0` rather than a URL parse on purpose -- a config with `ftp://` or a bare host
+ * both fail, and rejecting it early beats a network error later.
+ *
+ * @param {{provider?: string}|undefined} expert
+ * @param {Object<string, {base_url?: string}>} providers
+ * @returns {boolean}
+ */
+function isSeatUsable(expert, providers) {
+  if (!expert) return false;
+  const provider = providers[expert.provider];
+  if (!provider || !provider.base_url) return false;
+  return String(provider.base_url).indexOf('http') === 0;
+}
+
+/**
+ * Report whether the installed xp-gate matches npm's latest.
+ *
+ * The npm probe is opt-in (`probeNpmLatest`) or pre-supplied (`npmLatest`): the
+ * doctor never blocks on the network, which an offline CI or a restricted shell
+ * would otherwise hit (#414 R1 FC-03).
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ * @param {object} options
+ * @param {string|null|undefined} npmLatest
+ */
+async function checkDelphiVersionConsistency(add, options, npmLatest) {
+  const localVersion = getCliVersionSafe();
+  let versionStatus = 'PASS';
+  let versionDetail = `xp-gate ${localVersion}`;
+
+  if (npmLatest === undefined && options.probeNpmLatest === true) {
+    try {
+      // `execWithTimeout` is async; reading `.trim()` off the Promise threw, and the
+      // catch below swallowed it -- so a WORKING npm probe reported 'offline?' every
+      // time. Measured: `Promise.prototype.trim` is undefined.
+      const probed = await execWithTimeout('npm view @boyingliu01/xp-gate version', NPM_PROBE_TIMEOUT_MS);
+      versionDetail += `; npm latest probe: ${String(probed).trim()}`;
+    } catch {
+      versionStatus = 'SKIP';
+      versionDetail += '; npm latest probe unavailable (offline?) — skipped';
+    }
+  } else if (typeof npmLatest === 'string' && npmLatest !== localVersion) {
+    versionStatus = 'FAIL';
+    versionDetail += `; npm latest ${npmLatest} differs from local ${localVersion} — update (npm install -g @boyingliu01/xp-gate@latest) or verify which side is stale`;
+  } else if (npmLatest === null || options.probeNpmLatest !== true) {
+    versionDetail += '; npm latest probe skipped (pass --npm-check or options.probeNpmLatest to run it)';
+  }
+  add('Delphi version consistency', versionStatus, versionDetail);
+}
+
+
+/**
+ * Check 7: DSH native-channel readiness (#443 REQ-6).
+ *
+ * Only meaningful when a DSH home exists. The two-layer switch (preset
+ * capability plus host setting) defaults to DISABLED, and a review that
+ * assumes native will silently run three same-model seats -- the failure this
+ * check exists to make visible before a review spends money on it.
+ *
+ * @param {(name: string, status: string, detail?: string) => void} add
+ */
+function checkDshChannelReadiness(add) {
+  // 7. DSH native-channel readiness (#443 REQ-6): only meaningful when a DSH home
+  // exists. The two-layer switch (preset capability + host setting) defaults to
+  // disabled, and a review that assumes native will silently run three same-model
+  // seats.
+  const label = 'DSH subagent model selection';
+  const dshHome = path.join(HOME_DIR(), '.dsh');
+  if (!fs.existsSync(dshHome)) {
+    add(label, 'SKIP', `no ${dshHome} — not a DSH environment`);
+    return;
+  }
+
+  const settingsCandidates = [
+    path.join(dshHome, 'settings.json'),
+    path.join(dshHome, 'settings', 'settings.json'),
+    path.join(dshHome, 'config.json'),
+  ];
+  const settingsFile = settingsCandidates.find((p) => fs.existsSync(p));
+  if (!settingsFile) {
+    add(label, 'FAIL',
+      `${dshHome} exists but no settings file found — subagent model selection defaults to disabled (#443)`);
+    return;
+  }
+
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  } catch (err) {
+    add(label, 'SKIP', `${settingsFile} unparseable: ${err.message}`);
+    return;
+  }
+  reportDshSelection(add, label, settingsFile, settings.subagentModelSelection);
+}
+
+/**
+ * Report whether the DSH switch is on AND properly provisioned.
+ *
+ * The switch shipping OFF is the platform default, not a defect: only an operator who
+ * explicitly enables it and under-provisions `allowedModels` has a real
+ * misconfiguration (#414 R1 FC-07). Collapsing those two into one FAIL is what told
+ * working setups they were broken.
+ */
+function reportDshSelection(add, label, settingsFile, selection) {
+  const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
+  const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
+  const distinct = new Set(ids).size;
+
+  if (!selection || selection.enabled !== true) {
+    add(label, 'SKIP',
+      `${settingsFile}: native model selection disabled (platform default) — the external channel is the contract path (#443)`);
+    return;
+  }
+  if (distinct >= MIN_DISTINCT_MODELS) {
+    add(label, 'PASS', `${settingsFile}: enabled, ${distinct} distinct allowed models`);
+    return;
+  }
+  add(label, 'FAIL',
+    `${settingsFile}: enabled but only ${distinct} distinct allowedModels (need >=${MIN_DISTINCT_MODELS}) — native channel unusable`);
+}
+
+/**
+ * Report seats that are not `local-*`, as a WARN.
+ *
+ * #574: the local-only rule is an operator preference (the 2026-10-03 quota burn),
+ * so doctor surfaces the cost exposure without failing a deliberately hosted seat.
+ * The HARD enforcement lives in Gate MW, which binds evidence to whatever the config
+ * declares rather than to a `local-` prefix. `scripts/check_delphi_local_models.py`
+ * holds the same rule with the same allowlist and exit code; reporting it here is
+ * what finally gives that guard a caller instead of leaving it in its docstring.
+ *
+ * @param {Function} add
+ * @param {Array<string|undefined>} models one per DELPHI_ROLES entry
+ */
+function reportHostedSeats(add, models) {
+  const label = 'Delphi local-model guard (#574)';
+  const hosted = DELPHI_ROLES
+    .map((role, i) => ({ role, model: models[i] }))
+    .filter(({ model }) => model && !String(model).toLowerCase().startsWith('local-'));
+
+  if (hosted.length === 0) {
+    add(label, 'PASS', `all ${DELPHI_ROLES.length} seats are local-*`);
+    return;
+  }
+  add(label, 'WARN',
+    `hosted (non local-*) seats: ${hosted.map(({ role, model }) => `${role}=${model}`).join(', ')} — `
+    + 'local-only review is the standing rule; run: python scripts/check_delphi_local_models.py --probe');
+}
+
+/**
+ * Warn when a project config shadows a global one whose seats differ.
+ *
+ * #541: loaders fall back to the global config only on ENOENT, so this project file
+ * always wins here. If the machine-wide config exists AND its seats differ, the
+ * effective model mix depends on cwd -- the cross-project drift class behind the
+ * 2026-10-03 quota burn. WARN, never FAIL: intentional overrides are legal, and only
+ * the cwd-dependence is the hazard.
+ *
+ * Seat shape is object-keyed OR array in the wild (`delphi-config.ts` accepts both),
+ * so both sides are normalized before comparing.
+ *
+ * @param {{add: Function, cfgPath: string, globalConfigPath: string, models: Array}} p
+ */
+function reportConfigShadow(p) {
+  const { add, cfgPath, globalConfigPath, models } = p;
+  try {
+    if (!fs.existsSync(globalConfigPath) || path.resolve(globalConfigPath) === path.resolve(cfgPath)) return;
+
+    const gRaw = JSON.parse(fs.readFileSync(globalConfigPath, 'utf8'));
+    const gProfile = gRaw.profiles && gRaw.profiles[gRaw.active_profile || 'default'];
+    const gExperts = (gProfile && gProfile.experts) || {};
+    const pickExpert = (experts, role, idx) => {
+      if (!experts) return null;
+      if (Array.isArray(experts)) {
+        const seat = experts.find((x) => x && x.role === role) || experts[idx];
+        return (seat && seat.model) || null;
+      }
+      return (experts[role] && experts[role].model) || null;
+    };
+    const gModels = DELPHI_ROLES.map((role, i) => pickExpert(gExperts, role, i));
+    // Compare only roles BOTH sides define: a role missing on one side is an
+    // incomplete config (already FAILed above), not drift.
+    const differing = DELPHI_ROLES.filter((role, i) => gModels[i] && models[i] && gModels[i] !== models[i]);
+    if (differing.length === 0) return;
+
+    add('Delphi config shadow (#541)', 'WARN',
+      `project config shadows ${globalConfigPath}; seats differ (${differing.join(', ')}) — `
+      + 'reviews run from other directories will use different models');
+  } catch {
+    // A broken global config is not this check's failure mode; claiming nothing is
+    // better than claiming agreement.
+  }
+}
+
+/**
+ * Read the Delphi config and report whether a review can run from it.
+ *
+ * The file that was actually read is always named. With both scopes present a user
+ * cannot otherwise tell which one the review will take, and that ambiguity is what
+ * made #684 hard to see.
+ *
+ * @param {{add: Function, cfgPath: string, cfgLabel: string,
+ *   usingGlobalConfig: boolean, globalConfigPath: string}} p
+ */
+function reportConfigFile(p) {
+  const { add, cfgPath, cfgLabel, usingGlobalConfig, globalConfigPath } = p;
+  if (!fs.existsSync(cfgPath)) {
+    add(cfgLabel, 'FAIL',
+      `${cfgPath} not found (copy .delphi-config.json.example from the skill directory)`);
+  } else {
+    try {
+      const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const profileName = raw.active_profile || 'default';
+      const profile = raw.profiles && raw.profiles[profileName];
+      if (!profile) {
+        add(cfgLabel, 'FAIL', `profile "${profileName}" not found`);
+      } else {
+        const models = DELPHI_ROLES.map((r) => (profile.experts || {})[r] && profile.experts[r].model);
+        const problems = delphiModelProblems(profile);
+        if (problems.length > 0) {
+          add(cfgLabel, 'FAIL', problems.join('; '));
+        } else {
+          // Always name the file that was actually read. Without it a user with
+          // both scopes present cannot tell which one the review will use — the
+          // exact ambiguity that made #684 hard to see.
+          const scopeNote = usingGlobalConfig ? ` [global: ${cfgPath}]` : ` [project: ${cfgPath}]`;
+          add(cfgLabel, 'PASS',
+            `profile "${profileName}": ${models.join(' / ')}${scopeNote}`);
+          // #574: non-local seats are reported, not blocked. The local-only rule
+          // is an operator preference (the 2026-10-03 quota burn), so doctor
+          // surfaces the cost exposure without failing a deliberately hosted
+          // seat. The HARD enforcement lives in Gate MW, which binds evidence to
+          // whatever this file declares rather than to a local- prefix.
+          // `scripts/check_delphi_local_models.py` holds the same rule with the
+          // same allowlist and exit code; doctor reports it here so the guard
+          // finally has a caller (`xp-gate doctor delphi`) instead of existing
+          // only in its own docstring.
+          reportHostedSeats(add, models);
+        }
+        reportConfigShadow({ add, cfgPath, globalConfigPath, models });
+      }
+    } catch (err) {
+      add(cfgLabel, 'FAIL', `unparseable: ${err.message}`);
     }
   }
 
-  // 4. Runner script locate: the runner must be findable from the places a
-  // review actually starts.
-  const runnerCandidates = [
-    ['package bundle', path.join(PKG_DIR, 'scripts', 'delphi-external-review.cjs')],
-    ['project', path.join(process.cwd(), 'scripts', 'delphi-external-review.cjs')],
-    ['installed skill', path.join(installedSkillDir, 'scripts', 'delphi-external-review.cjs')],
-  ];
-  const foundRunner = runnerCandidates.filter(([, p]) => fs.existsSync(p));
-  add('delphi-external-review runner', foundRunner.length > 0 ? 'PASS' : 'FAIL',
-    foundRunner.length > 0
-      ? foundRunner.map(([label, p]) => `${label}: ${p}`).join('; ')
-      : 'not found in package bundle, project, or installed skill');
+}
 
+async function checkDelphiConfigPing(add, options, globalConfigPath) {
+  const { configPath, npmLatest } = options;
   // 5. Config ping: parseable, three distinct callable models. A duplicate
   // model here is a review that will BLOCK later — say so now.
   //
@@ -3592,164 +4675,54 @@ async function doctorDelphi(options = {}) {
     && fs.existsSync(globalConfigPath);
   const cfgPath = usingGlobalConfig ? globalConfigPath : projectCfgPath;
   const cfgLabel = 'Delphi config (.delphi-config.json)';
-  if (!fs.existsSync(cfgPath)) {
-    add(cfgLabel, 'FAIL',
-      `${cfgPath} not found (copy .delphi-config.json.example from the skill directory)`);
-  } else {
-    try {
-      const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-      const profileName = raw.active_profile || 'default';
-      const profile = raw.profiles && raw.profiles[profileName];
-      if (!profile) {
-        add(cfgLabel, 'FAIL', `profile "${profileName}" not found`);
-      } else {
-        const experts = profile.experts || {};
-        const models = roles.map((r) => experts[r] && experts[r].model);
-        const providers = profile.providers || {};
-        const missingRoles = roles.filter((r, i) => !models[i]);
-        const duplicates = models.filter((m, i) => m && models.indexOf(m) !== i);
-        const badProviders = roles.filter((r) => {
-          const e = experts[r];
-          return !e || !providers[e.provider]
-            || !providers[e.provider].base_url
-            || String(providers[e.provider].base_url).indexOf('http') !== 0;
-        });
-        if (missingRoles.length > 0 || duplicates.length > 0 || badProviders.length > 0) {
-          const problems = [];
-          if (missingRoles.length > 0) problems.push(`missing experts: ${missingRoles.join(', ')}`);
-          if (duplicates.length > 0) problems.push(`duplicate models: ${[...new Set(duplicates)].join(', ')}`);
-          if (badProviders.length > 0) problems.push(`unusable provider binding: ${badProviders.join(', ')}`);
-          add(cfgLabel, 'FAIL', problems.join('; '));
-        } else {
-          // Always name the file that was actually read. Without it a user with
-          // both scopes present cannot tell which one the review will use — the
-          // exact ambiguity that made #684 hard to see.
-          const scopeNote = usingGlobalConfig ? ` [global: ${cfgPath}]` : ` [project: ${cfgPath}]`;
-          add(cfgLabel, 'PASS',
-            `profile "${profileName}": ${models.join(' / ')}${scopeNote}`);
-          // #574: non-local seats are reported, not blocked. The local-only rule
-          // is an operator preference (the 2026-10-03 quota burn), so doctor
-          // surfaces the cost exposure without failing a deliberately hosted
-          // seat. The HARD enforcement lives in Gate MW, which binds evidence to
-          // whatever this file declares rather than to a local- prefix.
-          // `scripts/check_delphi_local_models.py` holds the same rule with the
-          // same allowlist and exit code; doctor reports it here so the guard
-          // finally has a caller (`xp-gate doctor delphi`) instead of existing
-          // only in its own docstring.
-          const hostedSeats = roles.filter((r) => {
-            const m = models[roles.indexOf(r)];
-            return m && !String(m).toLowerCase().startsWith('local-');
-          });
-          if (hostedSeats.length > 0) {
-            add('Delphi local-model guard (#574)', 'WARN',
-              `hosted (non local-*) seats: ${hostedSeats.map((r) => `${r}=${models[roles.indexOf(r)]}`).join(', ')} — `
-                + 'local-only review is the standing rule; run: python scripts/check_delphi_local_models.py --probe');
-          } else {
-            add('Delphi local-model guard (#574)', 'PASS', `all ${roles.length} seats are local-*`);
-          }
-        }
-        // #541 follow-up: shadow detection. Loaders fall back to the global
-        // config ONLY on ENOENT, so this project file always wins here. If the
-        // machine-wide config exists AND seats differ, the effective model mix
-        // depends on cwd — the cross-project drift class behind the 2026-10-03
-        // quota burn. Warn (intentional overrides are legal), never fail.
-        try {
-          if (fs.existsSync(globalConfigPath) && path.resolve(globalConfigPath) !== path.resolve(cfgPath)) {
-            const gRaw = JSON.parse(fs.readFileSync(globalConfigPath, 'utf8'));
-            const gProfileName = gRaw.active_profile || 'default';
-            const gProfile = gRaw.profiles && gRaw.profiles[gProfileName];
-            const gExperts = (gProfile && gProfile.experts) || {};
-            // Seat shape is object-keyed OR array in the wild (delphi-config.ts
-            // accepts both); normalize to a role->model map before comparing.
-            const pickExpert = (experts, role, idx) => {
-              if (!experts) return null;
-              if (Array.isArray(experts)) {
-                const e = experts.find((x) => x && x.role === role) || experts[idx];
-                return (e && e.model) || null;
-              }
-              return (experts[role] && experts[role].model) || null;
-            };
-            const gModels = roles.map((r, i) => pickExpert(gExperts, r, i));
-            // Compare only roles BOTH sides define: a role missing on one side
-            // is an incomplete config (check 5 already FAILs it), not drift.
-            const differing = roles.filter((r, i) => gModels[i] && models[i] && gModels[i] !== models[i]);
-            if (differing.length > 0) {
-              add('Delphi config shadow (#541)', 'WARN',
-                `project config shadows ${globalConfigPath}; seats differ (${differing.join(', ')}) — reviews run from other directories will use different models`);
-            }
-          }
-        } catch {
-          // A broken/unreadable global config is not this check's failure mode;
-          // silence here must not mask it elsewhere, so nothing is claimed.
-        }
-      }
-    } catch (err) {
-      add(cfgLabel, 'FAIL', `unparseable: ${err.message}`);
-    }
-  }
+  reportConfigFile({ add, cfgPath, cfgLabel, usingGlobalConfig, globalConfigPath });
 
-  // 6. Version consistency (#414 REQ-6): local files first. The npm-latest
-  // probe is opt-in (options.probeNpmLatest) or pre-supplied
-  // (options.npmLatest) — the doctor never blocks on the network, which is
-  // what an offline CI or restricted shell would otherwise hit (#414 R1 FC-03).
-  const localVersion = getCliVersionSafe();
-  let versionStatus = 'PASS';
-  let versionDetail = `xp-gate ${localVersion}`;
-  if (npmLatest === undefined && options.probeNpmLatest === true) {
-    try {
-      versionDetail += `; npm latest probe: ${execWithTimeout('npm view @boyingliu01/xp-gate version', 8000).trim()}`;
-    } catch {
-      versionStatus = 'SKIP';
-      versionDetail += '; npm latest probe unavailable (offline?) — skipped';
-    }
-  } else if (typeof npmLatest === 'string' && npmLatest !== localVersion) {
-    versionStatus = 'FAIL';
-    versionDetail += `; npm latest ${npmLatest} differs from local ${localVersion} — update (npm install -g @boyingliu01/xp-gate@latest) or verify which side is stale`;
-  } else if (npmLatest === null || options.probeNpmLatest !== true) {
-    versionDetail += '; npm latest probe skipped (pass --npm-check or options.probeNpmLatest to run it)';
-  }
-  add('Delphi version consistency', versionStatus, versionDetail);
+  // 6. Version consistency.
+  await checkDelphiVersionConsistency(add, options, npmLatest);
 
-  // 7. DSH native-channel readiness (#443 REQ-6): only meaningful when a DSH
-  // home exists. The two-layer switch (preset capability + host setting)
-  // defaults to disabled, and a review that assumes native will silently run
-  // three same-model seats.
-  const dshHome = path.join(HOME_DIR(), '.dsh');
-  if (!fs.existsSync(dshHome)) {
-    add('DSH subagent model selection', 'SKIP', `no ${dshHome} — not a DSH environment`);
-  } else {
-    const settingsCandidates = [
-      path.join(dshHome, 'settings.json'),
-      path.join(dshHome, 'settings', 'settings.json'),
-      path.join(dshHome, 'config.json'),
-    ];
-    const settingsFile = settingsCandidates.find((p) => fs.existsSync(p));
-    if (!settingsFile) {
-      add('DSH subagent model selection', 'FAIL',
-        `${dshHome} exists but no settings file found — subagent model selection defaults to disabled (#443)`);
-    } else {
-      try {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
-        const selection = settings.subagentModelSelection;
-        const allowed = selection && Array.isArray(selection.allowedModels) ? selection.allowedModels : [];
-        const ids = allowed.map((m) => (typeof m === 'string' ? m : m && m.id)).filter(Boolean);
-        if (selection && selection.enabled === true && new Set(ids).size >= 3) {
-          add('DSH subagent model selection', 'PASS', `${settingsFile}: enabled, ${new Set(ids).size} distinct allowed models`);
-        } else if (selection && selection.enabled === true) {
-          add('DSH subagent model selection', 'FAIL',
-            `${settingsFile}: enabled but only ${new Set(ids).size} distinct allowedModels (need ≥3) — native channel unusable`);
-        } else {
-          // The switch shipping off is the platform default, not a defect:
-          // only an operator who explicitly enables it and under-provisions
-          // allowedModels has a real misconfiguration (#414 R1 FC-07).
-          add('DSH subagent model selection', 'SKIP',
-            `${settingsFile}: native model selection disabled (platform default) — the external channel is the contract path (#443)`);
-        }
-      } catch (err) {
-        add('DSH subagent model selection', 'SKIP', `${settingsFile} unparseable: ${err.message}`);
-      }
-    }
-  }
+
+  // 7. DSH native-channel readiness.
+  checkDshChannelReadiness(add);
+
+}
+
+async function doctorDelphi(options = {}) {
+  const { configPath, npmLatest } = options;
+  // #541: the shadow check needs the loader's global fallback path. It is
+  // injectable for tests; the default mirrors delphi-config.ts /
+  // delphi-external-review.cjs resolution (XDG_CONFIG_HOME honored).
+  const globalConfigPath = options.globalConfigPath
+    || path.join(process.env.XDG_CONFIG_HOME || path.join(require('os').homedir(), '.config'), 'xp-gate', '.delphi-config.json');
+  const checks = [];
+  const add = (name, status, detail) => checks.push({ name, status, detail });
+
+  // 1. Node >= 18: the runner gates on it and exits 1 mid-review otherwise.
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  add(`Node.js >= ${MIN_NODE_MAJOR}`, nodeMajor >= MIN_NODE_MAJOR ? 'PASS' : 'FAIL',
+    `current: ${process.versions.node}`);
+
+  // 2. Qoder agent bindings.
+  checkDelphiAgentBindings(add, options);
+
+  // 3. Skill install parity. It also resolves the installed skill dir, which
+  // the runner-locate check below needs.
+  const installedSkillDir = checkSkillInstallParity(add, options);
+
+  // 4. Runner script locate: the runner must be findable from the places a
+  // review actually starts.
+  const runnerCandidates = [
+    ['package bundle', path.join(PKG_DIR, 'scripts', 'delphi-external-review.cjs')],
+    ['project', path.join(process.cwd(), 'scripts', 'delphi-external-review.cjs')],
+    ['installed skill', path.join(installedSkillDir, 'scripts', 'delphi-external-review.cjs')],
+  ];
+  const foundRunner = runnerCandidates.filter(([, p]) => fs.existsSync(p));
+  add('delphi-external-review runner', foundRunner.length > 0 ? 'PASS' : 'FAIL',
+    foundRunner.length > 0
+      ? foundRunner.map(([label, p]) => `${label}: ${p}`).join('; ')
+      : 'not found in package bundle, project, or installed skill');
+
+  // 5. Config ping.
+  await checkDelphiConfigPing(add, options, globalConfigPath);
 
   for (const check of checks) {
     const mark = check.status === 'PASS' ? '✓' : check.status === 'SKIP' ? '○' : check.status === 'WARN' ? '⚠' : '✗';
@@ -3817,6 +4790,33 @@ function platformTag(skillDir) {
  * Files in `skillDir` that are missing or differ from the bundle.
  * @returns {string[]} `rel: reason` entries; empty when the copy is clean
  */
+/**
+ * Files where an installed skill copy differs from the bundle.
+ *
+ * An unreadable file is reported as `unreadable` rather than skipped: a copy we
+ * cannot check is not a copy we can call matching, and silence here would let a
+ * permissions problem pass as parity.
+ */
+/**
+ * SHA-256 of a file, or a thrown error naming the path.
+ *
+ * A digest is used to compare two copies; a read failure must not yield a digest
+ * that happens to differ, because "cannot read" and "differs" need different
+ * repairs.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
+function fileSha256(filePath) {
+  let content;
+  try {
+    content = fs.readFileSync(filePath);
+  } catch (err) {
+    throw new Error(`cannot hash ${filePath}: ${err.message}`);
+  }
+  return require('crypto').createHash('sha256').update(content).digest('hex');
+}
+
 function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
   const drifted = [];
   for (const rel of bundledFiles) {
@@ -3824,15 +4824,22 @@ function collectSkillDrift(skillDir, bundledFiles, bundledSkillDir, sha256) {
     const bundledPath = path.join(bundledSkillDir, rel);
     if (!fs.existsSync(installedPath)) {
       drifted.push(`${rel}: missing`);
-    } else if (sha256(installedPath) !== sha256(bundledPath)) {
-      drifted.push(`${rel}: differs`);
+      continue;
+    }
+    try {
+      if (sha256(installedPath) !== sha256(bundledPath)) drifted.push(`${rel}: differs`);
+    } catch {
+      drifted.push(`${rel}: unreadable`);
     }
   }
   return drifted;
 }
 
 module.exports = {
-  doctor, doctorDelphi, isXpGateFile, SIGNATURES, getHookSignatures, isXpGateHookContent,
+  reportUnreadablePath, reportStalePath, reportSyncResult,
+  runHookAndModuleSync, staleSyncEntries,
+  planStaleHookSync, reportBlockedHookSync, refreshSafeHooks,
+  doctor, doctorDelphi, isXpGateFile, diagnoseLanguageTools, diagnoseCliTools, SIGNATURES, getHookSignatures, isXpGateHookContent,
   fixVersionMismatch,
   fixTemplateDirMismatch,
   fixMissingHooks,

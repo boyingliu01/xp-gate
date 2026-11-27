@@ -119,30 +119,66 @@ function detectJvm(dir: string): string | null {
 }
 
 /** Infrastructure-as-code by file extension, or null. */
+/**
+ * Whether this name is an IaC marker.
+ *
+ * The suffix test is scoped to `.tf` because `Dockerfile` has no extension -- matching
+ * `Dockerfile.dev` too, but NOT `my.tf.json`, which the suffix alone would accept.
+ */
+function isIacMarker(name: string): boolean {
+  return name.endsWith('.tf') || name === 'Dockerfile';
+}
+
 function detectIac(dir: string): string | null {
   try {
-    const files = fs.readdirSync(dir);
-    if (files.some((f) => f.endsWith('.tf') || f === 'Dockerfile')) return 'iac';
-  } catch { /* An unreadable directory proves nothing. */ }
-  return null;
+    return fs.readdirSync(dir).some(isIacMarker) ? 'iac' : null;
+  } catch {
+    // An unreadable directory proves nothing: not finding a marker is not evidence that
+    // the project is not IaC.
+    return null;
+  }
+}
+
+/**
+ * The language a marker FILE in this directory declares, or null.
+ *
+ * Markers are checked before any extension search because a `package.json` is an explicit
+ * declaration, while a stray `.sh` is only a hint.
+ */
+function langFromMarkers(dir: string): string | null {
+  const marker = LANG_MARKERS.find((m) => m.files.some((f) => fs.existsSync(path.join(dir, f))));
+  return marker ? marker.lang : null;
 }
 
 export function detectProjectLang(cwd?: string): string {
   const dir = cwd || process.cwd();
+  const byMarker = langFromMarkers(dir);
+  if (byMarker) return byMarker;
 
-  for (const marker of LANG_MARKERS) {
-    if (marker.files.some((f) => fs.existsSync(path.join(dir, f)))) return marker.lang;
-  }
-
-  const candidates = [
-    detectJvm(dir),
-    detectDartFlutter(dir),
-    hasFileWithExtension(dir, ['.psd1', '.psm1', '.ps1']) ? 'powershell' : null,
-    hasFileWithExtension(dir, ['.sh', '.bash']) ? 'shell' : null,
-    detectIac(dir),
-  ];
+  const candidates = EXTENSION_PROBES.map((probe) => probe(dir));
   return candidates.find((lang) => lang !== null) ?? 'unknown';
 }
+
+/**
+ * Language probes that run when no marker FILE matched, in precedence order.
+ *
+ * Marker files come first because a `package.json` is unambiguous, while an extension
+ * search can see a stray script in an otherwise unrelated project. The order among these
+ * is the order a reader would try them: the most specific ecosystem first.
+ */
+const EXTENSION_PROBES: Array<(dir: string) => string | null> = [
+  (dir) => detectJvm(dir),
+  (dir) => detectDartFlutter(dir),
+  (dir) => (hasFileWithExtension(dir, POWERSHELL_EXTENSIONS) ? 'powershell' : null),
+  (dir) => (hasFileWithExtension(dir, SHELL_EXTENSIONS) ? 'shell' : null),
+  (dir) => detectIac(dir),
+];
+
+/** The extensions that mark a PowerShell project. */
+const POWERSHELL_EXTENSIONS = ['.psd1', '.psm1', '.ps1'];
+
+/** The extensions that mark a shell project. */
+const SHELL_EXTENSIONS = ['.sh', '.bash'];
 
 // ── PowerShell Support ──
 

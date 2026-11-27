@@ -409,4 +409,10 @@ function listGates() {
   return 0;
 }
 
-module.exports = { check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary, normalizeGateExit, celebrateCleanRun };
+// BOTH halves: the branch added the low-level helpers, main added `celebrateCleanRun`.
+// Either export list alone breaks the other side's callers.
+module.exports = {
+  resolveGateToken, parseCheckArgs, gitChangedNames, readChangedFiles,
+  check, checkAllGates, formatGateTally, runChangedBrief, fileExtension,
+  printBriefSummary, normalizeGateExit, celebrateCleanRun,
+};

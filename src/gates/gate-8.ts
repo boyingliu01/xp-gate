@@ -17,6 +17,42 @@ import {
   getChangedFiles, detectProjectLang,
 } from './common';
 
+/**
+ * SKIP when gitleaks is absent, naming how to install it.
+ *
+ * SKIP rather than BLOCK: secret scanning is fail-closed on a SCAN ERROR, but a missing
+ * tool is a different claim -- nothing was examined either way, and the status says so.
+ */
+function skipNoGitleaks(startMs: number, messages: string[]): GateOutput {
+  messages.push('     ℹ️  gitleaks not installed — secret scanning unavailable');
+  messages.push('     Install: brew install gitleaks (macOS) | winget install gitleaks (Windows)');
+  messages.push('     ⏭️  SKIPPED - Secret scanning (gitleaks not installed)');
+  recordAudit('gate-8', 'secret-scanning', 'SKIP', 0, startMs);
+  return { status: 'SKIP', messages, exitCode: 0 };
+}
+
+/** The verdict for a scan that found nothing. */
+function passNoSecrets(startMs: number, messages: string[]): GateOutput {
+  messages.push('     ✅ PASSED - No secrets detected.');
+  recordAudit('gate-8', 'secret-scanning', 'PASS', 0, startMs);
+  return { status: 'PASS', messages, exitCode: 0 };
+}
+
+/**
+ * Run gitleaks for this project.
+ *
+ * `npx` is a COMMAND LINE, not a path: the tool reports it as `npx gitleaks`, which cannot
+ * be executed as a file.
+ */
+function runGitleaks(tool: { via?: string; path: string }, cwd: string) {
+  const viaNpx = tool.via === 'npx';
+  return runTool(
+    viaNpx ? 'npx' : tool.path,
+    buildGitleaksArgs(viaNpx, findGitleaksConfig(cwd)),
+    { cwd },
+  );
+}
+
 export function runGate8(input: GateInput): GateOutput {
   const startMs = Date.now();
   const cwd = input.cwd || process.cwd();
@@ -27,35 +63,51 @@ export function runGate8(input: GateInput): GateOutput {
 
   // Tool detection
   const tool = isToolAvailable('gitleaks', cwd);
-  if (!tool.available) {
-    messages.push('     ℹ️  gitleaks not installed — secret scanning unavailable');
-    messages.push('     Install: brew install gitleaks (macOS) | winget install gitleaks (Windows)');
-    messages.push('     ⏭️  SKIPPED - Secret scanning (gitleaks not installed)');
-    recordAudit('gate-8', 'secret-scanning', 'SKIP', 0, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
-  }
+  if (!tool.available) return skipNoGitleaks(startMs, messages);
 
-  const gitleaksCmd = tool.via === 'npx' ? 'npx' : tool.path;
-  const gitleaksArgs = buildGitleaksArgs(tool.via === 'npx', findGitleaksConfig(cwd));
+  const result = runGitleaks(tool, cwd);
 
-  const result = runTool(gitleaksCmd, gitleaksArgs, { cwd });
+  if (result.exitCode === 0) return passNoSecrets(startMs, messages);
 
-  if (result.exitCode === 0) {
-    messages.push('     ✅ PASSED - No secrets detected.');
-    recordAudit('gate-8', 'secret-scanning', 'PASS', 0, startMs);
-    return { status: 'PASS', messages, exitCode: 0 };
-  }
+  if (result.exitCode === 1) return secretsFound(startMs, messages, result.stdout);
+  return gitleaksErrored(startMs, messages, result.exitCode);
+}
 
-  if (result.exitCode === 1) {
-    messages.push(...secretsFoundMessages(result.stdout));
-    recordAudit('gate-8', 'secret-scanning', 'FAIL', 1, startMs);
-    return { status: 'FAIL', messages, exitCode: 1 };
-  }
+/**
+ * gitleaks exit 1 means it FOUND something -- the one verdict that must block.
+ *
+ * Its findings go to stdout as JSON, which is what `secretsFoundMessages` renders.
+ */
+function secretsFound(startMs: number, messages: string[], stdout: string): GateOutput {
+  messages.push(...secretsFoundMessages(stdout));
+  recordAudit('gate-8', 'secret-scanning', 'FAIL', 1, startMs);
+  return { status: 'FAIL', messages, exitCode: 1 };
+}
 
-  messages.push(`     ⚠️  gitleaks exited with code ${result.exitCode} - skipping gate`);
-  messages.push('     ✅ Secret Scanning (SKIP, gitleaks error)');
-  recordAudit('gate-8', 'secret-scanning', 'SKIP', result.exitCode, startMs);
-  return { status: 'SKIP', messages, exitCode: 0 };
+/**
+ * Any other non-zero exit is the TOOL misbehaving, not a finding.
+ *
+ * SKIP rather than PASS: nothing was examined, and a PASS here would claim the
+ * repository is clean on the strength of a broken scan.
+ */
+/**
+ * gitleaks could not complete: FAIL, not SKIP.
+ *
+ * `AGENTS.md` states the rule as "Tool missing → SKIP, not BLOCK — except secret
+ * scanning, which is fail-closed: a security gate that cannot run must not report
+ * success." A gitleaks that timed out or crashed is exactly "cannot run", and this
+ * returned `SKIP` with exit code 0 while printing a green tick -- the third of those
+ * three statements contradicted the first two (review FC-01).
+ *
+ * A MISSING gitleaks still SKIPs: that is a deliberate choice about a development
+ * checkout without the tool, and it is unchanged. Whether the scan STARTED and failed is
+ * a different question from whether it could start at all.
+ */
+function gitleaksErrored(startMs: number, messages: string[], exitCode: number): GateOutput {
+  messages.push(`     ❌ FAILED - Secret scanning could not complete (gitleaks exited ${exitCode})`);
+  messages.push('     This is NOT a clean scan: nothing was verified. Fix gitleaks, then re-run.');
+  recordAudit('gate-8', 'secret-scanning', 'FAIL', exitCode, startMs);
+  return { status: 'FAIL', messages, exitCode: 1 };
 }
 
 /** The report + remediation shown when gitleaks finds secrets (exit code 1). */

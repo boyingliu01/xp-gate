@@ -1,4 +1,5 @@
 import { BaseAdapter } from './base';
+import { maskLiterals } from './typescript-mask';
 import { Adapter } from '../types';
 import { isCallPosition } from './position-analysis';
 import { claimMember, countTopLevelMembers } from './member-scan';
@@ -57,16 +58,35 @@ const CONTROL_KEYWORDS = new Set([
 // function boundary when a return annotation contains a brace literal.
 type ScanStep = { depth: number; resume: number };
 
+/** Characters that open a generic/array context. */
+const DEPTH_OPENERS = new Set(['<', '[']);
+/** Characters that close one. `}` closes the enclosing block, not a generic. */
+const DEPTH_CLOSERS = new Set(['>', ']', '}']);
+
+/**
+ * Advance one character, reporting the new depth and where to resume.
+ *
+ * A parenthesised group is skipped WHOLE: parens only appear inside a header
+ * (`class X extends Y<() => void>`), never as body structure, so scanning inside one
+ * would count its contents as depth.
+ *
+ * `Math.max(0, …)` on closers: a `>` in a comparison is not a generic close, and a
+ * negative depth would make every later check wrong.
+ */
 const stepDepth = (masked: string, c: string, i: number, depth: number): ScanStep => {
   if (c === '(') {
     const { end } = readParenGroup(masked, i);
     return { depth, resume: end - 1 };
   }
-  if (c === '<' || c === '[') return { depth: depth + 1, resume: i };
-  if (c === '>' || c === ']') return { depth: Math.max(0, depth - 1), resume: i };
-  if (c === '}') return { depth: Math.max(0, depth - 1), resume: i };
+  if (DEPTH_OPENERS.has(c)) return { depth: depth + 1, resume: i };
+  if (DEPTH_CLOSERS.has(c)) return { depth: Math.max(0, depth - 1), resume: i };
   return { depth, resume: i };
 };
+
+/** Whether the character ends a header without a braced body. */
+function isHeaderTerminator(c: string, depth: number): boolean {
+  return (c === ';' || c === '\n') && depth === 0;
+}
 
 function findBodyBrace(masked: string, parenIndex: number): number {
   if (masked[parenIndex] !== '(') return -1;
@@ -75,20 +95,23 @@ function findBodyBrace(masked: string, parenIndex: number): number {
   let i = end;
   while (i < masked.length) {
     const c = masked[i];
-    if (c === '{') {
-      if (depth === 0) return i;
-      depth++;
-      i++;
-      continue;
-    }
-    // A line break or semicolon before any brace means this header has no
-    // braced body (an interface member or an overload signature).
-    if ((c === ';' || c === '\n') && depth === 0) return -1;
+    if (isBodyBraceAt(c, depth)) return i;
+    if (isHeaderTerminator(c, depth)) return -1;
     const stepped = stepDepth(masked, c, i, depth);
     depth = stepped.depth;
     i = stepped.resume + 1;
   }
   return -1;
+}
+
+/**
+ * Whether this character IS the function's body brace.
+ *
+ * A brace at depth 0 is the body; deeper it is a generic argument (`<{a: number}>`), and
+ * stopping there would measure a type as the function.
+ */
+function isBodyBraceAt(c: string, depth: number): boolean {
+  return c === '{' && depth === 0;
 }
 
 // Index just past the matching closing brace for the block opened at open.
@@ -142,21 +165,69 @@ const HEADER_CLOSERS = new Set(['>', ']']);
  * "this character means something", and a per-character decision keeps that list
  * readable and each rule independently testable.
  */
+/**
+ * How each header bracket changes DEPTH.
+ *
+ * Angle brackets nest in generic arguments, so a brace inside them is a TYPE
+ * (`class X extends Y<{a: number}>`) and not the body. A table because every arm is the
+ * same one-field answer.
+ */
+const HEADER_DEPTH_DELTA: Record<string, 1 | -1> = {};
+for (const c of HEADER_OPENERS) HEADER_DEPTH_DELTA[c] = 1;
+for (const c of HEADER_CLOSERS) HEADER_DEPTH_DELTA[c] = -1;
+
 function declarationScanAction(masked: string, i: number, depth: number): ScanAction {
   const c = masked[i];
 
-  // A parenthesised group is skipped whole: parens only ever appear inside a
-  // header (`class X extends Y<() => void>`), never as body structure.
-  if (c === '(') return { kind: 'jump', to: readParenGroup(masked, i).end - 1 };
-  if (HEADER_OPENERS.has(c)) return { kind: 'depth', delta: 1 };
-  if (HEADER_CLOSERS.has(c)) return { kind: 'depth', delta: -1 };
-
-  if (c === '{') return depth === 0 ? { kind: 'body', at: i } : { kind: 'depth', delta: 1 };
-  if (c === '}') return { kind: 'depth', delta: -1 };
-
-  if (c === ';' && depth === 0) return { kind: 'no-body' };
-  if (c === '\n' && depth === 0 && startsNewDeclaration(masked, i)) return { kind: 'no-body' };
+  if (c === '(') return skipParenGroup(masked, i);
+  const delta = HEADER_DEPTH_DELTA[c];
+  if (delta !== undefined) return { kind: 'depth', delta };
+  if (isBraceChar(c)) return braceAction(c, i, depth);
+  if (isDeclarationTerminator(masked, i, c, depth)) return { kind: 'no-body' };
   return { kind: 'advance' };
+}
+
+/** Whether this character is a brace. */
+function isBraceChar(c: string): boolean {
+  return c === '{' || c === '}';
+}
+
+/**
+ * Jump over a parenthesised group.
+ *
+ * Skipped whole because parens only ever appear inside a header
+ * (`class X extends Y<() => void>`), never as body structure -- so stepping into one
+ * could only misread its contents as braces.
+ */
+function skipParenGroup(masked: string, i: number): ScanAction {
+  return { kind: 'jump', to: readParenGroup(masked, i).end - 1 };
+}
+
+/**
+ * What a brace means at this depth.
+ *
+ * A `{` at DEPTH 0 opens the body -- the thing the caller is looking for -- while at
+ * any deeper depth it is a generic argument (`class X extends Y<{a: number}>`). A `}`
+ * only ever closes one.
+ *
+ * @returns either a `body` action pointing at `i`, or a depth step
+ */
+function braceAction(c: string, i: number, depth: number): ScanAction {
+  if (c === '}') return { kind: 'depth', delta: -1 };
+  return depth === 0 ? { kind: 'body', at: i } : { kind: 'depth', delta: 1 };
+}
+
+/**
+ * Whether this character ends a declaration that has no body.
+ *
+ * A `;` at depth 0 ends it outright. A newline at depth 0 ends it only when the next
+ * line starts a NEW declaration -- otherwise a wrapped header
+ * (`class X\n  extends Y`) would be cut in half.
+ */
+function isDeclarationTerminator(masked: string, i: number, c: string, depth: number): boolean {
+  if (depth !== 0) return false;
+  if (c === ';') return true;
+  return c === '\n' && startsNewDeclaration(masked, i);
 }
 
 /**
@@ -168,19 +239,23 @@ function findDeclarationBrace(masked: string, from: number): number {
   let depth = 0;
   for (let i = from; i < masked.length; i++) {
     const action = declarationScanAction(masked, i, depth);
-    switch (action.kind) {
-      case 'body': return action.at;
-      case 'no-body': return -1;
-      case 'jump': i = action.to; break;
-      case 'depth':
-        // Depth never goes negative: a stray closing bracket in a header must
-        // not look like the start of a new group.
-        depth = Math.max(0, depth + action.delta);
-        break;
-      case 'advance': break;
-    }
+    if (action.kind === 'body') return action.at;
+    if (action.kind === 'no-body') return -1;
+    if (action.kind === 'jump') i = action.to;
+    depth = nextDepth(depth, action);
   }
   return -1;
+}
+
+/**
+ * The depth after this action.
+ *
+ * Depth never goes NEGATIVE: a stray closing bracket in a header must not look like the
+ * start of a new group, which would make the next `{` appear to be at depth 0 and be
+ * taken for the body.
+ */
+function nextDepth(depth: number, action: ScanAction): number {
+  return action.kind === 'depth' ? Math.max(0, depth + action.delta) : depth;
 }
 
 function lineOf(src: string, index: number): number {
@@ -306,28 +381,73 @@ const ARROW_ASSIGNMENT = /(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*
 
 /** The three quoted states shared by the parameter/paren scanners. */
 /** Count top-level, comma-separated parameters in a raw parameter list. */
+/**
+ * How many parameters a raw parameter list holds.
+ *
+ * Counting COMMAS at depth 0 is the whole rule: a comma inside a generic
+ * (`Map<K, V>`), an array literal or a string does not separate parameters. That is
+ * why the scan tracks nesting and quote state before deciding.
+ *
+ * An empty list is 0, not 1: `()` declares nothing, and the naive "start at 1" would
+ * report one parameter for every no-argument function.
+ */
+/**
+ * How many characters of a `=>` / `>=` operator start at `i`, or 0 for anything else.
+ *
+ * `>` closes a generic parameter list, but in `=>` and `>=` it is an OPERATOR. Counting it
+ * as a closer drove the depth negative, after which no later comma looked top-level --
+ * measured: `f(cb = (x, y) => x + y, d)` and `f(a = b >= c, d)` each reported 1 parameter
+ * instead of 2.
+ *
+ * A lone `>` PRECEDED BY `=` is the `>` of an arrow whose `=` was consumed on the previous
+ * iteration, so it counts as skipped too -- without skipping, the loop would advance past
+ * it and still close the depth.
+ */
+function angleOperatorLength(src: string, i: number): number {
+  if (src[i] === '=' && src[i + 1] === '>') return 2;
+  if (src[i] === '>' && (src[i + 1] === '=' || src[i - 1] === '=')) return 1;
+  return 0;
+}
+
 function countParams(rawList: string): number {
   const trimmed = rawList.trim();
   if (trimmed === '') return 0;
 
   const depth = { value: 0 };
-  let count = 1;
   const state = newQuoteState();
+  let count = 1;
 
   for (let i = 0; i < trimmed.length;) {
     if (inQuotedState(state)) {
       i += advanceQuoteState(trimmed, i, state);
       continue;
     }
-    const c = trimmed[i];
-    if (isQuote(c)) {
-      advanceQuoteState(trimmed, i, state);
-    } else if (!applyDelimiter(c, depth) && c === ',' && depth.value === 0) {
-      count++;
-    }
+    const skipped = angleOperatorLength(trimmed, i);
+    if (skipped > 0) { i += skipped; continue; }
+    if (!deepensParamNesting(trimmed[i], depth)) count += 1;
     i++;
   }
   return count;
+}
+
+/**
+ * Whether this character is NOT a top-level parameter separator.
+ *
+ * Absorbing the decision keeps the loop to one test. A delimiter changes depth; anything
+ * else is a separator only when it is a top-level comma.
+ *
+ * A QUOTE returns true but does NOT open a state here, and that is correct: `countParams`
+ * receives text that `readParenGroup` already scanned, so a quoted run has been resolved
+ * to one opaque item before this sees it. The earlier wording ("a quote opens a state")
+ * read as a promise this function does not keep, and three reviewers concluded a comma
+ * inside a string was counted as a separator -- it is not. Measured on four shapes
+ * including `f(a: string = "1,2,3", b: number)` -> 2.
+ *
+ * @returns true when the caller should not count a new parameter
+ */
+function deepensParamNesting(c: string, depth: { value: number }): boolean {
+  if (isQuote(c)) return true;
+  return applyDelimiter(c, depth) || c !== ',' || depth.value !== 0;
 }
 
 /** What one step of the paren-group scan did, so the caller can react. */
@@ -408,151 +528,6 @@ function ioOperationsIn(body: string): string[] {
   return [...found];
 }
 
-/**
- * Blank a `//` line comment starting at `start`.
- * Stops AT the newline so line numbering survives (the newline is the caller's
- * to consume as an ordinary character).
- * @returns the index to resume scanning from.
- */
-function maskLineComment(src: string, out: string[], start: number): number {
-  let i = start;
-  while (i < src.length && src[i] !== '\n') { out[i] = ' '; i++; }
-  return i;
-}
-
-/**
- * Blank a block comment starting at `start` (which holds `/`).
- *
- * #602: newlines inside the comment must survive. Blanking them shifts every
- * subsequent line number, so `lineOf()` and every line-numbered violation after
- * a multi-line comment would point at the wrong line -- exactly the defect the
- * line-comment branch never had, because it stops AT the newline.
- *
- * @returns the index to resume scanning from.
- */
-function maskBlockComment(src: string, out: string[], start: number): number {
-  let i = start;
-  out[i] = ' '; out[i + 1] = ' '; i += 2;
-  while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
-    if (src[i] !== '\n') out[i] = ' ';
-    i++;
-  }
-  if (i < src.length) { out[i] = ' '; out[i + 1] = ' '; i += 2; }
-  return i;
-}
-
-/**
- * Decide whether the `/` at `index` opens a regex literal rather than being
- * division. A regex may only start where an expression may start: at the very
- * beginning, after an operator/punctuation, or after a keyword that expects an
- * expression (`return /re/`, `typeof /re/`, ...).
- */
-function opensRegexLiteral(src: string, index: number): boolean {
-  const before = src.substring(0, index).replace(/\s+$/, '');
-  const prev = before[before.length - 1];
-  if (prev === undefined) return true;
-  if (/[=(,:[!&|?{};+\-*%^~<>]/.test(prev)) return true;
-  return /(?:^|[^\w$])(return|typeof|case|in|of|new|delete|void|instanceof)$/.test(before);
-}
-
-/**
- * Find where a regex literal starting at `start` closes, honouring `\` escapes
- * and character classes (`[/]` must not close the literal).
- * @returns the index of the closing `/`, or -1 when the line ends first (so the
- *          slash really was division).
- */
-function findRegexClose(src: string, start: number): number {
-  let inClass = false;
-  for (let j = start + 1; j < src.length; j++) {
-    const d = src[j];
-    if (d === '\\') { j++; continue; }
-    if (d === '\n') return -1;
-    if (d === '[') { inClass = true; continue; }
-    if (d === ']') { inClass = false; continue; }
-    if (d === '/' && !inClass) return j;
-  }
-  return -1;
-}
-
-/**
- * Blank a regex literal (and its trailing flags) starting at `start`.
- * @returns the index to resume scanning from.
- */
-function maskRegexLiteral(src: string, out: string[], start: number): number {
-  const close = findRegexClose(src, start);
-  if (close < 0) return start;
-  for (let k = start; k <= close; k++) out[k] = ' ';
-  let i = close + 1;
-  while (i < src.length && /[a-z]/i.test(src[i])) { out[i] = ' '; i++; }
-  return i;
-}
-
-/**
- * Blank a quoted or template literal starting at `start`.
- * A backtick runs to its closing backtick (interpolations included); a single
- * or double quote stops at an unescaped newline, matching a syntax error.
- * @returns the index to resume scanning from.
- */
-function maskStringLiteral(src: string, out: string[], start: number): number {
-  const quote = src[start];
-  out[start] = ' ';
-  let i = start + 1;
-  while (i < src.length) {
-    const d = src[i];
-    if (d === '\\') {
-      out[i] = ' ';
-      if (i + 1 < src.length) out[i + 1] = ' ';
-      i += 2;
-      continue;
-    }
-    if (d === quote) { out[i] = ' '; i++; break; }
-    if (d === '\n' && quote !== '`') break;
-    out[i] = ' ';
-    i++;
-  }
-  return i;
-}
-
-/**
- * Blank out comments and string/template literals, preserving offsets.
- * A single left-to-right scan is used rather than chained `.replace()` calls:
- * sequential regex replacement re-scans text that earlier passes produced and
- * can pair a quote inside a regex literal with a quote in a later comment,
- * swallowing hundreds of lines (observed as a 302-line phantom function).
- *
- * The scan dispatches to one masking routine per construct and otherwise copies
- * the character through, so the loop's own branching stays flat (#602: split
- * from a single 36-CCN body into five routines the tests can pin separately).
- */
-function maskLiterals(src: string): string {
-  const out = src.split('');
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    const next = src[i + 1];
-
-    if (c === '/' && next === '/') {
-      i = maskLineComment(src, out, i);
-      continue;
-    }
-    if (c === '/' && next === '*') {
-      i = maskBlockComment(src, out, i);
-      continue;
-    }
-    if (c === '/' && opensRegexLiteral(src, i)) {
-      const resumed = maskRegexLiteral(src, out, i);
-      // -1/findRegexClose failure keeps start, so `i` only advances on a match.
-      if (resumed !== i) { i = resumed; continue; }
-    }
-    if (c === "'" || c === '"' || c === '`') {
-      i = maskStringLiteral(src, out, i);
-      continue;
-    }
-
-    i++;
-  }
-  return out.join('');
-}
 
 /**
  * The metrics the rule set actually reads (see src/principles/rules/**).
@@ -573,6 +548,45 @@ interface FunctionMetrics {
   hasTryCatch: boolean;
   ioOperations: string[];
   code: string;
+}
+
+/** Sentinel for "this arrow has a bare parameter, not a parenthesised list". */
+const PAREN_MISSING = -1;
+
+/** A single-identifier parameter followed by `=>`. */
+const BARE_PARAM_ARROW = /^\s*(\w+)\s*=>/;
+
+/** The bare parameter itself, for measuring where it ends. */
+const BARE_PARAM = /^\s*(\w+)/;
+
+/** What follows a parameter list: an optional return type, then `=>`. */
+const ARROW_HEAD = /^\s*(?::[^=]+)?=>/;
+
+/**
+ * The index of an arrow's `{` block body, or -1 for a concise body.
+ *
+ * The brace is accepted only when it comes straight after `=>`: a `{` appearing later
+ * belongs to the expression the arrow returns (an object literal is `=> ({ ... })`),
+ * and treating it as a block would measure a body that does not exist.
+ */
+function blockBodyOpen(masked: string, afterParams: number): number {
+  const braceAfter = masked.indexOf('{', afterParams);
+  if (braceAfter === -1) return -1;
+  const isBlockBody = /^\s*(?::[^=]+)?=>\s*\{/.test(masked.substring(afterParams, braceAfter + 1));
+  return isBlockBody ? braceAfter : -1;
+}
+
+/**
+ * The index of an arrow's parameter-list `(`, or PAREN_MISSING for a bare parameter.
+ *
+ * Both shapes are legal: `(x) => ...` and `x => ...`. A parenthesised group is preferred
+ * when present, because that is the common form.
+ *
+ * Module-level rather than a method: the adapter class is already at its method-count
+ * ceiling, and this needs nothing from `this`.
+ */
+function arrowParenIndex(rest: string, scanFrom: number): number {
+  return /^\s*\(/.test(rest) ? scanFrom + rest.indexOf('(') : PAREN_MISSING;
 }
 
 export class TypeScriptAdapter extends BaseAdapter implements Adapter {
@@ -795,25 +809,17 @@ export class TypeScriptAdapter extends BaseAdapter implements Adapter {
   ): { parenIndex: number; afterParams: number; bodyOpen: number } | null {
     const masked = this.maskedSource;
     const rest = masked.substring(scanFrom);
-    const parenOffset = /^\s*\(/.test(rest) ? rest.indexOf('(') : -1;
-    let parenIndex: number;
-    if (parenOffset !== -1) {
-      parenIndex = scanFrom + parenOffset;
-    } else {
-      // Single-identifier param: `x => ...`
-      if (!/^\s*(\w+)\s*=>/.test(rest)) return null;
-      parenIndex = -1;
-    }
-    const afterParams = parenIndex === -1
-      ? scanFrom + (/^\s*(\w+)/.exec(rest) as RegExpExecArray)[0].length
-      : readParenGroup(this.fileContent, parenIndex).end;
-    if (!/^\s*(?::[^=]+)?=>/.test(masked.substring(afterParams))) return null;
+    const parenIndex = arrowParenIndex(rest, scanFrom);
+    if (parenIndex === PAREN_MISSING && !BARE_PARAM_ARROW.test(rest)) return null;
 
-    const braceAfter = masked.indexOf('{', afterParams);
-    const isBlockBody = braceAfter !== -1 &&
-      /^\s*(?::[^=]+)?=>\s*\{/.test(masked.substring(afterParams, braceAfter + 1));
-    return { parenIndex, afterParams, bodyOpen: isBlockBody ? braceAfter : -1 };
+    const afterParams = parenIndex === PAREN_MISSING
+      ? scanFrom + (BARE_PARAM.exec(rest) as RegExpExecArray)[0].length
+      : readParenGroup(this.fileContent, parenIndex).end;
+    if (!ARROW_HEAD.test(masked.substring(afterParams))) return null;
+
+    return { parenIndex, afterParams, bodyOpen: blockBodyOpen(masked, afterParams) };
   }
+
 
   /** Derive the metrics for one arrow function, whether or not it has a block body. */
   private buildArrowMetrics(

@@ -90,6 +90,26 @@ function unknownDecision(importPath: string, layer: TestLayer): MockDecision {
  * - **unit** with `strict` policy: Applies integration-like rules.
  * - **integration**: Applies rules based on dependency scope and policy flags.
  */
+/** Whether a unit layer is configured to mock everything. */
+function isLenientUnit(layer: TestLayer, layerRules: MockPolicyLayerRules): boolean {
+  return layer === 'unit' && layerRules.mockPolicy === 'lenient';
+}
+
+/**
+ * The decision a lenient unit layer settles by itself.
+ *
+ * Policy, not a property of the import: in a lenient layer EVERY dependency should be
+ * mocked, so the import never needs classifying.
+ */
+function lenientDecision(layer: TestLayer): MockDecision {
+  return {
+    strategy: 'mock',
+    reason: 'Unit tests with lenient policy: all dependencies should be mocked',
+    layer,
+  };
+}
+
+
 class MockDecisionEngine {
   private readonly scope: ProjectScope;
   private readonly config: MockPolicyConfig;
@@ -119,13 +139,7 @@ class MockDecisionEngine {
 
     const layerRules = this.config.layers[layer === 'unknown' ? 'unit' : layer];
 
-    if (layer === 'unit' && layerRules.mockPolicy === 'lenient') {
-      return {
-        strategy: 'mock',
-        reason: `Unit tests with lenient policy: all dependencies should be mocked`,
-        layer,
-      };
-    }
+    if (isLenientUnit(layer, layerRules)) return lenientDecision(layer);
 
     const depScope = classifyDependency(
       importPath,

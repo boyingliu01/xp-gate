@@ -293,3 +293,11 @@ githooks/csharp.sh
 # Never commit: these are per-machine readings, and an untracked directory here
 # makes scripts/vitest-worktree-guard.cjs report test pollution (#428).
 .perf-measure/
+
+# `reinstall-xp-gate` is a SEPARATE skill, not part of xp-gate.
+#
+# It exists to uninstall and reinstall xp-gate, so it cannot ship inside the package
+# it removes -- a skill that deletes its own directory mid-run has no defined state to
+# continue from. Keeping it out of this repository keeps that boundary explicit rather
+# than relying on nobody staging it.
+skills/reinstall-xp-gate/

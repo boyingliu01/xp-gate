@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
+const { execFileSync } = require('child_process');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -40,28 +42,29 @@ function isPlainObject(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function parseTimestamp(value, field) {
-  const match = typeof value === 'string'
-    ? value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/)
-    : null;
-  if (!match) fail(`${field} must be a canonical UTC ISO-8601 timestamp.`);
+/** A canonical UTC ISO-8601 instant, with an optional millisecond fraction. */
+const TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
 
-  // Groups 1..6 are year, month, day, hour, minute, second; group 7 is the
-  // optional millisecond fraction. Keeping them as arrays means the "build the
-  // date" and "verify round-trip" steps share one ordered definition instead of
-  // repeating seven hand-numbered comparisons.
+/**
+ * The date one timestamp match describes.
+ *
+ * Groups 1..6 are year through second; group 7 is the optional fraction, padded to
+ * milliseconds. Built from the parts rather than by handing the string to `Date`, so a
+ * non-canonical spelling cannot be silently accepted by the platform's parser.
+ */
+function buildUtcDate(match) {
   const parts = match.slice(1, 7).map(Number);
   const [year, month, day, hour, minute, second] = parts;
   const milliseconds = Number((match[7] || '').padEnd(3, '0') || 0);
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(hour, minute, second, milliseconds);
+  return { date, expected: [...parts, milliseconds] };
+}
 
-  // A date silently rolls over ("2026-02-30" becomes March 2), so the only way
-  // to know the input was a real calendar instant is to read it back and compare
-  // every field.
-  const expected = [...parts, milliseconds];
-  const readBack = [
+/** The date's own fields, in the same order as `expected`. */
+function readBackFields(date) {
+  return [
     date.getUTCFullYear(),
     date.getUTCMonth() + 1,
     date.getUTCDate(),
@@ -70,7 +73,20 @@ function parseTimestamp(value, field) {
     date.getUTCSeconds(),
     date.getUTCMilliseconds(),
   ];
-  if (!readBack.every((actual, i) => actual === expected[i])) {
+}
+
+/**
+ * Read a canonical UTC timestamp, or fail naming the field.
+ *
+ * A date silently ROLLS OVER ("2026-02-30" becomes March 2), so the only way to know
+ * the input was a real calendar instant is to read it back and compare every field.
+ */
+function parseTimestamp(value, field) {
+  const match = typeof value === 'string' ? value.match(TIMESTAMP_RE) : null;
+  if (!match) fail(`${field} must be a canonical UTC ISO-8601 timestamp.`);
+
+  const { date, expected } = buildUtcDate(match);
+  if (!readBackFields(date).every((actual, i) => actual === expected[i])) {
     fail(`${field} must contain a valid UTC calendar date and time.`);
   }
   return date.getTime();
@@ -129,24 +145,37 @@ function seatsFromExperts(experts) {
  * @param {unknown} config parsed config document
  * @returns {Map<string, string>} role -> model id that evidence must match
  */
-function resolveBindingSeats(config) {
-  if (!isPlainObject(config)) fail(`${DELPHI_CONFIG_FILE} must contain a JSON object.`);
+/** Whether this config uses the legacy FLAT shape, where experts sit at top level. */
+function isFlatConfig(profiles) {
+  return !isPlainObject(profiles) || Object.keys(profiles).length === 0;
+}
 
-  const profiles = config.profiles;
-  if (!isPlainObject(profiles) || Object.keys(profiles).length === 0) {
-    // Legacy/flat shape: experts live at the top level.
-    return seatsFromExperts(config.experts);
-  }
+/**
+ * The experts of the profile the gate should read.
+ *
+ * A config with no profiles is the LEGACY flat shape, not a broken one: older
+ * releases wrote experts at the top level, and rejecting them would fail every
+ * existing setup on upgrade.
+ */
+function expertsOf(config, profiles) {
+  if (isFlatConfig(profiles)) return config.experts;
 
   const active = config.active_profile;
   if (typeof active !== 'string' || !isPlainObject(profiles[active])) {
+    // Naming the available profiles is what makes this actionable: the reader can
+    // pick one instead of re-reading the config to find the right spelling.
     const available = Object.keys(profiles).join(', ');
     fail(
       `${DELPHI_CONFIG_FILE} has no resolvable active_profile (active_profile=${JSON.stringify(active)}; `
         + `available: ${available}). Set one so the gate knows which seats bind.`
     );
   }
-  return seatsFromExperts(profiles[active].experts);
+  return profiles[active].experts;
+}
+
+function resolveBindingSeats(config) {
+  if (!isPlainObject(config)) fail(`${DELPHI_CONFIG_FILE} must contain a JSON object.`);
+  return seatsFromExperts(expertsOf(config, config.profiles));
 }
 
 /**
@@ -210,64 +239,70 @@ function globalConfigPath(env = process.env) {
  * @returns {Map<string, string>} seats; never null
  * @throws exits via fail() when neither location has a config
  */
+/**
+ * Read the config text from the project copy, or the machine-wide fallback.
+ *
+ * Both absent is a HARD failure that names both paths: a repo with walkthrough evidence
+ * and nothing binding it to seats cannot be verified, and "config not found" without
+ * the locations sends the reader to search.
+ *
+ * @returns the text and where it came from
+ */
+function readConfigText(projectPath, fallbackPath) {
+  try {
+    return { raw: fs.readFileSync(projectPath, 'utf8'), source: projectPath, fromProject: true };
+  } catch (projectError) {
+    if (!projectError || projectError.code !== 'ENOENT') {
+      fail(`cannot read ${DELPHI_CONFIG_FILE}: ${projectError && projectError.message ? projectError.message : String(projectError)}`);
+    }
+    return readFallbackConfig(fallbackPath, projectPath);
+  }
+}
+
+/** The machine-wide copy, used only when the project has none. */
+function readFallbackConfig(fallbackPath, projectPath) {
+  try {
+    return { raw: fs.readFileSync(fallbackPath, 'utf8'), source: fallbackPath, fromProject: false };
+  } catch (globalError) {
+    if (globalError && globalError.code === 'ENOENT') {
+      fail(
+        `no ${DELPHI_CONFIG_FILE} found, so the reviewer seats cannot be verified. `
+          + `Looked in: ${projectPath}, ${fallbackPath}. `
+          + `Create the machine-wide config or add one to the repository.`
+      );
+    }
+    fail(`cannot read ${DELPHI_CONFIG_FILE}: ${globalError && globalError.message ? globalError.message : String(globalError)}`);
+  }
+}
+
+/** Every required role must have a seat; the first missing one is named. */
+function assertAllRolesBound(seats) {
+  for (const role of REQUIRED_ROLES) {
+    if (!seats.has(role)) {
+      fail(`${DELPHI_CONFIG_FILE} declares no seat for the ${role} role; all three roles must be configured.`);
+    }
+  }
+}
+
 function loadBindingSeats(projectRoot, env = process.env) {
   const projectPath = path.join(projectRoot, DELPHI_CONFIG_FILE);
   const fallbackPath = globalConfigPath(env);
+  const { raw, source, fromProject } = readConfigText(projectPath, fallbackPath);
 
-  let raw;
-  let source = projectPath;
-  let projectMissing = false;
-  try {
-    raw = fs.readFileSync(projectPath, 'utf8');
-  } catch (projectError) {
-    if (projectError && projectError.code === 'ENOENT') {
-      projectMissing = true;
-      try {
-        raw = fs.readFileSync(fallbackPath, 'utf8');
-        source = fallbackPath;
-      } catch (globalError) {
-        if (globalError && globalError.code === 'ENOENT') {
-          // Both absent: this repo has walkthrough evidence but nothing binds
-          // it to seats. Fail closed and say exactly where we looked.
-          fail(
-            `no ${DELPHI_CONFIG_FILE} found, so the reviewer seats cannot be verified. `
-              + `Looked in: ${projectPath}, ${fallbackPath}. `
-              + `Create the machine-wide config or add one to the repository.`
-          );
-        }
-        fail(
-          `cannot read ${DELPHI_CONFIG_FILE}: ${globalError && globalError.message
-            ? globalError.message
-            : String(globalError)}`
-        );
-      }
-    } else {
-      fail(
-        `cannot read ${DELPHI_CONFIG_FILE}: ${projectError && projectError.message
-          ? projectError.message
-          : String(projectError)}`
-      );
-    }
-  }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     fail(`${source} is not valid JSON: ${error.message}`);
   }
+
   const seats = resolveBindingSeats(parsed);
-  for (const role of REQUIRED_ROLES) {
-    if (!seats.has(role)) {
-      fail(`${DELPHI_CONFIG_FILE} declares no seat for the ${role} role; all three roles must be configured.`);
-    }
-  }
-  // A repo-local copy that disagrees with the machine-wide one is exactly how
-  // the 2026-10-27 incident happened: a stale per-repo file silently won and the
-  // review kept using a seat that had been retired. Winning is still allowed
-  // (deliberate overrides exist), but it must never be silent.
-  if (!projectMissing) {
-    warnOnSeatDrift(projectPath, fallbackPath, seats);
-  }
+  assertAllRolesBound(seats);
+  // A repo-local copy that disagrees with the machine-wide one is how the 2026-10-27
+  // incident happened: a stale per-repo file silently won and the review kept using a
+  // retired seat. Winning is still allowed (deliberate overrides exist), but it must
+  // never be silent.
+  if (fromProject) warnOnSeatDrift(projectPath, fallbackPath, seats);
   return seats;
 }
 
@@ -288,31 +323,48 @@ function loadBindingSeats(projectRoot, env = process.env) {
  * @param {string} fallbackPath machine-wide config path
  * @param {Map<string, string>} projectSeats seats actually in effect
  */
-function warnOnSeatDrift(projectPath, fallbackPath, projectSeats) {
-  let machineRaw;
+/**
+ * Resolve the machine-wide config's seats, or null when there is nothing to compare.
+ *
+ * Null covers both "no machine config" and "unparseable machine config": neither is
+ * this function's business, and an unparseable one is reported by its own path when it
+ * is actually used.
+ */
+function machineSeatsOrNull(fallbackPath) {
   try {
-    machineRaw = fs.readFileSync(fallbackPath, 'utf8');
+    return resolveBindingSeats(JSON.parse(fs.readFileSync(fallbackPath, 'utf8')));
   } catch {
-    return; // no machine-wide config -> nothing to disagree with
+    return null;
   }
-  let machineSeats;
-  try {
-    machineSeats = resolveBindingSeats(JSON.parse(machineRaw));
-  } catch {
-    return; // a malformed machine config is reported by its own path when used
-  }
-  const drift = REQUIRED_ROLES.filter(
-    (role) => machineSeats.has(role) && projectSeats.get(role) !== machineSeats.get(role)
-  );
-  if (drift.length === 0) return;
+}
+
+/** A role whose repo seat differs from the machine-wide one. */
+function driftsFromMachine(role, projectSeats, machineSeats) {
+  return machineSeats.has(role) && projectSeats.get(role) !== machineSeats.get(role);
+}
+
+/** The drift announcement, one role per clause. */
+function driftWarning(drift, projectSeats, machineSeats) {
   const detail = drift
     .map((role) => `${role}: repo=${projectSeats.get(role)} machine=${machineSeats.get(role)}`)
     .join('; ');
-  process.stderr.write(
-    `⚠️  ${DELPHI_CONFIG_FILE} in this repository overrides the machine-wide seats `
-      + `(${detail}). The repository copy wins. If the machine-wide config was updated `
-      + `to retire a seat, this repo is still calling the old one.\n`
-  );
+  return `⚠️  ${DELPHI_CONFIG_FILE} in this repository overrides the machine-wide seats `
+    + `(${detail}). The repository copy wins. If the machine-wide config was updated `
+    + `to retire a seat, this repo is still calling the old one.\n`;
+}
+
+/**
+ * Warn when a repo-local config disagrees with the machine-wide one.
+ *
+ * Winning is allowed -- deliberate overrides exist -- but it must never be SILENT:
+ * a stale per-repo file silently outranking an updated machine config is how the
+ * 2026-10-27 incident kept a retired seat in use.
+ */
+function warnOnSeatDrift(projectPath, fallbackPath, projectSeats) {
+  const machineSeats = machineSeatsOrNull(fallbackPath);
+  if (!machineSeats) return;
+  const drift = REQUIRED_ROLES.filter((role) => driftsFromMachine(role, projectSeats, machineSeats));
+  if (drift.length > 0) process.stderr.write(driftWarning(drift, projectSeats, machineSeats));
 }
 
 /**
@@ -418,17 +470,109 @@ function validateExpert(expert, index, roles, models, resolvedModels, bindingSea
   validateResolvedModel(expert, resolvedModels);
 }
 
-function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats) {
+/**
+ * The review must have covered EVERY path this push actually changes.
+ *
+ * An ANCESTOR commit is accepted, which raises the question the reviewers put their
+ * finger on: evidence approved at commit A says nothing about the work added between A
+ * and HEAD. Without this check a stale approval could carry an arbitrary amount of
+ * unreviewed code into main -- the flat opposite of what the gate is for.
+ *
+ * `reviewed_paths` is the walkthrough's own record of what it was given. It is checked
+ * as a SUPERSET of the changed paths, so splitting one change across several reviews is
+ * fine as long as their union covers it. A missing field fails: "no record" cannot be
+ * read as "covered everything", which is the fail-open shape this repository keeps
+ * finding.
+ */
+function validateCoverage(evidence, changedPaths) {
+  // Null means git could not answer here; skipping beats inventing an empty set, which
+  // would pass every review on a repository this could not read.
+  if (!Array.isArray(changedPaths)) return;
+  const changed = changedPaths;
+  // Nothing changed between the reviewed commit and HEAD: there is no gap to cover, so
+  // the field is not required. Demanding it here would fail the exact-match case that
+  // worked before this check existed.
+  if (changed.length === 0) return;
+  // KNOWN LIMIT, measured and NOT fixed (review FC-01): this compares PATHS, so work done
+  // to an ALREADY-REVIEWED path between the review commit and HEAD is not detected. A
+  // review of `src/x.ts` at A, followed by more edits to `src/x.ts` before HEAD, passes.
+  //
+  // Closing it needs a content fingerprint per path -- `reviewed_digests` holding the blob
+  // each review saw -- and `git diff --name-only` cannot supply one. That is a schema
+  // change to the evidence format, which every existing evidence file would fail, so it is
+  // recorded as debt rather than half-built here. Until then this check is a real guard
+  // (it stops an unreviewed FILE) and not a proof.
+  const reviewed = evidence.reviewed_paths;
+  if (!Array.isArray(reviewed)) {
+    fail('reviewed_paths must be an array of the paths this walkthrough read.');
+  }
+  // BOTH sides normalised. Stripping `./` from `reviewed_paths` only meant a genuine
+  // `./src/x.ts` in the evidence failed to match git's `src/x.ts`, so a covered file was
+  // reported as missing and the push was blocked for nothing (review FC-03).
+  const normalise = (p) => String(p).replace(/^\.\//, '');
+  const seen = new Set(reviewed.map(normalise));
+  const missing = changed.map(normalise).filter((p) => !seen.has(p));
+  if (missing.length > 0) {
+    fail(
+      `the walkthrough did not cover ${missing.length} changed path(s): `
+        + `${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}. `
+        + 'Review them, or split the push.',
+    );
+  }
+}
+/**
+ * The diff to check coverage against, or null when there is nothing to compare.
+ *
+ * Null in two cases, for opposite reasons: an EXACT match means HEAD is the reviewed
+ * commit (no gap, and git may not be reachable at all -- unit tests build records in
+ * temporary directories on purpose), and a commit that is not an ancestor cannot be
+ * diffed against HEAD without failing inside git, which would mask the real finding.
+ */
+function comparablePaths(evidence, expectedCommit, coversHead, changedPathsOf) {
+  // Null here means ONE thing: there is no gap to compare. Two cases produce it -- the
+  // reviewed commit IS HEAD, or it is not an ancestor (which `validateEvidenceIdentity`
+  // rejects, so we never reach the coverage check). Neither can hide unread work.
+  //
+  // "Could not compute the diff" is NOT one of them: `changedPathsSince` calls `fail()`
+  // in that case rather than returning null (review technical CI-01 asked whether the
+  // two could be confused; the answer is that `fail` exits, so this cannot receive it).
+  if (evidence.commit === expectedCommit) return null;
+  if (typeof coversHead !== 'function' || !coversHead(evidence.commit)) return null;
+  return typeof changedPathsOf === 'function' ? changedPathsOf() : null;
+}
+
+function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, coversHead, changedPathsOf) {
   if (!isPlainObject(evidence)) fail('top level must be a plain object.');
-  validateEvidenceIdentity(evidence, expectedCommit, expectedBranch);
+  validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead);
+  // Lazy AND conditional: the diff is only meaningful when the reviewed commit is this
+  // branch's ancestor. A fake or foreign commit cannot be diffed against HEAD at all, and
+  // computing it would surface a git error in place of the real finding (that the evidence
+  // describes a different commit). Records built by unit tests use such commits on purpose.
+  validateCoverage(evidence, comparablePaths(evidence, expectedCommit, coversHead, changedPathsOf));
   validateEvidenceTimestamps(evidence, now);
   validateConsensusRatio(evidence.consensus_ratio);
   validateExperts(evidence.experts, bindingSeats);
 }
 
 /** The document must describe this exact push, and must approve it. */
-function validateEvidenceIdentity(evidence, expectedCommit, expectedBranch) {
-  if (evidence.commit !== expectedCommit) fail('commit does not match HEAD.');
+/**
+ * The commit a walkthrough must cover: HEAD, or an ancestor of it.
+ *
+ * Evidence names the commit the review SAW. Requiring it to equal HEAD made every
+ * commit after a review invalidate it, so a branch that was worked on for a day could
+ * not be pushed without a fresh three-model sweep of everything -- and a branch that
+ * had never been pushed needed one sweep of its ENTIRE history, which does not fit in
+ * the 40 KB prompt budget. Batching was therefore not merely awkward but impossible.
+ *
+ * `coversHead` (set by the caller when it can resolve git) accepts evidence for an
+ * ANCESTOR, because that commit is inside the range being pushed: the review did see
+ * the code that is landing. The check still rejects a commit on another branch, and
+ * still rejects a hypothetical one, since neither is an ancestor of HEAD.
+ */
+function validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead) {
+  const exact = evidence.commit === expectedCommit;
+  const ancestor = typeof coversHead === 'function' && coversHead(evidence.commit);
+  if (!exact && !ancestor) fail('commit does not match HEAD.');
   if (evidence.branch !== expectedBranch) fail('branch does not match the current branch.');
   if (evidence.verdict !== 'APPROVED') fail('top-level verdict must be APPROVED.');
 }
@@ -504,18 +648,99 @@ function resolveProjectRoot(projectRoot) {
   return path.resolve(projectRoot);
 }
 
-function main() {
-  const [file, expectedCommit, expectedBranch, nowValue, projectRoot] = process.argv.slice(2);
-  if (!file || !expectedCommit || !expectedBranch) {
-    fail(`usage: validate-code-walkthrough.cjs <file> <commit> <branch> [now] [project-root].`);
+/**
+ * The paths changed between `commit` and HEAD, or null when git cannot answer.
+ *
+ * Null means "not measurable here", and the coverage check then SKIPS rather than
+ * inventing an empty set: reporting zero changed paths would pass every review on a
+ * repository this could not read, which is worse than not checking.
+ */
+function changedPathsSince(root, commit) {
+  // Not a string: `validateEvidenceIdentity` has already rejected this, so the value never
+  // reaches a caller that would treat null as "nothing to compare".
+  if (typeof commit !== 'string' || commit === '') return null;
+  // NOT wrapped in try/catch. An unanswerable diff means the gate cannot prove what this
+  // push contains, and "unable to prove coverage" must not read as "covered" -- that is
+  // the fail-open shape this repository keeps removing. The error propagates and BLOCKS.
+  const cwd = root === null ? process.cwd() : root;
+  try {
+    return execFileSync('git', ['diff', '--name-only', '-z', `${commit}..HEAD`], {
+      cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\0')
+      .filter((p) => p !== '');
+  } catch (err) {
+    // Deliberately NOT "return null and skip": the gate cannot prove what this push
+    // contains, and that must block rather than pass. The message says which commit and
+    // why, so the operator knows whether the evidence is wrong or the repository is.
+    fail(
+      `cannot list what changed since ${commit}: ${err instanceof Error ? err.message : String(err)}. `
+        + 'Gate MW needs the diff to prove the review covers this push.',
+    );
   }
+}
 
-  const evidence = readEvidence(file);
-  const now = nowValue === undefined ? Date.now() : parseTimestamp(nowValue, 'current time');
 
-  const root = resolveProjectRoot(projectRoot);
+function main() {
+  const args = parseArguments(process.argv.slice(2));
+  const evidence = readEvidence(args.file);
+  const root = resolveProjectRoot(args.projectRoot);
   const bindingSeats = root === null ? null : loadBindingSeats(root);
-  validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats);
+  // ORDER MATTERS: identity first, coverage second. Computing the diff for a commit that
+  // is not this branch's ancestor fails inside git, and reporting that would mask the real
+  // problem ("this evidence is about a different commit").
+  validateEvidence(
+    evidence,
+    args.expectedCommit,
+    args.expectedBranch,
+    args.now,
+    bindingSeats,
+    ancestorCheck(root),
+    () => changedPathsSince(root, evidence && evidence.commit),
+  );
+}
+
+/** The command line, or a usage failure. */
+function parseArguments(argv) {
+  const [file, expectedCommit, expectedBranch, nowValue, projectRoot] = argv;
+  if (!file || !expectedCommit || !expectedBranch) {
+    fail('usage: validate-code-walkthrough.cjs <file> <commit> <branch> [now] [project-root].');
+  }
+  return {
+    file,
+    expectedCommit,
+    expectedBranch,
+    projectRoot,
+    now: nowValue === undefined ? Date.now() : parseTimestamp(nowValue, 'current time'),
+  };
+}
+
+/**
+ * A predicate that answers "is `commit` an ancestor of HEAD in this repository?".
+ *
+ * Resolved HERE rather than in the validator's core, so the identity rule stays
+ * testable without a git repository. A missing repository, a missing git, or a commit
+ * object that does not exist all answer `false`: the exact-match path still works, and
+ * the gate never PASSES on a lookup it could not perform.
+ */
+function ancestorCheck(root) {
+  // `root` is null when the caller passed no project-root, which is normal for an
+  // ad-hoc invocation. Falling back to `cwd` keeps the ancestor rule WORKING instead of
+  // silently reverting to exact-match only -- a check that quietly disables itself is
+  // the failure shape this repository keeps finding.
+  const cwd = root === null ? process.cwd() : root;
+  return (commit) => {
+    if (typeof commit !== 'string' || commit === '') return false;
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+        cwd,
+        stdio: 'ignore',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 main();

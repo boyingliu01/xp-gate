@@ -122,20 +122,53 @@ function checkFile(filePath) {
 
   const findings = [];
   lines.forEach((line, i) => {
-    if (isStructural(line)) return;
-    // Within a fence every line is a value assertion; outside one, only inline code is.
-    const fenceId = fenceOf[i];
-    const inFence = fenceId !== -1;
-    const hasInlineCode = /`[^`]+`/.test(line);
-    if (!inFence && !hasInlineCode) return;
-    if (!hasValue(line)) return;
-    if (hasCitation(blocks[i])) return;
-    // A fence copied from a named source file is itself a citation.
-    if (inFence && fenceSources.get(fenceId)) return;
-    findings.push({ line: i + 1, text: line.trim() });
+    if (needsCitation(line, { block: blocks[i], fenceId: fenceOf[i], fenceSources })) {
+      findings.push({ line: i + 1, text: line.trim() });
+    }
   });
-
   return findings;
+}
+
+/** An inline code span, whose contents are a value assertion. */
+const INLINE_CODE = /`[^`]+`/;
+
+/**
+ * Whether this line states a value without saying where it came from.
+ *
+ * Four ways it does not need a citation:
+ *
+ *  - it is structural (a heading, a list marker) and asserts nothing;
+ *  - it asserts a value NOWHERE -- outside a fence only inline code counts, while
+ *    INSIDE a fence every line is a value assertion;
+ *  - the paragraph it belongs to already carries a citation;
+ *  - it is a fence copied verbatim from a named source file, which is a citation in
+ *    itself.
+ */
+function needsCitation(line, { block, fenceId, fenceSources }) {
+  if (isStructural(line) || !hasValue(line)) return false;
+  if (!assertsValue(line, fenceId)) return false;
+  if (hasCitation(block)) return false;
+  return !isCitedFence(fenceId, fenceSources);
+}
+
+/** Whether this fence was copied from a named source file, which cites itself. */
+function isCitedFence(fenceId, fenceSources) {
+  return isInFence(fenceId) && Boolean(fenceSources.get(fenceId));
+}
+
+/** Whether this line sits inside a fenced block. */
+function isInFence(fenceId) {
+  return fenceId !== -1;
+}
+
+/**
+ * Whether this line actually ASSERTS a value.
+ *
+ * Inside a fence every line is a value assertion; outside one, only inline code is --
+ * a prose sentence mentioning no `code span` claims nothing checkable.
+ */
+function assertsValue(line, fenceId) {
+  return isInFence(fenceId) || INLINE_CODE.test(line);
 }
 
 /**
@@ -172,17 +205,69 @@ function assignFences(lines) {
 function indexFenceSources(lines, fenceOf) {
   const sources = new Map();
   lines.forEach((line, i) => {
-    if (!/^\s*```/.test(line)) return;
+    if (!FENCE_DELIMITER.test(line)) return;
     const nextId = fenceOf.slice(i + 1).find((id) => id !== -1);
-    if (nextId === undefined) return; // closing fence or empty block
-    if (sources.has(nextId)) return;  // already recorded from the opening fence
-    const contextLines = lines.slice(Math.max(0, i - 6), i + 1).join('\n');
-    const named = FENCE_SOURCE_HINT.some((re) => re.test(contextLines));
-    const marked = CITATION_PATTERNS.some((re) => re.test(contextLines));
-    sources.set(nextId, named || marked);
+    recordFence(sources, { nextId, lines, i });
   });
   return sources;
 }
+
+/** A fence delimiter line. */
+const FENCE_DELIMITER = /^\s*```/;
+
+/**
+ * Record whether the fence opening at `i` is cited.
+ *
+ * Two skips: no following fence id means this is the CLOSING delimiter or an empty
+ * block, and a fence already recorded was seen from its opening line.
+ */
+function recordFence(sources, { nextId, lines, i }) {
+  if (nextId === undefined || sources.has(nextId)) return;
+  const context = lines.slice(Math.max(0, i - FENCE_CONTEXT_LINES), i + 1).join('\n');
+  sources.set(nextId, fenceIsCited(context));
+}
+
+/** How many lines before a fence may name its source. */
+const FENCE_CONTEXT_LINES = 6;
+
+/**
+ * Whether a fence's CONTEXT cites it.
+ *
+ * Six lines rather than one: the source is often named in the sentence above a blank
+ * line, and the marker may be on either side of the fence opener.
+ */
+function fenceIsCited(contextLines) {
+  const named = FENCE_SOURCE_HINT.some((re) => re.test(contextLines));
+  const marked = CITATION_PATTERNS.some((re) => re.test(contextLines));
+  return named || marked;
+}
+
+/**
+ * Check and report one design document.
+ *
+ * @returns the finding count, or null when the file is missing -- an unreadable target
+ *   is a HARD failure rather than a finding, because "no citation problems" must never
+ *   be reported for a document that was not read.
+ */
+function reportOne(target) {
+  const resolved = path.resolve(target);
+  if (!fs.existsSync(resolved)) {
+    console.error(`missing: ${target}`);
+    return null;
+  }
+  const findings = checkFile(resolved);
+  if (findings.length === 0) return 0;
+  console.error(`\n${target}: ${findings.length} value(s) with no citation or new-design marker`);
+  for (const f of findings) {
+    // Truncated because a table row can run long, and the LINE NUMBER is what the
+    // reader navigates by -- a clipped quote is still enough to recognise it.
+    console.error(`  :${f.line}  ${f.text.slice(0, MAX_REPORTED_LINE)}`);
+  }
+  return findings.length;
+}
+
+/** How much of a finding's text to print beside its line number. */
+const MAX_REPORTED_LINE = 120;
 
 function main(argv) {
   const targets = argv.slice(2);
@@ -193,18 +278,9 @@ function main(argv) {
 
   let total = 0;
   for (const target of targets) {
-    const resolved = path.resolve(target);
-    if (!fs.existsSync(resolved)) {
-      console.error(`missing: ${target}`);
-      return 2;
-    }
-    const findings = checkFile(resolved);
-    if (findings.length === 0) continue;
-    total += findings.length;
-    console.error(`\n${target}: ${findings.length} value(s) with no citation or new-design marker`);
-    for (const f of findings) {
-      console.error(`  :${f.line}  ${f.text.slice(0, 120)}`);
-    }
+    const findings = reportOne(target);
+    if (findings === null) return 2;
+    total += findings;
   }
 
   if (total > 0) {

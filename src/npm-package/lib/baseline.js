@@ -43,9 +43,18 @@ function readBaselineForMerge() {
   }
 }
 
+/**
+ * Create a directory if it does not exist, or fail with the path.
+ *
+ * Called before every baseline write, so a silent failure here surfaces later as
+ * "cannot write" with no indication that the directory was the problem.
+ */
 function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
+  if (fs.existsSync(dirPath)) return;
+  try {
     fs.mkdirSync(dirPath, { recursive: true });
+  } catch (err) {
+    throw new Error(`cannot create ${dirPath}: ${err.message}`);
   }
 }
 
@@ -201,20 +210,75 @@ function formatToolFailure(err) {
  * Report a linter that could not be evaluated.
  *
  * Silence is what let "TypeScript was never baselined" survive in this repo: the
- * command printed a cheerful "✅ Baseline created" while 652 files had contributed
- * nothing. A warning is the minimum contract -- the caller can still finish, but
+ * command printed a cheerful "✅ Baseline created" while hundreds of files had
+ * contributed nothing. A warning is the minimum contract -- the caller can still finish, but
  * the user is told which language went unmeasured and why.
  *
  * @param {string} tool
  * @param {string[]} errors
  */
+/** Three bad entries is enough to convey the pattern; a wall of paths gets skimmed. */
+const PREVIEW_ITEMS = 3;
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+/** A lint run's JSON can be large on a big tree; this was the previous inline cap. */
+const LINT_MAX_OUTPUT_MEGABYTES = 5;
+const LINT_MAX_OUTPUT_BYTES = LINT_MAX_OUTPUT_MEGABYTES * BYTES_PER_MEGABYTE;
+
 function recordFailures(tool, errors) {
   if (!errors || errors.length === 0) return;
   const unique = [...new Set(errors)];
-  const shown = unique.slice(0, 3).join('; ');
-  const more = unique.length > 3 ? ` (+${unique.length - 3} more)` : '';
+  const shown = unique.slice(0, PREVIEW_ITEMS).join('; ');
+  const more = unique.length > PREVIEW_ITEMS ? ` (+${unique.length - PREVIEW_ITEMS} more)` : '';
   console.warn(`⚠️  ${tool}: could not evaluate ${errors.length} batch(es) — ${shown}${more}`);
   console.warn(`   Files covered by a failed batch are absent from the baseline, not clean.`);
+}
+
+/**
+ * Fold one tool's per-file counts into the baseline.
+ *
+ * The Go and Shell sections each ended with the same twelve lines: accumulate
+ * `{warnings, errors}` per file, then either add the field to an existing entry
+ * and bump its `totalWarnings`, or create the entry. Two copies means two places
+ * that must agree on how a file with several tools is represented -- and a file
+ * linted by both is the normal case in a mixed repo.
+ *
+ * @param {object} baseline entries keyed by file
+ * @param {string} tool field name to store, e.g. 'shellcheck'
+ * @param {Object<string, {warnings: number, errors: number}>} warningsByFile
+ */
+function mergeToolCounts(baseline, tool, warningsByFile) {
+  for (const [file, counts] of Object.entries(warningsByFile)) {
+    if (baseline[file]) {
+      baseline[file][tool] = counts;
+      baseline[file].totalWarnings += counts.warnings;
+    } else {
+      baseline[file] = {
+        [tool]: counts,
+        totalWarnings: counts.warnings,
+        lastAnalyzed: new Date().toISOString(),
+      };
+    }
+  }
+}
+
+/**
+ * Is this linter runnable?
+ *
+ * Four languages asked this with the same four-line try/catch around a
+ * `<tool> --version` call. One definition means one behaviour: a tool that
+ * answers is usable, one that throws is not, and the caller records the
+ * unmeasured files either way.
+ *
+ * @param {string} versionCmd e.g. 'ruff --version'
+ * @returns {boolean}
+ */
+function probeTool(versionCmd) {
+  try {
+    execSync(versionCmd, { encoding: 'utf8', stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -243,7 +307,7 @@ function findFilesByExt(extensions) {
     const patterns = extensions.map(e => `"**/*${e}"`).join(' ');
     const result = execSync(`git ls-files ${patterns}`, {
       encoding: 'utf8',
-      maxBuffer: 5 * 1024 * 1024,
+      maxBuffer: LINT_MAX_OUTPUT_BYTES,
       cwd: process.cwd(),
     }).trim();
     return result ? result.split('\n') : [];
@@ -285,7 +349,7 @@ function findShellScripts() {
   try {
     const result = execSync(`git ls-files ${hookPatterns}`, {
       encoding: 'utf8',
-      maxBuffer: 5 * 1024 * 1024,
+      maxBuffer: LINT_MAX_OUTPUT_BYTES,
       cwd,
     }).trim();
     hooks = result ? result.split('\n') : [];
@@ -307,6 +371,224 @@ function findShellScripts() {
  * Create baseline: scan all source files with available lint tools.
  * Called by: xp-gate baseline create|reset
  */
+/**
+ * Run one linter over its files and account for every batch that failed.
+ *
+ * Each language section opened with the same three lines:
+ *
+ *     const { results, errors, failedFiles } = runLintInBatches(...)
+ *     recordFailures('<tool>', errors);
+ *     failedFiles.forEach(f => unevaluated.add(f));
+ *
+ * Three lines does not look like duplication, but the CONSISTENCY is the point:
+ * every tool must add its unevaluated files to the same set, or the restore step
+ * at the end puts back the wrong entries and a file the linter could not read
+ * gets recorded as clean. One call site means a new language cannot forget.
+ *
+ * @param {string} tool name used in the warning
+ * @param {string[]} files
+ * @param {(batch: string[]) => string} buildCmd
+ * @param {string} jsonFlag
+ * @param {Set<string>} unevaluated collected across all tools
+ * @returns {{results: Array}} the parsed per-file results
+ */
+function lintAndAccount(tool, files, buildCmd, jsonFlag, unevaluated) {
+  const { results, errors, failedFiles } = runLintInBatches(files, buildCmd, jsonFlag);
+  recordFailures(tool, errors);
+  failedFiles.forEach((f) => unevaluated.add(f));
+  return { results };
+}
+
+/**
+ * Put back the entries for files no linter could evaluate this run.
+ *
+ * The ratchet's load-bearing half. A rebuild starts from `{}`, which is correct
+ * only for files that were actually examined: a batch whose linter did not run
+ * taught us nothing, and recording its files as "no entry" silently lowers the
+ * bar for every one of them. Measured recurrence -- a run in which every tool
+ * failed replaced a good baseline with `{}`, presenting as
+ * "BLOCKED - 50 NEW shellcheck issue(s) (baseline: 0, current: 50)" on an
+ * unchanged tree.
+ *
+ * Files that WERE evaluated still shrink: `baseline[file]` is already set for
+ * them, so the guard below leaves them alone. That is the ratchet working.
+ *
+ * @param {object} baseline mutated in place
+ * @param {object} previous what was on disk before this run
+ * @param {Set<string>} unevaluated
+ * @returns {number} how many entries were carried forward
+ */
+function carryUnevaluated(baseline, previous, unevaluated) {
+  let carried = 0;
+  for (const file of unevaluated) {
+    if (baseline[file]) continue;
+    if (!Object.prototype.hasOwnProperty.call(previous, file)) continue;
+    baseline[file] = previous[file];
+    carried++;
+  }
+  if (carried > 0) {
+    console.log(
+      `Kept ${carried} baseline entry/entries for files no linter could evaluate `
+      + `(${unevaluated.size} file(s) affected) -- not evaluated is not clean.`,
+    );
+  }
+  return carried;
+}
+
+/**
+ * Baseline TypeScript/JavaScript with ESLint.
+ *
+ * `mergeToolCounts` rather than assignment: a file linted by more than one tool keeps
+ * every tool's counts, and the previous assignment replaced the whole entry so the
+ * last tool to run erased the others.
+ *
+ * A project with no eslint config has nothing to baseline; staying quiet is correct.
+ * The silent-catch defect was about masking ERRORS, not about projects that
+ * legitimately have no tool.
+ *
+ * @param {object} baseline mutated in place
+ * @param {Set<string>} unevaluated files no linter could read
+ */
+function baselineTypeScript(baseline, unevaluated) {
+// TypeScript/JavaScript — ESLint
+const tsFiles = findFilesByExt(['.ts', '.tsx', '.js', '.jsx']);
+if (tsFiles.length > 0) {
+  const eslintConfigExists = fs.existsSync('.eslintrc.json') ||
+    fs.existsSync('.eslintrc.js') ||
+    fs.existsSync('.eslintrc.cjs') ||
+    fs.existsSync('eslint.config.js');
+  const eslintBin = resolveLocalBin('eslint');
+
+  const eslintAvailable = Boolean(eslintBin) || probeTool('npx eslint --version');
+
+  if (eslintConfigExists && eslintAvailable) {
+    const eslintCmd = eslintBin ? quoteBin(eslintBin) : 'npx eslint';
+    const { results } = lintAndAccount('eslint', tsFiles, batch => `${eslintCmd} ${batch.map(f => `"${f}"`).join(' ')}`, '-f json --no-warn-ignored', unevaluated);
+    const eslintCounts = {};
+    for (const fileResult of results) {
+      const fileName = matchResultToFile(fileResult.filePath, tsFiles);
+      if (!fileName) continue;
+      eslintCounts[fileName] = {
+        warnings: fileResult.warningCount || 0,
+        errors: fileResult.errorCount || 0,
+      };
+    }
+    // Merge, not overwrite: a file linted by more than one tool keeps every
+    // tool's counts. The previous assignment replaced the whole entry, so the
+    // last tool to run erased the others.
+    mergeToolCounts(baseline, 'eslint', eslintCounts);
+  } else if (tsFiles.length > 0 && !eslintConfigExists) {
+    // Not a failure: a project without an eslint config has nothing to
+    // baseline. Staying quiet here is correct; the silent-catch defect was
+    // about masking errors, not about projects that legitimately have no tool.
+  }
+}
+}
+
+/**
+ * Baseline Python with ruff.
+ *
+ * A result that names no file cannot be recorded against one; skipping it is the fix
+ * for the literal `undefined` key this used to write into the baseline.
+ */
+function baselinePython(baseline, unevaluated) {
+// Python — ruff
+const pyFiles = findFilesByExt(['.py']);
+if (pyFiles.length > 0) {
+  const ruffAvailable = probeTool('ruff --version');
+
+  if (ruffAvailable) {
+    const { results } = lintAndAccount('ruff', pyFiles, batch => `ruff check ${batch.map(f => `"${f}"`).join(' ')}`, '--output-format json', unevaluated);
+    const ruffCounts = {};
+    for (const fileResult of results) {
+      // A result that names no file cannot be recorded against one. Skipping it
+      // is the fix for the literal "undefined" key this used to write.
+      if (!fileResult.file) continue;
+      const messages = fileResult.messages || [];
+      ruffCounts[fileResult.file] = { warnings: messages.length, errors: 0 };
+    }
+    mergeToolCounts(baseline, 'ruff', ruffCounts);
+  }
+}
+
+}
+
+/**
+ * Baseline Go with golangci-lint. Unparseable output leaves the run's files alone:
+ * not measured is not clean.
+ */
+/**
+ * Turn golangci-lint issues into per-file counts.
+ *
+ * An issue whose path matches none of the project's `.go` files is dropped rather
+ * than filed under a guessed key: golangci-lint reports absolute paths, and a partial
+ * match on a dependency would attribute its problems to this project.
+ *
+ * @param {Array} issues
+ * @param {string[]} goFiles project-relative paths
+ * @returns {Object<string, {warnings: number, errors: number}>}
+ */
+function countGoIssues(issues, goFiles) {
+  const byFile = {};
+  for (const issue of issues) {
+    const matched = goFiles.find((f) => issue.file.endsWith(f));
+    if (!matched) continue;
+    byFile[matched] = byFile[matched] || { warnings: 0, errors: 0 };
+    if (issue.severity === 'error') byFile[matched].errors += 1;
+    else byFile[matched].warnings += 1;
+  }
+  return byFile;
+}
+
+function baselineGo(baseline) {
+// Go — golangci-lint
+const goFiles = findFilesByExt(['.go']);
+if (goFiles.length > 0) {
+  try {
+    execSync('golangci-lint --version', { encoding: 'utf8' });
+    const output = runToolJson('golangci-lint run', '--out-format json');
+    if (output) {
+      mergeToolCounts(baseline, 'golangci', countGoIssues(JSON.parse(output).Issues || [], goFiles));
+    }
+  } catch {
+    // golangci-lint unavailable — skip
+  }
+}
+}
+
+/**
+ * Baseline shell scripts with shellcheck, batched like the other tools: one argv for
+ * every script is the same platform-limit hazard the others avoid.
+ */
+function baselineShell(baseline, unevaluated) {
+// Shell — shellcheck
+const shFiles = findShellScripts();
+if (shFiles.length > 0) {
+  const shAvailable = probeTool('shellcheck --version');
+
+  if (shAvailable) {
+    // Same batching as the other tools: one argv for every shell script in the
+    // repo is the same platform-limit hazard, even though this repo happens to
+    // sit under the threshold today.
+    const { results } = lintAndAccount('shellcheck', shFiles, batch => `shellcheck -f json ${batch.map(f => `"${f}"`).join(' ')}`, '', unevaluated);
+    const warningsByFile = {};
+    for (const item of results) {
+      const matchedFile = matchResultToFile(item.file, shFiles);
+      if (!matchedFile) continue;
+      if (!warningsByFile[matchedFile]) {
+        warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
+      }
+      if (item.level === 'error') {
+        warningsByFile[matchedFile].errors++;
+      } else {
+        warningsByFile[matchedFile].warnings++;
+      }
+    }
+    mergeToolCounts(baseline, 'shellcheck', warningsByFile);
+  }
+}
+}
+
 async function createBaseline() {
   ensureDir(getXpGateDir());
 
@@ -329,200 +611,27 @@ async function createBaseline() {
   const previous = readBaselineForMerge();
   const unevaluated = new Set();
 
-  // TypeScript/JavaScript — ESLint
-  const tsFiles = findFilesByExt(['.ts', '.tsx', '.js', '.jsx']);
-  if (tsFiles.length > 0) {
-    const eslintConfigExists = fs.existsSync('.eslintrc.json') ||
-      fs.existsSync('.eslintrc.js') ||
-      fs.existsSync('.eslintrc.cjs') ||
-      fs.existsSync('eslint.config.js');
-    const eslintBin = resolveLocalBin('eslint');
+  baselineTypeScript(baseline, unevaluated);
 
-    let eslintAvailable = Boolean(eslintBin);
-    if (!eslintAvailable) {
-      try {
-        execSync('npx eslint --version', { encoding: 'utf8', stdio: 'pipe' });
-        eslintAvailable = true;
-      } catch {
-        eslintAvailable = false;
-      }
-    }
+  baselinePython(baseline, unevaluated);
+  baselineGo(baseline);
 
-    if (eslintConfigExists && eslintAvailable) {
-      const eslintCmd = eslintBin ? quoteBin(eslintBin) : 'npx eslint';
-      const { results, errors, failedFiles } = runLintInBatches(
-        tsFiles,
-        batch => `${eslintCmd} ${batch.map(f => `"${f}"`).join(' ')}`,
-        '-f json --no-warn-ignored'
-      );
-      recordFailures('eslint', errors);
-      failedFiles.forEach(f => unevaluated.add(f));
-      for (const fileResult of results) {
-        const fileName = matchResultToFile(fileResult.filePath, tsFiles);
-        if (!fileName) continue;
-
-        baseline[fileName] = {
-          eslint: {
-            warnings: fileResult.warningCount || 0,
-            errors: fileResult.errorCount || 0,
-          },
-          totalWarnings: fileResult.warningCount || 0,
-          lastAnalyzed: new Date().toISOString(),
-        };
-      }
-    } else if (tsFiles.length > 0 && !eslintConfigExists) {
-      // Not a failure: a project without an eslint config has nothing to
-      // baseline. Staying quiet here is correct; the silent-catch defect was
-      // about masking errors, not about projects that legitimately have no tool.
-    }
-  }
-
-  // Python — ruff
-  const pyFiles = findFilesByExt(['.py']);
-  if (pyFiles.length > 0) {
-    let ruffAvailable = false;
-    try {
-      execSync('ruff --version', { encoding: 'utf8', stdio: 'pipe' });
-      ruffAvailable = true;
-    } catch {
-      ruffAvailable = false;
-    }
-
-    if (ruffAvailable) {
-      const { results, errors, failedFiles } = runLintInBatches(
-        pyFiles,
-        batch => `ruff check ${batch.map(f => `"${f}"`).join(' ')}`,
-        '--output-format json'
-      );
-      recordFailures('ruff', errors);
-      failedFiles.forEach(f => unevaluated.add(f));
-      for (const fileResult of results) {
-        // A result that names no file cannot be recorded against one. Skipping it
-        // is the fix for the literal "undefined" key this used to write.
-        if (!fileResult.file) continue;
-        const messages = fileResult.messages || [];
-        if (!baseline[fileResult.file]) {
-          baseline[fileResult.file] = {
-            ruff: { warnings: messages.length, errors: 0 },
-            totalWarnings: messages.length,
-            lastAnalyzed: new Date().toISOString(),
-          };
-        } else {
-          baseline[fileResult.file].ruff = { warnings: messages.length, errors: 0 };
-          baseline[fileResult.file].totalWarnings += messages.length;
-        }
-      }
-    }
-  }
-
-  // Go — golangci-lint
-  const goFiles = findFilesByExt(['.go']);
-  if (goFiles.length > 0) {
-    try {
-      execSync('golangci-lint --version', { encoding: 'utf8' });
-      const output = runToolJson('golangci-lint run', '--out-format json');
-      if (output) {
-        const parsed = JSON.parse(output).Issues || [];
-        const warningsByFile = {};
-        for (const issue of parsed) {
-          const matchedFile = goFiles.find(f => issue.file.endsWith(f));
-          if (!matchedFile) continue;
-          if (!warningsByFile[matchedFile]) {
-            warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-          }
-          if (issue.severity === 'error') {
-            warningsByFile[matchedFile].errors++;
-          } else {
-            warningsByFile[matchedFile].warnings++;
-          }
-        }
-        for (const [file, counts] of Object.entries(warningsByFile)) {
-          if (baseline[file]) {
-            baseline[file].golangci = counts;
-            baseline[file].totalWarnings += counts.warnings;
-          } else {
-            baseline[file] = {
-              golangci: counts,
-              totalWarnings: counts.warnings,
-              lastAnalyzed: new Date().toISOString(),
-            };
-          }
-        }
-      }
-    } catch {
-      // golangci-lint unavailable — skip
-    }
-  }
-
-  // Shell — shellcheck
-  const shFiles = findShellScripts();
-  if (shFiles.length > 0) {
-    let shAvailable = false;
-    try {
-      execSync('shellcheck --version', { encoding: 'utf8', stdio: 'pipe' });
-      shAvailable = true;
-    } catch {
-      shAvailable = false;
-    }
-
-    if (shAvailable) {
-      // Same batching as the other tools: one argv for every shell script in the
-      // repo is the same platform-limit hazard, even though this repo happens to
-      // sit under the threshold today.
-      const { results, errors, failedFiles } = runLintInBatches(
-        shFiles,
-        batch => `shellcheck -f json ${batch.map(f => `"${f}"`).join(' ')}`,
-        ''
-      );
-      recordFailures('shellcheck', errors);
-      failedFiles.forEach(f => unevaluated.add(f));
-      const warningsByFile = {};
-      for (const item of results) {
-        const matchedFile = matchResultToFile(item.file, shFiles);
-        if (!matchedFile) continue;
-        if (!warningsByFile[matchedFile]) {
-          warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-        }
-        if (item.level === 'error') {
-          warningsByFile[matchedFile].errors++;
-        } else {
-          warningsByFile[matchedFile].warnings++;
-        }
-      }
-      for (const [file, counts] of Object.entries(warningsByFile)) {
-        if (baseline[file]) {
-          baseline[file].shellcheck = counts;
-          baseline[file].totalWarnings += counts.warnings;
-        } else {
-          baseline[file] = {
-            shellcheck: counts,
-            totalWarnings: counts.warnings,
-            lastAnalyzed: new Date().toISOString(),
-          };
-        }
-      }
-    }
-  }
+  baselineShell(baseline, unevaluated);
 
   // Restore what this run could not evaluate, so a broken toolchain cannot
   // rewrite known-bad files as clean. `baseline[file]` being set means some tool
   // did evaluate it this run, and the fresh value wins -- that is the ratchet
   // shrinking, not data loss.
-  let carried = 0;
-  for (const file of unevaluated) {
-    if (baseline[file]) continue;
-    if (!Object.prototype.hasOwnProperty.call(previous, file)) continue;
-    baseline[file] = previous[file];
-    carried++;
-  }
-  if (carried > 0) {
-    console.log(
-      `Kept ${carried} baseline entry/entries for files no linter could evaluate ` +
-      `(${unevaluated.size} file(s) affected) -- not evaluated is not clean.`
-    );
-  }
+  carryUnevaluated(baseline, previous, unevaluated);
 
-  fs.writeFileSync(getBaselineFile(), JSON.stringify(baseline, null, 2));
+  // The write is the whole point of the rebuild; a silent failure would leave the
+  // previous baseline on disk while reporting a fresh one.
+  const target = getBaselineFile();
+  try {
+    fs.writeFileSync(target, JSON.stringify(baseline, null, 2));
+  } catch (err) {
+    throw new Error(`cannot write baseline to ${target}: ${err.message}`);
+  }
   return baseline;
 }
 
@@ -558,7 +667,15 @@ function showBaseline() {
     return 1;
   }
 
-  const data = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  } catch (err) {
+    // A baseline we cannot read is not an empty baseline; saying so prevents a
+    // caller from concluding the project has no recorded warnings.
+    console.error(`Error: cannot read baseline: ${err.message}`);
+    return 1;
+  }
   const files = Object.keys(data);
 
   if (files.length === 0) {
@@ -611,15 +728,19 @@ function compareBaselines(oldBaseline, currentBaseline) {
 
     totalWarningsDelta += delta;
 
+    // Early continues, not an else-if ladder: the four cases are mutually exclusive
+    // but each reads as its own sentence, and the ladder pushed the body past the
+    // nesting bound for no gain.
     if (!oldBaseline[file] && currentBaseline[file]) {
       added.push(`  + ${file} (${newW} warnings)`);
-    } else if (oldBaseline[file] && !currentBaseline[file]) {
-      removed.push(`  - ${file} (all ${oldW} warnings cleared)`);
-    } else if (delta > 0) {
-      increased.push(`  ↑ ${file} (${oldW} → ${newW}, +${delta})`);
-    } else if (delta < 0) {
-      decreased.push(`  ↓ ${file} (${oldW} → ${newW}, ${delta})`);
+      continue;
     }
+    if (oldBaseline[file] && !currentBaseline[file]) {
+      removed.push(`  - ${file} (all ${oldW} warnings cleared)`);
+      continue;
+    }
+    if (delta > 0) increased.push(`  ↑ ${file} (${oldW} → ${newW}, +${delta})`);
+    else if (delta < 0) decreased.push(`  ↓ ${file} (${oldW} → ${newW}, ${delta})`);
   }
 
   return { totalWarningsDelta, increased, decreased, added, removed };
@@ -663,7 +784,14 @@ async function diffBaseline() {
     return 1;
   }
 
-  const oldBaseline = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  let oldBaseline;
+  try {
+    oldBaseline = JSON.parse(fs.readFileSync(getBaselineFile(), 'utf8'));
+  } catch (err) {
+    // Comparing against nothing would report every existing entry as new.
+    console.error(`Error: cannot read the current baseline: ${err.message}`);
+    return 1;
+  }
   const currentBaseline = await createBaseline();
 
   const result = compareBaselines(oldBaseline, currentBaseline);
@@ -722,4 +850,4 @@ Examples:
   }
 }
 
-module.exports = { handleBaseline, createBaseline, showBaseline, resetBaseline, diffBaseline, countBaselineByTool, compareBaselines, findShellScripts, resolveLocalBin };
+module.exports = { handleBaseline, createBaseline, carryUnevaluated, lintAndAccount, showBaseline, resetBaseline, diffBaseline, countBaselineByTool, compareBaselines, findShellScripts, resolveLocalBin };

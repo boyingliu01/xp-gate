@@ -222,6 +222,12 @@ HARNESS
   GATE1_OUT="$FIXTURE/gate1.log" bash harness.sh >/dev/null 2>&1 || true
   GATE1_LOG="$(cat "$FIXTURE/gate1.log" 2>/dev/null)"
 
+  # SKIP, not fail, when the Kotlin toolchain is absent. The assertion below reads a line
+  # detekt PRINTS, so without detekt there is nothing to count and the test would fail for
+  # a missing tool -- the shape `AGENTS.md` forbids ("tool missing -> SKIP, not BLOCK").
+  if ! command -v detekt >/dev/null 2>&1 && ! command -v ktlint >/dev/null 2>&1; then
+    skip "neither detekt nor ktlint is installed"
+  fi
   # The analysis ran (anti-vacuity): its findings must be present.
   [[ "$GATE1_LOG" == *"MagicNumber"* ]] || [[ "$GATE1_LOG" == *"ktlint"* ]] || [[ "$GATE1_LOG" == *"detekt"* ]]
   # ...and the gate must SAY the two entry points collapsed into one run.

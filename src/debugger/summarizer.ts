@@ -1,32 +1,53 @@
 import { SprintTrace, IterationSummary } from './types';
 
+/** Failures grouped by the skill that produced them. */
+function groupBySkill(failures: SprintTrace['tool_calls']): Map<string, SprintTrace['tool_calls']> {
+  const grouped = new Map<string, SprintTrace['tool_calls']>();
+  for (const failure of failures) {
+    const bucket = grouped.get(failure.skill_name);
+    if (bucket) bucket.push(failure);
+    else grouped.set(failure.skill_name, [failure]);
+  }
+  return grouped;
+}
+
+/** A predicted pass-rate gain of 5 points per failure, capped so one bad skill cannot
+ * dominate the estimate. */
+const DELTA_PER_FAILURE = 5;
+const DELTA_CAP = 30;
+
+/**
+ * The iteration summary for one repeatedly-failing skill.
+ *
+ * Grouped by SKILL rather than by call because the reader acts on the skill: ten
+ * failures of one tool is one thing to fix, not ten.
+ */
+function summariseSkill(
+  skill: string,
+  skillFailures: SprintTrace['tool_calls'],
+  sprintId: string,
+): IterationSummary {
+  return {
+    problem: `${skill} failed ${skillFailures.length} time(s) during sprint ${sprintId}`,
+    root_cause: inferRootCause(skillFailures),
+    suggestion: generateSuggestion(skill, skillFailures),
+    predicted_impact: {
+      metric: 'pass_rate',
+      direction: 'up',
+      delta_pct: Math.min(skillFailures.length * DELTA_PER_FAILURE, DELTA_CAP),
+      risk: `Fixing ${skill} may affect downstream phase execution`,
+    },
+    actual_impact: null,
+  };
+}
+
 export function analyzeTrace(trace: SprintTrace): IterationSummary[] {
   const failures = trace.tool_calls.filter((tc) => !tc.success);
   const summaries: IterationSummary[] = [];
 
   if (failures.length > 0) {
-    const grouped = new Map<string, typeof failures>();
-    for (const failure of failures) {
-      const key = failure.skill_name;
-      if (!grouped.has(key)) {
-        grouped.set(key, []);
-      }
-      grouped.get(key)!.push(failure);
-    }
-
-    for (const [skill, skillFailures] of grouped) {
-      summaries.push({
-        problem: `${skill} failed ${skillFailures.length} time(s) during sprint ${trace.sprint_id}`,
-        root_cause: inferRootCause(skillFailures),
-        suggestion: generateSuggestion(skill, skillFailures),
-        predicted_impact: {
-          metric: 'pass_rate',
-          direction: 'up',
-          delta_pct: Math.min(skillFailures.length * 5, 30),
-          risk: `Fixing ${skill} may affect downstream phase execution`,
-        },
-        actual_impact: null,
-      });
+    for (const [skill, skillFailures] of groupBySkill(failures)) {
+      summaries.push(summariseSkill(skill, skillFailures, trace.sprint_id));
     }
   }
 

@@ -6,6 +6,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // ─── Inline copies of pure functions from init-baseline.ts ───────────────────
 // The module runs main() on import, so we cannot import it directly.
@@ -343,5 +345,29 @@ describe('isSourceFile (getSourceFiles filter predicate)', () => {
     expect(isSourceFile('src/index.js')).toBe(false);
     expect(isSourceFile('src/style.css')).toBe(false);
     expect(isSourceFile('README.md')).toBe(false);
+  });
+});
+
+describe('scanFiles fails closed on an unreadable directory', () => {
+  // `scanFiles` is private and this module runs `main()` on import, so the behaviour is
+  // asserted against the SOURCE. That is weaker than calling it, and it is the right
+  // trade here: the defect was that a warning let a PARTIAL baseline look complete, and
+  // what must not come back is a `console.warn` followed by `return` in the readdir catch.
+  const source = readFileSync(join(process.cwd(), 'src/mutation/init-baseline.ts'), 'utf8');
+
+  it('throws instead of warning-and-continuing', () => {
+    const catchBlock = source.slice(source.indexOf('} catch (err) {'), source.indexOf('for (const entry of entries)'));
+    // Strip comments: the explanation MENTIONS the old `console.warn`, and matching it
+    // would make this assertion fail on its own documentation.
+    const code = catchBlock
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+    expect(code).toContain('throw new Error');
+    expect(code).not.toContain('console.warn');
+  });
+
+  it('names the directory in the failure so the operator can fix it', () => {
+    expect(source).toContain('cannot read directory ${dir}');
   });
 });

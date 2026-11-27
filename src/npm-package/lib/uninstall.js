@@ -129,8 +129,18 @@ function getConfig() {
   }
 }
 
+/**
+ * Persist the config, or throw with the path.
+ *
+ * Uninstall edits this file to drop what it removed; a silent failure would leave the
+ * config pointing at things that no longer exist.
+ */
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  } catch (err) {
+    throw new Error(`cannot save config to ${CONFIG_FILE}: ${err.message}`);
+  }
 }
 
 function getGitDir() {
@@ -249,9 +259,20 @@ function isDirEmpty(dir) {
   }
 }
 
+/**
+ * Copy a directory tree.
+ *
+ * An unreadable source aborts with the path named: a partial backup is worse than
+ * none, because it looks like a backup.
+ */
 function copyDirSync(src, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  const entries = fs.readdirSync(src, { withFileTypes: true });
+  let entries;
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    entries = fs.readdirSync(src, { withFileTypes: true });
+  } catch (err) {
+    throw new Error(`cannot copy ${src} to ${dest}: ${err.message}`);
+  }
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
@@ -285,84 +306,116 @@ function cleanupBackup(backupMeta) {
  * Build the uninstall plan based on mode.
  * Returns an array of operation objects: { type, path, signature, label, critical }
  */
-function buildPlan(mode) {
-  const plan = [];
-  const manifest = getConfig() && getConfig().manifest ? getConfig().manifest : null;
+/**
+ * Append the project-local uninstall entries to `plan`.
+ *
+ * Split out of `buildPlan`, which measured CCN 17 over 158 lines by holding
+ * both modes. `plan` is passed in rather than returned so the two halves
+ * compose without either owning the list, and the shared template entry stays
+ * in `buildPlan` where it belongs to neither.
+ *
+ * @param {Array<object>} plan
+ * @param {object|null} manifest
+ */
+/**
+ * Plan the five entries every local install creates.
+ *
+ * All fully owned (signature checked) and all `critical`: these are the files that
+ * make the gates run, so uninstalling must not leave one behind.
+ */
+function pushHookEntries(plan, hooksDir, githooksDir) {
+  const owned = (base, name, manifestKey) => plan.push({
+    type: 'file',
+    path: path.join(base, name),
+    signature: SIGNATURES[name],
+    label: manifestKey,
+    manifestKey,
+    critical: true,
+  });
 
-  if (mode === 'local') {
+  owned(hooksDir, 'pre-commit', '.git/hooks/pre-commit');
+  owned(hooksDir, 'pre-push', '.git/hooks/pre-push');
+  owned(hooksDir, 'post-merge', '.git/hooks/post-merge');
+  owned(githooksDir, 'adapter-common.sh', 'githooks/adapter-common.sh');
+
+  const adaptersDir = path.join(githooksDir, 'adapters');
+  if (fs.existsSync(adaptersDir)) {
+    plan.push({ type: 'dir', path: adaptersDir, label: 'githooks/adapters/', critical: true });
+  }
+}
+
+/**
+ * Plan the project-level config files `init` generates.
+ *
+ * Matched by a content SIGNATURE rather than by ownership, and non-critical: a
+ * project that edited its own baseline keeps it.
+ */
+function pushProjectConfigEntries(plan, projectRoot) {
+  const files = [
+    { name: '.xp-gate-config.json', signature: '"languages"' },
+    { name: '.warnings-baseline.json', signature: '"warnings"' },
+  ];
+  for (const { name, signature } of files) {
+    const target = path.join(projectRoot, name);
+    if (!fs.existsSync(target)) continue;
+    plan.push({ type: 'file', path: target, signature, label: name, critical: false });
+  }
+}
+
+function buildLocalPlanInto(plan, manifest) {
     const gitDir = getGitDir();
     if (gitDir) {
       const projectRoot = path.dirname(gitDir);
       const hooksDir = path.join(projectRoot, '.git', 'hooks');
       const githooksDir = path.join(projectRoot, 'githooks');
 
-      plan.push({
-        type: 'file',
-        path: path.join(hooksDir, 'pre-commit'),
-        signature: SIGNATURES['pre-commit'],
-        label: '.git/hooks/pre-commit',
-        manifestKey: '.git/hooks/pre-commit',
-        critical: true
-      });
-      plan.push({
-        type: 'file',
-        path: path.join(hooksDir, 'pre-push'),
-        signature: SIGNATURES['pre-push'],
-        label: '.git/hooks/pre-push',
-        manifestKey: '.git/hooks/pre-push',
-        critical: true
-      });
-      plan.push({
-        type: 'file',
-        path: path.join(hooksDir, 'post-merge'),
-        signature: SIGNATURES['post-merge'],
-        label: '.git/hooks/post-merge',
-        manifestKey: '.git/hooks/post-merge',
-        critical: true
-      });
-      plan.push({
-        type: 'file',
-        path: path.join(githooksDir, 'adapter-common.sh'),
-        signature: SIGNATURES['adapter-common.sh'],
-        label: 'githooks/adapter-common.sh',
-        manifestKey: 'githooks/adapter-common.sh',
-        critical: true
-      });
-      const adaptersDir = path.join(githooksDir, 'adapters');
-      if (fs.existsSync(adaptersDir)) {
-        plan.push({
-          type: 'dir',
-          path: adaptersDir,
-          label: 'githooks/adapters/',
-          critical: true
-        });
-      }
-
-      // Project-level config files (generated by init)
-      const langConfig = path.join(projectRoot, '.xp-gate-config.json');
-      if (fs.existsSync(langConfig)) {
-        plan.push({
-          type: 'file',
-          path: langConfig,
-          signature: '"languages"',
-          label: '.xp-gate-config.json',
-          critical: false
-        });
-      }
-      const baselineFile = path.join(projectRoot, '.warnings-baseline.json');
-      if (fs.existsSync(baselineFile)) {
-        plan.push({
-          type: 'file',
-          path: baselineFile,
-          signature: '"warnings"',
-          label: '.warnings-baseline.json',
-          critical: false
-        });
-      }
+      pushHookEntries(plan, hooksDir, githooksDir);
+      pushProjectConfigEntries(plan, projectRoot);
     }
-  }
+}
 
-  if (mode === 'global') {
+/**
+ * Append the global uninstall entries to `plan`.
+ *
+ * @param {Array<object>} plan
+ * @param {object|null} manifest
+ */
+/**
+ * Plan the files `setup-global` writes outside the hook/config entries.
+ *
+ * #663: setup-global also writes `modules/`, a `node_modules/` tree, `package.json`,
+ * `package-lock.json` and the `xp-gate.json` manifest. None were in the plan, so
+ * uninstall printed "Uninstall complete" over an installation still ~1000 files on
+ * disk. The residue is not cosmetic: a leftover `node_modules/` makes the NEXT
+ * setup-global skip its own install and reuse a stale dependency tree, and a leftover
+ * `xp-gate.json` carries the previous manifest into `doctor`, which reports it as the
+ * current installation.
+ */
+function planGlobalInstallResidue(plan) {
+  for (const item of GLOBAL_INSTALL_RESIDUE) {
+    const target = path.join(CONFIG_DIR, item.key);
+    // One stat, not exists-then-stat: the pair has a window in which the entry can
+    // vanish and the second call throws.
+    let isDir;
+    try {
+      isDir = fs.statSync(target).isDirectory();
+    } catch {
+      continue; // absent or unreadable: nothing to plan
+    }
+    plan.push({
+      type: isDir ? 'dir' : 'file',
+      path: target,
+      label: item.label,
+      critical: false,
+      // #714: a fixed-path file we install ourselves needs no content signature.
+      // Carrying the flag through the plan is what makes the delete happen instead
+      // of stopping at "does not contain xp-gate signature".
+      ownedByPath: item.ownedByPath === true,
+    });
+  }
+}
+
+function buildGlobalPlanInto(plan, manifest) {
     plan.push({
       type: 'gitconfig',
       action: 'unset-hooks-path',
@@ -387,38 +440,13 @@ function buildPlan(mode) {
       });
     }
 
-    // #663: `setup-global` also writes modules/, a node_modules/ tree, a
-    // package.json + package-lock.json and the xp-gate.json manifest. None of them
-    // were in the plan, so uninstall printed "Uninstall complete" over an
-    // installation that was still ~1000 files on disk. The residue is not
-    // cosmetic: a leftover node_modules/ makes the NEXT setup-global skip its own
-    // install and reuse a stale dependency tree, and a leftover xp-gate.json
-    // carries the previous version's manifest/lastInit into `doctor`, which then
-    // reports it as the current installation.
-    const configDir = CONFIG_DIR;
-    for (const item of GLOBAL_INSTALL_RESIDUE) {
-      const target = path.join(configDir, item.key);
-      if (fs.existsSync(target)) {
-        const isDir = fs.statSync(target).isDirectory();
-        plan.push({
-          type: isDir ? 'dir' : 'file',
-          path: target,
-          label: `~/.config/xp-gate/${item.label}`,
-          critical: false,
-          // #714: a fixed-path file we install ourselves needs no content
-          // signature. Carrying the flag through the plan is what makes the
-          // delete actually happen instead of stopping at "does not contain
-          // xp-gate signature".
-          ownedByPath: item.ownedByPath === true
-        });
-      }
-    }
+    planGlobalInstallResidue(plan);
 
     // User data is deliberately NOT deleted. Reporting it is the second half of
     // the fix: leaving it behind silently is how a user ends up with a stray
     // config they cannot attribute.
     for (const item of GLOBAL_USER_DATA) {
-      const target = path.join(configDir, item.key);
+      const target = path.join(CONFIG_DIR, item.key);
       if (fs.existsSync(target)) {
         plan.push({
           type: 'retain',
@@ -429,6 +457,16 @@ function buildPlan(mode) {
         });
       }
     }
+}
+
+function buildPlan(mode) {
+  const config = getConfig();
+  const manifest = config && config.manifest ? config.manifest : null;
+  const plan = [];
+  if (mode === 'local') {
+    buildLocalPlanInto(plan, manifest);
+  } else if (mode === 'global') {
+    buildGlobalPlanInto(plan, manifest);
   }
 
   // Template dir is common to both modes
@@ -458,7 +496,14 @@ function removeFile(item, config) {
   // stayed.
   if (item.ownedByPath === true) {
     if (!fs.existsSync(item.path)) return false;
-    fs.unlinkSync(item.path);
+    try {
+      fs.unlinkSync(item.path);
+    } catch (err) {
+      // Report a failure AS a failure: printing "Removed" for a file still on disk
+      // is the residue problem this command exists to end.
+      console.error(`  ✗ Could not remove ${item.label}: ${err.message}`);
+      return false;
+    }
     console.log(`  Removed ${item.label}`);
     return true;
   }
@@ -568,30 +613,152 @@ function executePlanItem(item, config) {
  * @param {string[]} args CLI arguments
  * @returns {number} exit code (0 = success, 1 = error)
  */
-async function uninstall(args) {
-  const options = {
-    dryRun: args.includes('--dry-run'),
-    force: args.includes('--force'),
-    forceLocal: args.includes('--local'),
-    forceGlobal: args.includes('--global'),
-    purge: args.includes('--purge'),
-  };
+/**
+ * Print what is about to happen, with removal and retention stated separately.
+ *
+ * #724: 'retain' entries used to be printed under "The following will be removed"
+ * and then kept, with no further mention anywhere in the output. A user scripting
+ * cleanup from this preview would delete a directory they had been told was already
+ * gone. The two groups are separate now, and the retained list is echoed again at the
+ * end of the run.
+ *
+ * @param {string} mode
+ * @param {Array} plan
+ * @param {Array} purgeDirs
+ * @param {{purge?: boolean}} options
+ * @returns {Array} the retained entries, which the caller restates at the end
+ */
+function printUninstallPlan(mode, plan, purgeDirs, options) {
+  console.log(`XP-Gate Uninstall (${mode} mode)`);
+  console.log('=======================\n');
 
-  // §4.3 Step 1: Read config
-  const config = getConfig();
+  const removable = plan.filter((item) => item.retain !== true);
+  const retained = plan.filter((item) => item.retain === true);
 
-  // §4.3 Step 1: No config → exit cleanly (AC-09 idempotency)
-  if (!config) {
-    console.log('No xp-gate installation found');
-    return 0;
+  console.log('The following will be removed:\n');
+  for (const item of removable) {
+    console.log(`  • ${item.label}`);
   }
 
-  // §4.3 Step 1: Already uninstalled → exit cleanly (AC-09 idempotency)
-  if (config.mode === 'uninstalled') {
-    console.log('No xp-gate installation found');
-    return 0;
+  if (retained.length > 0) {
+    console.log('\nThe following will be KEPT (your data):\n');
+    for (const item of retained) {
+      console.log(`  • ${item.label}`);
+    }
   }
 
+  if (options.purge) {
+    console.log('\nPurge mode — additional cleanup:');
+    for (const d of purgeDirs) {
+      console.log(`  • ${d.label}`);
+    }
+  }
+  return retained;
+}
+
+/**
+ * Run the plan: state machine, backup, removals, purge, final state write.
+ *
+ * The ORDER is the safety property. The state moves to `uninstalling` BEFORE anything
+ * is removed, so a crash halfway leaves a config saying "do not trust this
+ * installation" rather than one claiming to be active. The backup is taken before the
+ * destructive loop for the same reason.
+ *
+ * Errors do not stop the run: one unwritable file must not strand the rest. They are
+ * collected into the return value, which decides whether the backup is cleaned up.
+ *
+ * @returns {{hadErrors: boolean, backupMeta: object}} `backupMeta` is returned so the
+ *   caller can decide whether to keep or discard the snapshot.
+ */
+/**
+ * Delete the whole directories `--purge` asks for.
+ *
+ * Separate from the plan loop because these are trees removed with `force`, not
+ * owned files: there is no signature to check and no partial failure to report
+ * beyond "could not remove". A dry run prints them in the preview's shape, because
+ * the preview only lists what the PLAN will touch.
+ *
+ * @param {Array<{label: string, path: string}>} purgeDirs
+ * @param {{dryRun?: boolean}} options
+ * @returns {boolean} whether anything failed
+ */
+function runPurge(purgeDirs, options) {
+  let failed = false;
+  for (const dir of purgeDirs) {
+    if (options.dryRun) {
+      console.log(`  • ${dir.label}`);
+      continue;
+    }
+    if (!fs.existsSync(dir.path)) continue;
+    try {
+      fs.rmSync(dir.path, { recursive: true, force: true });
+      console.log(`  Removed ${dir.label}`);
+    } catch (err) {
+      console.warn(`  Warning: Could not remove ${dir.label}: ${err.message}`);
+      failed = true;
+    }
+  }
+  return failed;
+}
+
+function executeUninstallPlan(plan, config, purgeDirs, options) {
+  // §4.8 State machine: active → uninstalling
+  saveConfig({ ...config, mode: 'uninstalling' });
+
+  // §4.12 Step 4: Create backup snapshot before destructive operations
+  const backupMeta = createBackupSnapshot(plan);
+
+  // §4.12 Execute operations in order (non-destructive first, then destructive)
+  let hadErrors = false;
+
+  for (const item of plan) {
+    try {
+      hadErrors = !executePlanItem(item, config) || hadErrors;
+    } catch (e) {
+      console.warn(`  Warning: Could not remove ${item.label}: ${e.message}`);
+      hadErrors = true;
+    }
+  }
+
+  const purgeErrors = options.purge ? runPurge(purgeDirs, options) : false;
+
+  // §4.8 State machine: uninstalling → uninstalled
+  try {
+    saveConfig({
+      ...getConfig() || config,
+      mode: 'uninstalled',
+      uninstalled: new Date().toISOString(),
+      manifest: undefined,
+    });
+  } catch (e) {
+    // purge mode: config dir has been deleted, save is non-critical
+    if (!options.purge) throw e;
+    console.warn(`  Warning: Could not save config: ${e.message}`);
+  }
+
+  // §4.12 Step 11: Clean up backup on success
+  if (!hadErrors) {
+    cleanupBackup(backupMeta);
+  }
+    return { hadErrors: hadErrors || purgeErrors, backupMeta };
+}
+
+/**
+ * Decide the install mode and build the plan (plus purge targets).
+ *
+ * Returns `mode: null` when there is nothing xp-gate-shaped on this machine, which
+ * the caller reports as a clean exit -- uninstalling twice is not an error, and
+ * saying so twice is idempotency (#AC-09), not noise.
+ *
+ * Purge targets are scoped to the MODE: a local install has a project `.xp-gate/`
+ * worth removing, a global one does not, and `force` flags override the recorded
+ * mode so a half-broken config can still be cleaned up.
+ *
+ * @param {object} config
+ * @param {{forceLocal?: boolean, forceGlobal?: boolean, purge?: boolean}} options
+ * @returns {{mode: string|null, plan: Array, purgeDirs: Array}}
+ */
+function prepareUninstallPlan(config, options) {
   // §4.3 Step 2: Determine mode
   let mode = config.mode;
   if (options.forceLocal) mode = 'local';
@@ -621,107 +788,83 @@ async function uninstall(args) {
     }
   }
 
-  if (plan.length === 0 && purgeDirs.length === 0) {
-    console.log('Nothing to uninstall');
-    // Still update config to uninstalled
-    saveConfig({ ...config, mode: 'uninstalled', uninstalled: new Date().toISOString() });
-    return 0;
+  return { mode, plan, purgeDirs };
+}
+
+/**
+ * Whether there is nothing to uninstall.
+ *
+ * Two conditions, one message: no config at all, and a config that already records
+ * the uninstalled state. Both are the AC-09 idempotency case -- running `uninstall`
+ * twice is not an error, and the second run has nothing to report beyond that.
+ *
+ * @param {object|null} config
+ * @returns {boolean}
+ */
+function isAlreadyGone(config) {
+  if (!config || config.mode === 'uninstalled') {
+    console.log('No xp-gate installation found');
+    return true;
   }
+  return false;
+}
 
-  // §4.3 Step 4: Print plan
-  console.log(`XP-Gate Uninstall (${mode} mode)`);
-  console.log('=======================\n');
+/**
+ * Record that the plan was empty.
+ *
+ * The config is still moved to `uninstalled`: the installation may consist only of
+ * entries the guard refused to touch, and leaving the mode `active` would make the
+ * next run repeat the same no-op. Saying "nothing to uninstall" is a result, not a
+ * failure.
+ *
+ * @param {object} config
+ * @returns {number} exit code
+ */
+function recordNothingToDo(config) {
+  console.log('Nothing to uninstall');
+  saveConfig({ ...config, mode: 'uninstalled', uninstalled: new Date().toISOString() });
+  return 0;
+}
 
-  // #724: 'retain' entries used to be printed under "The following will be
-  // removed" and then kept, with no further mention anywhere in the output.
-  // A user scripting cleanup from this preview would delete a directory they
-  // had been told was gone. The two groups are now stated separately, and the
-  // retained list is echoed again at the end.
-  const removable = plan.filter((item) => item.retain !== true);
-  const retained = plan.filter((item) => item.retain === true);
+/**
+ * Say that a dry run changed nothing.
+ *
+ * @returns {number} exit code
+ */
+function reportDryRun() {
+  console.log('\nDry-run mode — no files were modified');
+  return 0;
+}
 
-  console.log('The following will be removed:\n');
-  for (const item of removable) {
-    console.log(`  • ${item.label}`);
-  }
+async function uninstall(args) {
+  const options = {
+    dryRun: args.includes('--dry-run'),
+    force: args.includes('--force'),
+    forceLocal: args.includes('--local'),
+    forceGlobal: args.includes('--global'),
+    purge: args.includes('--purge'),
+  };
 
-  if (retained.length > 0) {
-    console.log('\nThe following will be KEPT (your data):\n');
-    for (const item of retained) {
-      console.log(`  • ${item.label}`);
-    }
-  }
+  // §4.3 Step 1: Read config
+  const config = getConfig();
 
-  if (options.purge) {
-    console.log('\nPurge mode — additional cleanup:');
-    for (const d of purgeDirs) {
-      console.log(`  • ${d.label}`);
-    }
-  }
+  // §4.3 Step 1: nothing installed, or already uninstalled → clean exit (AC-09)
+  if (isAlreadyGone(config)) return 0;
 
-  // §4.3 Step 5: Dry-run → exit
-  if (options.dryRun) {
-    console.log('\nDry-run mode — no files were modified');
-    return 0;
-  }
+  const prepared = prepareUninstallPlan(config, options);
+  if (prepared.mode === null) return 0;
+  const { mode, plan, purgeDirs } = prepared;
+
+  if (plan.length === 0 && purgeDirs.length === 0) return recordNothingToDo(config);
+
+  const retained = printUninstallPlan(mode, plan, purgeDirs, options);
+  if (options.dryRun) return reportDryRun();
 
   // §4.3 Step 6: Confirm
   // Skipped in test environment since we use --force or non-interactive
   // In real usage with TTY, would prompt here
 
-  // §4.8 State machine: active → uninstalling
-  saveConfig({ ...config, mode: 'uninstalling' });
-
-  // §4.12 Step 4: Create backup snapshot before destructive operations
-  const backupMeta = createBackupSnapshot(plan);
-
-  // §4.12 Execute operations in order (non-destructive first, then destructive)
-  let hadErrors = false;
-
-  for (const item of plan) {
-    try {
-      hadErrors = !executePlanItem(item, config) || hadErrors;
-    } catch (e) {
-      console.warn(`  Warning: Could not remove ${item.label}: ${e.message}`);
-      hadErrors = true;
-    }
-  }
-
-  if (options.purge) {
-    for (const d of purgeDirs) {
-      if (options.dryRun) {
-        console.log(`  • ${d.label}`);
-        continue;
-      }
-      if (!fs.existsSync(d.path)) continue;
-      try {
-        fs.rmSync(d.path, { recursive: true, force: true });
-        console.log(`  Removed ${d.label}`);
-      } catch (e) {
-        console.warn(`  Warning: Could not remove ${d.label}: ${e.message}`);
-        hadErrors = true;
-      }
-    }
-  }
-
-  // §4.8 State machine: uninstalling → uninstalled
-  try {
-    saveConfig({
-      ...getConfig() || config,
-      mode: 'uninstalled',
-      uninstalled: new Date().toISOString(),
-      manifest: undefined,
-    });
-  } catch (e) {
-    // purge mode: config dir has been deleted, save is non-critical
-    if (!options.purge) throw e;
-    console.warn(`  Warning: Could not save config: ${e.message}`);
-  }
-
-  // §4.12 Step 11: Clean up backup on success
-  if (!hadErrors) {
-    cleanupBackup(backupMeta);
-  }
+  const { hadErrors, backupMeta } = executeUninstallPlan(plan, config, purgeDirs, options);
 
   // Print summary
   console.log('\nUninstall complete');

@@ -47,31 +47,49 @@ const PROBE_TIMEOUT_MS = 10000;
  * SOLID analyzer flags `new X()` as a dependency-inversion smell regardless of
  * whether the type is injectable.
  */
+/**
+ * SIGKILL a child that has not reported its outcome yet.
+ *
+ * Checked at FIRE time, not at schedule time: the child may have settled during the
+ * escalation window, and killing a recycled pid would hit an unrelated process.
+ */
+function killIfUnsettled(child: ChildProcess, isSettled: () => boolean): void {
+  if (!isSettled()) child.kill('SIGKILL');
+}
+
 function createSettleGuard(resolve: (o: MutationRunOutcome) => void) {
   let settled = false;
   let escalationId: NodeJS.Timeout | undefined;
   let timeoutId: NodeJS.Timeout | undefined;
 
-  const escalateToKill = (child: ChildProcess): void => {
-    if (!settled) child.kill('SIGKILL');
+  /**
+   * SIGTERM at `timeoutMs`, escalating to SIGKILL if the child ignores it.
+   *
+   * The escalation is armed only while UNSETTLED: a child that already reported its
+   * outcome is gone, and scheduling a kill for it would target a recycled pid.
+   */
+  const onTimeout = (child: ChildProcess, guard: { timedOut: boolean }): void => {
+    guard.timedOut = true;
+    child.kill('SIGTERM');
+    if (settled) return;
+    escalationId = setTimeout(() => killIfUnsettled(child, () => settled), SIGKILL_ESCALATION_MS);
   };
+
+  /** Cancel both timers; a null id is simply nothing to cancel. */
+  function clearTimers(): void {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (escalationId) clearTimeout(escalationId);
+  }
 
   const guard = {
     timedOut: false,
-    /** SIGTERM at `timeoutMs`, escalating to SIGKILL if the child ignores it. */
     armTimeout(child: ChildProcess, timeoutMs: number): void {
-      timeoutId = setTimeout(() => {
-        guard.timedOut = true;
-        child.kill('SIGTERM');
-        if (settled) return;
-        escalationId = setTimeout(() => escalateToKill(child), SIGKILL_ESCALATION_MS);
-      }, timeoutMs);
+      timeoutId = setTimeout(() => onTimeout(child, guard), timeoutMs);
     },
     settle(outcome: MutationRunOutcome): void {
       if (settled) return;
       settled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-      if (escalationId) clearTimeout(escalationId);
+      clearTimers();
       resolve(outcome);
     },
   };
@@ -211,16 +229,33 @@ function buildTargets(files: string[]): string {
  * `Survived` to survived; the totals are their sum, matching the mutmut
  * runner's normalization exactly.
  */
-export function parseConsoleReport(stdout: string): MutationRunResult | null {
-  const zapped = extractCount(stdout, /Zapped:\s*(\d+)\s*gremlins?/i);
-  const survived = extractCount(stdout, /Survived:\s*(\d+)\s*gremlins?/i);
+/** `Zapped: 142 gremlins (89%)` -- the killed count. */
+const ZAPPED_PATTERN = /Zapped:\s*(\d+)\s*gremlins?/i;
 
+/** `Survived: 18 gremlins (11%)` -- the surviving count. */
+const SURVIVED_PATTERN = /Survived:\s*(\d+)\s*gremlins?/i;
+
+/**
+ * The mutant counts from the two optional figures, or null when there is no denominator.
+ *
+ * A run that printed neither line got no report, and a score of 0 would be a FABRICATED
+ * verdict -- "measured 0%" and "never measured" must not look alike.
+ */
+function buildCounts(zapped: number | null, survived: number | null) {
+  const killed = zapped ?? 0;
+  const lived = survived ?? 0;
+  const total = killed + lived;
+  return total === 0 ? null : { nrOfKilledMutants: killed, nrOfSurvivedMutants: lived, nrOfMutants: total };
+}
+
+export function parseConsoleReport(stdout: string): MutationRunResult | null {
+  const zapped = extractCount(stdout, ZAPPED_PATTERN);
+  const survived = extractCount(stdout, SURVIVED_PATTERN);
   if (zapped === null && survived === null) return null;
 
-  const nrOfKilledMutants = zapped ?? 0;
-  const nrOfSurvivedMutants = survived ?? 0;
-  const nrOfMutants = nrOfKilledMutants + nrOfSurvivedMutants;
-  if (nrOfMutants === 0) return null;
+  const counts = buildCounts(zapped, survived);
+  if (!counts) return null;
+  const { nrOfKilledMutants, nrOfSurvivedMutants, nrOfMutants } = counts;
 
   return {
     mutationScore: (nrOfKilledMutants / nrOfMutants) * 100,

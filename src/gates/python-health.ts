@@ -136,23 +136,41 @@ function isPythonFileEntry(entry: import('fs').Dirent): boolean {
  * readable, and bounded by depth and entry count so a pathological tree cannot
  * make a gate hang.
  */
-function walkForPythonFile(dir: string, depth: number, counter: { seen: number }): boolean {
-  if (depth > SIGNAL_MAX_DEPTH || counter.seen > SIGNAL_MAX_ENTRIES) return false;
-  let entries: import('fs').Dirent[];
+/** The directory's entries, or null when it cannot be read. */
+function readEntries(dir: string): import('fs').Dirent[] | null {
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    return fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return false;
+    // Unreadable is not "definitely not Python": the caller decides, and the caller
+    // here treats it as "keep looking".
+    return null;
   }
-  for (const entry of entries) {
-    counter.seen += 1;
-    if (counter.seen > SIGNAL_MAX_ENTRIES) return false;
-    if (isPythonFileEntry(entry)) return true;
-    if (entry.isDirectory() && !shouldSkipDir(entry) && walkForPythonFile(path.join(dir, entry.name), depth + 1, counter)) {
-      return true;
-    }
-  }
-  return false;
+}
+
+/** Whether the walk has spent its budget. */
+function budgetExhausted(depth: number, counter: { seen: number }): boolean {
+  return depth > SIGNAL_MAX_DEPTH || counter.seen > SIGNAL_MAX_ENTRIES;
+}
+
+/**
+ * Whether this directory entry is, or contains, a Python file.
+ *
+ * The counter is incremented per ENTRY rather than per directory, so a tree with a
+ * huge flat directory is bounded too -- the depth limit alone would not stop it.
+ */
+function entryLeadsToPython(dir: string, entry: import('fs').Dirent, depth: number, counter: { seen: number }): boolean {
+  counter.seen += 1;
+  if (counter.seen > SIGNAL_MAX_ENTRIES) return false;
+  if (isPythonFileEntry(entry)) return true;
+  if (!entry.isDirectory() || shouldSkipDir(entry)) return false;
+  return walkForPythonFile(path.join(dir, entry.name), depth + 1, counter);
+}
+
+function walkForPythonFile(dir: string, depth: number, counter: { seen: number }): boolean {
+  if (budgetExhausted(depth, counter)) return false;
+  const entries = readEntries(dir);
+  if (!entries) return false;
+  return entries.some((entry) => entryLeadsToPython(dir, entry, depth, counter));
 }
 
 /**
@@ -175,27 +193,45 @@ export function detectPython(): { available: boolean; exe: string; version: stri
     : ['python3', 'python'];
 
   for (const exe of candidates) {
-    // Check if executable exists
-    const whichCheck = isToolAvailable(exe);
-    if (!whichCheck.available) continue;
-
-    const exePath = whichCheck.path;
-
-    // Filter Windows Store stubs (heuristic: path contains WindowsApps)
-    if (exePath.toLowerCase().includes('windowsapps')) continue;
-
-    // Verify it's a real Python (not a stub that opens Store)
-    const verResult = runTool(exePath, ['--version'], { timeoutMs: 3000 });
-    if (verResult.exitCode !== 0 || verResult.timedOut) continue;
-
-    const output = (verResult.stdout + verResult.stderr).trim();
-    const versionMatch = output.match(/^Python\s+(\d+\.\d+\.\d+)/);
-    if (!versionMatch) continue;
-
-    return { available: true, exe: exePath, version: versionMatch[1] };
+    const resolved = resolveRealPython(exe);
+    if (resolved) return { available: true, ...resolved };
   }
-
   return { available: false, exe: '', version: '' };
+}
+
+/** Windows ships a Store STUB named `python` that opens the Store instead of running. */
+const WINDOWS_STORE_STUB = 'windowsapps';
+
+/** `Python 3.12.1`, in the banner both stdout and stderr carry. */
+const VERSION_BANNER = /^Python\s+(\d+\.\d+\.\d+)/;
+
+/**
+ * The path and version of a REAL Python found under this name, or null.
+ *
+ * Three ways a candidate is not a real Python, and each must be skipped rather than
+ * reported: not on PATH, a Windows Store stub (which "exists" and even responds), or a
+ * binary whose `--version` does not print a version banner.
+ */
+function resolveRealPython(exe: string): { exe: string; version: string } | null {
+  const found = isToolAvailable(exe);
+  if (!found.available) return null;
+  if (found.path.toLowerCase().includes(WINDOWS_STORE_STUB)) return null;
+
+  const version = versionOf(found.path);
+  return version === null ? null : { exe: found.path, version };
+}
+
+/**
+ * The version this binary reports, or null when it does not behave like Python.
+ *
+ * Both streams are read because some Pythons print their banner on stderr, and a run
+ * that timed out or exited non-zero is not a Python this gate can use.
+ */
+function versionOf(exePath: string): string | null {
+  const result = runTool(exePath, ['--version'], { timeoutMs: 3000 });
+  if (result.exitCode !== 0 || result.timedOut) return null;
+  const banner = (result.stdout + result.stderr).trim().match(VERSION_BANNER);
+  return banner ? banner[1] : null;
 }
 
 /**
@@ -204,13 +240,28 @@ export function detectPython(): { available: boolean; exe: string; version: stri
 export function checkPythonVersion(version: string, minVersion = '3.8.0'): boolean {
   const parts = version.split('.').map(Number);
   const minParts = minVersion.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    const v = parts[i] || 0;
-    const m = minParts[i] || 0;
-    if (v > m) return true;
-    if (v < m) return false;
+  for (let i = 0; i < VERSION_DEPTH; i++) {
+    const verdict = compareAt(parts[i] || 0, minParts[i] || 0);
+    if (verdict !== null) return verdict;
   }
   return true; // equal
+}
+
+/** How many version segments participate in the comparison. */
+const VERSION_DEPTH = 3;
+
+/**
+ * The verdict for one version segment, or null when the two are equal.
+ *
+ * Compared from the MAJOR segment outward, so 3.10 > 3.9 -- a string comparison would
+ * put `3.10` before `3.9` and reject a Python that is new enough.
+ *
+ * @returns true when `v` is newer, false when older, null when equal
+ */
+function compareAt(v: number, m: number): boolean | null {
+  if (v > m) return true;
+  if (v < m) return false;
+  return null;
 }
 
 // ── pip Detection ──
@@ -237,27 +288,61 @@ export function detectPip(pythonExe: string): { available: boolean; version: str
 /**
  * Detect Python environment type.
  */
-export function detectEnvironment(cwd?: string): { type: PythonHealthResult['environment']['type']; path: string | null } {
-  const env = process.env;
+/** Environment variables that identify a managed Python, in precedence order. */
+const ENV_MARKERS: Array<{ key: string; type: PythonHealthResult['environment']['type'] }> = [
+  { key: 'CONDA_PREFIX', type: 'conda' },
+  { key: 'CONDA_DEFAULT_ENV', type: 'conda' },
+  { key: 'VIRTUAL_ENV', type: 'venv' },
+];
 
-  // conda
-  if (env.CONDA_PREFIX) return { type: 'conda', path: env.CONDA_PREFIX };
-  if (env.CONDA_DEFAULT_ENV) return { type: 'conda', path: env.CONDA_DEFAULT_ENV };
+/** Files that identify the project's Python manager, in precedence order. */
+const FILE_MARKERS: Array<{ name: string; type: PythonHealthResult['environment']['type'] }> = [
+  { name: 'uv.lock', type: 'uv' },
+  { name: '.python-version', type: 'pyenv' },
+  { name: '.venv', type: 'venv' },
+];
 
-  // venv / virtualenv
-  if (env.VIRTUAL_ENV) return { type: 'venv', path: env.VIRTUAL_ENV };
+/**
+ * The manager identified by an environment variable, or null.
+ *
+ * Environment beats files: a shell that has ACTIVATED a venv is telling us what is
+ * really running, while a config file only says what the project would like.
+ */
+function environmentFromEnv(env: NodeJS.ProcessEnv) {
+  const marker = ENV_MARKERS.find((m) => env[m.key]);
+  return marker ? { type: marker.type, path: env[marker.key] as string } : null;
+}
 
-  // uv
-  const dir = cwd || process.cwd();
+/**
+ * The manager identified by a marker file in `dir`, or null.
+ *
+ * The path for `.venv` is the directory itself, not the marker -- that is what a caller
+ * would activate.
+ */
+function environmentFromFiles(dir: string, fsMod: typeof import('fs'), pathMod: typeof import('path')) {
+  for (const marker of FILE_MARKERS) {
+    const markerPath = pathMod.join(dir, marker.name);
+    if (!fsMod.existsSync(markerPath)) continue;
+    return { type: marker.type, path: marker.type === 'venv' ? markerPath : dir };
+  }
+  return null;
+}
+
+/** The manager a project directory declares, or null when unreadable or absent. */
+function environmentFromProject(cwd: string) {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    if (fs.existsSync(path.join(dir, 'uv.lock'))) return { type: 'uv', path: dir };
-    if (fs.existsSync(path.join(dir, '.python-version'))) return { type: 'pyenv', path: dir };
-    if (fs.existsSync(path.join(dir, '.venv'))) return { type: 'venv', path: path.join(dir, '.venv') };
-  } catch { /* ignore */ }
+    return environmentFromFiles(cwd, require('fs'), require('path'));
+  } catch {
+    // A project directory that cannot be read does not make this a managed
+    // environment; the caller falls back to the system default.
+    return null;
+  }
+}
 
-  return { type: 'system', path: null };
+export function detectEnvironment(cwd?: string): { type: PythonHealthResult['environment']['type']; path: string | null } {
+  return environmentFromEnv(process.env)
+    || environmentFromProject(cwd || process.cwd())
+    || { type: 'system', path: null };
 }
 
 // ── Tool Checking ──
@@ -281,33 +366,61 @@ export function checkTools(pythonExe: string, cwd?: string): PythonHealthResult[
   return tools;
 }
 
+/** A tool version as printed by `--version`; the patch segment is optional. */
+const TOOL_VERSION = /(\d+\.\d+(?:\.\d+)?)/;
+
+/** The version a run printed, or 'unknown' when it printed none. */
+function versionFrom(result: { stdout: string; stderr: string }): string {
+  // Some tools print their banner on stderr, so both streams are read.
+  const banner = (result.stdout + result.stderr).trim().match(TOOL_VERSION);
+  return banner ? banner[1] : 'unknown';
+}
+
+/**
+ * The tool's version via `<python> -m <tool> --version`, or null when that fails.
+ *
+ * Preferred over a bare `--version` because it runs the tool in the SAME interpreter the
+ * gate will use -- a tool installed for a different Python would otherwise be reported
+ * available and then fail at run time.
+ */
+function versionViaInterpreter(name: string, pythonExe: string, cwd?: string): string | null {
+  if (!pythonExe) return null;
+  const result = runTool(pythonExe, ['-m', name, '--version'], { timeoutMs: 5000, cwd });
+  return result.exitCode === 0 ? versionFrom(result) : null;
+}
+
+/** `npx` is invoked through its own command line, not as a path. */
+function isNpxPath(toolPath: string, name: string): boolean {
+  return toolPath === `npx ${name}`;
+}
+
+/** The tool's version via its own executable, or null when it is not on PATH. */
+function versionViaExecutable(name: string, cwd?: string): string | null {
+  const tool = isToolAvailable(name, cwd);
+  if (!tool.available) return null;
+  const npx = isNpxPath(tool.path, name);
+  const result = runTool(
+    npx ? 'npx' : tool.path,
+    npx ? ['-y', name, '--version'] : ['--version'],
+    { timeoutMs: 5000, cwd },
+  );
+  // The exit code decides, exactly as in `versionViaModule` above. Without it a tool that
+  // crashed or timed out is reported "available" whenever a version-looking string reached
+  // stdout or stderr -- and those are the runs whose banner is least trustworthy (review
+  // FC-02). Two functions asking the same question must not answer it differently.
+  if (result.exitCode !== 0 || result.timedOut) return null;
+  return versionFrom(result);
+}
+
 function checkPythonTool(
   name: string,
   pythonExe: string,
   cwd?: string
 ): { name: string; available: boolean; version: string } {
-  // Try via <python-exe> -m <tool> --version first (ensures correct env)
-  if (pythonExe) {
-    const result = runTool(pythonExe, ['-m', name, '--version'], { timeoutMs: 5000, cwd });
-    if (result.exitCode === 0) {
-      const output = (result.stdout + result.stderr).trim();
-      const versionMatch = output.match(/(\d+\.\d+(?:\.\d+)?)/);
-      return { name, available: true, version: versionMatch ? versionMatch[1] : 'unknown' };
-    }
-  }
-
-  // Fallback: direct tool detection via common.ts
-  const tool = isToolAvailable(name, cwd);
-  if (tool.available) {
-    const verResult = runTool(tool.path === `npx ${name}` ? 'npx' : tool.path,
-      tool.path === `npx ${name}` ? ['-y', name, '--version'] : ['--version'],
-      { timeoutMs: 5000, cwd });
-    const output = (verResult.stdout + verResult.stderr).trim();
-    const versionMatch = output.match(/(\d+\.\d+(?:\.\d+)?)/);
-    return { name, available: true, version: versionMatch ? versionMatch[1] : 'unknown' };
-  }
-
-  return { name, available: false, version: '' };
+  const version = versionViaInterpreter(name, pythonExe, cwd) ?? versionViaExecutable(name, cwd);
+  return version === null
+    ? { name, available: false, version: '' }
+    : { name, available: true, version };
 }
 
 /**
@@ -372,24 +485,30 @@ function inspectEnvironment(
 /**
  * Run comprehensive Python environment health check.
  */
+/**
+ * The result for a machine with no Python at all.
+ *
+ * `toolProbesRan: false` is the load-bearing field: no tool COULD have been probed, and
+ * reporting an empty tool list without that flag reads as "everything is installed".
+ */
+function pythonMissing(): PythonHealthResult {
+  return {
+    healthy: false,
+    python: { available: false, exe: '', version: '' },
+    pip: { available: false, version: '' },
+    environment: { type: 'system', path: null },
+    tools: [],
+    issues: ['Python 3 not found. Install from https://python.org/downloads'],
+    toolProbesRan: false,
+  };
+}
+
 export function checkPythonHealth(cwd?: string): PythonHealthResult {
   const issues: string[] = [];
 
   // 1. Detect Python
   const python = detectPython();
-  if (!python.available) {
-    issues.push('Python 3 not found. Install from https://python.org/downloads');
-    return {
-      healthy: false,
-      python,
-      pip: { available: false, version: '' },
-      environment: { type: 'system', path: null },
-      tools: [],
-      issues,
-      // Python itself is absent, so no tool could have been probed.
-      toolProbesRan: false,
-    };
-  }
+  if (!python.available) return pythonMissing();
 
   // 2-4. Version, pip, and virtualenv — each appends its own issue if unhappy.
   const { pip, environment } = inspectEnvironment(python, cwd, issues);
@@ -398,20 +517,39 @@ export function checkPythonHealth(cwd?: string): PythonHealthResult {
   const pythonSignal = hasPythonSignal(cwd);
   const { tools, missingRequired } = resolvePythonTools(python.exe, cwd, pythonSignal);
 
-  // Only report missing tools when the project is actually Python — otherwise this
-  // is a non-signal, and telling a TS project to install mypy is noise.
-  if (missingRequired.length > 0 && pythonSignal) {
-    const names = missingRequired.map(t => t.name).join(', ');
-    issues.push(`Required tools missing: ${names}. Install: ${python.exe} -m pip install ${names}`);
-  }
+  reportMissingTools(issues, missingRequired, python.exe, pythonSignal);
+  return {
+    healthy: isHealthy(issues, missingRequired, pythonSignal),
+    python, pip, environment, tools, issues,
+    toolProbesRan: pythonSignal,
+  };
+}
 
-  // `missingRequired` counts only when it was actually PROBED. On a non-Python
-  // project the tools are unknown-and-irrelevant, not missing: counting them would
-  // report "unhealthy" for a repo that has nothing for Python tooling to check.
-  const healthy = issues.filter(i => i.includes('not found') || i.includes('minimum')).length === 0
-    && (!pythonSignal || missingRequired.length === 0);
+/**
+ * Note the required tools that are absent, but only on a PYTHON project.
+ *
+ * On a non-Python repo the tools are unknown-and-irrelevant, and telling a TS project to
+ * install mypy is noise.
+ */
+function reportMissingTools(issues: string[], missingRequired: Array<{ name: string }>, exe: string, pythonSignal: boolean): void {
+  if (missingRequired.length === 0 || !pythonSignal) return;
+  const names = missingRequired.map((t) => t.name).join(', ');
+  issues.push(`Required tools missing: ${names}. Install: ${exe} -m pip install ${names}`);
+}
 
-  return { healthy, python, pip, environment, tools, issues, toolProbesRan: pythonSignal };
+/** Issues that describe a BROKEN install rather than a missing optional convenience. */
+const BLOCKING_ISSUE = /not found|minimum/;
+
+/**
+ * The overall verdict.
+ *
+ * `missingRequired` counts only when the tools were actually PROBED. Counting them
+ * unconditionally would report "unhealthy" for a repo with nothing for Python tooling
+ * to check.
+ */
+function isHealthy(issues: string[], missingRequired: unknown[], pythonSignal: boolean): boolean {
+  if (issues.some((issue) => BLOCKING_ISSUE.test(issue))) return false;
+  return !pythonSignal || missingRequired.length === 0;
 }
 
 // ── CLI Entry Point ──

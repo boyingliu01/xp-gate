@@ -28,21 +28,27 @@ function writeState(sprintId: string, phase?: number): void {
     status: 'running',
     metrics: {},
   };
-  fs.writeFileSync(
-    path.join(tmpDir, '.sprint-state', 'sprint-state.json'),
-    JSON.stringify(state, null, 2),
-  );
+  try {
+    fs.writeFileSync(
+      path.join(tmpDir, '.sprint-state', 'sprint-state.json'),
+      JSON.stringify(state, null, 2),
+    );
+  } catch (err) {
+    // A fixture that was never written makes the test pass over state it did not set up,
+    // which is the fail-open shape the production code is being fixed for.
+    throw new Error(`cannot write the fixture sprint state: ${String(err)}`);
+  }
+}
+
+/** Record one token delta against the fixture root, which every case here shares. */
+function record(inputTokens: number, outputTokens: number, phase = 0): void {
+  recordTokenDelta({ projectRoot: tmpDir, inputTokens, outputTokens, phase });
 }
 
 describe('recordTokenDelta', () => {
   it('records token usage for the first call (no delta)', () => {
     writeState('sprint-001');
-    recordTokenDelta({
-      projectRoot: tmpDir,
-      inputTokens: 1000,
-      outputTokens: 500,
-      phase: 0,
-    });
+    record(1000, 500, 0);
 
     const total = getTotalTokens({ projectRoot: tmpDir });
     expect(total).not.toBeNull();
@@ -53,20 +59,10 @@ describe('recordTokenDelta', () => {
 
   it('calculates delta from previous record', () => {
     writeState('sprint-001');
-    recordTokenDelta({
-      projectRoot: tmpDir,
-      inputTokens: 1000,
-      outputTokens: 500,
-      phase: 0,
-    });
+    record(1000, 500, 0);
 
     // Second call — cumulative tokens
-    recordTokenDelta({
-      projectRoot: tmpDir,
-      inputTokens: 2500,
-      outputTokens: 1200,
-      phase: 1,
-    });
+    record(2500, 1200, 1);
 
     const history = getTokenHistory({ projectRoot: tmpDir });
     expect(history).toHaveLength(2);
@@ -131,12 +127,7 @@ describe('recordTokenDelta', () => {
 
   it('persists to sprint state metrics', () => {
     writeState('sprint-001');
-    recordTokenDelta({
-      projectRoot: tmpDir,
-      inputTokens: 1000,
-      outputTokens: 500,
-      phase: 2,
-    });
+    record(1000, 500, 2);
 
     const state = JSON.parse(
       fs.readFileSync(path.join(tmpDir, '.sprint-state', 'sprint-state.json'), 'utf8'),
@@ -189,5 +180,26 @@ describe('getTokenHistory', () => {
     expect(history).toHaveLength(2);
     expect(history[0].phase).toBe(0);
     expect(history[1].phase).toBe(1);
+  });
+
+  it('never records a NEGATIVE delta when the counters reset', () => {
+    // The counters are cumulative within a runner PROCESS. A restart makes them smaller,
+    // and subtracting anyway wrote a negative delta into the audit history -- where it is
+    // indistinguishable from a real measurement and corrupts every sum over it (review
+    // CI-02 / FC-02, two seats). A decrease means "the whole count is new".
+    writeState('sprint-001');
+    recordTokenDelta({ projectRoot: tmpDir, inputTokens: 1000, outputTokens: 500, phase: 0 });
+    // Simulate a restart: the new process reports smaller cumulative counts.
+    recordTokenDelta({ projectRoot: tmpDir, inputTokens: 300, outputTokens: 100, phase: 0 });
+
+    const history = getTokenHistory({ projectRoot: tmpDir });
+    expect(history).toHaveLength(2);
+    const last = history[history.length - 1];
+    expect(last.delta_input).toBeGreaterThanOrEqual(0);
+    expect(last.delta_output).toBeGreaterThanOrEqual(0);
+    expect(last.delta_total).toBeGreaterThanOrEqual(0);
+    // The reset count is treated as entirely new.
+    expect(last.delta_input).toBe(300);
+    expect(last.delta_output).toBe(100);
   });
 });

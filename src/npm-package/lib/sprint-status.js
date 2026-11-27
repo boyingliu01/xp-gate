@@ -9,6 +9,18 @@
 
 const fs = require('fs');
 const path = require('path');
+const { statusIcon, formatDuration: formatDurationShared } = require('./sprint-format.js');
+
+/**
+ * A list row shows nothing for an unmeasured duration: "instantaneous" and "not
+ * measured" must not look alike, and neither should take visual weight.
+ *
+ * @param {number|null|undefined} seconds
+ * @returns {string}
+ */
+function formatDuration(seconds) {
+  return formatDurationShared(seconds);
+}
 const { execFileSync } = require('child_process');
 const { discoverActiveSprints } = require('./sprint-discovery');
 const { SprintStateManager } = require('./sprint-state-manager');
@@ -44,7 +56,7 @@ function getLatestTimestamp(state) {
 function isStale(state) {
   if (!state || !state.started_at) return false;
   const latest = getLatestTimestamp(state);
-  return latest > 0 && Date.now() - latest > 3600000;
+  return latest > 0 && Date.now() - latest > STALE_AFTER_MS;
 }
 
 /**
@@ -62,33 +74,7 @@ function readSprintState(dir) {
   }
 }
 
-/**
- * Get a phase's status icon.
- * @param {'completed'|'in_progress'|'pending'|string} status
- * @returns {string} Icon character
- */
-function statusIcon(status) {
-  switch (status) {
-    case 'completed': return '✅';
-    case 'in_progress': return '🔄';
-    case 'skipped': return '⏭️';
-    default: return '⏳';
-  }
-}
 
-/**
- * Format a duration in seconds to a human-readable string.
- * @param {number|null} seconds
- * @returns {string}
- */
-function formatDuration(seconds) {
-  if (seconds == null || seconds === 0) return '';
-  if (seconds < 60) return `${seconds}s`;
-  const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
-}
 
 /**
  * Format the sprint header lines (task description, ID, branch).
@@ -196,7 +182,7 @@ function formatSprintTable(state) {
     if (name.length > maxNameLen) maxNameLen = name.length;
   }
 
-  const sep = '─'.repeat(maxNameLen + 40);
+  const sep = '─'.repeat(maxNameLen + TABLE_SIDE_PADDING);
   lines.push(sep);
 
   for (const key of PHASE_ORDER) {
@@ -218,7 +204,7 @@ function jsonMode(state) {
 }
 
 // #369: fix commit matching — conventional commits + keyword boundary
-const FIX_RE = /^(fix(\(.+\))?:)|\b(fix|bugfix|hotfix|patch|修复)\b/i;
+const FIX_RE = /^(fix(\(.+\))?:)|\b(fix|bugfix|hotfix|patch)\b|修复/i;
 
 /**
  * Git env with every repo-redirecting variable stripped, so `cwd` is the only
@@ -289,42 +275,125 @@ function getWindowCommitCounts(repoDir, sinceDate, untilDate) {
  * @param {number} windowDays - Window in days after completed_at
  * @returns {Promise<number>} Exit code
  */
+/** A sprint whose state file has not changed for an hour is reported as stale. */
+const STALE_AFTER_MS = 3600000;
+/** Characters a table rule adds around the widest name: two of margin per side. */
+const TABLE_SIDE_PADDING = 40;
+/** `fs.watchFile` polls; five seconds is frequent enough to feel live, cheap enough to ignore. */
+const WATCH_POLL_INTERVAL_MS = 5000;
+
+/** One day in milliseconds -- the unit the rework window is expressed in. */
+const MS_PER_DAY = 86400000;
+
+/**
+ * Every sprint that closed within the last `windowDays`, newest data included.
+ *
+ * A sprint counts only if it has `metrics.completed_at`: the rework rate is
+ * computed over a finished sprint's own window, so an open sprint has nothing to
+ * measure. Malformed files are skipped rather than aborting the report -- one
+ * corrupt history entry must not hide the other sprints.
+ *
+ * @param {{sprintStateFile: string, historyDir: string}} paths
+ * @param {number} windowDays
+ * @returns {Array<{id: string, state: object, file: string}>}
+ */
+function collectClosedSprints(paths, windowDays) {
+  const { sprintStateFile, historyDir } = paths;
+  const sprints = [];
+
+  const addIfClosed = (file, fallbackId) => {
+    try {
+      const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (state.metrics && state.metrics.completed_at) {
+        sprints.push({ id: state.id || fallbackId, state, file });
+      }
+    } catch {
+      // A malformed entry is skipped; one bad file must not hide the others.
+    }
+  };
+
+  if (fs.existsSync(sprintStateFile)) addIfClosed(sprintStateFile, 'unknown');
+
+  if (fs.existsSync(historyDir)) {
+    for (const name of fs.readdirSync(historyDir).filter((f) => f.endsWith('.json'))) {
+      addIfClosed(path.join(historyDir, name), name.replace('.json', ''));
+    }
+  }
+
+  const now = Date.now();
+  const windowMs = windowDays * MS_PER_DAY;
+  return sprints.filter((s) => {
+    const t = new Date(s.state.metrics.completed_at).getTime();
+    return !isNaN(t) && (now - t) <= windowMs;
+  });
+}
+
+/**
+ * Rework rate above this is an alert. 30% of a sprint's commits being fixes is
+ * the point at which the sprint was not really building the thing.
+ */
+const REWORK_ALERT_THRESHOLD = 0.30;
+
+/**
+ * Measure one sprint's rework rate over its own window, and report it.
+ *
+ * #704: the window is the sprint itself (start -> completion), and both counts
+ * come from one `git log` over it. Previously the total came from a field nothing
+ * wrote and the `--since` bound was the sprint's END, so both numbers were
+ * structurally 0 and the rate could only be 0 -- while the summary still said
+ * "within acceptable rate".
+ *
+ * No commits in the window means the rate is UNDEFINED, not zero. Reporting 0.0%
+ * would rebuild the same false reassurance one level down, so the sprint is
+ * surfaced as unmeasurable and never counts as within threshold.
+ *
+ * @param {string} searchDir
+ * @param {string} id
+ * @param {object} state
+ * @param {string} file
+ * @returns {{unmeasurable: boolean, alert: boolean}}
+ */
+function measureSprint(searchDir, id, state, file) {
+  const { fix: fixCommits, total: totalCommits } = getWindowCommitCounts(
+    searchDir,
+    state.started_at,
+    state.metrics.completed_at,
+  );
+
+  if (totalCommits === 0) {
+    console.log(`  ${id}: 0 fix / 0 total commits — NOT MEASURABLE (no commits in sprint window)`);
+    return { unmeasurable: true, alert: false };
+  }
+
+  const rate = fixCommits / totalCommits;
+
+  // Persist what was actually measured, denominator included: the previous code
+  // wrote the rate unconditionally, so a transposed 0 could overwrite a value a
+  // human had corrected.
+  state.metrics.rework_rate = rate;
+  state.metrics.total_sprint_commits = totalCommits;
+  state.metrics.fix_sprint_commits = fixCommits;
+  try {
+    fs.writeFileSync(file, JSON.stringify(state, null, 2));
+  } catch {
+    // Non-fatal: the report is still printable from the measured values.
+  }
+
+  const pct = (rate * 100).toFixed(1);
+  console.log(`  ${id}: ${pct}% (${fixCommits} fix / ${totalCommits} total commits)`);
+  if (rate > REWORK_ALERT_THRESHOLD) {
+    console.log(`  ⚠️  ${id}: ${pct}% rework — exceeds ${REWORK_ALERT_THRESHOLD * 100}% threshold`);
+    return { unmeasurable: false, alert: true };
+  }
+  return { unmeasurable: false, alert: false };
+}
+
 async function handleReworkCheck(searchDir, windowDays) {
   const stateDir = path.join(searchDir, '.sprint-state');
   const historyDir = path.join(stateDir, 'sprint-history');
   const sprintStateFile = path.join(stateDir, 'sprint-state.json');
 
-  const sprints = [];
-
-  // Current sprint-state.json
-  if (fs.existsSync(sprintStateFile)) {
-    try {
-      const state = JSON.parse(fs.readFileSync(sprintStateFile, 'utf8'));
-      if (state.metrics && state.metrics.completed_at) {
-        sprints.push({ id: state.id || 'unknown', state, file: sprintStateFile });
-      }
-    } catch { /* skip malformed */ }
-  }
-
-  // History files
-  if (fs.existsSync(historyDir)) {
-    for (const f of fs.readdirSync(historyDir).filter(f => f.endsWith('.json'))) {
-      try {
-        const fp = path.join(historyDir, f);
-        const state = JSON.parse(fs.readFileSync(fp, 'utf8'));
-        if (state.metrics && state.metrics.completed_at) {
-          sprints.push({ id: state.id || f.replace('.json', ''), state, file: fp });
-        }
-      } catch { /* skip malformed */ }
-    }
-  }
-
-  const now = Date.now();
-  const windowMs = windowDays * 86400000;
-  const inWindow = sprints.filter(s => {
-    const t = new Date(s.state.metrics.completed_at).getTime();
-    return !isNaN(t) && (now - t) <= windowMs;
-  });
+  const inWindow = collectClosedSprints({ sprintStateFile, historyDir }, windowDays);
 
   if (inWindow.length === 0) {
     console.log(`No closed sprints within ${windowDays} day${windowDays === 1 ? '' : 's'}`);
@@ -337,45 +406,9 @@ async function handleReworkCheck(searchDir, windowDays) {
   let hasAlert = false;
   let hasUnmeasurable = false;
   for (const { id, state, file } of inWindow) {
-    // #704: the window is the sprint itself (start → completion), and both
-    // counts come from one `git log` over that window. Previously the total was
-    // read from a field nothing wrote, and the `--since` bound was the END of
-    // the sprint, so both numbers were structurally 0 and the rate could only
-    // ever be 0 — while the summary line still said "within acceptable rate".
-    const { fix: fixCommits, total: totalCommits } = getWindowCommitCounts(
-      searchDir,
-      state.started_at,
-      state.metrics.completed_at,
-    );
-
-    // No commits in the window means the rate is undefined, not zero. Reporting
-    // 0.0% here would rebuild the same false reassurance one level down, so the
-    // sprint is surfaced as unmeasurable and never counts as "within threshold".
-    if (totalCommits === 0) {
-      hasUnmeasurable = true;
-      console.log(`  ${id}: 0 fix / 0 total commits — NOT MEASURABLE (no commits in sprint window)`);
-      continue;
-    }
-
-    const rate = fixCommits / totalCommits;
-
-    // Persist what was actually measured. The previous code wrote the rate
-    // unconditionally, which meant a transposed 0 could overwrite a value a
-    // human had already corrected; now the denominator is persisted alongside
-    // it so the next run can be checked against its own evidence.
-    state.metrics.rework_rate = rate;
-    state.metrics.total_sprint_commits = totalCommits;
-    state.metrics.fix_sprint_commits = fixCommits;
-    try {
-      fs.writeFileSync(file, JSON.stringify(state, null, 2));
-    } catch { /* non-fatal */ }
-
-    const pct = (rate * 100).toFixed(1);
-    console.log(`  ${id}: ${pct}% (${fixCommits} fix / ${totalCommits} total commits)`);
-    if (rate > 0.30) {
-      console.log(`  ⚠️  ${id}: ${pct}% rework — exceeds 30% threshold`);
-      hasAlert = true;
-    }
+    const outcome = measureSprint(searchDir, id, state, file);
+    if (outcome.unmeasurable) hasUnmeasurable = true;
+    if (outcome.alert) hasAlert = true;
   }
 
   console.log('─'.repeat(60));
@@ -515,7 +548,7 @@ function watchMode(stateFile) {
     } catch {
       // Fallback to fs.watchFile
       try {
-        fs.watchFile(stateFile, { interval: 5000 }, () => {
+        fs.watchFile(stateFile, { interval: WATCH_POLL_INTERVAL_MS }, () => {
           const state = readSprintState(path.dirname(dir));
           if (state) {
             console.clear();
@@ -558,4 +591,15 @@ module.exports = {
   // the CLI, so the only way to test it was to shell out and parse console
   // output. A function nobody can call directly is a function nobody can pin.
   handleReworkCheck,
+  // Pure display/parse helpers, exported so they can be pinned without rendering a
+  // whole table through the CLI.
+  parseTime,
+  getLatestTimestamp,
+  statusIcon,
+  formatDuration,
+  buildMetricsLine,
+  formatReqLines,
+  formatPhaseLine,
+  getWindowCommitCounts,
+  measureSprint,
 };

@@ -1,5 +1,5 @@
 // @no-test-required: Stryker wrapper — tested via gate-m integration + pre-push Gate M
-import { spawn } from 'child_process';
+import { runMutationCommand } from './spawn-with-capture';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type {
@@ -35,60 +35,19 @@ export class StrykerRunner implements MutationRunner {
   }
 
   async run(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
-      const configPath = this.resolveConfig(options.cwd);
-      const args = [
-        'stryker',
-        'run',
-        ...(configPath ? ['--config', configPath] : []),
-        ...options.files.flatMap(f => ['--mutate', f]),
-      ];
+    const configPath = this.resolveConfig(options.cwd);
+    const args = [
+      'stryker',
+      'run',
+      ...(configPath ? ['--config', configPath] : []),
+      ...options.files.flatMap(f => ['--mutate', f]),
+    ];
 
-      const child = spawn('npx', args, {
-        stdio: 'pipe',
-        shell: true,
-        cwd: options.cwd,
-      });
-
-      let stderr = '';
-      let stdout = '';
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (code === null) {
-          resolve({ report: null, timedOut: true });
-          return;
-        }
-
-        const report = this.parseReport(options.cwd);
-        resolve({
-          report,
-          timedOut: false,
-          error: code !== 0 ? stderr || stdout : undefined,
-        });
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timeoutId);
-        resolve({ report: null, timedOut: false, error: err.message });
-      });
-    });
+    return runMutationCommand('npx', args, {
+      timeoutMs: options.timeoutMs,
+      cwd: options.cwd,
+      shell: true,
+    }, () => this.parseReport(options.cwd));
   }
 
   private resolveConfig(cwd: string): string | null {

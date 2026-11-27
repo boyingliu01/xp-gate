@@ -1,5 +1,6 @@
 // @no-test-required: PITest wrapper — tested via gate-m integration + pre-push Gate M
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
+import { runMutationCommand } from './spawn-with-capture';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import type {
@@ -33,6 +34,41 @@ interface PitestJsonReport {
  * Parses the target/pit-reports/.../mutations.json (Maven) or
  * build/reports/pitest/mutations.json (Gradle) into MutationRunResult.
  */
+/** Whether a `mvn` binary answers in this directory. */
+function canRunMaven(cwd: string): boolean {
+  if (!existsSync(join(cwd, 'pom.xml'))) return false;
+  return toolResponds('mvn --version');
+}
+
+/** Whether a `gradle` binary answers in this directory. */
+function canRunGradle(cwd: string): boolean {
+  if (!hasGradleBuild(cwd)) return false;
+  // The WRAPPER is preferred and needs no probe: `gradlew` in the repo is the project's
+  // own pinned version, so its presence is proof enough.
+  if (existsSync(join(cwd, 'gradlew'))) return true;
+  return toolResponds('gradle --version');
+}
+
+/** Whether the directory declares a Gradle build, in either DSL. */
+function hasGradleBuild(cwd: string): boolean {
+  return existsSync(join(cwd, 'build.gradle')) || existsSync(join(cwd, 'build.gradle.kts'));
+}
+
+/**
+ * Whether this command answers within the probe budget.
+ *
+ * A tool that is absent THROWS from `execSync`; a tool that HANGS would block the gate,
+ * so the timeout is part of the check rather than an optimisation.
+ */
+function toolResponds(command: string): boolean {
+  try {
+    execSync(command, { stdio: 'pipe', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class PitestRunner implements MutationRunner {
   readonly name = 'pitest';
   readonly extensions = ['java', 'kt', 'kts'];
@@ -57,149 +93,67 @@ export class PitestRunner implements MutationRunner {
     };
   }
 
+  /**
+   * Which build tool can run these mutants, or null.
+   *
+   * MAVEN is checked first: a project with both build files is conventionally a Maven
+   * project that added a Gradle wrapper experimentally. A build file alone is not
+   * enough -- the tool must answer, or the run fails later with a less useful message.
+   */
   private detectBuildTool(cwd: string): 'maven' | 'gradle' | null {
-    if (existsSync(join(cwd, 'pom.xml'))) {
-      try {
-        execSync('mvn --version', { stdio: 'pipe', timeout: 5000 });
-        return 'maven';
-      } catch {
-        // mvn not available
-      }
-    }
-
-    if (
-      existsSync(join(cwd, 'build.gradle')) ||
-      existsSync(join(cwd, 'build.gradle.kts'))
-    ) {
-      if (existsSync(join(cwd, 'gradlew'))) {
-        return 'gradle';
-      }
-      try {
-        execSync('gradle --version', { stdio: 'pipe', timeout: 5000 });
-        return 'gradle';
-      } catch {
-        // gradle not available
-      }
-    }
-
+    if (canRunMaven(cwd)) return 'maven';
+    if (canRunGradle(cwd)) return 'gradle';
     return null;
   }
 
   private runMaven(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
-      const child = spawn(
-        'mvn',
-        [
-          'test-compile',
-          'org.pitest:pitest-maven:mutationCoverage',
-          '-DoutputFormats=JSON',
-        ],
-        {
-          stdio: 'pipe',
-          shell: true,
-          cwd: options.cwd,
-        },
-      );
-
-      let stderr = '';
-      let stdout = '';
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (code === null) {
-          resolve({ report: null, timedOut: true });
-          return;
-        }
-
-        const report = this.parsePitestJson(options.cwd, 'maven');
-        resolve({
-          report,
-          timedOut: false,
-          error: code !== 0 ? stderr || stdout : undefined,
-        });
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timeoutId);
-        resolve({ report: null, timedOut: false, error: err.message });
-      });
-    });
+    return this.runPitest(
+      'mvn',
+      ['test-compile', 'org.pitest:pitest-maven:mutationCoverage', '-DoutputFormats=JSON'],
+      options,
+      'maven',
+    );
   }
 
   private runGradle(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
-      const gradlewPath = join(options.cwd, 'gradlew');
-      const gradleCmd = existsSync(gradlewPath) ? gradlewPath : 'gradle';
+    const gradlewPath = join(options.cwd, 'gradlew');
+    const gradleCmd = existsSync(gradlewPath) ? gradlewPath : 'gradle';
+    return this.runPitest(gradleCmd, ['pitest'], options, 'gradle');
+  }
 
-      const child = spawn(gradleCmd, ['pitest'], {
-        stdio: 'pipe',
-        shell: true,
-        cwd: options.cwd,
-      });
-
-      let stderr = '';
-      let stdout = '';
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (code === null) {
-          resolve({ report: null, timedOut: true });
-          return;
-        }
-
-        const report = this.parsePitestJson(options.cwd, 'gradle');
-        resolve({
-          report,
-          timedOut: false,
-          error: code !== 0 ? stderr || stdout : undefined,
-        });
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timeoutId);
-        resolve({ report: null, timedOut: false, error: err.message });
-      });
-    });
+  /**
+   * Run PIT and read the report it wrote.
+   *
+   * Maven and Gradle differ only in how PIT is invoked and which report file it
+   * lands in; the spawn/timeout/capture skeleton was copied verbatim into both,
+   * which is two places for the timeout policy to drift apart.
+   */
+  private async runPitest(
+    command: string,
+    args: string[],
+    options: RunMutationOptions,
+    flavour: 'maven' | 'gradle',
+  ): Promise<MutationRunOutcome> {
+    return runMutationCommand(command, args, {
+      timeoutMs: options.timeoutMs,
+      cwd: options.cwd,
+      shell: true,
+    }, () => this.parsePitestJson(options.cwd, flavour));
   }
 
   private findMavenReportPath(cwd: string): string | null {
     const reportsDir = join(cwd, 'target', 'pit-reports');
-    if (!existsSync(reportsDir)) return null;
-    for (const entry of readdirSync(reportsDir)) {
-      const candidate = join(reportsDir, entry, 'mutations.json');
-      if (existsSync(candidate)) return candidate;
+    try {
+      for (const entry of readdirSync(reportsDir)) {
+        const candidate = join(reportsDir, entry, 'mutations.json');
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch {
+      // A missing or unreadable reports directory means PIT wrote nothing, which
+      // the caller reports as "no report" rather than as a crash. ENOENT here is
+      // routine (PIT skipped, or the build failed before the report step), so
+      // throwing would turn "no report" into an unhandled error.
+      return null;
     }
     return null;
   }

@@ -144,6 +144,21 @@ def _handle_scan(request):
     return _verify_coverage(result, roots)
 
 
+def _scanned_paths(payload):
+    """The paths semgrep says it scanned, or an empty list for any unexpected shape.
+
+    Deliberately permissive about BAD input and strict about the consequence: a payload
+    can omit `paths` entirely or put a non-list there, and any of those readings routes to
+    SKIP rather than PASS. Assuming an absent field means "everything was fine" is exactly
+    the mistake that makes a thinner scan look clean.
+    """
+    paths = payload.get("paths")
+    if not isinstance(paths, dict):
+        return []
+    scanned = paths.get("scanned")
+    return scanned if isinstance(scanned, list) else []
+
+
 def _verify_coverage(payload, roots):
     """Refuse to hand back a scan that did not actually look at the roots.
 
@@ -166,9 +181,7 @@ def _verify_coverage(payload, roots):
     # that is not a list as "scanned nothing known", which is the conservative reading:
     # it routes to SKIP rather than PASS. Assuming an absent field means "everything was
     # fine" is exactly the mistake that makes a thinner scan look clean.
-    raw_paths = payload.get("paths")
-    raw_scanned = raw_paths.get("scanned") if isinstance(raw_paths, dict) else None
-    scanned = raw_scanned if isinstance(raw_scanned, list) else []
+    scanned = _scanned_paths(payload)
     requested = [str(r) for r in roots]
     # Recorded so the caller can compare this run against a direct scan. The daemon
     # cannot express the CLI's --include filter (the in-process API has no equivalent
@@ -233,12 +246,22 @@ def _clean_check_ids(payload, config):
 
     hits = payload.get("results") or []
     for hit in hits:
-        cid = hit.get("check_id")
-        if isinstance(cid, str) and cid.startswith(prefix):
-            hit["check_id"] = cid[len(prefix) :].lstrip(".")
+        _strip_prefix_from(hit, prefix)
 
     _flag_unmatched_prefixes(payload, hits, prefix)
     return payload
+
+
+def _strip_prefix_from(hit, prefix):
+    """Drop the config-path prefix from one hit's check_id, if it has it.
+
+    Only a STRING id can be rewritten; anything else is left alone rather than coerced,
+    because a coerced id would no longer match the baseline either -- and it would do so
+    silently, which is the failure this whole function exists to prevent.
+    """
+    cid = hit.get("check_id")
+    if isinstance(cid, str) and cid.startswith(prefix):
+        hit["check_id"] = cid[len(prefix):].lstrip(".")
 
 
 def _flag_unmatched_prefixes(payload, hits, prefix):

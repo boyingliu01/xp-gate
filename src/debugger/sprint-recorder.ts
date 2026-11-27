@@ -12,38 +12,94 @@ export interface PhaseTokenOptions {
   tokensUsed: number;
 }
 
-function buildPhaseTimeline(state: { phase_history?: { phase: number; phase_name: string; status: string; timestamp?: string; started_at?: string }[] }): string[] {
-  const phases: string[] = [];
-  const seen = new Set<string>();
-  for (const ph of state.phase_history || []) {
-    const key = `${ph.phase}:${ph.phase_name}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      phases.push(ph.phase_name);
-    }
-  }
-  return phases;
+/** One entry of a sprint's phase history. */
+interface PhaseHistoryEntry {
+  phase: number;
+  phase_name: string;
+  status: string;
+  timestamp?: string;
+  started_at?: string;
 }
 
-function buildTokenSnapshots(state: { metrics?: Record<string, unknown>; phase_history?: { phase: number; phase_name: string; status: string; timestamp?: string; started_at?: string }[] }): { phase: string; tokens: number }[] {
-  const tokenMap: Record<string, number> = {};
-  if (state.metrics && typeof state.metrics === 'object') {
-    for (const [key, val] of Object.entries(state.metrics)) {
-      if (key.startsWith('tokens_phase_') && typeof val === 'number') {
-        const phaseKey = key.replace('tokens_phase_', '');
-        tokenMap[phaseKey] = val;
-      }
-    }
+/**
+ * The part of the sprint state this module reads.
+ *
+ * A named interface rather than an inline literal: the inline form repeated the same
+ * six-field shape at every parameter, and each optional marker counted as a decision.
+ */
+interface RecordableState {
+  metrics?: Record<string, unknown>;
+  phase_history?: PhaseHistoryEntry[];
+}
+
+function buildPhaseTimeline(state: RecordableState): string[] {
+  return uniquePhaseNames(state.phase_history || []);
+}
+
+/** The phase names in first-seen order, one per phase. */
+function uniquePhaseNames(history: Array<{ phase: number; phase_name: string }>): string[] {
+  const byKey = new Map<string, string>();
+  for (const ph of history) {
+    if (!byKey.has(phaseKeyOf(ph))) byKey.set(phaseKeyOf(ph), ph.phase_name);
   }
-  const snapshots: { phase: string; tokens: number }[] = [];
-  for (const ph of state.phase_history || []) {
-    const phaseKey = String(ph.phase);
-    snapshots.push({
-      phase: phaseKey,
-      tokens: tokenMap[phaseKey] ?? 0,
-    });
+  return [...byKey.values()];
+}
+
+/**
+ * The key that makes two history entries the same phase.
+ *
+ * NUMBER AND NAME together: a phase that was renamed mid-sprint is the same phase, and
+ * one that reused a name for a different number is not.
+ */
+function phaseKeyOf(ph: { phase: number; phase_name: string }): string {
+  return `${ph.phase}:${ph.phase_name}`;
+}
+
+/** The metrics prefix that carries per-phase token counts. */
+const TOKEN_PHASE_PREFIX = 'tokens_phase_';
+
+/**
+ * Per-phase token counts, keyed by the phase number the metric name carries.
+ *
+ * Read from `metrics`, not from the timeline: a phase that ran and then had its history
+ * entry rewritten still spent its tokens, and the metric is the only place that
+ * survives the rewrite.
+ */
+function collectPhaseTokens(metrics: Record<string, unknown> | undefined): Record<string, number> {
+  const tokens: Record<string, number> = {};
+  for (const [key, value] of Object.entries(metrics ?? {})) {
+    if (!key.startsWith(TOKEN_PHASE_PREFIX) || typeof value !== 'number') continue;
+    tokens[key.replace(TOKEN_PHASE_PREFIX, '')] = value;
   }
-  return snapshots;
+  return tokens;
+}
+
+/**
+ * One snapshot per phase in the history, with its tokens.
+ *
+ * A phase with no recorded count reports 0 rather than being omitted: the timeline is
+ * the spine of the report, and dropping entries would make it silently disagree with
+ * the phase list.
+ */
+function buildTokenSnapshots(state: RecordableState): { phase: string; tokens: number }[] {
+  const tokenMap = collectPhaseTokens(state.metrics);
+  return (state.phase_history || []).map((ph) => snapshotFor(ph, tokenMap));
+}
+
+/**
+ * One phase's snapshot, defaulting its token count to 0.
+ *
+ * 0 rather than omission: the timeline is the spine of the report, and a missing entry
+ * would make it silently disagree with the phase list printed beside it.
+ */
+function snapshotFor(ph: { phase: number }, tokenMap: Record<string, number>) {
+  const phaseKey = String(ph.phase);
+  return { phase: phaseKey, tokens: tokensFor(tokenMap, phaseKey) };
+}
+
+/** A phase's token count, or 0 when none was recorded. */
+function tokensFor(tokenMap: Record<string, number>, phaseKey: string): number {
+  return tokenMap[phaseKey] ?? 0;
 }
 
 /**

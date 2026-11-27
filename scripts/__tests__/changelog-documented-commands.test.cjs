@@ -39,17 +39,23 @@ function knownFlags(source) {
   return flags;
 }
 
+/**
+ * The runner's required flags, read from its own declaration.
+ *
+ * The runner states them as `REQUIRED_ARGS` -- `{ satisfied, label }` rows -- since the
+ * five inline `missing.push` calls became a table. Reading the LABELS keeps this test
+ * pinned to the same source of truth it was pinned to before: a flag that becomes
+ * required without being documented still fails here.
+ *
+ * A label may name two spellings (`--input or --input-file`); both are returned,
+ * because a command that passes only one of them still satisfies the requirement.
+ */
 function requiredRunnerArgs(source) {
-  // The runner's own guard: `if (!args.X) missing.push('--flag')`.
-  const guards = [...source.matchAll(/missing\.push\(['"](--[\w-]+)(?: or --[\w-]+)?['"]\)/g)];
-  if (guards.length === 0) throw new Error('could not read the runner required-argument guard');
-  // Counting the pushes and the `missing.push` statements against each other is
-  // what keeps a flag guarded through a different idiom from being dropped
-  // silently -- the alternative would be AC-429-05 passing while a required
-  // argument goes undocumented (#488 Round 3, feasibility FC-03).
-  const statements = (source.match(/missing\.push\(/g) || []).length;
-  expect(guards.length, 'the runner has missing.push statements this parser does not read').toBe(statements);
-  return guards.map((m) => m[1]);
+  const block = source.match(/const REQUIRED_ARGS = \[([\s\S]*?)\n\];/);
+  if (!block) throw new Error('could not read the runner required-argument table');
+  const labels = [...block[1].matchAll(/label:\s*'([^']+)'/g)].map((m) => m[1]);
+  expect(labels.length, 'the runner declares at least one required argument').toBeGreaterThan(0);
+  return labels.flatMap((label) => label.split(' or ').map((part) => part.trim()));
 }
 
 describe('release notes describe the real command contract (#488/#429 Round 3)', () => {

@@ -1,4 +1,5 @@
 import { BaseAdapter } from './base';
+import { skipLineComment } from './line-comment';
 import { Adapter } from '../types';
 
 /**
@@ -80,6 +81,126 @@ function countMemberDeclarations(body: string): number {
  * available in this zero-dependency package, and the same lexical-blindness
  * problem (braces inside literals/comments) applies verbatim.
  */
+/**
+ * The deepest run of braces in a body, or 0 when it has none.
+ *
+ * The body still carries its STRING and CHARACTER literals -- measured on
+ * `var s = "{{{{";`, which reported nesting 5 for source that has 2 levels. So the
+ * literal bodies are neutralised first; leaving them in counts braces nobody wrote as
+ * depth, which is the direction that inflates a nesting finding.
+ *
+ * `max(0, ...)` keeps a body that only CLOSES braces (a fragment) from reporting a
+ * negative depth.
+ */
+function maxNestingOf(body: string): number {
+  let depth = 0;
+  let maxDepth = 0;
+  for (const ch of withoutLiterals(body)) {
+    if (ch === '{') {
+      depth++;
+      maxDepth = Math.max(maxDepth, depth);
+    } else if (ch === '}') {
+      depth--;
+    }
+  }
+  return Math.max(0, maxDepth);
+}
+
+/**
+ * A quoted run, keeping the quotes but not the contents.
+ *
+ * This does NOT model C#'s grammar -- no raw strings, no verbatim strings -- and it does
+ * not need to. MEASURED against every form that can hold a brace:
+ *
+ *   `"""\n{ { { {\n"""`         raw string      -> 0 braces survive
+ *   `@"a""b{ {"`                   verbatim        -> 0 braces survive
+ *   `"""\nsay "hi" { {\n"""`        raw + quotes     -> 0 braces survive
+ *   `@"a""b{ {"; if (x) { }`       verbatim + code -> 1 brace, which is the `if`
+ *
+ * The reason is structural: C# quote pairing always yields a CLOSED interval, and a
+ * verbatim `""` escape consumes as two adjacent literals. So the regex is right for any
+ * input a C# file can produce even though it would be wrong for a general lexer.
+ *
+ * Recorded because three reviewers raised it independently; if a future form breaks the
+ * closed-interval property, this comment is where the reasoning lives.
+ */
+const STRING_LITERAL = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
+
+/**
+ * The body with literal CONTENTS blanked out, preserving length.
+ *
+ * Length is preserved because callers may count positions; the braces inside a literal
+ * are what must not reach the depth scan.
+ */
+function withoutLiterals(body: string): string {
+  return body.replace(STRING_LITERAL, (literal) => `"${' '.repeat(Math.max(0, literal.length - 2))}"`);
+}
+
+/**
+ * Open a character literal.
+ *
+ * Never verbatim: C# has no `@'a'` form, and reusing the verbatim flag from an earlier
+ * string would make the closing quote read as escaped.
+ */
+function openCharLiteral(lex: CSharpLexState): number {
+  lex.inString = true;
+  lex.inVerbatimString = false;
+  lex.stringChar = "'";
+  return 1;
+}
+
+/**
+ * How many backslashes immediately precede `i`.
+ *
+ * The count decides whether a quote is DATA or a terminator, and only its PARITY
+ * matters: an even run leaves the quote unescaped.
+ */
+function countPrecedingBackslashes(src: string, i: number): number {
+  let count = 0;
+  for (let j = i - 1; j >= 0 && src[j] === '\\'; j--) count++;
+  return count;
+}
+
+/**
+ * `@"` opens a VERBATIM string, where a quote is escaped by doubling.
+ *
+ * A bare `@` is an identifier prefix (`@class`), not a string.
+ */
+function openAtSign(nextChar: string, lex: CSharpLexState): number {
+  if (nextChar !== '"') return 0;
+  lex.inString = true;
+  lex.inVerbatimString = true;
+  lex.stringChar = '"';
+  return 2;
+}
+
+/**
+ * Handle a quote inside a VERBATIM string.
+ *
+ * A doubled quote is content (`@"a""b"` is `a"b`), consuming both characters. A single
+ * one closes the literal and clears BOTH flags -- leaving `inVerbatimString` set would
+ * make the next ordinary string inherit the doubling rule.
+ */
+function skipVerbatimQuote(src: string, i: number, lex: CSharpLexState): number {
+  if (src[i + 1] === '"') return 2;
+  lex.inString = false;
+  lex.inVerbatimString = false;
+  return 1;
+}
+
+/**
+ * `//` versus a block-comment opener: the same first character, so only lookahead tells
+ * them apart.
+ *
+ * A lone `/` is DIVISION, and blanking from it would swallow the rest of the line.
+ */
+function openSlash(src: string, i: number, nextChar: string, lex: CSharpLexState): number {
+  if (nextChar === '/') return skipLineComment(src, i);
+  if (nextChar !== '*') return 0;
+  lex.inBlockComment = true;
+  return 2;
+}
+
 export class CSharpAdapter extends BaseAdapter implements Adapter {
   /**
    * This adapter implements rules of its own, so the gate may report its files
@@ -181,15 +302,8 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
 
     // Nesting depth = the deepest run of `{` that the scanner saw. Literals and
     // comments were already removed by the scanner before this string was cut.
-    let depth = 0;
-    let maxDepth = 0;
-    for (const ch of body) {
-      if (ch === '{') { depth++; if (depth > maxDepth) maxDepth = depth; }
-      else if (ch === '}') depth--;
-    }
     // A method body contributes its own level, so a flat body reads 1.
-    m.nestingDepth = maxDepth > 0 ? maxDepth : 0;
-
+    m.nestingDepth = maxNestingOf(body);
     m.hasTryCatch = /\btry\s*\{/.test(body) && /\bcatch\s*[({]/.test(body);
   }
 
@@ -242,56 +356,47 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     const char = this.fileContent[i];
     const nextChar = this.fileContent[i + 1] || '';
 
+    const inContext = this.skipActiveContext(i, char, nextChar, lex);
+    if (inContext !== null) return inContext;
+    return this.openContext(i, char, nextChar, lex);
+  }
+
+  /**
+   * Continue whatever literal or comment is already open, or null.
+   *
+   * Checked before ANY opener, so a `//` inside a raw string stays text and a quote
+   * inside a comment stays a comment.
+   */
+  private skipActiveContext(
+    i: number,
+    char: string,
+    nextChar: string,
+    lex: CSharpLexState,
+  ): number | null {
     if (lex.inRawString) return this.skipRawStringBody(i, lex);
     if (lex.inBlockComment) return this.skipBlockCommentBody(i, char, nextChar, lex);
     if (lex.inString) return this.skipStringBody(i, char, lex);
+    return null;
+  }
 
-    if (char === '/' && nextChar === '/') return this.skipLineComment(i);
-    if (char === '/' && nextChar === '*') {
-      lex.inBlockComment = true;
-      return 2;
-    }
-
-    // `@"` opens a verbatim string; `"` alone opens a normal one.
-    if (char === '@' && nextChar === '"') {
-      lex.inString = true;
-      lex.inVerbatimString = true;
-      lex.stringChar = '"';
-      return 2;
-    }
-
-    // A run of 3+ quotes is a raw string literal.
-    if (char === '"') {
-      let run = 0;
-      let k = i;
-      while (this.fileContent[k] === '"') { run++; k++; }
-      if (run >= 3) {
-        lex.inRawString = true;
-        lex.rawStringQuoteCount = run;
-        return run;
-      }
-      lex.inString = true;
-      lex.inVerbatimString = false;
-      lex.stringChar = '"';
-      return 1;
-    }
-
-    if (char === "'") {
-      lex.inString = true;
-      lex.inVerbatimString = false;
-      lex.stringChar = "'";
-      return 1;
-    }
-
+  /**
+   * Recognise a construct that opens here, or return 0 for a structural character.
+   *
+   * C# has three string forms and they are told apart by PREFIX, not by the quote
+   * alone: `@"` is verbatim (where `""` escapes a quote and a backslash is literal),
+   * a run of 3+ quotes is raw, and a bare quote is ordinary.
+   */
+  private openContext(i: number, char: string, nextChar: string, lex: CSharpLexState): number {
+    if (char === '/') return openSlash(this.fileContent, i, nextChar, lex);
+    if (char === '@') return openAtSign(nextChar, lex);
+    if (char === '"') return openDoubleQuoteString(this.fileContent, i, lex);
+    if (char === "'") return openCharLiteral(lex);
     return 0;
   }
 
-  /** Skip a `//` comment through, but not including, the newline. */
-  private skipLineComment(start: number): number {
-    let i = start;
-    while (i < this.fileContent.length && this.fileContent[i] !== '\n') i++;
-    return i - start;
-  }
+
+
+
 
   private skipBlockCommentBody(
     i: number,
@@ -308,26 +413,14 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
 
   private skipStringBody(i: number, char: string, lex: CSharpLexState): number {
     if (char !== lex.stringChar) return 1;
-
     // Verbatim strings escape a quote by DOUBLING it: `@"a""b"` is `a"b`.
-    if (lex.inVerbatimString) {
-      if (this.fileContent[i + 1] === '"') return 2;
-      lex.inString = false;
-      lex.inVerbatimString = false;
-      return 1;
-    }
-
+    if (lex.inVerbatimString) return skipVerbatimQuote(this.fileContent, i, lex);
     // A quote closes the literal only after an EVEN number of backslashes:
     // `"\\"` is a backslash then a terminator, `"\""` is a quote as data.
-    let backslashCount = 0;
-    let j = i - 1;
-    while (j >= 0 && this.fileContent[j] === '\\') {
-      backslashCount++;
-      j--;
-    }
-    if (backslashCount % 2 === 0) lex.inString = false;
+    if (countPrecedingBackslashes(this.fileContent, i) % 2 === 0) lex.inString = false;
     return 1;
   }
+
 
   /** A raw string closes on a quote run of the same length that opened it. */
   private skipRawStringBody(i: number, lex: CSharpLexState): number {
@@ -344,4 +437,28 @@ export class CSharpAdapter extends BaseAdapter implements Adapter {
     }
     return run;
   }
+}
+/**
+ * A `"` opens a raw literal when it starts a run of 3+, else an ordinary one.
+ *
+ * The run is counted BEFORE the state changes: a raw literal consumes the whole run
+ * as its opening delimiter, so three quotes must not be read as an empty string.
+ *
+ * A module-level function rather than a method because `CSharpAdapter` sits at the
+ * class-size ceiling -- and this reads nothing but its arguments.
+ *
+ * @returns characters consumed
+ */
+function openDoubleQuoteString(content: string, i: number, lex: CSharpLexState): number {
+  let run = 0;
+  while (content[i + run] === '"') run++;
+  if (run >= 3) {
+    lex.inRawString = true;
+    lex.rawStringQuoteCount = run;
+    return run;
+  }
+  lex.inString = true;
+  lex.inVerbatimString = false;
+  lex.stringChar = '"';
+  return 1;
 }

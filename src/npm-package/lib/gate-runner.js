@@ -1,4 +1,13 @@
 const { execSync, execFileSync, spawnSync } = require('node:child_process');
+
+/**
+ * jscpd can emit a large report: the previous inline limit was 64 MB, and it was
+ * raised rather than removed because an unbounded buffer on a pathological repo
+ * is a crash waiting to happen.
+ */
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+const JSCPD_MAX_OUTPUT_MEGABYTES = 64;
+const JSCPD_MAX_OUTPUT_BYTES = JSCPD_MAX_OUTPUT_MEGABYTES * BYTES_PER_MEGABYTE;
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -144,8 +153,18 @@ function firstExisting(candidates) {
  * @param {string} contents newline-separated file list
  * @returns {string} path to the temp file
  */
+/** Distinguishes two lists written within the same millisecond. */
+let allFileListSequence = 0;
+
 function writeAllModeFileList(contents) {
-  const listFile = path.join(os.tmpdir(), `xp-gate-all-files-${process.pid}-${Date.now()}.txt`);
+  // pid + timestamp is NOT unique: two calls in the same millisecond produce the same
+  // name, and the second silently overwrites the file the first gate is about to
+  // read. A counter makes the name unique within the process as well.
+  allFileListSequence += 1;
+  const listFile = path.join(
+    os.tmpdir(),
+    `xp-gate-all-files-${process.pid}-${Date.now()}-${allFileListSequence}.txt`,
+  );
   try {
     fs.writeFileSync(listFile, contents, 'utf8');
   } catch (err) {
@@ -497,14 +516,21 @@ function findConsumerGateVariant(gateModule, cwd) {
  *
  * @returns {{kind: 'variant', script: string} | {kind: 'module', entry: string} | {kind: 'fallback', script: string} | {kind: 'none'}}
  */
-function resolveGateImplementation(gateModule, targetCwd) {
-  const variant = findConsumerGateVariant(gateModule, targetCwd);
+function resolveGateImplementation(gateModule, targetCwd, options = {}) {
+  // The three lookups touch the filesystem and the package tree. Injectable so
+  // the PRECEDENCE order -- which is the contract, not the lookups -- can be
+  // driven directly.
+  const findVariant = options.findVariant || findConsumerGateVariant;
+  const findEntry = options.findEntry || findTsGateEntry;
+  const findScript = options.findScript || resolveGateScript;
+
+  const variant = findVariant(gateModule, targetCwd);
   if (variant) return { kind: 'variant', script: variant };
 
-  const entry = findTsGateEntry(gateModule);
+  const entry = findEntry(gateModule);
   if (entry) return { kind: 'module', entry };
 
-  const script = resolveGateScript(gateModule.replace('gate-', ''), targetCwd);
+  const script = findScript(gateModule.replace('gate-', ''), targetCwd);
   return script ? { kind: 'fallback', script } : { kind: 'none' };
 }
 
@@ -1081,68 +1107,56 @@ function classifyJscpdRun(exitCode, output) {
   return 'clean';
 }
 
-function runJscpd(args, targetPath) {
-  // Invoke jscpd's JS entry through `node` rather than going through .bin/.
-  //
-  // Two dead ends, both measured on Windows:
-  //   execFileSync with shell:true  -> the ignore pattern's `|` became a pipe and
-  //     the child died with "'dist' is not recognized ...", while `check 2` still
-  //     exited 0 -- a crashed gate reading as a fast clean pass.
-  //   execFileSync without shell     -> EINVAL on jscpd.cmd (.cmd needs a shell) and
-  //     ENOENT on the extensionless jscpd (a shell script).
-  // Running the package's real entry point sidesteps both: argv goes to node
-  // untouched, no shell parses anything, and the tool is the one already installed.
-  // Where jscpd actually lives, in the order that avoids a shell entirely:
-  //   1. the project under check
-  //   2. this package own dependency tree
-  //   3. the global install tree
-  //
-  // The global trees are passed as PREFIXES, not as `.../node_modules` paths,
-  // because a global npm prefix already contains `node_modules`. Treating the two
-  // the same is #853: the old code appended `node_modules/jscpd/bin/jscpd` to an
-  // already-`node_modules`-terminated root, probing
-  // `<prefix>/node_modules/node_modules/jscpd/bin/jscpd`, which can never exist.
-  // `entry` was therefore always undefined and every lookup fell through to `npx`,
-  // which on Windows reported `spawnSync npx ENOENT` -- a working tool reported as
-  // missing, with an exit code indistinguishable from "duplicate code found".
-  //
-  // process.execPath is the node BINARY location, not the npm global prefix; both
-  // are probed along with the APPDATA npm tree, because a global package lives in
-  // a directory that varies by platform and by install method.
-  // Each entry is a PREFIX, not a node_modules directory: findJscpdEntry probes
-  // `<prefix>/node_modules`, `<prefix>/lib/node_modules` (POSIX global installs)
-  // and, when the prefix is itself named node_modules, the prefix directly.
-  const nodeBinDir = path.dirname(process.execPath);
-  const globalPrefixes = buildGlobalPrefixes({
-    binDir: nodeBinDir,
-    appData: process.env.APPDATA,
-    home: process.env.USERPROFILE || process.env.HOME,
-  });
-  const entry = findJscpdEntry({ searchRoots: [targetPath, process.cwd(), ...globalPrefixes] });
+/**
+ * Build the ordered list of ways to invoke jscpd, given where it was found.
+ *
+ * WHY A RESOLVED ENTRY COMES FIRST: invoking the package's real JS entry through
+ * `node` avoids a shell entirely, and a shell is what has broken this twice --
+ *   execFileSync with shell:true  -> the ignore pattern's `|` became a pipe, the
+ *     child died with "'dist' is not recognized ...", and `check 2` still exited 0,
+ *     so a crashed gate read as a fast clean pass;
+ *   execFileSync without shell    -> EINVAL on jscpd.cmd (a .cmd needs a shell) and
+ *     ENOENT on the extensionless jscpd (a shell script).
+ *
+ * WHY THE FALLBACKS EXIST: a global jscpd can be on PATH while `npx` reports
+ * ENOENT when no local node_modules exists -- a tool that IS installed reported as
+ * missing. The bare-name attempt covers PATH; `npx --no-install` covers a global
+ * npm prefix not on PATH. Neither installs anything.
+ *
+ * @param {string|undefined} entry resolved jscpd entry point
+ * @param {string[]} args
+ * @returns {Array<[string, string[]]>}
+ */
+function buildJscpdAttempts(entry, args) {
+  if (entry) return [[process.execPath, [entry, ...args]]];
+  return [
+    [process.platform === 'win32' ? 'jscpd.cmd' : 'jscpd', args],
+    ['jscpd', args],
+    ['npx', ['--no-install', 'jscpd', ...args]],
+  ];
+}
+
+/**
+ * Try each invocation until one exits 0, replaying whatever it said.
+ *
+ * The stream is CAPTURED and replayed rather than inherited, because the verdict
+ * depends on what jscpd said. With `stdio: 'inherit'` the output went straight to
+ * the terminal, so the gate could not tell a clean scan from one that examined
+ * nothing (#855). Replaying it immediately keeps the operator's view identical.
+ *
+ * @param {Function} spawn
+ * @param {Array<[string, string[]]>} attempts
+ * @param {string|undefined} targetPath
+ * @returns {string} the jscpd verdict
+ */
+function executeJscpdAttempts(spawn, attempts, targetPath) {
   let lastErr = null;
-  // Third fallback is deliberately `--no-install`: a global jscpd is on PATH on the
-  // dev machine (/c/Users/think/AppData/Roaming/npm/jscpd) but `npx` here was
-  // reported ENOENT when no local node_modules existed -- a tool that IS installed
-  // reported as missing. The bare-name attempt covers PATH; npx covers a global npm
-  // prefix not on PATH; neither installs anything.
-  const attempts = entry
-    ? [[process.execPath, [entry, ...args]]]
-    : [
-        [process.platform === 'win32' ? 'jscpd.cmd' : 'jscpd', args],
-        ['jscpd', args],
-        ['npx', ['--no-install', 'jscpd', ...args]],
-      ];
   for (const [cmd, cmdArgs] of attempts) {
     try {
-      // The stream is CAPTURED and replayed rather than inherited, because the
-      // verdict depends on what jscpd said. With `stdio: 'inherit'` the output went
-      // straight to the terminal, so the gate could not tell a clean scan from one
-      // that examined nothing -- #855. Replaying it immediately keeps the operator's
-      // view identical to before.
-      const result = spawnSync(cmd, cmdArgs, {
+      const result = spawn(cmd, cmdArgs, {
         cwd: targetPath || process.cwd(),
         encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
+        maxBuffer: JSCPD_MAX_OUTPUT_BYTES,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -1155,6 +1169,38 @@ function runJscpd(args, targetPath) {
     }
   }
   throw lastErr || new Error('jscpd not available');
+}
+
+/**
+ * Run jscpd and return its verdict.
+ *
+ * `spawn` and `findEntry` are injectable: the real ones launch a child process and
+ * walk the install trees, so the fallback chain -- the interesting part, since
+ * each attempt covers a different install shape -- was reachable only by having
+ * jscpd installed.
+ *
+ * Global install roots are passed as PREFIXES, not as `.../node_modules` paths: a
+ * global npm prefix already contains `node_modules`. Treating the two alike is
+ * #853 -- the old code appended `node_modules/jscpd/bin/jscpd` to an
+ * already-`node_modules`-terminated root, probing a path that can never exist, so
+ * every lookup fell through to `npx`.
+ *
+ * @param {string[]} args
+ * @param {string|undefined} targetPath
+ * @param {{spawn?: Function, findEntry?: Function}} [options]
+ * @returns {string}
+ */
+function runJscpd(args, targetPath, options = {}) {
+  const spawn = options.spawn || spawnSync;
+  const findEntry = options.findEntry || findJscpdEntry;
+
+  const globalPrefixes = buildGlobalPrefixes({
+    binDir: path.dirname(process.execPath),
+    appData: process.env.APPDATA,
+    home: process.env.USERPROFILE || process.env.HOME,
+  });
+  const entry = findEntry({ searchRoots: [targetPath, process.cwd(), ...globalPrefixes] });
+  return executeJscpdAttempts(spawn, buildJscpdAttempts(entry, args), targetPath);
 }
 
 function findConfig(basePath, fileName) {
@@ -1381,7 +1427,8 @@ async function invokeGateHandler(gateId, gate, targetPath, opts) {
   }
 }
 
-module.exports = { findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
+module.exports = { writeAllModeFileList, removeFileList, buildFileSourceLines, firstExisting, resolveBashForGates,
+  findConsumerGateVariant, GATE_REGISTRY, GATE_NOT_RUN, classifyJscpdRun, runJscpd, resolveGateImplementation, getGateInfo, getAllGates, runGate, resolveAlias, getAliases, runGateAdapter, findTsGateEntry, resolveGateScript, resolveTsxInvocation, findTsxCli, findJscpdEntry, buildJscpdArgs, JSCPD_THRESHOLD, buildGlobalPrefixes, SOURCE_FILE_EXTENSIONS, resolveAllModeChangedFiles, describeEmptyChangedFiles, describeChangedFilesScope,
   // AC-670-03 asserts the --all preamble END-TO-END: that an all-mode run hands
   // the security gates a non-empty file population sourced from the list file and
   // sets GATE_SCOPE="all". With these unexported, the case could only take its

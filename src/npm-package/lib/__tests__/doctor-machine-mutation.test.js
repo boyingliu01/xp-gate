@@ -59,7 +59,12 @@ describe('doctor machine-mutation boundary (#502/#495 Round 3)', () => {
     // judged-safe entries; nothing in doctor forces, and nothing leaves .bak litter
     // in the user's work tree (#428's guard would reject that too).
     expect(DOCTOR).not.toMatch(/updateHooks\(\s*\{[^}]*force:\s*true/);
-    expect(DOCTOR).toMatch(/for \(const entry of plan\.safe\)/);
+    // The per-file copy now lives in `refreshSafeHooks`, which takes exactly the
+    // judged-safe entries. Asserting the loop shape inline would forbid extracting
+    // it; asserting the function that owns the loop does not weaken the property.
+    expect(DOCTOR).toMatch(/return refreshSafeHooks\(plan\.safe\);/);
+    const refreshFn = DOCTOR.slice(DOCTOR.indexOf('function refreshSafeHooks('));
+    expect(refreshFn).toMatch(/for \(const entry of safe\)/);
     expect(DOCTOR).not.toMatch(/noBackup:/);
   });
 
@@ -69,7 +74,8 @@ describe('doctor machine-mutation boundary (#502/#495 Round 3)', () => {
   // `--sync-hooks --force` must be told before the bytes are gone that nothing
   // keeps a copy for them.
   it('AC-502-06: the path that suggests --force says it overwrites with no backup', () => {
-    expect(DOCTOR).toMatch(/function fixStaleHooks[\s\S]{0,3500}no automatic backup/);
+    const reportFn = DOCTOR.slice(DOCTOR.indexOf('function reportBlockedHookSync('));
+    expect(reportFn.slice(0, 2000)).toMatch(/no automatic backup/);
     expect(DOCTOR).toMatch(/--sync-hooks --force[^\n]*no backup|no backup[^\n]*--sync-hooks --force/);
   });
 

@@ -99,10 +99,7 @@ function baseContract(
   isJava: boolean,
 ): Map<string, string[]> {
   const contract = new Map<string, string[]>();
-  const extendsMatch = code.match(/\bextends\s+([\w$.]+)/);
-  if (!extendsMatch) return contract;
-  const baseName = extendsMatch[1].split('.').pop() ?? extendsMatch[1];
-  const base = allClasses.find((c) => c.name === baseName && typeof c.code === 'string');
+  const base = findBaseClass(code, allClasses);
   if (!base || !base.code) return contract;
   const declRe = new RegExp(declarationMatcher(isJava).source, 'g');
   let m: RegExpExecArray | null;
@@ -110,6 +107,40 @@ function baseContract(
     contract.set(m[1], extractParamTypes(m[2], isJava));
   }
   return contract;
+}
+
+/**
+ * The base class this declaration extends, or null.
+ *
+ * Both must be present: the `extends` clause AND a matching class with source in this
+ * file. A contract built from a base we could not see would be an empty map, which
+ * reads the same as "the base declares nothing" -- and those two must not be confused.
+ */
+function findBaseClass(code: string, allClasses: ClassInfo[]): ClassInfo | null {
+  const baseName = extendedTypeName(code);
+  if (!baseName) return null;
+  return allClasses.find((c) => hasSourceNamed(c, baseName)) ?? null;
+}
+
+/** The `extends` clause of a declaration. */
+const EXTENDS_CLAUSE = /\bextends\s+([\w$.]+)/;
+
+/**
+ * The SIMPLE name of the type this declaration extends, or null.
+ *
+ * Qualified names are reduced to their last segment: the declaration says
+ * `extends com.example.Base`, while the class map is keyed by `Base`, and comparing the
+ * full path would never match.
+ */
+function extendedTypeName(code: string): string | null {
+  const match = code.match(EXTENDS_CLAUSE);
+  if (!match) return null;
+  return match[1].split('.').pop() ?? match[1];
+}
+
+/** Whether this class has the name AND source needed to read a contract from it. */
+function hasSourceNamed(cls: ClassInfo, name: string): boolean {
+  return cls.name === name && typeof cls.code === 'string' && Boolean(cls.code);
 }
 
 /**
@@ -132,13 +163,23 @@ function baseContract(
  * @param baseParamTypes the base method's parameter types, or undefined when unavailable
  * @returns true/false when decidable, null when not
  */
-function compatibilityVerdict(
+/**
+ * Whether this parameter type can NEVER be an LSP violation.
+ *
+ * A primitive matches trivially, and a type starting with the CLASS NAME is the class
+ * itself or a subclass of it -- both satisfy the contract by construction.
+ */
+function isAlwaysCompatible(paramType: string, className: string | undefined): boolean {
+  if (isPrimitive(paramType)) return true;
+  return Boolean(className && paramType.startsWith(className));
+}
+
+export function compatibilityVerdict(
   paramType: string,
   className: string | undefined,
   baseParamTypes?: string[],
 ): boolean | null {
-  if (isPrimitive(paramType)) return true;
-  if (className && paramType.startsWith(className)) return true;
+  if (isAlwaysCompatible(paramType, className)) return true;
   if (baseParamTypes && baseParamTypes.length > 0) {
     // A type the base method also accepts is compatible; one it does not is the LSP
     // violation this rule exists to find. Compared by simple name with generics erased,
@@ -320,17 +361,24 @@ function checkClass(
   const contract = baseContract(cls.code, allClasses, isJava);
   if (contract.size === 0) return undetermined();
 
-  const violations: Violation[] = [];
-  for (const [methodName, paramTypes] of declaredDeclarations(cls.code, isJava)) {
-    const baseParamTypes = contract.get(methodName);
-    if (!baseParamTypes) continue;
-    for (const paramType of paramTypes) {
-      if (compatibilityVerdict(paramType, cls.name, baseParamTypes) === false) {
-        violations.push(buildViolation(file, cls, paramType));
-      }
-    }
-  }
-  return violations;
+  return [...declaredDeclarations(cls.code, isJava)]
+    .flatMap(([methodName, paramTypes]) => violatingParams(cls, contract.get(methodName), paramTypes))
+    .map((paramType) => buildViolation(file, cls, paramType));
+}
+
+/**
+ * The parameter types that VIOLATE the base contract for one method.
+ *
+ * Only an explicit `false` counts: `compatibilityVerdict` returns `null` for "cannot
+ * tell", and treating that as a violation is exactly the #588 defect -- a single-file
+ * regex analysis often lacks the base class, and silence is the honest answer.
+ *
+ * A method the base does not declare has no contract to break, so it contributes
+ * nothing either.
+ */
+function violatingParams(cls: ClassInfo, baseParamTypes: string[] | undefined, paramTypes: string[]): string[] {
+  if (!baseParamTypes) return [];
+  return paramTypes.filter((paramType) => compatibilityVerdict(paramType, cls.name, baseParamTypes) === false);
 }
 
 /**

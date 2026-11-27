@@ -27,7 +27,12 @@ const CONFIG_PATH = path.join(REPO_ROOT, 'vitest.config.ts');
  * would be a bigger dependency than the invariant is worth.
  */
 function readConfig() {
-  return fs.readFileSync(CONFIG_PATH, 'utf8');
+  try {
+    return fs.readFileSync(CONFIG_PATH, 'utf8');
+  } catch (err) {
+    // Name the path: a bare ENOENT reads as a broken test rather than a moved config.
+    throw new Error(`cannot read ${CONFIG_PATH}: ${err.message}`);
+  }
 }
 
 /** Extract the `exclude: [...]` array inside the `test:` vs `coverage:` block. */
@@ -56,6 +61,11 @@ describe('覆盖率镜像清单一致 (#562)', () => {
     const mirrors = fs.readdirSync(mirrorRoot, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => e.name)
+      // Dot-prefixed directories are runtime/state directories, not mirrors. Both
+      // `src/.xp-gate` and `src/npm-package/.xp-gate` exist and hold DIFFERENT things
+      // (an audit log versus a lint baseline), so a name collision there is not a
+      // mirror pair.
+      .filter((name) => !name.startsWith('.'))
       .filter((name) => fs.existsSync(path.join(canonicalRoot, name)));
 
     // `lib` exists only under src/npm-package (no canonical sibling), so the filter

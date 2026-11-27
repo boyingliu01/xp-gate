@@ -27,6 +27,50 @@ const { PHASE_NAMES } = require('./phase-transition');
  * @param {string[]} args - CLI arguments
  * @returns {Promise<number>} Exit code
  */
+/**
+ * Sort the six phases into done / missing / started-but-unfinished.
+ *
+ * Pure: lookup in, three arrays out. Extracted from `handleSprintAudit` (CCN 34)
+ * because the classification is the part worth testing directly -- the rest of
+ * that function is file reads and console output around it.
+ *
+ * @param {Object<number, {status: string}>} lookup phase number -> history entry
+ * @returns {{completedPhases: number[], missingPhases: number[], incompletePhases: Array<{phase: number, name: string, status: string}>}}
+ */
+function classifyPhases(lookup) {
+  const completedPhases = [];
+  const missingPhases = [];
+  const incompletePhases = [];
+
+  for (let i = 1; i <= 6; i++) {
+    const entry = lookup[i];
+    if (!entry) {
+      missingPhases.push(i);
+    } else if (entry.status === 'completed' || entry.status === 'skipped') {
+      completedPhases.push(i);
+    } else {
+      incompletePhases.push({ phase: i, name: PHASE_NAMES[i] || `Phase ${i}`, status: entry.status });
+    }
+  }
+  return { completedPhases, missingPhases, incompletePhases };
+}
+
+/**
+ * The completed phases only -- `skipped` counts as done for coverage but has no
+ * time or summary to record.
+ *
+ * Both check 2 and check 3 walked `completedPhases` and re-filtered on
+ * `status === 'completed'` inside the loop. Stating the filter once means the two
+ * checks cannot disagree about which phases they apply to.
+ *
+ * @param {number[]} completedPhases
+ * @param {Object<number, {status: string}>} lookup
+ * @returns {number[]}
+ */
+function trulyCompleted(completedPhases, lookup) {
+  return completedPhases.filter((n) => lookup[n] && lookup[n].status === 'completed');
+}
+
 async function handleSprintAudit(args = []) {
   if (args.includes('--help')) {
     console.log('Usage: xp-gate sprint-audit [options]');
@@ -85,37 +129,23 @@ async function handleSprintAudit(args = []) {
   }
 
   // Check 1: Phase coverage
-  const completedPhases = [];
-  const missingPhases = [];
-  const incompletePhases = [];
-
-  for (let i = 1; i <= 6; i++) {
-    const entry = historyLookup[i];
-    if (!entry) {
-      missingPhases.push(i);
-    } else if (entry.status === 'completed' || entry.status === 'skipped') {
-      completedPhases.push(i);
-    } else {
-      incompletePhases.push({ phase: i, name: PHASE_NAMES[i] || `Phase ${i}`, status: entry.status });
-    }
-  }
+  const { completedPhases, missingPhases, incompletePhases } = classifyPhases(historyLookup);
 
   // Check 2: Time records for completed phases
-  for (const phaseNum of completedPhases) {
+  const donePhases = trulyCompleted(completedPhases, historyLookup);
+  for (const phaseNum of donePhases) {
     const entry = historyLookup[phaseNum];
-    if (entry.status === 'completed' && (entry.duration_seconds == null || entry.duration_seconds === 0)) {
+    if (entry.duration_seconds == null || entry.duration_seconds === 0) {
       warnings.push(`Phase ${phaseNum} (${PHASE_NAMES[phaseNum]}) completed but has no duration recorded`);
     }
   }
 
   // Check 3: Artifact records (phase-{N}-summary.md)
   const outputsDir = path.join(projectDir, '.sprint-state', 'phase-outputs');
-  for (const phaseNum of completedPhases) {
-    if (historyLookup[phaseNum].status === 'completed') {
-      const summaryFile = path.join(outputsDir, `phase-${phaseNum}-summary.md`);
-      if (!fs.existsSync(summaryFile)) {
-        warnings.push(`Phase ${phaseNum} summary missing: .sprint-state/phase-outputs/phase-${phaseNum}-summary.md`);
-      }
+  for (const phaseNum of donePhases) {
+    const summaryFile = path.join(outputsDir, `phase-${phaseNum}-summary.md`);
+    if (!fs.existsSync(summaryFile)) {
+      warnings.push(`Phase ${phaseNum} summary missing: .sprint-state/phase-outputs/phase-${phaseNum}-summary.md`);
     }
   }
 

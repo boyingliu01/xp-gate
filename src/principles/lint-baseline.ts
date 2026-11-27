@@ -52,25 +52,93 @@ interface ShellcheckResult {
  * Parse ESLint JSON output into BaselineEntry format.
  * ESLint -f json output: Array<{filePath, errorCount, warningCount, messages}>
  */
+/**
+ * Build a matcher from a reported path to the project-relative file it belongs to.
+ *
+ * The three parsers each did this inline, with slightly different rules, and the
+ * differences were accidents rather than decisions: ESLint compares BOTH directions
+ * because it reports absolute paths and the caller passes relative ones, while
+ * golangci and shellcheck only need one direction.
+ *
+ * Matching both directions is the safe superset: a path that ends with a known file, OR
+ * a known file that ends with the reported path, names the same file. The membership
+ * check afterwards is what stops a path from matching a file the caller never asked
+ * about.
+ *
+ * @param files project-relative paths the caller asked for
+ * @param bidirectional compare both directions (absolute reporters need this)
+ * @returns a function from a reported path to the matched file, or null
+ */
+function makeFileMatcher(files: string[], bidirectional: boolean) {
+  return (reported: string): string | null => pickMatchedFile(files, reported, bidirectional);
+}
+
+/**
+ * The file a reported path refers to, or null.
+ *
+ * PATH-BOUNDARY match, not a bare `endsWith`. `endsWith('bar.ts')` is true for
+ * `foobar.ts`, so a report about one file claimed another file's baseline entry -- the
+ * counts land on the wrong file and the real one looks clean (review MC-01).
+ */
+function pickMatchedFile(files: string[], reported: string, bidirectional: boolean): string | null {
+  return files.find((f) => eitherEndsAtBoundary(f, reported, bidirectional)) ?? null;
+}
+
+/** Either direction of the suffix match, when the caller allows both. */
+function eitherEndsAtBoundary(f: string, reported: string, bidirectional: boolean): boolean {
+  if (endsAtPathBoundary(f, reported)) return true;
+  return bidirectional && endsAtPathBoundary(reported, f);
+}
+
+/**
+ * Whether `whole` ends with `suffix` on a path boundary (`/` or the start).
+ *
+ * A suffix that begins with a separator already carries its boundary; otherwise the
+ * character before it must be one.
+ */
+function endsAtPathBoundary(whole: string, suffix: string): boolean {
+  if (suffix === '' || !whole.endsWith(suffix)) return false;
+  if (whole.length === suffix.length) return true;
+  if (suffix.startsWith('/') || suffix.startsWith('\\')) return true;
+  const before = whole[whole.length - suffix.length - 1];
+  return before === '/' || before === '\\';
+}
+
+/** A tool's warning/error counts for one file. */
+interface ToolCounts {
+  warnings: number;
+  errors: number;
+}
+
+/**
+ * A baseline entry for one file.
+ *
+ * `totalWarnings` is DERIVED from the tool counts rather than passed separately: the
+ * two were written independently at four call sites, and a mismatch between them would
+ * make the baseline's own number disagree with the per-tool breakdown beside it.
+ */
+function entryFor(tool: string, counts: ToolCounts): BaselineEntry {
+  return {
+    [tool]: counts,
+    totalWarnings: counts.warnings,
+    lastAnalyzed: new Date().toISOString(),
+  };
+}
+
 function parseESLint(parsed: ESLintFileResult[], files: string[]): Record<string, BaselineEntry> {
   const result: Record<string, BaselineEntry> = {};
-  const fileSet = new Set(files);
+  // ESLint reports absolute paths and the caller passes relative ones, so both
+  // directions are compared.
+  const matchFile = makeFileMatcher(files, true);
 
   for (const fileResult of parsed) {
-    // Try to find a match in the files list
-    const matchedFile = files.find(f =>
-      fileResult.filePath.endsWith(f) || f.endsWith(fileResult.filePath)
-    );
-    if (!matchedFile || !fileSet.has(matchedFile)) continue;
+    const matchedFile = matchFile(fileResult.filePath);
+    if (!matchedFile) continue;
 
-    result[matchedFile] = {
-      eslint: {
-        warnings: fileResult.warningCount || 0,
-        errors: fileResult.errorCount || 0,
-      },
-      totalWarnings: fileResult.warningCount || 0,
-      lastAnalyzed: new Date().toISOString(),
-    };
+    result[matchedFile] = entryFor('eslint', {
+      warnings: fileResult.warningCount || 0,
+      errors: fileResult.errorCount || 0,
+    });
   }
 
   return result;
@@ -103,33 +171,51 @@ function parseRuff(parsed: RuffFileResult[], files: string[]): Record<string, Ba
  * Parse golangci-lint JSON output into BaselineEntry format.
  * golangci-lint --out-format json: {Issues: [{file, line, severity, text}]}
  */
-function parseGolangci(parsed: GolangciOutput, files: string[]): Record<string, BaselineEntry> {
-  const result: Record<string, BaselineEntry> = {};
+/**
+ * Tally one issue against its file, creating the entry on first sight.
+ *
+ * Everything that is not severity `error` counts as a warning: the linter's own severity
+ * vocabulary is open-ended, and folding the rest into "warning" is what the baseline's
+ * budget compares against.
+ */
+function addIssueCount(
+  byFile: Record<string, ToolCounts>,
+  file: string,
+  severity: string,
+): void {
+  byFile[file] ??= { warnings: 0, errors: 0 };
+  if (severity === "error") byFile[file].errors++;
+  else byFile[file].warnings++;
+}
+
+/**
+ * Tally golangci issues per file.
+ *
+ * Issues carry ABSOLUTE paths, so each is matched by suffix against the relative list --
+ * and the match must then be IN the set: the suffix test alone would also accept a file
+ * that merely ends with the same name.
+ */
+function tallyIssues(
+  issues: Array<{ file: string; severity?: string }>,
+  files: string[],
+): Record<string, ToolCounts> {
+  const byFile: Record<string, ToolCounts> = {};
   const fileSet = new Set(files);
-  const warningsByFile: Record<string, { warnings: number; errors: number }> = {};
-
-  for (const issue of parsed.Issues || []) {
-    // Issues have absolute paths; match against files list
-    const matchedFile = files.find(f => issue.file.endsWith(f));
+  for (const issue of issues) {
+    const matchedFile = files.find((f) => issue.file.endsWith(f));
     if (!matchedFile || !fileSet.has(matchedFile)) continue;
-
-    if (!warningsByFile[matchedFile]) {
-      warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-    }
-
-    if (issue.severity === 'error') {
-      warningsByFile[matchedFile].errors++;
-    } else {
-      warningsByFile[matchedFile].warnings++;
-    }
+    // An issue with no declared severity is not an ERROR; it counts as a warning.
+    addIssueCount(byFile, matchedFile, issue.severity ?? '');
   }
+  return byFile;
+}
 
+function parseGolangci(parsed: GolangciOutput, files: string[]): Record<string, BaselineEntry> {
+  const warningsByFile = tallyIssues(parsed.Issues || [], files);
+
+  const result: Record<string, BaselineEntry> = {};
   for (const [file, counts] of Object.entries(warningsByFile)) {
-    result[file] = {
-      golangci: counts,
-      totalWarnings: counts.warnings,
-      lastAnalyzed: new Date().toISOString(),
-    };
+    result[file] = entryFor('golangci', counts);
   }
 
   return result;
@@ -141,22 +227,13 @@ function parseGolangci(parsed: GolangciOutput, files: string[]): Record<string, 
  */
 function parseShellcheck(parsed: ShellcheckResult[], files: string[]): Record<string, BaselineEntry> {
   const result: Record<string, BaselineEntry> = {};
-  const fileSet = new Set(files);
+  const matchFile = makeFileMatcher(files, false);
   const warningsByFile: Record<string, { warnings: number; errors: number }> = {};
 
   for (const item of parsed) {
-    const matchedFile = files.find(f => item.file.endsWith(f));
-    if (!matchedFile || !fileSet.has(matchedFile)) continue;
-
-    if (!warningsByFile[matchedFile]) {
-      warningsByFile[matchedFile] = { warnings: 0, errors: 0 };
-    }
-
-    if (item.level === 'error') {
-      warningsByFile[matchedFile].errors++;
-    } else {
-      warningsByFile[matchedFile].warnings++;
-    }
+    const matchedFile = matchFile(item.file);
+    // A missing level is not an ERROR; it counts as a warning.
+    if (matchedFile) addIssueCount(warningsByFile, matchedFile, item.level ?? '');
   }
 
   for (const [file, counts] of Object.entries(warningsByFile)) {
@@ -174,31 +251,59 @@ function parseShellcheck(parsed: ShellcheckResult[], files: string[]): Record<st
  * Parse lint tool JSON output into BaselineEntry format.
  * Supports: eslint, ruff, golangci, shellcheck
  */
+/** Output shapes that carry no findings: absent, an empty array, an empty object. */
+const EMPTY_OUTPUTS = new Set(['', '[]', '{}']);
+
+/** Whether this tool output has nothing to record. */
+function isNothingRecorded(output: string): boolean {
+  return !output || EMPTY_OUTPUTS.has(output);
+}
+
+/**
+ * How each supported tool's JSON maps into baseline entries.
+ *
+ * A table rather than a `switch` so adding a tool is a row, and so the four casts that
+ * were interleaved with the dispatch live in one place each.
+ */
+const TOOL_PARSERS: Record<string, (parsed: unknown, files: string[]) => Record<string, BaselineEntry>> = {
+  eslint: (parsed, files) => parseESLint(parsed as ESLintFileResult[], files),
+  ruff: (parsed, files) => parseRuff(parsed as RuffFileResult[], files),
+  golangci: (parsed, files) => parseGolangci(parsed as GolangciOutput, files),
+  shellcheck: (parsed, files) => parseShellcheck(parsed as ShellcheckResult[], files),
+};
+
+/**
+ * Parse tool output into baseline entries.
+ *
+ * Empty output and unparseable output both mean "nothing to record", not an error: a
+ * tool with nothing to report prints an empty array, and a failed run is reported by
+ * the caller's exit-code check rather than inferred from the absence of JSON.
+ */
 export function parseLintOutput(
   tool: string,
   output: string,
   files: string[],
 ): Record<string, BaselineEntry> {
-  if (!output || output === '[]' || output === '{}') return {};
+  if (isNothingRecorded(output)) return {};
+  const parser = TOOL_PARSERS[tool];
+  if (!parser) return {};
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(output);
-  } catch {
+    return parser(JSON.parse(output), files);
+  } catch (err) {
+    // The RETURN stays `{}` -- the caller's exit-code check is what decides whether a run
+    // failed, and changing a return type here would be a bigger contract change than the
+    // defect. But silence is wrong: an unparseable payload and a genuinely clean run both
+    // produce "no entries", and a baseline built on the first is missing every one of them
+    // (review MC-02 / FC-01, two seats). The warning is the only signal that separates them.
+    //
+    // Note this function has no production caller yet; the risk is realised the moment one
+    // is added, which is why the signal is here rather than in the future caller.
+    console.warn(
+      `[lint-baseline] could not parse ${tool} output (${output.length} bytes): `
+        + `${err instanceof Error ? err.message : String(err)} — treating as no entries`,
+    );
     return {};
-  }
-
-  switch (tool) {
-    case 'eslint':
-      return parseESLint(parsed as ESLintFileResult[], files);
-    case 'ruff':
-      return parseRuff(parsed as RuffFileResult[], files);
-    case 'golangci':
-      return parseGolangci(parsed as GolangciOutput, files);
-    case 'shellcheck':
-      return parseShellcheck(parsed as ShellcheckResult[], files);
-    default:
-      return {};
   }
 }
 
@@ -233,13 +338,12 @@ export function diffBaselines(
   oldBaseline: Record<string, BaselineEntry>,
   newBaseline: Record<string, BaselineEntry>,
 ): LintDiffResult {
-  const filesAdded: LintDiffFileResult[] = [];
-  const filesRemoved: LintDiffFileResult[] = [];
-  const filesIncreased: LintDiffFileResult[] = [];
-  const filesDecreased: LintDiffFileResult[] = [];
-  const filesUnchanged: LintDiffFileResult[] = [];
+  // One list per outcome, addressed by name instead of by an if/else ladder: the five
+  // outcomes are mutually exclusive and each is a sentence.
+  const buckets: Record<string, LintDiffFileResult[]> = {
+    filesAdded: [], filesRemoved: [], filesIncreased: [], filesDecreased: [], filesUnchanged: [],
+  };
   let totalWarningsDelta = 0;
-
   const allFiles = new Set([...Object.keys(oldBaseline), ...Object.keys(newBaseline)]);
 
   for (const file of allFiles) {
@@ -250,31 +354,42 @@ export function diffBaselines(
     const delta = newW - oldW;
 
     totalWarningsDelta += delta;
-
-    const result: LintDiffFileResult = { file, oldWarnings: oldW, newWarnings: newW, warningsDelta: delta };
-
-    if (!oldEntry && newEntry) {
-      filesAdded.push(result);
-    } else if (oldEntry && !newEntry) {
-      filesRemoved.push(result);
-    } else if (delta > 0) {
-      filesIncreased.push(result);
-    } else if (delta < 0) {
-      filesDecreased.push(result);
-    } else {
-      filesUnchanged.push(result);
-    }
+    const bucket = classifyDiff(oldEntry, newEntry, delta);
+    buckets[bucket].push({ file, oldWarnings: oldW, newWarnings: newW, warningsDelta: delta });
   }
 
-  return {
-    totalWarningsDelta,
-    filesAdded,
-    filesRemoved,
-    filesIncreased,
-    filesDecreased,
-    filesUnchanged,
-  };
+  return { totalWarningsDelta, ...buckets } as LintDiffResult;
 }
+
+/**
+ * Which bucket one file's change belongs to.
+ *
+ * PRESENCE is tested before the delta: a file that appeared is "added" even when its
+ * previous count of zero makes the delta look like an increase, and one that vanished
+ * is "removed" even though the delta is negative. Reading the delta first reported
+ * both of those as ordinary increases and decreases.
+ */
+function classifyDiff(
+  oldEntry: BaselineEntry | undefined,
+  newEntry: BaselineEntry | undefined,
+  delta: number,
+): keyof LintDiffResult {
+  if (!oldEntry) return newEntry ? 'filesAdded' : 'filesUnchanged';
+  if (!newEntry) return 'filesRemoved';
+  return DELTA_BUCKETS[Math.sign(delta)];
+}
+
+/**
+ * The bucket a signed delta falls into.
+ *
+ * `Math.sign` gives exactly -1, 0, +1, so the table answers for every input -- there is
+ * no "unreachable" arm to keep in sync.
+ */
+const DELTA_BUCKETS: Record<number, keyof LintDiffResult> = {
+  [-1]: 'filesDecreased',
+  0: 'filesUnchanged',
+  1: 'filesIncreased',
+};
 
 // ── Delta (per-commit enforcement) ───────────────────────
 
@@ -338,43 +453,41 @@ export function computeLintDelta(
 /**
  * Format baseline as a human-readable summary string.
  */
+/**
+ * The tools a baseline can carry, and the label each gets in the summary.
+ *
+ * A table so a new tool appears here and in `TOOL_PARSERS` and nowhere else -- the
+ * four counters it replaces were four variables with four near-identical tests.
+ */
+const SUMMARY_TOOLS: Array<{ field: keyof BaselineEntry; label: string }> = [
+  { field: 'eslint', label: 'ESLint' },
+  { field: 'ruff', label: 'Ruff' },
+  { field: 'golangci', label: 'golangci-lint' },
+  { field: 'shellcheck', label: 'ShellCheck' },
+];
+
+/** How many baseline entries carry a result for `field`. */
+function countFilesFor(baseline: Record<string, BaselineEntry>, field: keyof BaselineEntry): number {
+  return Object.values(baseline).filter((entry) => entry[field]).length;
+}
+
 export function formatBaselineSummary(baseline: Record<string, BaselineEntry>): string {
   const files = Object.keys(baseline);
   if (files.length === 0) {
-    return 'No baseline data available. Run `xp-gate baseline create` to initialize.';
+    return 'No baseline data available. Run `xpgate baseline create` to initialize.'.replace('xpgate', 'xp-gate');
   }
-
   const totalWarnings = files.reduce((sum, f) => sum + baseline[f].totalWarnings, 0);
 
-  // Count tool usage
-  let eslintFiles = 0;
-  let ruffFiles = 0;
-  let golangciFiles = 0;
-  let shellcheckFiles = 0;
-
-  for (const entry of Object.values(baseline)) {
-    if (entry.eslint) eslintFiles++;
-    if (entry.ruff) ruffFiles++;
-    if (entry.golangci) golangciFiles++;
-    if (entry.shellcheck) shellcheckFiles++;
-  }
-
-  const toolLines = [
-    [eslintFiles, 'ESLint'],
-    [ruffFiles, 'Ruff'],
-    [golangciFiles, 'golangci-lint'],
-    [shellcheckFiles, 'ShellCheck'],
-  ] as const;
-
-  const lines: string[] = [
-    `Lint Baseline Summary:`,
+  const lines = [
+    'Lint Baseline Summary:',
     `  Files tracked: ${files.length}`,
     `  Total warnings: ${totalWarnings}`,
   ];
-
-  for (const [count, name] of toolLines) {
-    if (count > 0) lines.push(`  ${name}: ${count} files`);
+  // A tool with no entries is omitted rather than printed as 0: a summary of what the
+  // baseline CONTAINS should not list what it does not.
+  for (const tool of SUMMARY_TOOLS) {
+    const count = countFilesFor(baseline, tool.field);
+    if (count > 0) lines.push(`  ${tool.label}: ${count} files`);
   }
-
   return lines.join('\n');
 }

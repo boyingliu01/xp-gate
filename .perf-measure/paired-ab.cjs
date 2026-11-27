@@ -58,8 +58,14 @@ function cleanupTransient() {
 }
 
 function prepareBaselineSources() {
-  fs.rmSync(BASE_DIR, { recursive: true, force: true });
-  fs.mkdirSync(BASE_DIR, { recursive: true });
+  try {
+    fs.rmSync(BASE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(BASE_DIR, { recursive: true });
+  } catch (err) {
+    // Without the baseline tree there is no A arm, and continuing would compare the
+    // current code with itself -- a clean, meaningless result.
+    throw new Error(`cannot prepare the baseline sources at ${BASE_DIR}: ${err.message}`);
+  }
   // Copy the whole gate source tree at HEAD so relative imports resolve.
   const files = ['common.ts', 'common-process.ts', 'gate-9.ts', 'python-health.ts'];
   for (const f of files) {
@@ -70,10 +76,14 @@ function prepareBaselineSources() {
 }
 
 function makeFixture() {
-  fs.rmSync(FIXTURE, { recursive: true, force: true });
-  fs.mkdirSync(FIXTURE, { recursive: true });
-  fs.writeFileSync(path.join(FIXTURE, 'README.md'), '# fixture\n');
-  fs.writeFileSync(path.join(FIXTURE, 'data.json'), '{"a":1}\n');
+  try {
+    fs.rmSync(FIXTURE, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE, { recursive: true });
+    fs.writeFileSync(path.join(FIXTURE, 'README.md'), '# fixture\n');
+    fs.writeFileSync(path.join(FIXTURE, 'data.json'), '{"a":1}\n');
+  } catch (err) {
+    throw new Error(`cannot create the fixture at ${FIXTURE}: ${err.message}`);
+  }
 }
 
 function cpuLoad() {
@@ -89,11 +99,18 @@ function cpuLoad() {
 
 function runOne(entry) {
   const t0 = process.hrtime.bigint();
-  const r = spawnSync(process.execPath, [TSX_CLI, entry, '--run', '--cwd', FIXTURE], {
-    encoding: 'utf-8', cwd: FIXTURE, timeout: 300000,
-  });
-  const t1 = process.hrtime.bigint();
-  return { ms: Number(t1 - t0) / 1e6, rc: r.status, out: (r.stdout || '') + (r.stderr || '') };
+  try {
+    const r = spawnSync(process.execPath, [TSX_CLI, entry, '--run', '--cwd', FIXTURE], {
+      encoding: 'utf-8', cwd: FIXTURE, timeout: 300000,
+    });
+    const t1 = process.hrtime.bigint();
+    return { ms: Number(t1 - t0) / 1e6, rc: r.status, out: (r.stdout || '') + (r.stderr || '') };
+  } catch (err) {
+    // A run that could not even START still consumed the wall time, and silently
+    // dropping it would shrink the sample and bias the median.
+    const t1 = process.hrtime.bigint();
+    return { ms: Number(t1 - t0) / 1e6, rc: -1, out: `SPAWN FAILED: ${err.message}` };
+  }
 }
 
 function median(xs) {
@@ -140,50 +157,90 @@ function main() {
   const rounds = +(process.argv[2] || 6);
   prepareBaselineSources();
   makeFixture();
-  // Whatever happens below (including a throw mid-measurement), the transient
-  // source copy must not survive into the working tree — see TRANSIENT_DIRS.
+  // Whatever happens below (including a throw mid-measurement), the transient source copy
+  // must not survive into the working tree — see TRANSIENT_DIRS.
   installCleanupHandlers();
 
-  const arms = {
+  const res = measureAll(rounds);
+  printReport(res, rounds);
+  writeResultFile(res);
+  cleanupTransient();
+}
+
+/**
+ * Persist the raw result.
+ *
+ * A failed write is REPORTED rather than thrown: the console report has already been
+ * printed, and losing the JSON must not make a completed measurement look failed.
+ */
+function writeResultFile(res) {
+  try {
+    fs.writeFileSync(path.join(__dirname, 'paired-ab-result.json'), JSON.stringify(res, null, 2));
+  } catch (err) {
+    console.error(`could not write paired-ab-result.json: ${err.message}`);
+  }
+}
+
+/** The arithmetic mean of a non-empty list. */
+function meanOf(xs) {
+  return xs.reduce((x, y) => x + y, 0) / xs.length;
+}
+
+/** Both arms, as the ABBA schedule consumes them. */
+function armsFor() {
+  return {
     baseline: { entry: (g) => path.join(BASE_DIR, g.rel) },
     current: { entry: (g) => path.join(REPO, 'src', 'gates', g.rel) },
   };
+}
 
+/** Run every gate for every round, alternating A-B-B-A. */
+function measureAll(rounds) {
+  const arms = armsFor();
   const res = emptyResult();
   for (let r = 0; r < rounds; r++) {
     for (const g of GATES) runRound(arms, g, r, res);
   }
+  return res;
+}
 
+/**
+ * Print one line of the per-gate A/B comparison.
+ *
+ * Rule 6 of the measurement discipline: a load difference above 5% between the arms makes
+ * the comparison INVALID, and saying so is the point -- a number produced under unequal
+ * load is a time trend, not a treatment effect.
+ */
+function printComparison(g, res, onInvalid) {
+  const A = res[g.name].baseline;
+  const B = res[g.name].current;
+  const loadA = meanOf(A.load);
+  const loadB = meanOf(B.load);
+  const loadDiffPct = Math.abs(loadB - loadA) / Math.max(loadA, 1) * 100;
+  const valid = loadDiffPct <= 5;
+  if (!valid) onInvalid();
+
+  console.log(`\n--- ${g.name} ---`);
+  console.log(`  baseline ms : ${A.ms.map((x) => Math.round(x)).join(', ')}`);
+  console.log(`  current  ms : ${B.ms.map((x) => Math.round(x)).join(', ')}`);
+  console.log(`  baseline med: ${median(A.ms).toFixed(0)} ms   (mean load ${loadA.toFixed(1)}%)`);
+  console.log(`  current  med: ${median(B.ms).toFixed(0)} ms   (mean load ${loadB.toFixed(1)}%)`);
+  const delta = (median(B.ms) - median(A.ms)) / median(A.ms) * 100;
+  console.log(`  delta       : ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%  (negative = faster)`);
+  console.log(`  LOAD VALID  : ${valid ? 'YES' : 'NO  <-- load diff ' + loadDiffPct.toFixed(1) + '% > 5%, comparison INVALID'}`);
+  console.log(`  verdict A   : ${A.verdict[0]}`);
+  console.log(`  verdict B   : ${B.verdict[0]}`);
+  console.log(`  SAME VERDICT: ${A.verdict[0] === B.verdict[0] ? 'YES' : 'NO  <-- behaviour changed!'}`);
+}
+
+/** The whole report: every gate, then the overall validity line. */
+function printReport(res, rounds) {
   console.log(`\n=== PAIRED A/B (ABBA interval, ${rounds} rounds/gate) ===`);
   let allValid = true;
   for (const g of GATES) {
-    const A = res[g.name].baseline;
-    const B = res[g.name].current;
-    const mean = (xs) => xs.reduce((x, y) => x + y, 0) / xs.length;
-    const loadA = mean(A.load);
-    const loadB = mean(B.load);
-    const loadDiffPct = Math.abs(loadB - loadA) / Math.max(loadA, 1) * 100;
-    // Rule 6: a load difference >5% invalidates the comparison.
-    const valid = loadDiffPct <= 5;
-
-    console.log(`\n--- ${g.name} ---`);
-    console.log(`  baseline ms : ${A.ms.map((x) => Math.round(x)).join(', ')}`);
-    console.log(`  current  ms : ${B.ms.map((x) => Math.round(x)).join(', ')}`);
-    console.log(`  baseline med: ${median(A.ms).toFixed(0)} ms   (mean load ${loadA.toFixed(1)}%)`);
-    console.log(`  current  med: ${median(B.ms).toFixed(0)} ms   (mean load ${loadB.toFixed(1)}%)`);
-    const delta = (median(B.ms) - median(A.ms)) / median(A.ms) * 100;
-    console.log(`  delta       : ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%  (negative = faster)`);
-    console.log(`  LOAD VALID  : ${valid ? 'YES' : 'NO  <-- load diff ' + loadDiffPct.toFixed(1) + '% > 5%, comparison INVALID'}`);
-    if (!valid) allValid = false;
-    const sameVerdict = A.verdict.every((v) => v === B.verdict[0]) || A.verdict[0] === B.verdict[0];
-    console.log(`  verdict A   : ${A.verdict[0]}`);
-    console.log(`  verdict B   : ${B.verdict[0]}`);
-    console.log(`  SAME VERDICT: ${A.verdict[0] === B.verdict[0] ? 'YES' : 'NO  <-- behaviour changed!'}`);
+    printComparison(g, res, () => { allValid = false; });
   }
-
   console.log(`\nOVERALL: ${allValid ? 'all comparisons load-valid' : 'some comparisons INVALID by rule 6'}`);
-  fs.writeFileSync(path.join(__dirname, 'paired-ab-result.json'), JSON.stringify(res, null, 2));
-  cleanupTransient();
 }
 
 try {

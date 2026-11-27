@@ -113,6 +113,21 @@ function stepEscape(state: MaskState): void {
 }
 
 /** Handle a character inside a literal or template. Returns false when not consumed. */
+/**
+ * Whether this position opens a template interpolation.
+ *
+ * All three conditions are needed: the mode, the `$`, and the brace. A bare `$` in a
+ * template is ordinary text, and `${` in an ordinary string is two characters.
+ */
+function opensInterpolation(mode: MaskMode, ch: string, next: string): boolean {
+  return mode === 'template' && ch === '$' && next === '{';
+}
+
+/** Whether this character is one of the quote marks a regex could match. */
+function isQuoteLike(ch: string): boolean {
+  return ch === "'" || ch === '"' || ch === '`';
+}
+
 function stepLiteral(state: MaskState): boolean {
   const { content, i, mode } = state;
   const ch = content[i];
@@ -128,7 +143,7 @@ function stepLiteral(state: MaskState): boolean {
     state.mode = 'code';
     return true;
   }
-  if (mode === 'template' && ch === '$' && content[i + 1] === '{') {
+  if (opensInterpolation(mode, ch, content[i + 1])) {
     // Interpolation body is code again. Emit `$` and `{` as themselves and push
     // a fresh brace depth for the matching `}`.
     //
@@ -146,8 +161,7 @@ function stepLiteral(state: MaskState): boolean {
     return true;
   }
   // Text: a quote-like character here must not be usable by the regexes.
-  const isQuoteLike = ch === "'" || ch === '"' || ch === '`';
-  state.out.push(isQuoteLike ? QUOTE_SENTINEL : ch);
+  state.out.push(isQuoteLike(ch) ? QUOTE_SENTINEL : ch);
   state.i += 1;
   return true;
 }

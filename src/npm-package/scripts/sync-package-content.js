@@ -22,7 +22,12 @@ const CORE_SKILLS = [
   'to-issues',
 ];
 
-const PLUGINS = ['claude-code', 'opencode', 'qoder', 'dsh'];
+// `shared` is not a host plugin: it holds code the OTHER plugins need at runtime
+// (`bin/delphi-review-guard.sh` is exec'd by both the Claude Code and Qoder shims).
+// Omitting it from this list shipped shims whose target was absent -- and because the
+// shims deny when the target is missing, that turned a packaging gap into a hard
+// failure on every edit rather than a silent bypass. Still a publish-time break.
+const PLUGINS = ['claude-code', 'opencode', 'qoder', 'dsh', 'shared'];
 
 // Plugins whose `skills/` subtree is gitignored (build artifact). For these,
 // the source-of-truth skill content lives in repo-root `skills/` and must be
@@ -154,7 +159,18 @@ function assertDshBundleEntry() {
 function syncScripts() {
   const srcRoot = path.join(REPO_ROOT, 'scripts');
   const destRoot = path.join(PKG_ROOT, 'scripts');
-  const scriptsToSync = ['delphi-external-review.cjs'];
+  // Every module the reviewer requires at run time. A file missing here ships a package
+  // whose CLI dies on require -- the same failure mode as the cross-module reference
+  // fixed in the split, and just as invisible in review.
+  const scriptsToSync = [
+    'delphi-external-review.cjs',
+    'delphi-repo-tools.cjs',
+    'delphi-model-validation.cjs',
+    'delphi-config-read.cjs',
+    'delphi-json-extract.cjs',
+    'delphi-prompts.cjs',
+    'delphi-seat-calibration.cjs',
+  ];
   let copied = 0;
   for (const name of scriptsToSync) {
     const src = path.join(srcRoot, name);

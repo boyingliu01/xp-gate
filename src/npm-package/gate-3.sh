@@ -823,12 +823,23 @@ fi
 # the gate failed while the journal claimed nothing was found.
 CC_ISSUES="${CC_VIOLATIONS:-${CC_WARNINGS:-0}}"
 # Shared verdict helpers (append-with-de-duplication, strongest-verdict rule).
-_GATE_STATUS_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)/gate-status.sh"
+# Resolve the library from the CALLER's own directory, both absolute and relative.
+#
+# `cd "$(dirname "$BASH_SOURCE[0]")/../lib"` broke when the file was sourced by a RELATIVE
+# path from inside `githooks/`: `dirname ./gate-3.sh` is `.`, `/../lib` climbs to `/lib`,
+# the test fails, and `_GATE_STATUS_LIB` becomes the bare `/gate-status.sh` -- not readable,
+# so `xp_gate_detail_append` is never defined and every caller of it dies with
+# "command not found". Measured: 70 BATS failures from this one line.
+_GATE_STATUS_DIR="$(dirname "${BASH_SOURCE[0]}")"
+_GATE_STATUS_LIB="$(cd "$_GATE_STATUS_DIR/../lib" 2>/dev/null && pwd)/gate-status.sh"
+if [ ! -r "$_GATE_STATUS_LIB" ]; then
+  _GATE_STATUS_LIB="$(cd "$_GATE_STATUS_DIR" 2>/dev/null && pwd)/lib/gate-status.sh"
+fi
 if [ -r "$_GATE_STATUS_LIB" ]; then
   # shellcheck source=/dev/null
   . "$_GATE_STATUS_LIB"
 fi
-unset _GATE_STATUS_LIB
+unset _GATE_STATUS_DIR _GATE_STATUS_LIB
 
 # The audit detail must say WHY when the gate skipped.
 #

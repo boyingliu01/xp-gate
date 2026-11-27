@@ -15,3 +15,25 @@
 Thumbs.db
 *.swp
 *~
+
+# Tests ship with the package only by accident: nothing under bin/, hooks/ or the
+# runtime libraries imports them, and measured they are the largest single block --
+# lib/__tests__ alone is 1.47 MB of a 2.27 MB tarball, which is what pushed it past the
+# 2 MB guard. Excluding them is not a size trick: a test file is not a thing the package
+
+# Test files are not shipped. Nothing under bin/, hooks/ or the runtime libraries
+# imports them, and measurably lib/__tests__ alone is 1.47 MB of the tarball -- it is what
+# made the package cross the 2 MB guard.  is used rather than a negative
+# entry in  because the package's own contract forbids __tests__ in 
+# (scripts/__tests__/gates-shipped.test.cjs), and an .npmignore pattern subtracts from
+# an allowlisted directory without touching that list.
+lib/__tests__/
+gates/__tests__/
+principles/**/__tests__/
+mutation/**/__tests__/
+mock-policy/**/__tests__/
+build-integrity/**/__tests__/
+plugins/**/__tests__/
+**/*.test.js
+**/*.test.ts
+**/*.test.mjs

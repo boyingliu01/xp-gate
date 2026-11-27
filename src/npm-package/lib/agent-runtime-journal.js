@@ -23,6 +23,22 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
+/** zstd frame magic: 0x28 0xB5 0x2F 0xFD. */
+const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd];
+const ZSTD_MAGIC_LENGTH = ZSTD_MAGIC.length;
+
+/**
+ * A `timeout` budget is "oversized" past ten minutes.
+ *
+ * The diagnosis this rule came from found 375 calls with such a budget whose p50
+ * runtime was 6.3 s: the budget sat far above reality, which is how a caller ends
+ * up waiting instead of measuring.
+ */
+const OVERSIZED_TIMEOUT_SECONDS = 600;
+
+/** The summary is meant to be one screen; longer and it stops being scanned. */
+const SUMMARY_LINE_BUDGET = 15;
+
 /**
  * A tool call cannot plausibly run longer than this. Beyond it, the recorded
  * span measures a session resume or log flush, not work: the 2026-10-30
@@ -52,7 +68,7 @@ function parseSessionBuffer(buffer) {
   let text;
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(String(buffer), 'utf8');
   // zstd magic number: 0x28 0xB5 0x2F 0xFD (little endian 0xFD2FB528).
-  if (buf.length >= 4 && buf[0] === 0x28 && buf[1] === 0xb5 && buf[2] === 0x2f && buf[3] === 0xfd) {
+  if (buf.length >= ZSTD_MAGIC_LENGTH && ZSTD_MAGIC.every((byte, i) => buf[i] === byte)) {
     try {
       text = zlib.zstdDecompressSync(buf).toString('utf8');
     } catch {
@@ -105,7 +121,7 @@ function classifyCommand(command) {
     ciPolling: /gh\s+run\s+(?:list|watch|view)/.test(cmd),
     // `timeout` only counts as oversized past 10 minutes; the diagnosis found
     // 375 such calls whose p50 runtime was 6.3 s — budget far above reality.
-    oversizedTimeout: /timeout\s+(\d{3,})\b/.test(cmd) && Number((cmd.match(/timeout\s+(\d{3,})\b/) || [])[1]) >= 600,
+    oversizedTimeout: /timeout\s+(\d{3,})\b/.test(cmd) && Number((cmd.match(/timeout\s+(\d{3,})\b/) || [])[1]) >= OVERSIZED_TIMEOUT_SECONDS,
   };
 }
 
@@ -181,42 +197,23 @@ function extractCalls(events, maxPlausibleMs) {
  *   before/after comparison instead of only an all-time total.
  * @returns {object} report
  */
-function analyseSessions(sessionDirs, options = {}) {
-  const maxPlausibleMs = options.maxPlausibleMs ?? DEFAULT_MAX_PLAUSIBLE_MS;
-  const blockingThresholdMs = options.blockingThresholdMs ?? DEFAULT_BLOCKING_THRESHOLD_MS;
-  const sinceMs = typeof options.sinceMs === 'number' ? options.sinceMs : -Infinity;
-  const untilMs = typeof options.untilMs === 'number' ? options.untilMs : Infinity;
-
-  const allCalls = [];
-  let sessions = 0;
-
-  for (const dir of sessionDirs || []) {
-    const jp = journalPathIn(dir);
-    if (!jp) continue;
-    let buf;
-    try {
-      buf = fs.readFileSync(jp);
-    } catch {
-      continue;
-    }
-    const events = parseSessionBuffer(buf);
-    if (!events.length) continue;
-    sessions += 1;
-    for (const call of extractCalls(events, maxPlausibleMs)) {
-      if (typeof call.t === 'number' && call.t >= sinceMs && call.t < untilMs) allCalls.push(call);
-    }
-  }
-
-  const plausible = allCalls.filter((c) => c.durMs !== null ? !c.implausible : true);
-  const implausible = allCalls.filter((c) => c.implausible);
-  const timed = plausible.filter((c) => c.durMs !== null);
-
-  // ---- rule 3a: job_output blocking ----
+/**
+ * Calls that represent WAITING rather than working.
+ *
+ * Rule 3a finds `job_output` calls that blocked; rule 3b finds sleeps and poll
+ * loops inside shell commands. They are one function because they answer one
+ * question -- how much of this session was spent waiting -- and the report
+ * presents them together.
+ *
+ * @param {Array} plausible calls with a usable duration
+ * @param {number} blockingThresholdMs
+ * @returns {{jobCalls: Array, blocking: Array, explicitWaitTrue: Array, sleep: Array, pollLoop: Array, ciPolling: Array, oversizedTimeout: Array}}
+ */
+function classifyWaitingCalls(plausible, blockingThresholdMs) {
   const jobCalls = plausible.filter((c) => c.name === 'job_output');
   const blocking = jobCalls.filter((c) => c.durMs !== null && c.durMs > blockingThresholdMs);
   const explicitWaitTrue = jobCalls.filter((c) => c.args && c.args.wait === true);
 
-  // ---- rule 3b: idle waiting inside bash ----
   const bashCalls = plausible.filter((c) => c.name === 'bash' || c.name === 'pwsh' || c.name === 'powershell');
   const sleep = [];
   const pollLoop = [];
@@ -229,14 +226,84 @@ function analyseSessions(sessionDirs, options = {}) {
     if (flags.ciPolling) ciPolling.push(c);
     if (flags.oversizedTimeout) oversizedTimeout.push(c);
   }
+  return { jobCalls, blocking, explicitWaitTrue, sleep, pollLoop, ciPolling, oversizedTimeout };
+}
 
-  // ---- rule 2: call batching ----
+/**
+ * How many calls landed in each agent step.
+ *
+ * Rule 2 measures parallelism: a step with one call could have been two in one
+ * message. A call with neither `turn` nor `step` is skipped rather than bucketed
+ * into a shared key -- an unattributed call would look like a batch of its own.
+ *
+ * @param {Array} calls
+ * @returns {Map<string, number>}
+ */
+function countCallsPerStep(calls) {
   const perStep = new Map();
-  for (const c of plausible) {
+  for (const c of calls) {
     if (!c.turn && !c.step) continue;
     const key = `${c.turn}:${c.step}`;
     perStep.set(key, (perStep.get(key) || 0) + 1);
   }
+  return perStep;
+}
+
+/**
+ * Read every session's journal and collect the tool calls inside the window.
+ *
+ * A session with no journal, an unreadable one, or an empty one is skipped and
+ * does NOT count towards `sessions`: that number is the denominator of per-session
+ * figures, and counting a session we could not read would understate them.
+ *
+ * The window is half-open -- `[sinceMs, untilMs)` -- so two adjacent windows never
+ * both claim the call on their shared boundary.
+ *
+ * @param {string[]|undefined} sessionDirs
+ * @param {{maxPlausibleMs: number, sinceMs: number, untilMs: number}} opts
+ * @returns {{allCalls: Array, sessions: number}}
+ */
+function scanSessionDirs(sessionDirs, opts) {
+  const { maxPlausibleMs, sinceMs, untilMs } = opts;
+  const allCalls = [];
+  let sessions = 0;
+
+  for (const dir of sessionDirs || []) {
+    const journalPath = journalPathIn(dir);
+    if (!journalPath) continue;
+    let buffer;
+    try {
+      buffer = fs.readFileSync(journalPath);
+    } catch {
+      continue;
+    }
+    const events = parseSessionBuffer(buffer);
+    if (!events.length) continue;
+    sessions += 1;
+    for (const call of extractCalls(events, maxPlausibleMs)) {
+      if (typeof call.t === 'number' && call.t >= sinceMs && call.t < untilMs) allCalls.push(call);
+    }
+  }
+  return { allCalls, sessions };
+}
+
+function analyseSessions(sessionDirs, options = {}) {
+  const maxPlausibleMs = options.maxPlausibleMs ?? DEFAULT_MAX_PLAUSIBLE_MS;
+  const blockingThresholdMs = options.blockingThresholdMs ?? DEFAULT_BLOCKING_THRESHOLD_MS;
+  const sinceMs = typeof options.sinceMs === 'number' ? options.sinceMs : -Infinity;
+  const untilMs = typeof options.untilMs === 'number' ? options.untilMs : Infinity;
+
+  const { allCalls, sessions } = scanSessionDirs(sessionDirs, { maxPlausibleMs, sinceMs, untilMs });
+
+  const plausible = allCalls.filter((c) => c.durMs !== null ? !c.implausible : true);
+  const implausible = allCalls.filter((c) => c.implausible);
+  const timed = plausible.filter((c) => c.durMs !== null);
+
+  const { jobCalls, blocking, explicitWaitTrue, sleep, pollLoop, ciPolling, oversizedTimeout } =
+    classifyWaitingCalls(plausible, blockingThresholdMs);
+
+  // ---- rule 2: call batching ----
+  const perStep = countCallsPerStep(plausible);
   const stepCounts = Array.from(perStep.values());
   const stepsWithMultiple = stepCounts.filter((n) => n >= 2).length;
 
@@ -311,7 +378,7 @@ function summariseForSlot(report) {
     lines.push(`excluded ${report.implausible.count} implausible duration(s) (resume/log-flush artifacts)`);
   }
 
-  return lines.slice(0, 15);
+  return lines.slice(0, SUMMARY_LINE_BUDGET);
 }
 
 /**

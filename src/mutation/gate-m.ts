@@ -484,18 +484,22 @@ function applyNullScores(files: string[], scores: Record<string, number | null>)
   for (const f of files) scores[f] = null;
 }
 
-function applyMutationResult(
+export function applyMutationResult(
   outcome: MutationRunOutcome,
   files: string[],
   scores: Record<string, number | null>,
   counts: Record<string, MutantCounts>,
 ): void {
   if (outcome.timedOut || outcome.error || !outcome.report) {
-    for (const f of files) scores[f] = null;
+    applyNullScores(files, scores);
     return;
   }
 
   if (outcome.report.files) {
+    // Every asked-for file starts at null: a reporter that OMITS a file (older Stryker
+    // builds skip files with no mutants) must leave it "not measured", not absent -- an
+    // absent key became a measured zero downstream (review feasibility FC-01, batch 4).
+    applyNullScores(files, scores);
     for (const [fileKey, fileReport] of Object.entries(outcome.report.files)) {
       scores[fileKey] = fileReport.mutationScore;
       // #544: keep the outcome counts the reporter already gave us. Dropping

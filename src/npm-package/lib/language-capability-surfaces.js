@@ -303,10 +303,13 @@ function inspectGate13(deps, lang, exts, ctx) {
 }
 
 /** CLI registry: LANGUAGE_REGISTRY key. */
+/** Where LANGUAGE_REGISTRY actually lives. It used to be inline in language-tools.js. */
+const REGISTRY_SOURCE = 'src/npm-package/lib/language-registry.js';
+
 function inspectRegistry(deps, lang, exts, ctx) {
-  const langTools = ctx.read('src/npm-package/lib/language-tools.js');
+  const langTools = ctx.read(REGISTRY_SOURCE);
   if (langTools === null) {
-    return deps.row('cli-registry', lang, deps.STATE.UNKNOWN, 'language-tools.js unreadable');
+    return deps.row('cli-registry', lang, deps.STATE.UNKNOWN, `${REGISTRY_SOURCE} unreadable`);
   }
   // [#731] The original pattern was `^\s{2}${lang}:\s*\{` with the `m` flag,
   // and it NEVER matched: under `m`, `\s` matches the newline that `^` just

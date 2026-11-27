@@ -77,6 +77,28 @@ for (const lang of langs) {
 lines.push('');
 lines.push('图例: P=PASS F=FAIL B=BLOCK S=SKIP W=WARN N=NOT_REACHED -=absent ?=无报告');
 
+/** The verdicts that mean the gate CAUGHT the defect. */
+const BLOCKING_VERDICTS = new Set(['FAIL', 'BLOCK']);
+
+/** The verdicts that mean the gate did not even try. */
+const UNATTEMPTED_VERDICTS = new Set(['ABSENT', 'NO_REPORT', 'NOT_REACHED']);
+
+/** Whether this verdict means the gate blocked. */
+function isBlockingVerdict(v) {
+  return BLOCKING_VERDICTS.has(v);
+}
+
+/**
+ * Whether the gate RAN at all.
+ *
+ * Expressed as "not unattempted" rather than as a list of attempted verdicts: a new
+ * verdict value should count as attempted, because silently treating it as "never ran"
+ * would report a working gate as unreachable.
+ */
+function isAttemptedVerdict(v) {
+  return !UNATTEMPTED_VERDICTS.has(v);
+}
+
 // --- finding 1: a clean project blocked by a gate ----------------------------
 //
 // Two possible causes, and the analyzer must not pick one for the reader:
@@ -97,61 +119,61 @@ function firstDiagnostic(logPath) {
   }
   for (const line of text.split('\n')) {
     const t = line.trim();
-    // Skip the report's own decoration and the gate banners.
-    if (!t) continue;
-    if (/^[━─=]/.test(t)) continue;
-    if (/^(→|⚙|✅|❌|⚠️|ℹ️|⏭️|📊|Proceeding|Fix )/.test(t)) continue;
-    if (/^Gate \d+ \(/.test(t)) continue;
-    if (/(error|Error|cannot|unused|undefined|should omit|would be reformatted|mismatch|is not)/.test(t)) {
-      return t.slice(0, 160);
-    }
+    if (isDiagnosticLine(t)) return t.slice(0, MAX_DIAGNOSTIC_CHARS);
   }
   return null;
+}
+
+/** How much of a diagnostic line to report beside its gate. */
+const MAX_DIAGNOSTIC_CHARS = 160;
+
+/** The report's own decoration and banner lines, which say nothing about a failure. */
+const DECORATION = [/^[━─=]/, /^(→|⚙|✅|❌|⚠️|ℹ️|⏭️|📊|Proceeding|Fix )/, /^Gate \d+ \(/];
+
+/** Wording that marks a real diagnostic rather than progress output. */
+const DIAGNOSTIC_HINT = /(error|Error|cannot|unused|undefined|should omit|would be reformatted|mismatch|is not)/;
+
+/**
+ * Whether this line is the first DIAGNOSTIC worth reporting.
+ *
+ * The decoration is skipped first: gate banners contain the same ✅/❌ marks a diagnostic
+ * does, and reporting a banner as the diagnosis sends the reader to a line that names no
+ * problem.
+ */
+function isDiagnosticLine(trimmed) {
+  if (!trimmed || DECORATION.some((re) => re.test(trimmed))) return false;
+  return DIAGNOSTIC_HINT.test(trimmed);
 }
 
 for (const lang of langs) {
   const run = byKey.get(`${lang}/clean`);
   if (!run) continue;
-  const blocked = run.gates.filter((g) => g.verdict === 'FAIL' || g.verdict === 'BLOCK');
-  if (blocked.length) {
-    const diag = firstDiagnostic(`${process.env.MATRIX_LOG_DIR || ''}${lang}-clean.log`);
-    findings.push({
-      kind: '待判定（产品缺陷或 fixture 缺陷）',
-      detail: `${lang} 干净项目被 G${blocked.map((b) => b.gate).join(',G')} 拦截`,
-      evidence: blocked.map((b) => `G${b.gate} ${b.verdict}`).join('; ') +
-        (diag ? ` — 诊断: ${diag}` : ''),
-    });
-  }
+  const blocked = blockedGates(run);
+  if (blocked.length) findings.push(cleanProjectFinding(lang, blocked));
+}
+
+/** The gates that blocked this run. */
+function blockedGates(run) {
+  return run.gates.filter((g) => g.verdict === 'FAIL' || g.verdict === 'BLOCK');
+}
+
+/**
+ * The finding for a CLEAN project that a gate blocked.
+ *
+ * The evidence names the gate numbers AND the first diagnostic: "G3 BLOCK" alone sends the
+ * reader to the log with no idea what to look for.
+ */
+function cleanProjectFinding(lang, blocked) {
+  const diag = firstDiagnostic(`${process.env.MATRIX_LOG_DIR || ''}${lang}-clean.log`);
+  return {
+    kind: '待判定（产品缺陷或 fixture 缺陷）',
+    detail: `${lang} 干净项目被 G${blocked.map((b) => b.gate).join(',G')} 拦截`,
+    evidence: blocked.map((b) => `G${b.gate} ${b.verdict}`).join('; ') + (diag ? ` — 诊断: ${diag}` : ''),
+  };
 }
 
 // --- finding 2: the planted defect was not caught by its owner ---------------
-for (const lang of langs) {
-  const dirty = byKey.get(`${lang}/dirty`);
-  if (!dirty) continue;
-  const owners = DEFECT_OWNER[lang] || [];
-  if (!owners.length) continue;
-  const seen = owners.filter((g) => {
-    const v = verdictOf(dirty, g);
-    return v === 'FAIL' || v === 'BLOCK';
-  });
-  const attempted = owners.filter((g) => {
-    const v = verdictOf(dirty, g);
-    return v !== 'ABSENT' && v !== 'NO_REPORT' && v !== 'NOT_REACHED';
-  });
-  if (attempted.length === 0) {
-    findings.push({
-      kind: '门禁不可达',
-      detail: `${lang} 的负责门禁根本没有运行`,
-      evidence: owners.map((g) => `G${g}=${verdictOf(dirty, g)}`).join(' '),
-    });
-  } else if (!seen.length) {
-    findings.push({
-      kind: '可能漏检',
-      detail: `${lang} 的植入缺陷没有被 G${owners.join('/G')} 抓到`,
-      evidence: owners.map((g) => `G${g}=${verdictOf(dirty, g)}`).join(' '),
-    });
-  }
-}
+findings.push(...collectMissedDefects(langs, byKey));
 
 // --- finding 3: a gate that never runs for any language ----------------------
 //
@@ -162,14 +184,41 @@ for (const lang of langs) {
 // reporting something it did not compute, which is the exact defect class this
 // whole exercise is about.
 const PREFLIGHT_GATES = new Set(['0']);
-const neverRan = GATES.filter((g) => PREFLIGHT_GATES.has(g) ? false : (
-  langs.every((lang) =>
-    ['clean', 'dirty'].every((mode) => {
-      const v = verdictOf(byKey.get(`${lang}/${mode}`), g);
-      return v === 'ABSENT' || v === 'NO_REPORT';
-    })
-  )
-));
+
+/**
+ * Whether any language's run reported a real verdict for this gate.
+ *
+ * ABSENT and NO_REPORT mean the gate left no evidence. Anything else -- including a
+ * verdict this analyzer does not recognise -- counts as having run, so a new verdict
+ * value cannot make a working gate look unreachable.
+ */
+function everRan(gate, langs, byKey) {
+  return langs.some((lang) =>
+    ['clean', 'dirty'].some((mode) => !isUnreporting(verdictOf(byKey.get(`${lang}/${mode}`), gate)))
+  );
+}
+
+/** Verdicts that leave no evidence the gate executed. */
+/**
+ * Verdicts that carry NO evidence the gate executed.
+ *
+ * `NOT_REACHED` belongs here. It was already in `UNATTEMPTED_VERDICTS` -- so the gate was
+ * reported "not attempted" -- while this set excluded it, so `everRan` counted the same
+ * row as evidence the gate RAN. Two readers of one verdict, opposite conclusions, and the
+ * one that mattered (could a gate actually be reached?) was the one being papered over
+ * (review feasibility FC-01).
+ *
+ * It is NOT an absence: the gate exists and was blocked by an upstream failure. That is
+ * "did not execute", which is exactly what the reachability question asks.
+ */
+const UNREPORTING_VERDICTS = new Set(['ABSENT', 'NO_REPORT', 'NOT_REACHED']);
+
+/** Whether this verdict is one that produces no evidence of execution. */
+function isUnreporting(verdict) {
+  return UNREPORTING_VERDICTS.has(verdict);
+}
+
+const neverRan = GATES.filter((g) => !PREFLIGHT_GATES.has(g) && !everRan(g, langs, byKey));
 if (neverRan.length) {
   findings.push({
     kind: '不可达',
@@ -178,15 +227,79 @@ if (neverRan.length) {
   });
 }
 
-console.log(lines.join('\n'));
-console.log('');
-console.log('## 发现');
-if (!findings.length) {
+function printFindings(lines, findings) {
+  console.log(lines.join('\n'));
   console.log('');
-  console.log('无。');
-} else {
+  console.log('## 发现');
   console.log('');
+  if (!findings.length) {
+    console.log('无。');
+    return;
+  }
   for (const f of findings) {
     console.log(`- **[${f.kind}]** ${f.detail} — \`${f.evidence}\``);
   }
 }
+
+/**
+ * The finding for a planted defect its OWNER gate did not catch, or null.
+ *
+ * Two distinct failures, reported separately: a gate that never RAN (unreachable) is a
+ * harness problem, while one that ran and passed a known-bad fixture is a possible
+ * detection gap. Collapsing them would point the investigation at the wrong layer.
+ */
+/**
+ * Every planted defect its owner gate did not catch.
+ *
+ * A collector rather than a loop at the top level: the top level then states WHAT is
+ * being gathered instead of holding three loops whose bodies each push.
+ */
+function collectMissedDefects(langs, byKey) {
+  return langs.map((lang) => missedDefectFinding(lang, byKey)).filter(Boolean);
+}
+
+function missedDefectFinding(lang, byKey) {
+
+  const dirty = byKey.get(`${lang}/dirty`);
+  const owners = DEFECT_OWNER[lang] || [];
+  if (!isCheckable(dirty, owners)) return null;
+  const seen = owners.filter((g) => isBlockingVerdict(verdictOf(dirty, g)));
+  const attempted = owners.filter((g) => isAttemptedVerdict(verdictOf(dirty, g)));
+  if (attempted.length === 0) return unreachableFinding(lang, owners, dirty);
+  return seen.length > 0 ? null : missedDefect(lang, owners, dirty);
+}
+
+/**
+ * Whether there is anything to judge.
+ *
+ * Without a dirty run there is no fixture result, and without owner gates there is no
+ * claim about which gate should have caught it -- neither absence is a finding.
+ */
+function isCheckable(dirty, owners) {
+  return Boolean(dirty) && owners.length > 0;
+}
+
+/** The evidence string: each owner gate with the verdict it gave. */
+function gateEvidence(owners, dirty) {
+  return owners.map((g) => `G${g}=${verdictOf(dirty, g)}`).join(' ');
+}
+
+/** A gate that never ran: a HARNESS problem, not a detection gap. */
+function unreachableFinding(lang, owners, dirty) {
+  return {
+    kind: '门禁不可达',
+    detail: `${lang} 的负责门禁根本没有运行`,
+    evidence: gateEvidence(owners, dirty),
+  };
+}
+
+/** A gate that ran and passed a known-bad fixture: a possible detection gap. */
+function missedDefect(lang, owners, dirty) {
+  return {
+    kind: '可能漏检',
+    detail: `${lang} 的植入缺陷没有被 G${owners.join('/G')} 抓到`,
+    evidence: gateEvidence(owners, dirty),
+  };
+}
+
+printFindings(lines, findings);

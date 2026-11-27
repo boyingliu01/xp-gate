@@ -127,20 +127,30 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
  * not a `{files: {...}}` wrapper. A `files` wrapper is still accepted for forwards
  * compatibility, but the flat form is what `saveBaseline` actually writes.
  */
-function parseBaselineFiles(baselineJson: string): Record<string, unknown> | string {
+/**
+ * Parse the baseline, or return the reason it is unusable.
+ *
+ * Fail SAFE: an unparsable baseline must never be reported as "all stale", which is
+ * exactly how the reporter's entries disappeared.
+ */
+function parseObject(baselineJson: string): Record<string, unknown> | string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(baselineJson);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    // Fail safe: an unparsable baseline must never be reported as "all stale",
-    // which is exactly how the reporter's entries disappeared.
-    return `could not parse baseline: ${detail}`;
+    return `could not parse baseline: ${errorMessageOf(error)}`;
   }
+  return isJsonObject(parsed) ? parsed : 'baseline is not a JSON object';
+}
 
-  if (!isJsonObject(parsed)) {
-    return 'baseline is not a JSON object';
-  }
+/** The message of a thrown value, which is not always an `Error`. */
+function errorMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseBaselineFiles(baselineJson: string): Record<string, unknown> | string {
+  const parsed = parseObject(baselineJson);
+  if (typeof parsed === 'string') return parsed;
 
   // A `files` wrapper is unwrapped rather than merged, matching the old shape.
   if (isJsonObject(parsed.files)) {

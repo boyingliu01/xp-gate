@@ -1,5 +1,6 @@
 // @no-test-required: Go mutation wrapper — tested via gate-m integration + pre-push Gate M
-import { spawn, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
+import { runMutationCommand } from './spawn-with-capture';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import type {
@@ -36,7 +37,6 @@ export class GoMutantRunner implements MutationRunner {
   }
 
   async run(options: RunMutationOptions): Promise<MutationRunOutcome> {
-    return new Promise((resolve) => {
       const reportPath = join(options.cwd, GOMUTANTS_REPORT_PATH);
 
       const args = [
@@ -45,53 +45,11 @@ export class GoMutantRunner implements MutationRunner {
         '--quiet',
       ];
 
-      const child = spawn('gomutants', args, {
-        stdio: 'pipe',
-        shell: true,
-        cwd: options.cwd,
-      });
-
-      let stderr = '';
-      let stdout = '';
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdout += data.toString();
-      });
-
-      child.stderr?.on('data', (data: Buffer) => {
-        stderr += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (!child.killed) child.kill('SIGKILL');
-        }, 5000);
-      }, options.timeoutMs);
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutId);
-
-        if (code === null) {
-          resolve({ report: null, timedOut: true });
-          return;
-        }
-
-        // Exit codes: 0=pass, 10=below threshold, 11=below coverage
-        // All three produce a JSON report we can parse
-        const report = this.parseReport(reportPath);
-        resolve({
-          report,
-          timedOut: false,
-          error: code !== 0 ? stderr || stdout : undefined,
-        });
-      });
-
-      child.on('error', (err) => {
-        clearTimeout(timeoutId);
-        resolve({ report: null, timedOut: false, error: err.message });
-      });
-    });
+      return runMutationCommand('gomutants', args, {
+      timeoutMs: options.timeoutMs,
+      cwd: options.cwd,
+      shell: true,
+    }, () => this.parseReport(reportPath));
   }
 
   private parseReport(reportPath: string): MutationRunResult | null {

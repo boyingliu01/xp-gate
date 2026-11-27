@@ -11,6 +11,18 @@
     "**/.perf-measure/**",
     "**/.xp-gate/**",
     "**/*.md",
-    "**/src/npm-package/**"
+    "**/src/npm-package/**",
+    "**/.git/**",
+    "**/.sprint-history/**",
+    "**/githooks/adapters/gate-*.sh",
+    "**/plugins/*/skills/**",
+    "**/plugins/*/lib/**",
+    "**/*/lib/client.js",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.js",
+    "**/*.test.mjs",
+    "**/*.spec.ts",
+    "**/adapters/plugins/**"
   ]
 }

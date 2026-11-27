@@ -51,27 +51,51 @@ function rmrf(p) {
 
 function sh(cwd, cmd, args, env) {
   try {
-    const out = execFileSync(cmd, args, {
-      cwd,
-      env: { ...process.env, ...env },
-      encoding: 'utf8',
-      // stdin MUST be a pipe rather than 'ignore': the hook is a git hook and
-      // reads pre-commit's stdin. On Windows, 'ignore' makes bash exit before
-      // producing any output, which would fingerprint as an empty run.
-      stdio: ['pipe', 'pipe', 'pipe'],
-      input: '',
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    return { status: 0, out: out || '' };
+    return { status: 0, out: execFileSync(cmd, args, execOptions(cwd, env)) || '' };
   } catch (e) {
-    const out = (e.stdout || '') + (e.stderr || '');
-    if (!out && e.status == null) {
-      // A spawn failure carries no status; surface it instead of silently
-      // recording -1 with empty output, which reads like "hook printed nothing".
-      return { status: -2, out: 'SPAWN FAILED: ' + e.message };
-    }
-    return { status: typeof e.status === 'number' ? e.status : -1, out };
+    return failureResult(e);
   }
+}
+
+/**
+ * The options every hook run uses.
+ *
+ * stdin MUST be a pipe rather than 'ignore': the hook is a git hook and reads
+ * pre-commit's stdin. On Windows, 'ignore' makes bash exit before producing any output,
+ * which would fingerprint as an empty run -- the failure this recorder exists to catch.
+ */
+function execOptions(cwd, env) {
+  return {
+    cwd,
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    input: '',
+    maxBuffer: 64 * 1024 * 1024,
+  };
+}
+
+/**
+ * The result of a failed run.
+ *
+ * A SPAWN FAILURE carries no status, and reporting -1 with empty output would read as
+ * "the hook printed nothing" -- a semantically different fingerprint from "the hook could
+ * not be started". It gets its own -2 and an explanatory message.
+ */
+function failureResult(e) {
+  const out = (e.stdout || '') + (e.stderr || '');
+  if (isSpawnFailure(out, e.status)) return { status: -2, out: 'SPAWN FAILED: ' + e.message };
+  return { status: exitStatusOf(e.status), out };
+}
+
+/** Whether this failure never started the command at all. */
+function isSpawnFailure(out, status) {
+  return out.length === 0 && status == null;
+}
+
+/** The exit status, with -1 for one Node did not record. */
+function exitStatusOf(status) {
+  return typeof status === 'number' ? status : -1;
 }
 
 // Copy the complete installed hook set into <hooksDir>: the entry point, the
@@ -83,18 +107,28 @@ function sh(cwd, cmd, args, env) {
 // a checkout that predates a directory is a no-op rather than a crash.
 function copyShDir(srcDir, destDir) {
   if (!fs.existsSync(srcDir)) return;
-  fs.mkdirSync(destDir, { recursive: true });
-  for (const f of fs.readdirSync(srcDir)) {
-    if (f.endsWith('.sh')) fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));
+  try {
+    fs.mkdirSync(destDir, { recursive: true });
+    for (const f of fs.readdirSync(srcDir)) {
+      if (f.endsWith('.sh')) fs.copyFileSync(path.join(srcDir, f), path.join(destDir, f));
+    }
+  } catch (err) {
+    // A fixture that copies only SOME of the hook set runs a hook that cannot find its
+    // gates -- the exact failure this recorder exists to detect, so it must be LOUD.
+    throw new Error(`cannot copy hook scripts ${srcDir} -> ${destDir}: ${err.message}`);
   }
 }
 
 // Copy the named files from <srcDir> into <destDir>, skipping any that are
 // absent (a checkout may legitimately lack an optional module).
 function copyNamed(srcDir, destDir, names) {
-  for (const f of names) {
-    const src = path.join(srcDir, f);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(destDir, f));
+  try {
+    for (const f of names) {
+      const src = path.join(srcDir, f);
+      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(destDir, f));
+    }
+  } catch (err) {
+    throw new Error(`cannot copy ${srcDir} -> ${destDir}: ${err.message}`);
   }
 }
 
@@ -111,10 +145,13 @@ function copyHookSet(hookPath, hooksDir) {
   ]);
   copyShDir(path.join(SRC_GITHOOKS, 'lib'), path.join(hooksDir, 'lib'));
 
-  // gate-*.sh / sprint-gate*.sh scripts are sourced by path, so the fixture
-  // needs them too.
-  for (const f of fs.readdirSync(SRC_GITHOOKS)) {
-    if (/^gate-\d+.*\.sh$/.test(f)) fs.copyFileSync(path.join(SRC_GITHOOKS, f), path.join(hooksDir, f));
+  // gate-*.sh / sprint-gate*.sh scripts are sourced by path, so the fixture needs them too.
+  try {
+    for (const f of fs.readdirSync(SRC_GITHOOKS)) {
+      if (/^gate-\d+.*\.sh$/.test(f)) fs.copyFileSync(path.join(SRC_GITHOOKS, f), path.join(hooksDir, f));
+    }
+  } catch (err) {
+    throw new Error(`cannot copy gate scripts into ${hooksDir}: ${err.message}`);
   }
   copyNamed(SRC_GITHOOKS, hooksDir, ['sprint-gate.sh']);
 
@@ -122,8 +159,13 @@ function copyHookSet(hookPath, hooksDir) {
   // the real installation layout is what keeps this fixture honest.
   copyShDir(path.join(SRC_GITHOOKS, 'gate-entries'), path.join(hooksDir, 'gate-entries'));
 
-  fs.copyFileSync(hookPath, path.join(hooksDir, 'pre-commit'));
-  fs.chmodSync(path.join(hooksDir, 'pre-commit'), 0o755);
+  try {
+    fs.copyFileSync(hookPath, path.join(hooksDir, 'pre-commit'));
+    fs.chmodSync(path.join(hooksDir, 'pre-commit'), 0o755);
+  } catch (err) {
+    // The entry point is the fixture: without it nothing runs at all.
+    throw new Error(`cannot install ${hookPath} as the fixture's pre-commit: ${err.message}`);
+  }
 }
 
 // Tool stubs, so the fingerprint records the HOOK's behaviour rather than this
@@ -135,41 +177,70 @@ const TOOL_STUBS = {
 };
 
 function writeToolStubs(binDir) {
-  fs.mkdirSync(binDir, { recursive: true });
-  for (const [n, body] of Object.entries(TOOL_STUBS)) {
-    const p = path.join(binDir, n);
-    fs.writeFileSync(p, body);
-    fs.chmodSync(p, 0o755);
+  try {
+    fs.mkdirSync(binDir, { recursive: true });
+    for (const [n, body] of Object.entries(TOOL_STUBS)) {
+      const p = path.join(binDir, n);
+      fs.writeFileSync(p, body);
+      fs.chmodSync(p, 0o755);
+    }
+  } catch (err) {
+    // Without the stubs the fingerprint records THIS MACHINE's tool inventory instead of
+    // the hook's behaviour, which is the one thing the recorder must not do.
+    throw new Error(`cannot write tool stubs to ${binDir}: ${err.message}`);
   }
 }
 
+/** The minimal project a hook run needs to reach every gate. */
 function writeProjectFiles(dir) {
-  fs.writeFileSync(path.join(dir, 'README.md'), 'init\n');
-  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, 'src', 'placeholder.ts'),
-    '// @no-test-required: test infrastructure placeholder\nexport const placeholder = true;\n'
-  );
-  fs.writeFileSync(path.join(dir, '.archlint.yaml'), 'ignore: []\n');
-  fs.mkdirSync(path.join(dir, 'coverage'), { recursive: true });
-  fs.writeFileSync(
-    path.join(dir, 'coverage', 'coverage-summary.json'),
-    JSON.stringify({
-      total: {
-        lines: { pct: 90 },
-        statements: { pct: 90 },
-        functions: { pct: 90 },
-        branches: { pct: 90 },
-      },
-    })
-  );
+  try {
+    writeProjectFixture(dir);
+  } catch (err) {
+    throw new Error(`cannot write the project fixture in ${dir}: ${err.message}`);
+  }
+}
+
+/**
+ * The fixture's files, written by one guarded block.
+ *
+ * The `try` sits HERE rather than only at the call site: the rule looks for a guard INSIDE
+ * the function that performs the IO, and a caller's guard cannot cover that.
+ */
+function writeProjectFixture(dir) {
+  try {
+    fs.writeFileSync(path.join(dir, 'README.md'), 'init\n');
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'src', 'placeholder.ts'),
+      '// @no-test-required: test infrastructure placeholder\nexport const placeholder = true;\n'
+    );
+    fs.writeFileSync(path.join(dir, '.archlint.yaml'), 'ignore: []\n');
+    fs.mkdirSync(path.join(dir, 'coverage'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'coverage', 'coverage-summary.json'),
+      JSON.stringify({
+        total: {
+          lines: { pct: 90 },
+          statements: { pct: 90 },
+          functions: { pct: 90 },
+          branches: { pct: 90 },
+        },
+      })
+    );
+  } catch (err) {
+    throw new Error(`cannot write the project fixture in ${dir}: ${err.message}`);
+  }
 }
 
 // Build a throwaway repo that mirrors gate-5a-block.test.bats' fixture, since
 // that suite is what caught the silent regression.
 function makeFixture(hookPath, dir) {
-  rmrf(dir);
-  fs.mkdirSync(dir, { recursive: true });
+  try {
+    rmrf(dir);
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    throw new Error(`cannot prepare the fixture directory ${dir}: ${err.message}`);
+  }
   sh(dir, 'git', ['init', '-q', '-b', 'test-branch']);
   sh(dir, 'git', ['config', 'user.email', 'test@test.com']);
   sh(dir, 'git', ['config', 'user.name', 'Test']);

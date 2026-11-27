@@ -28,32 +28,53 @@ interface BraceScan {
 }
 
 /**
- * Find the LAST index at which brace depth returned to zero, scanning `code` from
- * `startPos`.
+ * Find the FIRST index at which brace depth returned to zero, scanning `code`
+ * from `startPos`.
  *
- * The last crossing is the declaration's real closing brace: a nested class or
- * closure sits INSIDE the declaration and so cannot be the last one at depth zero.
- * The first crossing is deliberately not used -- measured, an unterminated heredoc
- * leaves unmatched `{` in the text, so the first zero-crossing lands mid-body and
- * reported a five-level `if` chain as depth 4.
+ * The first crossing is the declaration's own closing brace: from the
+ * declaration's start the depth goes up at its `{` and back to zero exactly at
+ * its `}`, so the first zero-crossing cannot belong to an enclosing scope.
+ *
+ * ## Why not the last crossing (the original implementation)
+ *
+ * It took the LAST zero-crossing of the whole file, on the reasoning that a
+ * nested class or closure sits INSIDE the declaration and therefore cannot be
+ * the last crossing. That reasoning only holds for the declaration that ends
+ * the file. For a method inside a class the last zero-crossing is the CLASS's
+ * closing brace, so the extracted block ran from the method's first line to the
+ * end of the file. `length` is derived from that block, so every method reported
+ * "distance to EOF":
+ *
+ *     public function first() { return 1; }   // 1 line -> reported 74 lines
+ *
+ * Measured on a real 475-line file: a 33-line constructor was reported as 423
+ * lines, a 5-line helper as 93. Every PHP file longer than the 50-line threshold
+ * consequently produced unfixable `clean-code.long-function` warnings -- 89 of
+ * them across 6 files, while an independent measurement found zero functions
+ * actually over 50 lines.
+ *
+ * ## Why the "first crossing" was believed unsafe
+ *
+ * The earlier comment recorded that an unterminated heredoc leaves unmatched
+ * `{` in the text, so the first zero-crossing lands mid-body. That hazard is
+ * handled upstream: `extractCodeBlock` scans a `stripPhpLiterals()` view, where
+ * heredoc/nowdoc bodies are blanked, so their braces never reach `stepDepth`.
+ * A test in php.test.ts pins this ("is not confused by a heredoc containing
+ * braces").
  *
  * `balanced` is false when the scan never returns to zero, the signal that the
  * input is malformed and no crossing is trustworthy.
  */
-function lastBalancedEnd(code: string, startPos: number): BraceScan {
+function firstBalancedEnd(code: string, startPos: number): BraceScan {
   let depth = 0;
   let seenBrace = false;
-  let endPos = -1;
   for (let i = startPos; i < code.length; i++) {
-    if (code[i] === '{') {
-      depth++;
-      seenBrace = true;
-    } else if (code[i] === '}') {
-      depth--;
-      if (seenBrace && depth === 0) endPos = i + 1;
-    }
+    const step = stepDepth(code[i], depth, seenBrace);
+    depth = step.depth;
+    seenBrace = step.seenBrace;
+    if (step.closedAtEnd) return { endPos: i + 1, balanced: true };
   }
-  return { endPos, balanced: depth === 0 };
+  return { endPos: -1, balanced: depth === 0 };
 }
 
 export class PhpAdapter extends BaseAdapter implements Adapter {
@@ -105,7 +126,7 @@ export class PhpAdapter extends BaseAdapter implements Adapter {
    */
   protected extractCodeBlock(startPos: number, maxFallback: number = 100): string {
     const blanked = stripPhpLiterals(this.fileContent);
-    const scan = lastBalancedEnd(blanked, startPos);
+    const scan = firstBalancedEnd(blanked, startPos);
 
     // Unterminated heredoc: the text never rebalances, so no crossing is a real
     // boundary. Fall back to the last `}` in the file rather than a boundary that
@@ -192,14 +213,25 @@ function measureNesting(stripped: string): number {
   let depth = 0;
   let maxDepth = 0;
   for (const ch of stripped) {
-    if (ch === '{') {
-      depth++;
-      if (depth > maxDepth) maxDepth = depth;
-    } else if (ch === '}') {
-      depth--;
-    }
+    depth = stepDepth(ch, depth, false).depth;
+    maxDepth = Math.max(maxDepth, depth);
   }
   return maxDepth > 0 ? maxDepth : 0;
+}
+
+/**
+ * Apply one character to a brace depth.
+ *
+ * `depth` may go NEGATIVE, and the callers depend on it: a `}` before any `{` is a
+ * stray closer, and tracking it keeps a later `{` from being mistaken for a balanced
+ * block. `closedAtEnd` is true only when a brace pair closed back to zero -- which is
+ * what makes the LAST balanced block findable rather than the first.
+ */
+function stepDepth(ch: string, depth: number, seenBrace: boolean) {
+  if (ch === '{') return { depth: depth + 1, seenBrace: true, closedAtEnd: false };
+  if (ch !== '}') return { depth, seenBrace, closedAtEnd: false };
+  const next = depth - 1;
+  return { depth: next, seenBrace, closedAtEnd: seenBrace && next === 0 };
 }
 
 /**
@@ -217,7 +249,8 @@ function blankLineComment(code: string, start: number): { emit: string; last: nu
 }
 
 /** Blank one block comment, including its delimiters. */
-function blankBlockComment(code: string, start: number): { emit: string; last: number } {  let i = start + 2;
+function blankBlockComment(code: string, start: number): { emit: string; last: number } {
+  let i = start + 2;
   let emit = '  ';
   while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
     emit += ' ';
@@ -225,7 +258,19 @@ function blankBlockComment(code: string, start: number): { emit: string; last: n
   }
   if (i < code.length) {
     emit += '  ';
-    i++;
+    // Advance PAST the closing `*` and `/` (two characters, two blanks).
+    //
+    // `last` is the STOP index, and the caller resumes at `last` — the same
+    // contract as blankLineComment. Incrementing once here made the helper
+    // consume `*` but stop on `/`, so `stripPhpLiterals` then swallowed the
+    // character after `*/` as well. Each block comment therefore shortened the
+    // output by one character, and because `stripPhpLiterals` promises
+    // "preserving length so brace positions stay meaningful", every position
+    // AFTER the first block comment drifted. Measured: a 30,587-byte file came
+    // back 181 bytes short, and `extractCodeBlock` — which re-uses the raw
+    // match index against the blanked view — cut a 9-line method into the
+    // 113-line span up to the next balanced brace.
+    i += 2;
   }
   return { emit, last: i };
 }
@@ -275,6 +320,51 @@ const HEREDOC_OPEN = /<<<[ \t]*(["']?)([A-Za-z_]\w*)\1[ \t]*\r?\n/y;
  * followed by a non-identifier character, so a line whose content merely starts
  * with the same word does not terminate the block early.
  */
+/**
+ * Whether this line closes the heredoc.
+ *
+ * The terminator must be followed by END OF LINE, whitespace, or a
+ * statement/expression terminator -- not the start of a longer word. The comma matters:
+ * PHP allows `SQL,` when the heredoc is an array element, and missing that case
+ * over-blanked silently, the same quiet failure class as truncation.
+ */
+function closesHeredoc(line: string, terminator: string): boolean {
+  const trimmed = line.trimStart();
+  if (!trimmed.startsWith(terminator)) return false;
+  const afterWord = trimmed.charAt(terminator.length);
+  return afterWord === '' || /[\s;,\]})]/.test(afterWord);
+}
+
+/** The index just past this line, newline included. */
+function nextLineStart(code: string, lineEnd: number): number {
+  return lineEnd < code.length ? lineEnd + 1 : lineEnd;
+}
+
+/**
+ * A heredoc with no terminator is MALFORMED source, and the honest reading is to treat
+ * the opener as ordinary text: with no closing marker there is no way to know where the
+ * string ends, so the gate reports what the braces literally say rather than guessing a
+ * boundary.
+ *
+ * The alternative -- blanking to end-of-file -- silently disabled every rule for the rest
+ * of the method (measured: a five-level `if` chain reported depth 1 and length 4). A
+ * malformed file must degrade to LESS CHECKING on that construct, never to a quiet pass
+ * on the whole method.
+ */
+/**
+ * The "blanking" result for a heredoc that has NO terminator.
+ *
+ * It returns the source UNCHANGED, and that is the point: an unterminated heredoc is a
+ * syntax error, so the braces inside it are real characters the reader can see. Blanking
+ * them would hide the mistake behind a result that looks parsed -- the opposite of what
+ * the blanking exists for. Pinned by a test, because "kept on purpose" and "leaked
+ * unblanked" look identical in the output (review technical CI-01).
+ */
+function unterminatedHeredoc(code: string, start: number, openerLength: number) {
+  const last = start + openerLength - 1;
+  return { emit: code.slice(start, last), last };
+}
+
 function blankHeredoc(code: string, start: number): { emit: string; last: number } | undefined {
   HEREDOC_OPEN.lastIndex = start;
   const opener = HEREDOC_OPEN.exec(code);
@@ -283,51 +373,30 @@ function blankHeredoc(code: string, start: number): { emit: string; last: number
   const terminator = opener[2];
   let i = start + opener[0].length;
   let emit = ' '.repeat(opener[0].length);
-  let closed = false;
 
   while (i < code.length) {
-    const lineStart = i;
-    let lineEnd = code.indexOf('\n', i);
-    if (lineEnd < 0) lineEnd = code.length;
-    const line = code.slice(lineStart, lineEnd);
-    const trimmed = line.trimStart();
-
-    if (trimmed.startsWith(terminator)) {
-      const afterWord = trimmed.charAt(terminator.length);
-      // End of line, whitespace, or a statement/expression terminator -- not the
-      // start of a longer word, and not a comma either: PHP allows `SQL,` when the
-      // heredoc is an array element. Missing the comma case over-blanked silently,
-      // which is the same class of quiet failure as truncation.
-      if (afterWord === '' || /[\s;,\]})]/.test(afterWord)) {
-        emit += ' '.repeat(line.length);
-        i = lineEnd;
-        closed = true;
-        break;
-      }
-    }
-    emit += ' '.repeat(line.length);
-    if (lineEnd < code.length) {
-      emit += '\n';
-      i = lineEnd + 1;
-    } else {
-      i = lineEnd;
-    }
+    const lineEnd = nextLineEnd(code, i);
+    const line = code.slice(i, lineEnd);
+    const closes = closesHeredoc(line, terminator);
+    // Cover the line AND the newline that ends it. Advancing to nextLineStart
+    // without emitting the newline shortened the output by one character per
+    // heredoc line, which broke the length contract `stripPhpLiterals` promises
+    // and shifted every brace position after the heredoc.
+    const span = nextLineStart(code, lineEnd) - i;
+    emit += ' '.repeat(span);
+    i = nextLineStart(code, lineEnd);
+    // `last` is the STOP index (exclusive): the caller resumes there, and its
+    // own `i++` moves one further. The terminating line's newline is already in
+    // `emit`, so stop at nextLineStart, not at lineEnd, or it is emitted twice.
+    if (closes) return { emit, last: nextLineStart(code, lineEnd) };
   }
+  return unterminatedHeredoc(code, start, opener[0].length);
+}
 
-  // A heredoc with no terminator is malformed source. Treating the opener as
-  // ordinary text keeps the rest of the method analysable, and the unmatched `{`
-  // inside the unterminated body then count as code. That is the honest reading:
-  // with no closing marker there is no way to know where the string ends, so the
-  // gate reports what the braces literally say rather than guessing a boundary.
-  //
-  // The alternative -- blanking to end-of-file -- silently disabled every rule for
-  // the rest of the method (measured: a five-level `if` chain reported depth 1 and
-  // length 4). A malformed file must degrade to less checking on that construct,
-  // never to a quiet pass on the whole method.
-  if (!closed) {
-    return { emit: code.slice(start, start + opener[0].length - 1), last: start + opener[0].length - 1 };
-  }
-  return { emit, last: i };
+/** The index of this line's terminating newline, or the end of the text. */
+function nextLineEnd(code: string, from: number): number {
+  const found = code.indexOf('\n', from);
+  return found < 0 ? code.length : found;
 }
 
 /**
@@ -358,16 +427,30 @@ function blankLiteralAt(code: string, index: number): { emit: string; last: numb
   const single = SINGLE_CHAR_LITERAL[ch];
   if (single) return single(code, index);
 
-  // `//` versus `/*`: same first character, so this needs lookahead.
-  if (ch === '/') {
-    if (code[index + 1] === '/') return blankLineComment(code, index);
-    return code[index + 1] === '*' ? blankBlockComment(code, index) : undefined;
-  }
-  // `<<<` opens a heredoc/nowdoc; a lone `<` is an operator.
-  if (ch === '<' && code[index + 1] === '<' && code[index + 2] === '<') {
-    return blankHeredoc(code, index);
-  }
+  if (ch === '/') return blankSlashAt(code, index);
+  if (ch === '<') return blankLessThanAt(code, index);
   return undefined;
+}
+
+/**
+ * `//` versus `/*`: the same first character, so only lookahead tells them apart.
+ *
+ * A lone `/` is DIVISION, and blanking from it would swallow the rest of the line.
+ */
+function blankSlashAt(code: string, index: number) {
+  if (code[index + 1] === '/') return blankLineComment(code, index);
+  return code[index + 1] === '*' ? blankBlockComment(code, index) : undefined;
+}
+
+/**
+ * `<<<` opens a heredoc or nowdoc; a lone `<` (or `<<`) is an OPERATOR.
+ *
+ * All three characters are required: `$a << 2` is a bit shift, and treating it as a
+ * heredoc opener would blank the rest of the file looking for a terminator.
+ */
+function blankLessThanAt(code: string, index: number) {
+  const isHeredoc = code[index + 1] === '<' && code[index + 2] === '<';
+  return isHeredoc ? blankHeredoc(code, index) : undefined;
 }
 
 /**
@@ -384,7 +467,7 @@ function blankLiteralAt(code: string, index: number): { emit: string; last: numb
  * CCN 23: seven branch points sharing one index variable read as deeply nested
  * even though each branch is trivial.
  */
-function stripPhpLiterals(code: string): string {
+export function stripPhpLiterals(code: string): string {
   let out = '';
   for (let i = 0; i < code.length; i++) {
     const slice = blankLiteralAt(code, i);
@@ -393,10 +476,17 @@ function stripPhpLiterals(code: string): string {
       continue;
     }
     out += slice.emit;
-    // `last` is the index the helper stopped AT (the terminating newline or
-    // closing delimiter, already emitted). Resume just past it; the loop's own
-    // `i++` would otherwise consume one character twice.
-    i = slice.last;
+    // `last` is the index the helper stopped AT, already past everything it
+    // emitted. The loop's own `i++` supplies the final step, so resume at
+    // `last - 1`; assigning `last` directly skipped one source character per
+    // literal.
+    //
+    // That off-by-one broke the length contract this function exists to keep
+    // ("preserving length so brace positions stay meaningful"). Measured on a
+    // 30,587-byte PHP file: 181 bytes short, and `extractCodeBlock` — which
+    // reuses the raw match index against this blanked view — cut a 9-line method
+    // into a 113-line span reaching the next balanced brace.
+    i = slice.last - 1;
   }
   return out;
 }
@@ -435,31 +525,70 @@ const BRACKET_DELTA: Readonly<Record<string, readonly [number, number, number]>>
   '}': [0, 0, -1],
 };
 
-function scanParamList(stripped: string, open: number): ParamScan {
-  let parens = 0;
-  let brackets = 0;
-  let braces = 0;
-  let commas = 0;
-  let sawContent = false;
-  for (let i = open; i < stripped.length; i++) {
-    const ch = stripped[i];
-    const delta = BRACKET_DELTA[ch];
+/**
+ * Whether the parameter list just closed.
+ *
+ * `i > open` guards the scan's own opening paren: without it the loop ends on its first
+ * character and every function reports zero parameters.
+ */
+function closesList(parens: number, i: number, open: number): boolean {
+  return parens === 0 && i > open;
+}
 
-    // Brackets are a table lookup, not a branch cascade: the cascade measured
-    // CCN 14-15 against a block threshold of 10 while each arm was one increment.
-    if (delta) {
-      parens += delta[0];
-      brackets += delta[1];
-      braces += delta[2];
-      if (parens === 0 && i > open) break;
-      continue;
-    }
+/** The running state of one parameter-list scan. */
+interface ParamScanState {
+  parens: number;
+  brackets: number;
+  braces: number;
+  commas: number;
+  sawContent: boolean;
+}
 
-    if (!/\s/.test(ch)) sawContent = true;
-    // A comma separates parameters only at the list's own outermost level.
-    if (ch === ',' && parens === 1 && brackets === 0 && braces === 0) commas++;
+/**
+ * Consume one character of a parameter list.
+ *
+ * @returns whether the list just closed, so the caller stops
+ */
+function consumeParamChar(ch: string, i: number, open: number, state: ParamScanState): boolean {
+  const delta = BRACKET_DELTA[ch];
+  // Brackets are a table lookup, not a branch cascade: the cascade measured CCN 14-15
+  // against a block threshold of 10 while each arm was one increment.
+  if (delta) {
+    state.parens += delta[0];
+    state.brackets += delta[1];
+    state.braces += delta[2];
+    return closesList(state.parens, i, open);
   }
-  return { commas, sawContent };
+  if (isParamSeparator(ch, state)) state.commas++;
+  if (!/\s/.test(ch)) state.sawContent = true;
+  return false;
+}
+
+function scanParamList(stripped: string, open: number): ParamScan {
+  const state: ParamScanState = { parens: 0, brackets: 0, braces: 0, commas: 0, sawContent: false };
+  for (let i = open; i < stripped.length; i++) {
+    if (consumeParamChar(stripped[i], i, open, state)) break;
+  }
+  return { commas: state.commas, sawContent: state.sawContent };
+}
+
+/** The nesting depths at one point in a parameter list. */
+interface ParamDepth {
+  parens: number;
+  brackets: number;
+  braces: number;
+}
+
+/**
+ * Whether this character separates two parameters.
+ *
+ * Only a comma at the list's OWN outermost level: `parens === 1` because the scan
+ * started at the opening paren, and no array or brace nesting open. A comma inside a
+ * default value (`[1, 2]`, `foo(1, 2)`, `'a,b'`) is content, not a separator.
+ */
+function isParamSeparator(ch: string, depth: ParamDepth): boolean {
+  if (ch !== ',') return false;
+  return depth.parens === 1 && depth.brackets === 0 && depth.braces === 0;
 }
 
 /**

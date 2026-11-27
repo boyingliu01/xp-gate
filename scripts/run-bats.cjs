@@ -38,8 +38,14 @@ function bashAvailable() {
   });
 }
 
+/** Whether the bats runner and the bash it needs are both present. */
+async function batsAvailable() {
+  if (!fs.existsSync(BATS_BIN) || !fs.existsSync(BATS_DIR)) return false;
+  return bashAvailable();
+}
+
 (async () => {
-  if (!fs.existsSync(BATS_BIN) || !fs.existsSync(BATS_DIR) || !(await bashAvailable())) {
+  if (!(await batsAvailable())) {
     console.log('SKIP test:bats — bash or the bats runner is not available in this environment.');
     console.log('         The BATS hook contracts still run in CI (quality-gates.yml, Gate 5b).');
     process.exit(0);

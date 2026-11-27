@@ -128,25 +128,34 @@ function mergeEntryList(rebuilt, key, list) {
  * Rewrite a parsed baseline in place, returning the number of fields changed.
  * Exported for the idempotency test.
  */
-function normalizeBaseline(parsed) {
-  if (!parsed || typeof parsed !== 'object' || !parsed.results || typeof parsed.results !== 'object') {
-    return 0;
-  }
+/** Whether this looks like a detect-secrets baseline. */
+function hasResultsMap(parsed) {
+  return Boolean(parsed) && typeof parsed === 'object'
+    && Boolean(parsed.results) && typeof parsed.results === 'object';
+}
 
+/**
+ * Rebuild one `results` entry under its normalised key.
+ *
+ * @returns how many things changed for this entry
+ */
+function rebuildEntry(rebuilt, rawKey, entries) {
+  const key = normalizePath(rawKey);
+  const list = requireEntryArray(rawKey, entries);
+  const changed = (key === rawKey ? 0 : 1) + normalizeEntryFilenames(list);
+  // Two keys can normalise to the SAME one (`a\b` and `a/b`), so a collision merges
+  // rather than overwriting -- overwriting would silently drop findings.
+  if (Object.prototype.hasOwnProperty.call(rebuilt, key)) mergeEntryList(rebuilt, key, list);
+  else rebuilt[key] = list;
+  return changed;
+}
+
+function normalizeBaseline(parsed) {
+  if (!hasResultsMap(parsed)) return 0;
   let changed = 0;
   const rebuilt = {};
   for (const [rawKey, entries] of Object.entries(parsed.results)) {
-    const key = normalizePath(rawKey);
-    if (key !== rawKey) changed++;
-
-    const list = requireEntryArray(rawKey, entries);
-    changed += normalizeEntryFilenames(list);
-
-    if (Object.prototype.hasOwnProperty.call(rebuilt, key)) {
-      mergeEntryList(rebuilt, key, list);
-    } else {
-      rebuilt[key] = list;
-    }
+    changed += rebuildEntry(rebuilt, rawKey, entries);
   }
   parsed.results = rebuilt;
   return changed;
@@ -168,6 +177,24 @@ function serialize(parsed, eol = '\n') {
 }
 
 /** The line ending a file already uses; LF for a file without any. */
+/**
+ * Count CRLF and bare-LF line terminators.
+ *
+ * A terminator is an LF optionally PRECEDED by a CR, so the CR itself is never counted.
+ * Counting raw characters instead is the defect this guards: `includes('\r\n')` also
+ * matches a CRLF embedded inside a JSON string VALUE, and then rewrote the whole file
+ * with CRLF while the parsed JSON still compared EQUAL -- a silent mass rewrite.
+ */
+function countTerminators(text, CR, LF) {
+  let crlf = 0;
+  let lfOnly = 0;
+  for (let i = text.indexOf(LF); i !== -1; i = text.indexOf(LF, i + 1)) {
+    if (i > 0 && text[i - 1] === CR) crlf++;
+    else lfOnly++;
+  }
+  return { crlf, lfOnly };
+}
+
 function detectEol(text) {
   // Count line TERMINATORS, not raw occurrences. `text.includes('\r\n')` also
   // matched a CRLF embedded inside a JSON string value, and then rewrote the
@@ -181,16 +208,59 @@ function detectEol(text) {
   // CRLF file, because a CRLF is preceded by the line's last character.)
   const CR = String.fromCharCode(13);
   const LF = String.fromCharCode(10);
-  let crlf = 0;
-  let lfOnly = 0;
-  for (let i = text.indexOf(LF); i !== -1; i = text.indexOf(LF, i + 1)) {
-    if (i > 0 && text[i - 1] === CR) crlf++;
-    else lfOnly++;
-  }
+  const { crlf, lfOnly } = countTerminators(text, CR, LF);
   if (crlf === 0) return LF;
   // Whichever terminator dominates; a tie goes to CRLF so a pure-CRLF file is
   // never silently converted.
   return crlf >= lfOnly ? CR + LF : LF;
+}
+
+/** Exit code for "there is no usable evidence", never 0 and never 1. */
+const NO_EVIDENCE = 2;
+
+/**
+ * Read and parse the baseline.
+ *
+ * Invalid JSON is exit 2 ("no evidence"), never 1: under `--check`, 1 means "needs
+ * normalizing", and reporting a BROKEN file that way sends the caller looking for a
+ * rewrite instead of a fix.
+ */
+function loadBaseline(target) {
+  const original = fs.readFileSync(target, 'utf8');
+  try {
+    return { original, parsed: JSON.parse(original) };
+  } catch (err) {
+    console.error(`FAIL — baseline is not valid JSON: ${err.message}`);
+    process.exit(NO_EVIDENCE);
+  }
+}
+
+/**
+ * Normalize in place, reporting the change count.
+ *
+ * The guard exists because the TypeError from `normalizeBaseline` used to escape as an
+ * uncaught exception: exit 1 plus a raw stack trace, which under `--check` reads as
+ * "needs normalizing" -- the same wrong verdict as invalid JSON.
+ */
+function countChanges(parsed) {
+  // A baseline with no usable `results` map is NOT "already normalized" -- it is a file
+  // that cannot answer the question. `normalizeBaseline` returns 0 for it, which `main`
+  // would print as "OK, 0 fields changed" and `--check` would exit 0 on, so a truncated
+  // or hand-broken baseline passed the check that exists to protect it (review FC-02).
+  //
+  // Checked here rather than inside `normalizeBaseline`: that function is exported and
+  // its 0 return is a legitimate answer for a caller that only counts, while exit codes
+  // are this script's business.
+  if (!hasResultsMap(parsed)) {
+    console.error('FAIL — baseline has no usable results map; cannot tell whether paths are normalized');
+    process.exit(NO_EVIDENCE);
+  }
+  try {
+    return normalizeBaseline(parsed);
+  } catch (err) {
+    console.error(`FAIL — baseline is malformed: ${err.message}`);
+    process.exit(NO_EVIDENCE);
+  }
 }
 
 function main(argv) {
@@ -204,27 +274,8 @@ function main(argv) {
     process.exit(2);
   }
 
-  const original = fs.readFileSync(target, 'utf8');
-  let parsed;
-  try {
-    parsed = JSON.parse(original);
-  } catch (err) {
-    console.error(`FAIL — baseline is not valid JSON: ${err.message}`);
-    process.exit(2);
-  }
-
-  // A malformed structure is "no usable evidence", which this script reports as
-  // exit 2 everywhere else. Without this guard the TypeError from
-  // normalizeBaseline escaped as an uncaught exception: exit 1 plus a raw stack
-  // trace, which under `--check` reads as "needs normalizing" — the one verdict
-  // that would send a caller looking for a rewrite instead of a broken baseline.
-  let changed;
-  try {
-    changed = normalizeBaseline(parsed);
-  } catch (err) {
-    console.error(`FAIL — baseline is malformed: ${err.message}`);
-    process.exit(2);
-  }
+  const { original, parsed } = loadBaseline(target);
+  const changed = countChanges(parsed);
   const next = serialize(parsed, detectEol(original));
 
   if (next === original) {
@@ -238,7 +289,14 @@ function main(argv) {
     process.exit(1);
   }
 
-  fs.writeFileSync(target, next);
+  // A write that fails must say so: reporting NORMALIZED for a file that was not
+  // written would send the caller on to commit an unchanged baseline.
+  try {
+    fs.writeFileSync(target, next);
+  } catch (err) {
+    console.error(`FAIL — cannot write ${target}: ${err.message}`);
+    process.exit(NO_EVIDENCE);
+  }
   console.log(`NORMALIZED — ${target}: ${changed} path field(s) rewritten to forward slashes.`);
   console.log('Review before committing: this must contain no new secrets.');
 }

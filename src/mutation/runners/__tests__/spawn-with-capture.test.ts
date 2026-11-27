@@ -1,0 +1,111 @@
+/**
+ * @test REQ-MUTATION-SPAWN
+ * @intent 每个 mutation runner 都自己实现了一遍"起子进程 + 收集 stdout/stderr +
+ *         超时先 SIGTERM 后 SIGKILL"。四份拷贝意味着超时语义有四处可能分叉——
+ *         实测 2026-11-24：pitest / stryker / go-mutant / gremlins 之间有 116 行重复
+ *         （jscpd，同一段 timeoutId + child.on('close') 骨架）。
+ *
+ *         抽出一处后，超时行为只有一个定义，测一遍等于测四个 runner。
+ *
+ * @covers AC-MUTATION-SPAWN-01
+ * @covers AC-MUTATION-SPAWN-02
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { spawnWithCapture, runMutationCommand } from '../spawn-with-capture';
+
+describe('spawnWithCapture', () => {
+  it('collects stdout, stderr and the exit code', async () => {
+    const result = await spawnWithCapture(
+      process.execPath,
+      ['-e', 'process.stdout.write("out"); process.stderr.write("err"); process.exit(0);'],
+      { timeoutMs: 10_000, cwd: process.cwd() },
+    );
+    expect(result.stdout).toBe('out');
+    expect(result.stderr).toBe('err');
+    expect(result.code).toBe(0);
+    expect(result.timedOut).toBe(false);
+  });
+
+  it('reports a non-zero exit code without throwing', async () => {
+    const result = await spawnWithCapture(
+      process.execPath,
+      ['-e', 'process.exit(3);'],
+      { timeoutMs: 10_000, cwd: process.cwd() },
+    );
+    expect(result.code).toBe(3);
+    expect(result.timedOut).toBe(false);
+  });
+
+  it('marks the run as timed out and kills the child', async () => {
+    const result = await spawnWithCapture(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 60_000);'],
+      { timeoutMs: 150, cwd: process.cwd() },
+    );
+    expect(result.timedOut).toBe(true);
+    // A timed-out child has no exit code of its own to report.
+    expect(result.code).toBeNull();
+  });
+
+  /**
+   * @covers AC-MUTATION-SPAWN-02
+   * A spawn that cannot even start must surface as an error result rather than
+   * an unhandled rejection: the runners call this inside a Promise chain that
+   * would otherwise reject and be swallowed by the caller's catch, turning a
+   * broken toolchain into "no findings".
+   */
+  it('reports a spawn failure as an error result instead of rejecting', async () => {
+    const result = await spawnWithCapture(
+      '/nonexistent/binary-for-test',
+      [],
+      { timeoutMs: 5_000, cwd: process.cwd() },
+    );
+    expect(result.timedOut).toBe(false);
+    expect(result.code).toBeNull();
+    expect(result.error).toBeTruthy();
+  });
+
+  it('does not leave a timer behind after a fast exit', async () => {
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    await spawnWithCapture(process.execPath, ['-e', 'process.exit(0);'], {
+      timeoutMs: 60_000,
+      cwd: process.cwd(),
+    });
+    expect(clearSpy).toHaveBeenCalled();
+    clearSpy.mockRestore();
+  });
+
+  it('escalates to SIGKILL when the child ignores SIGTERM', async () => {
+    // THE DEFECT THIS PINS: the escalation guard used `!child.killed`, but Node sets
+    // `killed` the moment `kill('SIGTERM')` is CALLED -- so it was already true and the
+    // SIGKILL never fired. A tool that traps TERM then held the gate open forever.
+    // `sleep` in a subshell that ignores TERM reproduces it in ~1s.
+    // `bash -c 'trap "" TERM; sleep 30'` does NOT work as a fixture: bash ignores TERM
+    // but keeps WAITING on `sleep`, which does not inherit the disposition. A Node
+    // process that installs its own SIGTERM handler ignores it reliably.
+    const ignoreTerm = 'process.on("SIGTERM",()=>{}); setInterval(()=>{},1000)';
+    const result = await spawnWithCapture(process.execPath, ['-e', ignoreTerm], {
+      timeoutMs: 300,
+      cwd: process.cwd(),
+    });
+    // The SIGKILL WORKED: the promise SETTLED at all (a hung SIGTERM would leave this
+    // pending until the vitest timeout) and the exit code is null, which is how a
+    // signal death is reported.
+    expect(result.timedOut).toBe(true);
+    expect(result.code).toBeNull();
+  }, 15_000);
+
+  it('reports a throwing parser as an absent report, not a rejection', async () => {
+    // If this REJECTED, the caller's catch would turn a parse bug into "the tool found
+    // nothing" -- a clean pass produced by an exception. A null report is the honest
+    // answer: nothing was read, so nothing is claimed.
+    const outcome = await runMutationCommand(
+      process.execPath,
+      ['-e', 'process.exit(0);'],
+      { timeoutMs: 10_000, cwd: process.cwd() },
+      () => { throw new Error('bad report'); },
+    );
+    expect(outcome.report).toBeNull();
+    expect(outcome.timedOut).toBe(false);
+  });
+});

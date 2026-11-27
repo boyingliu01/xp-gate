@@ -91,26 +91,33 @@ export class PythonAdapter extends BaseAdapter implements Adapter {
     
     const codeLines = [];
     let indentLevel = -1;
-    
+
     for (let i = startLine; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (i === startLine) {
-        indentLevel = line.search(/\S/);
-        codeLines.push(line);
-      } else {
-        const currentIndent = line.search(/\S/);
-        
-        if (line.trim() === '' || currentIndent > indentLevel) {
-          codeLines.push(line);
-        } else if (currentIndent >= 0 && currentIndent <= indentLevel) {
-          break;
-        }
-      }
-      
-      if (codeLines.length > 200) break;
+      if (i === startLine) { indentLevel = lines[i].search(/\S/); codeLines.push(lines[i]); continue; }
+      if (!continuesBlock(lines[i], indentLevel)) break;
+      codeLines.push(lines[i]);
+      if (codeLines.length > MAX_BLOCK_LINES) break;
     }
-    
+
     return codeLines.join('\n');
   }
+}
+
+/** How many lines a block may span before the scan gives up. */
+const MAX_BLOCK_LINES = 200;
+
+/**
+ * Whether this line is still inside the block.
+ *
+ * A blank line always belongs to the block it sits in -- otherwise a blank line between
+ * two methods would end the first one early, which is the single most common way a
+ * block-extent scan goes wrong in Python.
+ */
+function continuesBlock(line: string, indentLevel: number): boolean {
+  return isBlank(line) || line.search(/\S/) > indentLevel;
+}
+
+/** Whether this line carries no code at all. */
+function isBlank(line: string): boolean {
+  return line.trim() === '';
 }
