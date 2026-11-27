@@ -99,14 +99,10 @@ const RESCUE_WINDOW_LINES = 400;
 /**
  * Where a row's file belongs, first match wins.
  *
- * `TEST_PATH` is FIRST, and not for tidiness: the location rules below it are prefix
- * tests, so `plugins/dsh/client/client.test.js` matched `HOST_CLOSURE_PREFIX` and was
- * bucketed `host-closure` -- exempt from the production threshold -- before the test
- * pattern was ever consulted. A test file must not escape the threshold by where it
- * happens to live (review CI-01 / FC-01).
- *
- * Nothing in the repository has that shape today, which is why this is a latent bug
- * rather than a live one; the first `client/*.test.js` would have made it live.
+ * `TEST_PATH` must stay FIRST: the rules after it are LOCATION prefixes, so with any of
+ * them ahead, `plugins/dsh/client/client.test.js` is bucketed `host-closure` -- exempt
+ * from the production threshold -- and the test pattern is never consulted. Grouping the
+ * prefix rules together for tidiness reintroduces that bug (review CI-01 / FC-01).
  */
 const BUCKET_RULES = [
   [TEST_PATH, 'test'],
@@ -275,20 +271,24 @@ function isReadableFile(target) {
  * An unverified row above the threshold is the case where a wrong number would drive
  * a wrong decision, and the caller cannot tell it from a verified one.
  */
-function refuseUnverifiedRows(tally, srcPath, allowUnverified) {
+/** The default refusal: print and exit. Tests pass `opts.fail` instead. */
+function exitWithFailure(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+function refuseUnverifiedRows(tally, srcPath, allowUnverified, fail) {
   if (tally.unverified === 0) return;
-  // Still emit when asked, but SAY SO: an unmarked warning-free run is indistinguishable
-  // from a fully verified one, and an unverified high-CCN row can reach the baseline as
-  // though a human had checked it (review CI-02).
   if (allowUnverified) {
+    // Say so: without the warning these rows are indistinguishable from verified ones.
     console.error(
       `WARN - ${tally.unverified} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be `
         + `span-verified in ${srcPath}; --allow-unverified was given, so they are emitted UNVERIFIED`,
     );
     return;
   }
-  console.error(unverifiedFailure(tally.unverified, srcPath));
-  process.exit(1);
+  // Injected so the refusal path is testable (review technical CI-02).
+  fail(unverifiedFailure(tally.unverified, srcPath));
 }
 
 /** What a run without the flag says before refusing. */
@@ -333,7 +333,7 @@ function csvRows(srcPath, root, opts = {}) {
     const rewritten = rewriteCsvRow(line, { srcPath, root, sourceLines, tally });
     out.push(rewritten);
   }
-  refuseUnverifiedRows(tally, srcPath, opts.allowUnverified);
+  refuseUnverifiedRows(tally, srcPath, opts.allowUnverified, opts.fail ?? exitWithFailure);
   reportTally(tally, srcPath, opts.reportStats);
   // Only rows were rewritten; the trailing summary table is emitted by lizard
   // on a separate stream (stderr) when no --csv, so nothing else to fix here.
@@ -1035,8 +1035,7 @@ if (require.main === module) {
       fs.writeFileSync(tmp, input);
       try {
         // stderr only: the gate's parser must see nothing but rewritten CSV on stdout.
-        // Dead until now: nothing ever set `allowUnverified`, so the switch could not be
-        // turned on (review FC-02 asked whether a path enabled it by default; none did).
+        // Dead until now: nothing ever set `allowUnverified` (review FC-02).
         const allowUnverified = process.argv.slice(2).includes('--allow-unverified');
         process.stdout.write(csvRows(tmp, root, { reportStats: true, allowUnverified }));
       } finally {
