@@ -74,7 +74,16 @@ function applyRawFlag(argv, i, args, state) {
     return i;
   }
   const key = VALUE_FLAGS[flag];
-  if (!key) return i;
+  if (!key) {
+    // UNKNOWN flag: fail rather than ignore. Silently skipping it means a typo like
+    // `--expert` -> `--experts` falls back to the default behaviour instead of the
+    // caller's intent, which is the fail-open this gate exists to prevent (review FC-01).
+    if (flag.startsWith('-')) {
+      console.error(`[delphi-review] ERROR: unknown option ${flag}`);
+      process.exit(2);
+    }
+    return i;
+  }
   const value = requireFlagValue(argv, i, flag);
   args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
   return i + 1;
@@ -240,10 +249,10 @@ function resolveInputContent(args) {
       return fs.readFileSync(args.inputFile, 'utf8');
     } catch (err) {
       console.error(`[delphi-review] ERROR: Cannot read input file ${args.inputFile}: ${err.message}`);
-      // `process.exit` does not return; the `return ''` that used to sit here was
-      // unreachable and read as if this function could fall through (review CI-02).
+      // `process.exit` does not return. No statement follows it: a `throw` here is
+      // unreachable in production AND a live exception under a test that mocks
+      // `process.exit`, which is worse than dead code (review CI-02, twice).
       process.exit(1);
-      throw err;
     }
   }
   return args.input || '';
@@ -895,24 +904,3 @@ if (require.main !== module) {
   });
 }
 
-/**
- * Machine-wide `.delphi-config.json` path: `$XDG_CONFIG_HOME/xp-gate/`, or
- * `~/.config/xp-gate/` when the variable is unset.
- *
- * Exported so the path-parity test can hold this loader, the Gate MW validator
- * and the DSH plugin to one definition instead of three restatements.
- *
- * Deliberately declared at the END of the file. Function declarations hoist, so
- * readConfig above can call it, but placing it here keeps every line before the
- * old EOF byte-identical — which matters because `.ccn-baseline.json` anchors
- * anonymous functions by line number (`file::(anonymous)@657`). Adding these
- * lines near the top shifted that anchor to 676 and Gate 3 then read a
- * pre-existing CCN=24 function as a brand-new violation.
- *
- * @param {NodeJS.ProcessEnv} env
- * @returns {string}
- */
-function globalConfigPath(env) {
-  const configHome = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(configHome, 'xp-gate', '.delphi-config.json');
-}

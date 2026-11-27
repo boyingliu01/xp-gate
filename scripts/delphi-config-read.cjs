@@ -10,6 +10,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const {
   isNonEmptyString, isPlainObject, isValidTimeoutMs,
   clampConsensusSetting, expandEnvPlaceholder,
@@ -22,6 +23,22 @@ const {
  * treating a permission error as absence would silently route a run to another project's
  * config, which is how the 2026-10-03 quota incident happened.
  */
+/**
+ * Where the machine-wide config lives.
+ *
+ * Lives HERE, not in the caller, because this module is the one that reads it: it was
+ * defined in `delphi-external-review.cjs` while `shouldFallBack` above called it, so the
+ * cross-module reference resolved to `undefined` at run time (found by running the CLI
+ * after the split, not by the diff).
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string}
+ */
+function globalConfigPath(env) {
+  const configHome = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(configHome, 'xp-gate', '.delphi-config.json');
+}
+
 function isAbsent(configPath) {
   try {
     fs.statSync(configPath);
@@ -225,4 +242,4 @@ function validateProviders(providers, profileName) {
   }
 }
 
-module.exports = { readConfig, loadConfigFile, requireProfile, resolveProviderCredentials };
+module.exports = { readConfig, loadConfigFile, requireProfile, resolveProviderCredentials, globalConfigPath };
