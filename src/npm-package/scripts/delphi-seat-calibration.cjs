@@ -1,24 +1,4 @@
 'use strict';
-/**
- * Seat calibration and failure classification (#481, #707).
- *
- * A seat that fails before answering is a different event from one whose answer
- * was wrong, and the two need different fixes: the first is usually a prompt too
- * large or a dropped connection, the second is the model's judgement.
- * `classifySeatFailure` is the single place that decides which one a caller is
- * looking at, and it carries the byte counts that let a report say "not
- * measurable" instead of guessing.
- *
- * Moved out of `delphi-external-review.cjs` to fit its line ceiling. Boundary
- * fixed first: eight functions, and `isPlainObject` (now defined here, imported
- * back by the runner) plus `isNonEmptyString` from the validation module.
- */
-
-function isPlainObject(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
 
 // ── Seat prompt calibration (#481) ─────────────────────────────────────
 // The R1-R4 sprint review proved the ceiling is a seat × model route
@@ -215,7 +195,9 @@ function retryableOrNetwork(result) {
 }
 
 
-const { isNonEmptyString } = require('./delphi-model-validation.cjs');
+// `isPlainObject` is imported, not duplicated: this module already requires that one
+// in one direction, so a second copy was drift waiting to happen (review architecture MC-01).
+const { isNonEmptyString, isPlainObject } = require('./delphi-model-validation.cjs');
 
 /** The prompt budget used when a profile does not declare one. */
 const DEFAULT_PROMPT_BUDGET_BYTES = 40000;

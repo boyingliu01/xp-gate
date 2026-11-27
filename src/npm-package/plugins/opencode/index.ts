@@ -601,11 +601,19 @@ function gateArchTool(directory: string) {
       const cwd = ctx.directory || directory
       // #447: default to the built-in-rules path — no --config. Forcing
       // `--config architecture.yaml` hit the pre-0.16 schema archlint rejects.
-      const archArgs = args.config ? `arch --use-config ${args.config}` : "arch"
-      const direct = args.config
-        ? `npx -y @archlinter/cli scan . --config ${args.config}`
-        : "npx -y @archlinter/cli scan ."
-      return withUpgradeSuggestion(cwd, await runXpGate(archArgs, cwd), () => runCmd(direct, cwd))
+      //
+      // ARGV, like the other two tools: `args.config` reached a shell string here and was
+      // never quoted, so a value with a `;` ran as a second command. Two seats found it on
+      // the same batch after the identical fix landed for `gate-check` and `principles`
+      // (review CI-01), which is the argument for fixing a pattern everywhere at once.
+      const archArgs = args.config ? ["arch", "--use-config", args.config] : ["arch"]
+      const directArgs = ["-y", "@archlinter/cli", "scan", "."]
+      if (args.config) directArgs.push("--config", args.config)
+      return withUpgradeSuggestion(
+        cwd,
+        await runXpGateArgv(archArgs, cwd),
+        () => runArgv("npx", directArgs, cwd),
+      )
     },
   })
 }
