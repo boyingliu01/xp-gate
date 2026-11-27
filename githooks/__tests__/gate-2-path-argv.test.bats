@@ -60,6 +60,7 @@ assert_paths() {
 }
 
 @test "AC-GATE2-PATH-ARGV-03: real jscpd scans Unicode paths containing spaces" {
+  command -v jscpd >/dev/null 2>&1 || skip "jscpd is not installed; run npm install"
   printf '{"ignore":[]}' > "$WORK/jscpd.conf.json"
   local body='export function duplicate(value: number) {
   const doubled = value * 2;
@@ -122,4 +123,13 @@ assert_paths() {
 @test "AC-GATE2-MIRROR-06: the npm Gate 2 copy stays byte-identical" {
   cmp -s "$REPO/githooks/gate-entries/gate-2-entry.sh" \
     "$REPO/src/npm-package/hooks/gate-entries/gate-2-entry.sh"
+}
+
+@test "AC-GATE2-EMPTY-ARGV-07: generic jscpd keeps guarded empty-array expansion" {
+  local expected='jscpd ${GENERIC_JSCPD_FILES[@]+"${GENERIC_JSCPD_FILES[@]}"}'
+  local copy
+  for copy in "$REPO/githooks/gate-entries/gate-2-entry.sh" \
+              "$REPO/src/npm-package/hooks/gate-entries/gate-2-entry.sh"; do
+    grep -Fq "$expected" "$copy"
+  done
 }

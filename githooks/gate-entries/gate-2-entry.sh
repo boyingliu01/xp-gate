@@ -275,7 +275,7 @@ $SOURCE_FILES
 EOF_GENERIC
     if [ "${#GENERIC_JSCPD_FILES[@]}" -gt 0 ]; then
       GENERIC_JSCPD_TMP=$(mktemp)
-      jscpd "${GENERIC_JSCPD_FILES[@]}" > "$GENERIC_JSCPD_TMP" 2>&1 || GENERIC_JSCPD_EXIT=$?
+      jscpd ${GENERIC_JSCPD_FILES[@]+"${GENERIC_JSCPD_FILES[@]}"} > "$GENERIC_JSCPD_TMP" 2>&1 || GENERIC_JSCPD_EXIT=$?
       head -15 "$GENERIC_JSCPD_TMP" || true
       rm -f "$GENERIC_JSCPD_TMP"
       if [ "${GENERIC_JSCPD_EXIT:-0}" -ne 0 ]; then
