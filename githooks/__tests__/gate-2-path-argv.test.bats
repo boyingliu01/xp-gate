@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
 # @test REQ-GATE2-PATH-ARGV
 # @intent Gate 2 flattened newline-separated paths into a string and expanded it
-#         unquoted. Spaces split one path into several arguments, so jscpd scanned
-#         the wrong paths while Gate 2 still recorded PASS. Unicode itself works;
-#         the failure is shell word splitting, including quotes and glob characters.
+#         unquoted. Spaces split one path into several arguments and glob
+#         characters can expand, so jscpd scanned the wrong paths while Gate 2
+#         still recorded PASS. Unicode itself works; quotes are included to prove
+#         exact argv preservation, not because expansion re-parses quote syntax.
 # @covers AC-GATE2-PATH-ARGV-01 AC-GATE2-PATH-ARGV-02 AC-GATE2-PATH-ARGV-03
 
 setup() {
@@ -18,7 +19,7 @@ setup() {
 }
 
 run_gate2() {
-  local changed=$'src/含 空格.ts\nsrc/单引号\'文件.ts\nsrc/[literal].ts'
+  local changed=${2-$'src/含 空格.ts\nsrc/单引号\'文件.ts\nsrc/[literal].ts'}
   G2_LANG="$1" G2_FILES="$changed" G2_ROOT="$REPO" G2_WORK="$WORK" \
   G2_ARGS="$ARGS_FILE" G2_AUDIT="$AUDIT_FILE" bash -c '
     source "$G2_ROOT/githooks/lib/jscpd-run.sh"
@@ -100,4 +101,25 @@ assert_paths() {
   run run_gate2 rust
   [ "$status" -eq 0 ]
   assert_paths "src/含 空格.ts" "src/单引号'文件.ts" "src/[literal].ts"
+}
+
+@test "AC-GATE2-EMPTY-ARGV-04: an empty TypeScript scan list remains nounset-safe" {
+  printf '{"ignore":[]}' > "$WORK/jscpd.conf.json"
+  run run_gate2 typescript ""
+  [ "$status" -eq 0 ]
+  assert_paths --config "$WORK/jscpd.conf.json"
+}
+
+@test "AC-GATE2-EMPTY-ARGV-05: TypeScript keeps guarded empty-array expansions" {
+  local expected='jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} ${JSCPD_SCAN_FILES[@]+"${JSCPD_SCAN_FILES[@]}"}'
+  local copy
+  for copy in "$REPO/githooks/gate-entries/gate-2-entry.sh" \
+              "$REPO/src/npm-package/hooks/gate-entries/gate-2-entry.sh"; do
+    grep -Fq "$expected" "$copy"
+  done
+}
+
+@test "AC-GATE2-MIRROR-06: the npm Gate 2 copy stays byte-identical" {
+  cmp -s "$REPO/githooks/gate-entries/gate-2-entry.sh" \
+    "$REPO/src/npm-package/hooks/gate-entries/gate-2-entry.sh"
 }

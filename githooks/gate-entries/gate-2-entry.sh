@@ -84,7 +84,7 @@ $CHANGED_FILES
 EOF_CHANGED
   JSCPD_OUTPUT=$(mktemp)
   JSCPD_EXIT=0
-  jscpd "${JSCPD_ARGS[@]}" "${JSCPD_SCAN_FILES[@]}" > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
+  jscpd ${JSCPD_ARGS[@]+"${JSCPD_ARGS[@]}"} ${JSCPD_SCAN_FILES[@]+"${JSCPD_SCAN_FILES[@]}"} > "$JSCPD_OUTPUT" 2>&1 || JSCPD_EXIT=$?
   head -30 "$JSCPD_OUTPUT" || true
   JSCPD_OUTCOME=$(classify_jscpd_run "$JSCPD_EXIT" "$(cat "$JSCPD_OUTPUT")")
   rm -f "$JSCPD_OUTPUT"
