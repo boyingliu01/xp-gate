@@ -42,5 +42,9 @@
   "src/principles/rules/__tests__/solid/issue-588-lsp-base-contract.test.ts": {
     "lastAnalyzed": "2026-11-25T05:51:24.019Z",
     "totalWarnings": 1
+  },
+  "scripts/delphi-external-review.cjs": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-11-27T08:00:25.813Z"
   }
 }
