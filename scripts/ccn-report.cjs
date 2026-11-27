@@ -291,7 +291,6 @@ function refuseUnverifiedRows(tally, srcPath, allowUnverified) {
   process.exit(1);
 }
 
-
 /** What a run without the flag says before refusing. */
 function unverifiedFailure(count, srcPath) {
   return `FAIL - ${count} function(s) above CCN ${CCN_BLOCK_THRESHOLD} could not be span-verified `
@@ -1032,13 +1031,14 @@ if (require.main === module) {
     process.stdin.on('data', (c) => { input += c; });
     process.stdin.on('end', () => {
       // csvRows reads the CSV from srcPath, and the measured source paths are
-      // resolved against `root`, so the temp CSV is only a carrier for stdin.
       const tmp = path.join(require('os').tmpdir(), `ccn-verified-${process.pid}.csv`);
       fs.writeFileSync(tmp, input);
       try {
-        // Always report what verification did; stderr only, so the gate's parser
-        // still sees nothing but rewritten CSV on stdout.
-        process.stdout.write(csvRows(tmp, root, { reportStats: true }));
+        // stderr only: the gate's parser must see nothing but rewritten CSV on stdout.
+        // Dead until now: nothing ever set `allowUnverified`, so the switch could not be
+        // turned on (review FC-02 asked whether a path enabled it by default; none did).
+        const allowUnverified = process.argv.slice(2).includes('--allow-unverified');
+        process.stdout.write(csvRows(tmp, root, { reportStats: true, allowUnverified }));
       } finally {
         try { fs.unlinkSync(tmp); } catch { /* best effort */ }
       }
