@@ -1,6 +1,5 @@
 /**
- * @test REQ-MUT-007 mutmut mutation runner
- * @intent Verify MutmutRunner registration, availability checks, emoji progress parsing,
+ * @test REQ-MUT-007 mutmut mutation runner @intent Verify MutmutRunner registration, availability checks, emoji progress parsing,
  *         pyproject.toml config management, and cleanup behavior
  * @covers AC-MUT-007, AC-MUT-008
  */
@@ -76,7 +75,8 @@ describe('MutmutRunner', () => {
    */
   async function finish<T>(close: ((code: number | null) => void) | null, code: number, promise: Promise<T>): Promise<T> {
     await waitForSpawn();
-    close!(code);
+    if (!close) throw new Error('finish() called before the runner registered a close listener');
+    close(code);
     return promise;
   }
 
