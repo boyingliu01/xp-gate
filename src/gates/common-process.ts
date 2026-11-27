@@ -162,12 +162,76 @@ export function runTool(
 // ── Git Helpers ──
 
 /**
- * Get list of changed (staged) files via git diff --cached.
- * Equivalent to adapter-common.sh's git diff --cached --name-only.
+ * Which `git` subcommand enumerates this run's file list.
+ *
+ * Split out of `getChangedFiles` to keep that function's branching flat — the
+ * complexity ratchet counts the scope test as a decision, and inlining it took
+ * the recorded CCN from 5 to 7.
  */
+function gitListArgs(): string[] {
+  return (process.env.GATE_SCOPE ?? 'diff') === 'all'
+    ? ['ls-files']
+    : ['diff', '--cached', '--name-only', '--diff-filter=ACM'];
+}
+
+/**
+ * Get the list of files this run should inspect.
+ *
+ * Default (`GATE_SCOPE` unset or `diff`): the staged set, via
+ * `git diff --cached` — a plain commit must scan exactly what it commits.
+ * Equivalent to adapter-common.sh's `git diff --cached --name-only`.
+ *
+ * `GATE_SCOPE=all` (#820): every tracked file, via `git ls-files`. The runner
+ * already exports that decision (`gate-runner.js` builds `GATE_SCOPE="all"`),
+ * and the shell fragments were taught to read it in #589 and #616. These TS
+ * implementations were not: they kept calling `git diff --cached`, so on a
+ * clean index `--all` scanned NOTHING and reported the tree clean. Measured on
+ * a repo with ~60 tracked `.ts` files: `xp-gate check --all` SKIPped SAST with
+ * "no supported language files changed" while semgrep over the same sources
+ * returned 5 findings — the fail-open shape #589 fixed one layer up.
+ */
+/**
+ * Whether the file list for this run could be resolved at all.
+ *
+ * `getChangedFiles` returns `[]` both when a repository genuinely has nothing
+ * to inspect and when `git` failed. A gate cannot tell those apart, so it folds
+ * "could not check" into "nothing to check" — the fail-open shape this repo has
+ * removed from four other gates. Callers that care (SAST) use this to refuse.
+ */
+export interface ScopedFiles {
+  readonly files: readonly string[];
+  /** false when `git` failed, was missing, or exited non-zero. */
+  readonly resolved: boolean;
+}
+
+/**
+ * Resolve this run's file list together with whether resolution succeeded.
+ *
+ * Same commands as `getChangedFiles`, but keeps the distinction the bare array
+ * throws away. `--all` on a non-repo (CI container without a checkout, a tarball
+ * install) must report NOT_CHECKED, not "clean".
+ */
+export function resolveScopedFiles(cwd?: string): ScopedFiles {
+  try {
+    const result = spawnSync('git', gitListArgs(), {
+      encoding: 'utf-8',
+      cwd: cwd || process.cwd(),
+      timeout: 10000,
+    });
+    if (result.status !== 0) return { files: [], resolved: false };
+    const files = result.stdout
+      .split('\n')
+      .map(f => f.trim())
+      .filter(Boolean);
+    return { files, resolved: true };
+  } catch {
+    return { files: [], resolved: false };
+  }
+}
+
 export function getChangedFiles(cwd?: string): string[] {
   try {
-    const result = spawnSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], {
+    const result = spawnSync('git', gitListArgs(), {
       encoding: 'utf-8',
       cwd: cwd || process.cwd(),
       timeout: 10000,

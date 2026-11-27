@@ -14,7 +14,7 @@
 import {
   GateInput, GateOutput, isToolAvailable, runTool, recordAudit,
   filterSemgrepFiles, detectPowerShell, isPowerShellProject, runPowerShellTool,
-  getChangedFiles, detectProjectLang,
+  resolveScopedFiles, detectProjectLang,
 } from './common';
 
 // The semgrep ruleset, in ONE place (#640). It appears in the scan invocation and in
@@ -38,6 +38,29 @@ export const SEMGREP_RULESET = 'p/security-audit';
  */
 export const SEMGREP_EXTRA_ARGS = ['--disable-version-check', '--metrics=off'] as const;
 
+/**
+ * What to report when no semgrep-supported file is in scope (#820).
+ *
+ * "no files to scan" and "could not determine the files" are different facts,
+ * and folding the second into the first is the fail-open shape this repo has
+ * removed from four other gates. Under `--all` the caller passes
+ * `scopeResolved: false` when git itself failed; that is NOT_CHECKED, not a
+ * clean tree.
+ *
+ * Split out of `runGate9` to keep that function's branching flat — the extra
+ * test took its recorded CCN from 6 to 7.
+ */
+function emptyScopeVerdict(input: GateInput, startMs: number, messages: string[]): GateOutput {
+  if (input.scopeResolved === false) {
+    messages.push('     ⚠️  NOT CHECKED - SAST scope could not be resolved (git failed)');
+    recordAudit('gate-9', 'sast-security', 'WARN', 0, startMs);
+    return { status: 'WARN', messages, exitCode: 0 };
+  }
+  messages.push('     ⏭️  SKIPPED - SAST (no supported language files changed)');
+  recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
+  return { status: 'SKIP', messages, exitCode: 0 };
+}
+
 export function runGate9(input: GateInput): GateOutput {
   const startMs = Date.now();
   const messages: string[] = [];
@@ -55,9 +78,7 @@ export function runGate9(input: GateInput): GateOutput {
   // See the module header for the measurement behind this ordering.
   const semgrepFiles = filterSemgrepFiles(input.changedFiles);
   if (semgrepFiles.length === 0) {
-    messages.push('     ⏭️  SKIPPED - SAST (no supported language files changed)');
-    recordAudit('gate-9', 'sast-security', 'SKIP', 0, startMs);
-    return { status: 'SKIP', messages, exitCode: 0 };
+    return emptyScopeVerdict(input, startMs, messages);
   }
 
   // Standard path: semgrep
@@ -292,9 +313,9 @@ function runPowerShellSAST(
 if (process.argv.includes('--run')) {
   const cwdIdx = process.argv.indexOf('--cwd');
   const cwd = cwdIdx >= 0 ? process.argv[cwdIdx + 1] : process.cwd();
-  const changedFiles = getChangedFiles(cwd);
+  const scoped = resolveScopedFiles(cwd);
   const projectLang = detectProjectLang(cwd);
-  const result = runGate9({ changedFiles, projectLang, cwd });
+  const result = runGate9({ changedFiles: [...scoped.files], projectLang, cwd, scopeResolved: scoped.resolved });
   result.messages.forEach(m => console.log(m));
   process.exit(result.exitCode);
 }

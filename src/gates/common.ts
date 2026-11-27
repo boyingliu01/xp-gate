@@ -13,6 +13,16 @@ export interface GateInput {
   changedFiles: string[];
   projectLang: string;
   cwd?: string;
+  /**
+   * Whether `changedFiles` could be determined at all (#820).
+   *
+   * `undefined` means "the caller did not say" — treated the same as `true` so
+   * every existing gate keeps its behaviour. `false` means git failed, and a
+   * gate must report NOT_CHECKED rather than "nothing to check": those are
+   * different facts, and folding them together is how a clean report gets
+   * printed over an unexamined tree.
+   */
+  scopeResolved?: boolean;
 }
 
 export interface GateOutput {
@@ -32,6 +42,7 @@ export {
   isToolAvailable,
   runTool,
   getChangedFiles,
+  resolveScopedFiles,
   detectPowerShell,
 } from './common-process';
 
