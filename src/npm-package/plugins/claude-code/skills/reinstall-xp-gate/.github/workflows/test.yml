@@ -1,0 +1,106 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # A green suite proves the tests agree with the code on the day it was
+    # written. The gate audit below depends on the *installed* xp-gate release,
+    # which changes without this repo changing -- hence the weekly run.
+    - cron: '0 3 * * 1'
+
+# Least privilege: this workflow only reads the repo and runs local commands.
+# Without an explicit block GitHub defaults to write-all, which is CKV2_GHA_1.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Node 18 EOL 2025-04-30, Node 20 EOL 2026-04-30: neither gets security
+        # patches any more, and setup-node keeps dropping prebuilt EOL releases,
+        # which would turn this matrix red for reasons unrelated to this repo.
+        # 22 is supported to 2027-04-30, 24 to 2028-04-30, 26 to 2029-04-30.
+        node: ['22', '24', '26']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+      # No `npm install`: the suite uses the built-in node:test runner and has
+      # no dependencies. An empty install step would only add a failure mode.
+      - run: node --test tests/*.test.mjs
+      # The coverage floor Gate 5 enforces locally. Node 22+ prints the numbers;
+      # scripts/coverage.mjs translates them to the istanbul artefact the gate
+      # reads, so this repo does not need vitest just to satisfy a file shape.
+      # Runs on the LTS line only: --experimental-test-coverage is still flagged
+      # experimental, and its exact percentages drift between majors, so
+      # reporting from a single version keeps the number reproducible.
+      - if: matrix.node == '26'
+        run: node scripts/coverage.mjs
+
+  mutation:
+    name: mutation gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      # Fails if any injected defect survives the suite, i.e. if a property this
+      # skill exists to guarantee has stopped being tested. See scripts/mutation.mjs.
+      - run: node scripts/mutation.mjs
+
+  hp-gate:
+    name: complexity of .mjs sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install lizard
+      # xp-gate's Gate 3 never looks at this repo. Its LIZARD_EXTENSIONS and
+      # SEMGREP_EXTENSIONS are /\.(ts|tsx|js|jsx|py|go|java|...)$/ -- neither
+      # lists mjs -- so a pure-ESM project reports "no source files to check"
+      # and passes Gate 3 on complexity without measuring a single function
+      # (xp-gate#732, reproduced: the same code as src/a.js is checked and the
+      # same code as src/a.mjs is skipped). hp-gate runs lizard over
+      # .mjs/.cjs with the same CCN 5 threshold Gate 3 uses, so the number that
+      # would have been checked is now checked here.
+      - run: node scripts/hp-gate.mjs
+
+  gate-audit:
+    name: gates actually block
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install xp-gate
+        run: npm install -g @boyingliu01/xp-gate
+      - name: Install gate tools
+        run: |
+          pip install semgrep lizard
+          npm install -g jscpd
+      # Gray-box: plant a defect the gate is responsible for catching and require
+      # the gate to say so. A gate that passes a dirty tree is broken, and no
+      # amount of hash comparison in verify.mjs would reveal it.
+      #
+      # Skipped on push/PR because it installs a toolchain and runs the real CLI;
+      # the point is to catch an upstream regression after it ships, not to gate
+      # this repo's own commits.
+      - run: node scripts/audit.mjs --gates

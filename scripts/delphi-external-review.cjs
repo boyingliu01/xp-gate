@@ -215,7 +215,7 @@ const {
   clampConsensusSetting,
   expandEnvPlaceholder,
 } = require('./delphi-model-validation.cjs');
-const { readConfig } = require('./delphi-config-read.cjs');
+const { readConfig, globalConfigPath } = require('./delphi-config-read.cjs');
 
 // ── JSON extraction (4-layer fallback) ─────────────────────────────────
 const { extractJsonFromResponse } = require('./delphi-json-extract.cjs');

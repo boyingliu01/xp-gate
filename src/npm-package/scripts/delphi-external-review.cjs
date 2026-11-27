@@ -36,7 +36,23 @@ const VALUE_FLAGS = {
   '--other-experts-file': 'otherExpertsFile',
 };
 const BOOLEAN_FLAGS = { '--fallback-local': 'fallbackLocal' };
-const INTEGER_FLAGS = { '--round': (v) => parseInt(v) };
+/**
+ * Integer flags, each rejecting a value that is not an integer.
+ *
+ * `parseInt('abc')` is NaN, and NaN is falsy -- so the "was it supplied?" checks saw a
+ * missing flag and reported THAT, hiding the real problem (the value is not a number)
+ * behind the wrong diagnosis (review FC-04).
+ */
+const INTEGER_FLAGS = {
+  '--round': (v) => {
+    const parsed = Number(v);
+    if (!Number.isInteger(parsed)) {
+      console.error(`[delphi-review] ERROR: --round needs an integer, got ${JSON.stringify(v)}`);
+      process.exit(2);
+    }
+    return parsed;
+  },
+};
 
 /**
  * Record one flag's value, advancing past it when it consumes the next token.
@@ -58,7 +74,16 @@ function applyRawFlag(argv, i, args, state) {
     return i;
   }
   const key = VALUE_FLAGS[flag];
-  if (!key) return i;
+  if (!key) {
+    // UNKNOWN flag: fail rather than ignore. Silently skipping it means a typo like
+    // `--expert` -> `--experts` falls back to the default behaviour instead of the
+    // caller's intent, which is the fail-open this gate exists to prevent (review FC-01).
+    if (flag.startsWith('-')) {
+      console.error(`[delphi-review] ERROR: unknown option ${flag}`);
+      process.exit(2);
+    }
+    return i;
+  }
   const value = requireFlagValue(argv, i, flag);
   args[key] = INTEGER_FLAGS[flag] ? INTEGER_FLAGS[flag](value) : value;
   return i + 1;
@@ -73,7 +98,11 @@ function applyRawFlag(argv, i, args, state) {
  */
 function requireFlagValue(argv, i, flag) {
   const value = argv[i + 1];
-  if (value === undefined || value.startsWith('--')) {
+  // ABSENT only. A leading `--` is NOT treated as "missing": `-1` and a path like
+  // `--my-config.json` are legal values, and rejecting them broke working call sites
+  // (review CI-01 / FC-03, two seats). A flag whose value was forgotten still fails --
+  // at the point where the value is USED, with a message about that value.
+  if (value === undefined) {
     console.error(`[delphi-review] ERROR: ${flag} needs a value`);
     process.exit(2);
   }
@@ -186,7 +215,7 @@ const {
   clampConsensusSetting,
   expandEnvPlaceholder,
 } = require('./delphi-model-validation.cjs');
-const { readConfig } = require('./delphi-config-read.cjs');
+const { readConfig, globalConfigPath } = require('./delphi-config-read.cjs');
 
 // ── JSON extraction (4-layer fallback) ─────────────────────────────────
 const { extractJsonFromResponse } = require('./delphi-json-extract.cjs');
@@ -220,10 +249,10 @@ function resolveInputContent(args) {
       return fs.readFileSync(args.inputFile, 'utf8');
     } catch (err) {
       console.error(`[delphi-review] ERROR: Cannot read input file ${args.inputFile}: ${err.message}`);
-      // `process.exit` does not return; the `return ''` that used to sit here was
-      // unreachable and read as if this function could fall through (review CI-02).
+      // `process.exit` does not return. No statement follows it: a `throw` here is
+      // unreachable in production AND a live exception under a test that mocks
+      // `process.exit`, which is worse than dead code (review CI-02, twice).
       process.exit(1);
-      throw err;
     }
   }
   return args.input || '';
@@ -875,24 +904,3 @@ if (require.main !== module) {
   });
 }
 
-/**
- * Machine-wide `.delphi-config.json` path: `$XDG_CONFIG_HOME/xp-gate/`, or
- * `~/.config/xp-gate/` when the variable is unset.
- *
- * Exported so the path-parity test can hold this loader, the Gate MW validator
- * and the DSH plugin to one definition instead of three restatements.
- *
- * Deliberately declared at the END of the file. Function declarations hoist, so
- * readConfig above can call it, but placing it here keeps every line before the
- * old EOF byte-identical — which matters because `.ccn-baseline.json` anchors
- * anonymous functions by line number (`file::(anonymous)@657`). Adding these
- * lines near the top shifted that anchor to 676 and Gate 3 then read a
- * pre-existing CCN=24 function as a brand-new violation.
- *
- * @param {NodeJS.ProcessEnv} env
- * @returns {string}
- */
-function globalConfigPath(env) {
-  const configHome = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(configHome, 'xp-gate', '.delphi-config.json');
-}
