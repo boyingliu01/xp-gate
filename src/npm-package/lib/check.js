@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const { principles } = require('./principles.js');
 const { arch } = require('./arch.js');
 const { getGateInfo, runGate, resolveAlias, getAliases, GATE_NOT_RUN } = require('./gate-runner.js');
@@ -107,12 +108,24 @@ async function check(args) {
  * prove the side effect happens on the pass path and, more importantly, does
  * NOT happen on the fail path.
  */
-function celebrateCleanRun() {
+function celebrateCleanRun(target) {
   try {
-    require('./star-notice.js').maybeShowStarNotice();
+    const notice = require('./star-notice.js');
+    notice.maybeShowStarNotice();
+    // Offered after the same clean run, and only then: the badge claims a
+    // passing gate, so offering it after a failure would be a false claim.
+    //
+    // The project root is the checked TARGET, not the working directory: CI and
+    // `xp-gate check ../other` both run from somewhere else, and reading the
+    // wrong README would either nag a project that already has the badge or
+    // skip one that wants it.
+    // Resolve, do not assume: `check ../other` passes a relative path and
+    // `check .` passes the cwd literal. resolve() makes both name the same
+    // directory the gates just inspected.
+    notice.maybeOfferBadge({ projectRoot: path.resolve(target || process.cwd()) });
   } catch {
-    // A decoration must never turn a green check into a crash. The notice is
-    // optional; the exit code is not.
+    // A decoration must never turn a green check into a crash. The notice and
+    // the badge are optional; the exit code is not.
   }
 }
 
@@ -132,7 +145,7 @@ async function runDefaultChecks(target) {
 
   console.log('');
   console.log(`[xp-gate check] ${ran - failures}/${ran} gate(s) passed`);
-  if (failures === 0) celebrateCleanRun();
+  if (failures === 0) celebrateCleanRun(target);
   return failures === 0 ? 0 : 1;
 }
 
@@ -315,7 +328,6 @@ async function runBriefGates(sourceFiles) {
   const results = [];
   if (sourceFiles.length === 0) return results;
   results.push({ id: '3', code: await runGate('3', '.', {}) });
-  const { principles } = require('./principles.js');
   results.push({ id: '4', code: await principles(sourceFiles) });
   return results;
 }
