@@ -199,7 +199,19 @@ function everRan(gate, langs, byKey) {
 }
 
 /** Verdicts that leave no evidence the gate executed. */
-const UNREPORTING_VERDICTS = new Set(['ABSENT', 'NO_REPORT']);
+/**
+ * Verdicts that carry NO evidence the gate executed.
+ *
+ * `NOT_REACHED` belongs here. It was already in `UNATTEMPTED_VERDICTS` -- so the gate was
+ * reported "not attempted" -- while this set excluded it, so `everRan` counted the same
+ * row as evidence the gate RAN. Two readers of one verdict, opposite conclusions, and the
+ * one that mattered (could a gate actually be reached?) was the one being papered over
+ * (review feasibility FC-01).
+ *
+ * It is NOT an absence: the gate exists and was blocked by an upstream failure. That is
+ * "did not execute", which is exactly what the reachability question asks.
+ */
+const UNREPORTING_VERDICTS = new Set(['ABSENT', 'NO_REPORT', 'NOT_REACHED']);
 
 /** Whether this verdict is one that produces no evidence of execution. */
 function isUnreporting(verdict) {

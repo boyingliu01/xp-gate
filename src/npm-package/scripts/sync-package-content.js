@@ -159,7 +159,18 @@ function assertDshBundleEntry() {
 function syncScripts() {
   const srcRoot = path.join(REPO_ROOT, 'scripts');
   const destRoot = path.join(PKG_ROOT, 'scripts');
-  const scriptsToSync = ['delphi-external-review.cjs'];
+  // Every module the reviewer requires at run time. A file missing here ships a package
+  // whose CLI dies on require -- the same failure mode as the cross-module reference
+  // fixed in the split, and just as invisible in review.
+  const scriptsToSync = [
+    'delphi-external-review.cjs',
+    'delphi-repo-tools.cjs',
+    'delphi-model-validation.cjs',
+    'delphi-config-read.cjs',
+    'delphi-json-extract.cjs',
+    'delphi-prompts.cjs',
+    'delphi-seat-calibration.cjs',
+  ];
   let copied = 0;
   for (const name of scriptsToSync) {
     const src = path.join(srcRoot, name);

@@ -1,6 +1,5 @@
 /**
- * @test REQ-MUT-007 mutmut mutation runner @intent Verify MutmutRunner registration, availability checks, emoji progress parsing,
- *         pyproject.toml config management, and cleanup behavior
+ * @test REQ-MUT-007 mutmut mutation runner @intent Verify MutmutRunner registration, availability checks, emoji progress parsing, pyproject.toml config management, and cleanup behavior
  * @covers AC-MUT-007, AC-MUT-008
  */
 
@@ -58,6 +57,7 @@ describe('MutmutRunner', () => {
       timeoutMs,
       cwd: tmpDir,
     });
+    await vi.advanceTimersByTimeAsync(0); // let spawn register the timer before the clock moves (FC-02)
     await vi.advanceTimersByTimeAsync(advanceMs);
     return pending;
   }

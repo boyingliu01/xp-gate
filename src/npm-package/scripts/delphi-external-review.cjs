@@ -219,6 +219,7 @@ const {
   expandEnvPlaceholder,
 } = require('./delphi-model-validation.cjs');
 const { readConfig, globalConfigPath } = require('./delphi-config-read.cjs');
+const { converseWithTools } = require('./delphi-repo-tools.cjs');
 
 // ── JSON extraction (4-layer fallback) ─────────────────────────────────
 const { extractJsonFromResponse } = require('./delphi-json-extract.cjs');
@@ -538,7 +539,9 @@ function buildChatBody(model, systemPrompt, userPrompt) {
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    response_format: { type: 'json_object' },
+    // The JSON shape is asked for in the SYSTEM PROMPT, not via response_format: a
+    // response_format forces the model to answer immediately, which the tool rounds below
+    // make impossible (a tool call is not a JSON object).
   };
 }
 
@@ -567,6 +570,18 @@ async function classifyHttpResponse(response) {
     return { error: true, message: `API request failed (${response.status}). Provider response was not included.` };
   }
   return await readSuccessfulResponse(response);
+}
+
+
+
+
+
+/** The tool conversation, given the same arguments as the single-shot call. */
+function withRepoTools(providerConfig, model, systemPrompt, userPrompt, options) {
+  const url = `${providerConfig.base_url.replace(/\/$/, '')}/chat/completions`;
+  return converseWithTools(providerConfig, model, systemPrompt, userPrompt, {
+    ...options, url, body: buildChatBody(model, systemPrompt, userPrompt),
+  });
 }
 
 async function callModelAPI(providerConfig, model, systemPrompt, userPrompt, options = {}) {
@@ -672,7 +687,14 @@ async function backOffBeforeRetry(attempt, reason) {
 async function callWithRetry(providerConfig, model, systemPrompt, userPrompt, maxRetries = 2, timeoutMs = DEFAULT_TIMEOUT_MS) {
   let lastResult;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const result = await callModelAPI(providerConfig, model, systemPrompt, userPrompt, { timeoutMs });
+    // The repository the reviewer may consult. Passed here rather than inside
+    // `callModelAPI` so that function keeps one shape: the tool conversation is a sibling
+    // entry point, and adding a branch to the single-shot path pushed its CCN over the
+    // ceiling the ratchet records.
+    const result = await withRepoTools(providerConfig, model, systemPrompt, userPrompt, {
+      timeoutMs,
+      repoRoot: process.cwd(),
+    });
 
     if (result.success) return result;
     if (!result.retryable) return result;

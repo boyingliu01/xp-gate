@@ -46,5 +46,9 @@
   "scripts/delphi-external-review.cjs": {
     "totalWarnings": 1,
     "lastAnalyzed": "2026-11-27T08:00:25.813Z"
+  },
+  "src/mutation/__tests__/mutmut-runner.test.ts": {
+    "totalWarnings": 1,
+    "lastAnalyzed": "2026-11-27T08:16:59.445Z"
   }
 }
