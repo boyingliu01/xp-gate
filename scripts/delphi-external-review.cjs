@@ -36,7 +36,23 @@ const VALUE_FLAGS = {
   '--other-experts-file': 'otherExpertsFile',
 };
 const BOOLEAN_FLAGS = { '--fallback-local': 'fallbackLocal' };
-const INTEGER_FLAGS = { '--round': (v) => parseInt(v) };
+/**
+ * Integer flags, each rejecting a value that is not an integer.
+ *
+ * `parseInt('abc')` is NaN, and NaN is falsy -- so the "was it supplied?" checks saw a
+ * missing flag and reported THAT, hiding the real problem (the value is not a number)
+ * behind the wrong diagnosis (review FC-04).
+ */
+const INTEGER_FLAGS = {
+  '--round': (v) => {
+    const parsed = Number(v);
+    if (!Number.isInteger(parsed)) {
+      console.error(`[delphi-review] ERROR: --round needs an integer, got ${JSON.stringify(v)}`);
+      process.exit(2);
+    }
+    return parsed;
+  },
+};
 
 /**
  * Record one flag's value, advancing past it when it consumes the next token.
@@ -73,7 +89,11 @@ function applyRawFlag(argv, i, args, state) {
  */
 function requireFlagValue(argv, i, flag) {
   const value = argv[i + 1];
-  if (value === undefined || value.startsWith('--')) {
+  // ABSENT only. A leading `--` is NOT treated as "missing": `-1` and a path like
+  // `--my-config.json` are legal values, and rejecting them broke working call sites
+  // (review CI-01 / FC-03, two seats). A flag whose value was forgotten still fails --
+  // at the point where the value is USED, with a message about that value.
+  if (value === undefined) {
     console.error(`[delphi-review] ERROR: ${flag} needs a value`);
     process.exit(2);
   }
