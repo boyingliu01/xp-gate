@@ -136,7 +136,10 @@ function fail(message) {
 const REQUIRED_ARGS = [
   { satisfied: (a) => Boolean(a.expert), label: '--expert' },
   { satisfied: (a) => Boolean(a.input || a.inputFile), label: '--input or --input-file' },
-  { satisfied: (a) => Boolean(a.round), label: '--round' },
+  // NOT `Boolean(a.round)`: round 0 is a legal value and Boolean(0) is false, so the
+  // check reported "--round is missing" for a value that was supplied (review CI-01).
+  // Numbers are tested for presence, strings for emptiness.
+  { satisfied: (a) => a.round !== undefined && a.round !== null, label: '--round' },
   { satisfied: (a) => Boolean(a.config), label: '--config' },
 ];
 
