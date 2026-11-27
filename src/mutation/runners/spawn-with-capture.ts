@@ -164,11 +164,14 @@ function wireOutcome(
   state: CaptureState,
   settle: (result: SpawnCaptureResult) => void,
 ): void {
+  // BOUNDED accumulation: a runner that emits gigabytes would grow these strings until
+  // the process dies of OOM, and `common-process.ts` has capped the same risk at 10 MB
+  // since it was written (review technical CI-01).
   child.stdout?.on('data', (data: Buffer) => {
-      state.stdout += data.toString();
-    });
+    state.stdout = appendBounded(state.stdout, data);
+  });
   child.stderr?.on('data', (data: Buffer) => {
-    state.stderr += data.toString();
+    state.stderr = appendBounded(state.stderr, data);
   });
 
   // Async spawn failures (ENOENT) arrive as an 'error' event, not a throw.
@@ -283,4 +286,19 @@ function safeParse(
     console.error(`[mutation] could not read the report: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
+}
+
+/** The most captured text either stream may hold, matching `common-process.ts`. */
+const MAX_CAPTURE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Append a chunk, keeping at most `MAX_CAPTURE_BYTES`.
+ *
+ * The TAIL is kept, not the head: a failing tool prints its diagnosis last, so truncating
+ * the front would drop exactly the lines that explain the failure.
+ */
+function appendBounded(existing: string, chunk: Buffer): string {
+  const combined = existing + chunk.toString();
+  if (combined.length <= MAX_CAPTURE_BYTES) return combined;
+  return combined.slice(combined.length - MAX_CAPTURE_BYTES);
 }
