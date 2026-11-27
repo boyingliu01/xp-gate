@@ -108,7 +108,11 @@ _load_gate_chain() {
   grep -q 'GATE_0_DETAIL="not_selected"' <<< "$HOOK_TEXT"
   grep -q 'GATE_1_DETAIL="not_selected"' <<< "$HOOK_TEXT"
   grep -q 'GATE_2_DETAIL="not_selected"' <<< "$HOOK_TEXT"
-  grep -q 'GATE_5_DETAIL="not_selected"' <<< "$HOOK_TEXT"
+  # Gate 5 records its detail through the shared helper, which APPENDS with
+  # de-duplication instead of assigning; the assignment form it used before is still
+  # accepted so the assertion tests the BEHAVIOUR (a SKIP is recorded) rather than one
+  # spelling of it.
+  grep -qE 'GATE_5_DETAIL="not_selected"|xp_gate_detail_append GATE_5_DETAIL "not_selected"' <<< "$HOOK_TEXT"
   grep -q 'GATE_3_REASON="not_selected"' <<< "$HOOK_TEXT"
   grep -q 'GATE_4_REASON="not_selected"' <<< "$HOOK_TEXT"
 }
