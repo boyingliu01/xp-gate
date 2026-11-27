@@ -7191,3 +7191,16 @@ specification:
         - id: AC-TOOLS-018-02
           criteria: 共享解析器找不到工具时返回 null，由调用方回落到普通探测，而不是判成缺失
           test_type: unit
+    - id: REQ-BADGE
+      description: 全部门禁通过后，一次性提供 README 徽章 Markdown，供用户在项目中声明"这些门禁会跑"。徽章是对外可见的承诺，所以只在真正全绿时提供——门禁失败时提供就等于让用户做一个假声明。静默条件比 star 邀请更严：非 TTY、CI、环境变量退订、`star-notice --off` 有效期内、README 已含徽章、当天已提供过，任一成立即不说话。
+      priority: medium
+      acceptance_criteria:
+        - id: AC-BADGE-01
+          criteria: 全部通过时输出可直接粘贴的徽章 Markdown（含 shields.io 图片 URL 与仓库链接），任何门禁失败时不输出
+          test_type: unit
+        - id: AC-BADGE-02
+          criteria: 非 TTY、CI、NO_UPDATE_NOTIFIER/XP_GATE_NO_NOTICE、`star-notice --off` 有效期内、当天已提供过——五种情况均保持静默；徽章使用独立时钟（badgeOffer），不被 star 邀请刚写入的 starNotice.lastShownAt 影响
+          test_type: unit
+        - id: AC-BADGE-03
+          criteria: README 已含徽章图片 URL 或完整 Markdown 时不重复提供；仅在正文提及仓库（如致谢、回链）不算已有徽章
+          test_type: unit

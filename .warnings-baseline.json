@@ -1,8 +1,4 @@
 {
-  "scripts/ccn-report.cjs": {
-    "lastAnalyzed": "2026-11-22T20:22:40.491Z",
-    "totalWarnings": 1
-  },
   "src/build-integrity/__tests__/gate-10.test.ts": {
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
     "totalWarnings": 8
@@ -15,44 +11,28 @@
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
     "totalWarnings": 10
   },
-  "src/mutation/__tests__/pitest-runner.test.ts": {
-    "lastAnalyzed": "2026-11-05T10:35:00.000Z",
-    "totalWarnings": 4
-  },
-  "src/mutation/runners/pitest-runner.ts": {
-    "lastAnalyzed": "2026-11-05T10:35:00.000Z",
-    "totalWarnings": 4
-  },
   "src/npm-package/lib/__tests__/doctor.test.js": {
     "lastAnalyzed": "2026-11-20T14:42:46.813Z",
-    "totalWarnings": 40
+    "totalWarnings": 38
   },
   "src/npm-package/lib/doctor.js": {
     "lastAnalyzed": "2026-11-20T14:42:46.812Z",
-    "totalWarnings": 21
+    "totalWarnings": 1
   },
   "src/npm-package/lib/gate-runner.js": {
     "lastAnalyzed": "2026-11-20T14:42:46.813Z",
-    "totalWarnings": 2
+    "totalWarnings": 1
   },
   "src/npm-package/lib/init.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
-    "totalWarnings": 13
-  },
-  "src/npm-package/lib/phase-transition.js": {
-    "lastAnalyzed": "2026-11-05T10:35:00.000Z",
-    "totalWarnings": 8
+    "totalWarnings": 1
   },
   "src/npm-package/lib/test-alignment.ts": {
     "lastAnalyzed": "2026-10-31T07:31:43.881Z",
-    "totalWarnings": 12
-  },
-  "src/npm-package/mutation/runners/pitest-runner.ts": {
-    "lastAnalyzed": "2026-11-05T10:35:00.000Z",
-    "totalWarnings": 4
+    "totalWarnings": 2
   },
   "src/npm-package/scripts/sync-package-content.js": {
     "lastAnalyzed": "2026-11-05T10:35:00.000Z",
-    "totalWarnings": 14
+    "totalWarnings": 0
   }
 }

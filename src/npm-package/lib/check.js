@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const { principles } = require('./principles.js');
 const { arch } = require('./arch.js');
 const { getGateInfo, runGate, resolveAlias, getAliases, GATE_NOT_RUN } = require('./gate-runner.js');
@@ -99,6 +100,35 @@ async function check(args) {
   return runDefaultChecks(opts.pathArg);
 }
 
+/**
+ * Called only when every gate in the default run passed (#871).
+ *
+ * Only a clean run earns the star invitation: congratulating someone on a
+ * failed check would read as tone-deaf. Exported so the integration test can
+ * prove the side effect happens on the pass path and, more importantly, does
+ * NOT happen on the fail path.
+ */
+function celebrateCleanRun(target) {
+  try {
+    const notice = require('./star-notice.js');
+    notice.maybeShowStarNotice();
+    // Offered after the same clean run, and only then: the badge claims a
+    // passing gate, so offering it after a failure would be a false claim.
+    //
+    // The project root is the checked TARGET, not the working directory: CI and
+    // `xp-gate check ../other` both run from somewhere else, and reading the
+    // wrong README would either nag a project that already has the badge or
+    // skip one that wants it.
+    // Resolve, do not assume: `check ../other` passes a relative path and
+    // `check .` passes the cwd literal. resolve() makes both name the same
+    // directory the gates just inspected.
+    notice.maybeOfferBadge({ projectRoot: path.resolve(target || process.cwd()) });
+  } catch {
+    // A decoration must never turn a green check into a crash. The notice and
+    // the badge are optional; the exit code is not.
+  }
+}
+
 async function runDefaultChecks(target) {
   let failures = 0;
   let ran = 0;
@@ -115,6 +145,7 @@ async function runDefaultChecks(target) {
 
   console.log('');
   console.log(`[xp-gate check] ${ran - failures}/${ran} gate(s) passed`);
+  if (failures === 0) celebrateCleanRun(target);
   return failures === 0 ? 0 : 1;
 }
 
@@ -297,7 +328,6 @@ async function runBriefGates(sourceFiles) {
   const results = [];
   if (sourceFiles.length === 0) return results;
   results.push({ id: '3', code: await runGate('3', '.', {}) });
-  const { principles } = require('./principles.js');
   results.push({ id: '4', code: await principles(sourceFiles) });
   return results;
 }
@@ -379,4 +409,10 @@ function listGates() {
   return 0;
 }
 
-module.exports = { resolveGateToken, parseCheckArgs, gitChangedNames, readChangedFiles, check, checkAllGates, formatGateTally, runChangedBrief, fileExtension, printBriefSummary, normalizeGateExit };
+// BOTH halves: the branch added the low-level helpers, main added `celebrateCleanRun`.
+// Either export list alone breaks the other side's callers.
+module.exports = {
+  resolveGateToken, parseCheckArgs, gitChangedNames, readChangedFiles,
+  check, checkAllGates, formatGateTally, runChangedBrief, fileExtension,
+  printBriefSummary, normalizeGateExit, celebrateCleanRun,
+};

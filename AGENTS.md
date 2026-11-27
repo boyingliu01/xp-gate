@@ -184,36 +184,45 @@ difference, not the product.
 - **Three gates skip on main/master pushes by design** (pre-reviewed via PR).
   That is intentional; do not "fix" it.
 
+## DELPHI SEATS — pick three VENDORS, not three model IDs
+
+The review skill requires three DISTINCT model IDs. That is necessary and NOT
+sufficient: two tiers of one vendor (say `g-qwen3.7-max` and `s-qwen3.8-flash`)
+share training data and method, so they agree with each other for reasons that
+have nothing to do with the code. Consensus between them measures the vendor,
+not the change.
+
+**Choose one model per vendor.** Measured 2026-11-26 on the same snippet, a
+three-vendor panel returned three genuinely different first findings — a parse
+robustness concern, a silent-failure concern, and no critical at all. A
+single-vendor panel produces one of those three and repeats it.
+
+The seats currently used (`g-deepseek-v4-pro`, `g-qwen3.7-max`, `g-minimax-m3`)
+are three vendors at 12–13 s per review. Latency matters because a review is on
+the push path, and it is where this went wrong before: the template shipped GLM
+5.3, which measured **58.7 s and timed out**, while every other model answered
+in 1–6 s. Candidates that cannot be used at all, for measured reasons:
+`g-mimo-v2.6-pro` returns prose instead of the requested JSON, and `g-hy4`
+answers 403.
+
+The endpoint exposes no prices. It does expose `channel_tier` and a `model_desc`
+line, which is the cost signal that IS reachable: a `g-` id is a gold/dealer-price
+channel, an `s-` id is a silver/discounted one. Prefer `s-` when the vendor
+constraint still holds.
+
 ## PUSH RHYTHM — the walkthrough gate makes batching expensive
 
-Gate MW (code walkthrough) is the one gate whose cost GROWS with how long you
-wait, and its shape is easy to work against without noticing:
+Gate MW's cost grows with how long a branch stays local: the evidence names a
+commit (accepted only if it is HEAD or its ancestor), expires in one hour, and a
+review takes 40 KB of source per expert — roughly two files.
 
-- **The evidence names the commit the review saw.** It must be that commit or an
-  ANCESTOR of HEAD — never an unrelated one.
-- **It expires in one hour.** Review, then push; a review that sits overnight is
-  worthless.
-- **A review's input budget is 40 KB per expert** — roughly two source files.
+Measured: a branch 300 commits deep, never pushed, was 223 files / 26 713 lines.
+At 40 KB per review that is ~27 reviews, and the push could not be performed.
 
-Measured 2026-11-26, on a branch that had never been pushed: **223 files,
-26 713 changed lines, 300+ commits**. At 40 KB per review that is ~27 reviews
-minimum, and the first push could not be performed at all. Three branches were
-sitting in that state.
+**Push at least once per work session.** A branch with no upstream is the WORST
+case, not the safest: its first push reviews everything at once. Small pushes are
+cheaper — 27 reviews for one large push versus one per small push.
 
-**So: push at least once per work session.** Concretely:
-
-- Push after a coherent unit (one gate change, one refactor with green tests),
-  not after a day of work.
-- A branch that has never been pushed is the WORST case, not the safest: its
-  first push must review everything on it at once. `git log @{u}..HEAD` failing
-  with "no upstream configured" is the warning sign.
-- If a review is rejected and you commit fixes, push promptly — each new commit
-  on top would otherwise need its own review before the one you have can be used.
-
-This is not a rule about discipline for its own sake. Batching genuinely costs
-MORE here: 27 reviews for one push of a large branch, versus one review per push
-when each push is small. **Small pushes are the cheaper option, and the gate is
-built to say so.**
 
 ## MEASUREMENT DISCIPLINE
 

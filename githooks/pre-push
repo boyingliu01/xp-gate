@@ -75,9 +75,11 @@ if [ -f "$_PRE_PUSH_REGISTRY" ]; then
 else
   # Absent is not a failure: record it so a missing registry is visible in the
   # journal instead of silently indistinguishable from "nothing to report".
+  # shellcheck disable=SC2034  # journal field: written for the report, read by name downstream
   PRE_PUSH_REGISTRY_STATUS="missing"
 fi
 
+# shellcheck disable=SC2329  # invoked via trap/caller, not textually inline (write_pre_push_report)
 write_pre_push_report() {
   local exit_code="$1"
   local timestamp report_ts reports_dir report_file commit_hash verdict
@@ -299,6 +301,7 @@ write_pre_push_report() {
   fi
 }
 
+# shellcheck disable=SC2329  # invoked via trap/caller, not textually inline (_pre_push_report_on_exit)
 _pre_push_report_on_exit() {
   local saved_exit=$?
   if [ "$_PRE_PUSH_REPORT_DONE" = "1" ]; then
@@ -314,7 +317,10 @@ trap '_pre_push_report_on_exit' EXIT
 # pre-push receives stdin with ref information
 PUSHED_FILES=""
 TS_FILES=""
-while read local_ref local_sha remote_ref remote_sha; do
+# shellcheck disable=SC2034  # the read loop must name every field git supplies on stdin
+# `-r` matters here: without it, a ref name containing a backslash is mangled,
+# and this loop feeds the gate's idea of what is being pushed (SC2162).
+while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
     # Branch deletion - skip validation entirely
     echo "   ℹ️  Branch deletion detected ($local_ref). Skipping validation."
@@ -388,7 +394,30 @@ SOURCE_EXTENSIONS="\.py$|\.js$|\.cjs$|\.mjs$|\.ts$|\.tsx$|\.java$|\.go$|\.rs$|\.
 # its .bats suite was classified "Documentation-only push (no source code
 # files)" and the walkthrough was skipped — the single most safety-critical
 # script in the repo, exempt from review by a filename-shape accident.
-NON_EXT_SOURCE_RE='^(githooks/(pre-commit|pre-push|post-merge|install\.sh|verify\.sh)|[^/]+\.bats)$|/__tests__/'
+#
+# The same accident covered every file that decides what SHIPS. Measured
+# 2026-11-26, each of these was classified "非源码" and skipped the walkthrough
+# entirely:
+#
+#   src/npm-package/package.json   the `files` allowlist and `bin` entry
+#   src/npm-package/.npmignore     what the tarball excludes
+#   .github/workflows/*.yml        what CI runs
+#   package-lock.json              the dependency graph
+#
+# The same reasoning covers the rest of the surface that decides what ships or
+# what runs: npm-shrinkwrap.json (published dependency graph), .npmrc (registry
+# and auth config -- a change here can repoint where a publish goes) and
+# action.yml (a composite/GitHub action's own entrypoint). A reviewer asked why
+# shrinkwrap was missing while package-lock was not; there is no good answer.
+#
+# A push that changes only package.json can add a file to the published
+# tarball, repoint `bin`, or widen the `files` glob — and no gate looked at it.
+# Reviewing that as "documentation only" is the same defect as the githooks
+# case, one layer out: the file's NAME decided whether it was reviewed.
+#
+# Artefacts that are genuinely not code stay classified as such: markdown,
+# images, LICENSE and similar are not matched here and never were.
+NON_EXT_SOURCE_RE='^(githooks/(pre-commit|pre-push|post-merge|install\.sh|verify\.sh)|[^/]+\.bats)$|/__tests__/|(^|/)package\.json$|(^|/)package-lock\.json$|(^|/)npm-shrinkwrap\.json$|(^|/)\.npmignore$|(^|/)\.npmrc$|^\.github/(workflows/.*\.ya?ml|actions/[^/]+/action\.ya?ml)$|(^|/)action\.ya?ml$'
 
 for file in $PUSHED_FILES; do
   if echo "$file" | grep -qE "$SOURCE_EXTENSIONS" || echo "$file" | grep -qE "$NON_EXT_SOURCE_RE"; then
@@ -748,7 +777,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # so there is no second implementation left to drift. If somebody adds a fourth
 # tier to ADAPTER_DIR_ORDER, this hook picks it up with no edit.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC2034  # same contract as pre-commit: the tier table reads this by name
 PROJECT_GITHOOKS="$(git rev-parse --show-toplevel 2>/dev/null)/githooks"
+# shellcheck disable=SC2034  # same contract as pre-commit: the tier table reads this by name
 GLOBAL_ADAPTER_DIR="$HOME/.config/xp-gate/adapters"
 
 ADAPTER_COMMON=""
@@ -1279,6 +1310,7 @@ fi
 if [ -z "$ALL_PUSHED_TEST_FILES" ]; then
   echo "⏭️  SKIPPED - Mock density check (no test files in push)"
 else
+  # shellcheck disable=SC2034  # assigned per test file and read below inside the loop
   MOCK_BLOCKED=false
 
   # Read .mockpolicyrc configuration
@@ -1333,7 +1365,9 @@ else
       done
 
       # Count total non-empty, non-comment lines for density denominator
-      TOTAL_LINES=$(grep -v '^\s*$' "$test_file" | grep -v '^\s*//' | grep -v '^\s*\*' | grep -v '^\s*#' | wc -l | tr -d ' ')
+      # One pass instead of five greps plus wc (SC2126). Same definition of a
+      # "code line": non-blank, and not a //, /* continuation or # comment.
+      TOTAL_LINES=$(awk '!/^[[:space:]]*$/ && !/^[[:space:]]*\/\// && !/^[[:space:]]*\*/ && !/^[[:space:]]*#/ {n++} END {print n+0}' "$test_file")
       TOTAL_LINES=${TOTAL_LINES//[^0-9]/}
       TOTAL_LINES=${TOTAL_LINES:-0}
 
@@ -1381,6 +1415,7 @@ fi
 # ============================================================================
 run_gate_m3() {
   local changed_files="$1"
+  # shellcheck disable=SC2034  # read from the caller via positional arg; kept for parity
   local project_root="$2"
 
   echo ""
@@ -1532,6 +1567,7 @@ else
         echo ""
         echo "❌ Gate UI: could not evaluate the UI verdict (detector unavailable or produced no verdict, exit ${UI_DETECT_EXIT})."
         echo "   This push touches UI-looking paths:"
+        # shellcheck disable=SC2001  # a multi-line block needs per-line prefixing
         echo "$UI_PATH_HITS" | sed 's/^/     /'
         echo ""
         echo "   The gate cannot claim there is nothing to review when it never got an answer."
@@ -1659,6 +1695,7 @@ fi
 EXPECTED_COMMIT=$(git rev-parse HEAD)
 
 # Validate the complete evidence contract without interpolating JSON into shell.
+  # shellcheck disable=SC1007  # "CDPATH= cd" is the idiom that suppresses cd's output;
 HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # #739: under Git Bash $HOOK_DIR is a POSIX path (/d/projects/...). `test -f`
 # accepts it because MSYS resolves that form itself, but node.exe does not: it

@@ -198,14 +198,53 @@ compare_pair() {
 
 # shellcheck disable=SC2086  # word splitting IS the intent: one file per line
 expected_hook_mirrors=$(printf '%s\n' $HOOK_MIRROR_FILES | LC_ALL=C sort)
-# #587/#588: `-type f` also catches build artefacts that live in the tree without being
-# part of it. `__pycache__` appears the moment anything imports prepush-score.py, and the
-# hook mirror then reports "file set drifted" for a file nobody added — a push-blocking
-# failure with no fix available to the operator except deleting a cache directory by hand.
-# VCS-ignored artefacts are filtered by their directory, not by name.
+#
+# #587/#588: `-type f` also catches build artefacts that live in the tree without
+# being part of it. `__pycache__` appears the moment anything imports
+# prepush-score.py, and the mirror then reports "file set drifted" for a file
+# nobody added -- a push-blocking failure with no fix available to the operator
+# except deleting a cache directory by hand.
+#
+# The earlier comment claimed "VCS-ignored artefacts are filtered by their
+# directory, not by name", but the code excluded ONLY `__pycache__/*`. Every
+# other artefact tripped the gate. Reproduced 2026-11-26: one stale file left in
+# `hooks/lib/` blocked the push, and all the operator saw was a 60-entry list of
+# expected names -- it never said which file was the problem.
+#
+# Two candidate fixes were tried and rejected by measurement:
+#
+#   * filter by `git check-ignore` -- wrong, because `hooks/lib/` is gitignored
+#     BY DESIGN; the predicate would drop 24 legitimate mirrors and fail in the
+#     opposite direction.
+#   * filter by artefact SUFFIX (*.bak, *.orig, ...) -- wrong for the actual
+#     failure mode. A stale generated `.ts` from an earlier layout is neither an
+#     editor backup nor ignored-by-name; a suffix list just relocates the bug.
+#
+# The distinction that matters is not "ignored or not" and not "what suffix", but
+# "is this a file the gate is supposed to compare". The generator's output is
+# enumerated in HOOK_MIRROR_FILES, so disk content that is neither listed nor an
+# obvious cache is what blocks the push -- and the message now NAMES those files
+# instead of printing the whole expected list.
 actual_hook_mirrors=$([ -d src/npm-package/hooks ] && find src/npm-package/hooks -type f \
-  -not -path '*/__pycache__/*' | sed 's|^src/npm-package/hooks/||' | LC_ALL=C sort || true)
-[ "$expected_hook_mirrors" = "$actual_hook_mirrors" ] || fail "hook mirror file set drifted (expected exactly: $(printf '%s' "$HOOK_MIRROR_FILES" | tr '\n' ' '))"
+  -not -path '*/__pycache__/*' \
+  | sed 's|^src/npm-package/hooks/||' | LC_ALL=C sort || true)
+# shellcheck disable=SC2086  # word splitting IS the intent: one name per word
+unexpected_hook_mirrors=$(comm -13 <(printf '%s\n' $expected_hook_mirrors) <(printf '%s\n' "$actual_hook_mirrors") | sed '/^$/d')
+if [ -n "$unexpected_hook_mirrors" ]; then
+  echo ""
+  echo "   Files found in src/npm-package/hooks that no mirror pair generates:" >&2
+  # shellcheck disable=SC2086  # one line per file, so the words MUST split
+  printf '     %s\n' $unexpected_hook_mirrors >&2
+  echo "" >&2
+  echo "   These are stale leftovers from an earlier layout or a hand edit." >&2
+  echo "   Delete them (git clean -fd src/npm-package/hooks), then retry." >&2
+  echo "   If one of them is a mirror that SHOULD ship, add it to" >&2
+  echo "   HOOK_MIRROR_FILES in scripts/check-hook-mirror.sh." >&2
+fi
+[ -z "$unexpected_hook_mirrors" ] || fail "hook mirror file set drifted: unexpected file(s) listed above"
+# shellcheck disable=SC2086  # word splitting IS the intent: one name per word
+missing_hook_mirrors=$(comm -23 <(printf '%s\n' $expected_hook_mirrors) <(printf '%s\n' "$actual_hook_mirrors") | sed '/^$/d')
+[ -z "$missing_hook_mirrors" ] || fail "hook mirror file(s) missing: $(printf '%s' "$missing_hook_mirrors" | tr '\n' ' ')"
 
 # Every path compare_pair will ask about, in one list, fetched from the index
 # once. Doing it here (before the loops) is what removes the ~94 git spawns.
