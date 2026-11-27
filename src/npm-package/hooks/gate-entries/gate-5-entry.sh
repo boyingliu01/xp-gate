@@ -983,7 +983,11 @@ else
               echo "   No related test files found, running full test suite..."
               TESTS_OUTPUT=$(run_without_git_context run_node_bin vitest vitest/vitest.mjs run --coverage 2>&1)
               TESTS_EXIT_CODE=$?
-              echo "$TESTS_OUTPUT" | head -60
+              # `head` closes the pipe and the WRITER takes SIGPIPE, which is why the
+              # pipeline can print "write error: Broken pipe" -- harmless in itself, but it
+              # made a passing suite look like a failure in the log. Printed with printf and
+              # a bounded slice instead, so nothing downstream can break the writer.
+              printf '%s\n' "$(printf '%s\n' "$TESTS_OUTPUT" | sed -n '1,60p')" 
               if [ "$TESTS_EXIT_CODE" -ne 0 ]; then
                 handle_test_failure "$TESTS_OUTPUT" "full test suite" || return 1
               else

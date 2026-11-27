@@ -31,6 +31,11 @@ export default defineConfig({
       // nothing. Only `plugins/dsh` is kept, so `plugins/opencode/node_modules`
       // and the other vendored trees stay out.
       'plugins/*/node_modules/**',
+      // Skills copied into a plugin are the SAME files as repo-root `skills/`, which the
+      // next line already excludes. Without this, a newly installed skill whose tests are
+      // not ready yet fails the FULL suite from every plugin copy at once -- 42 collect
+      // errors from three files, which is how this was found at push time.
+      'plugins/*/skills/**',
       'skills/**',
       'src/npm-package/plugins/**', 'src/npm-package/skills/**',
       'src/npm-package/principles/**', 'src/npm-package/mutation/**',

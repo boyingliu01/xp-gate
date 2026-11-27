@@ -91,7 +91,13 @@ function restoreFromBackup({ pyprojectPath, backupPath, hadExisting }: RestoreTa
  * mutation RESULT into a crash.
  */
 function restoreExisting({ pyprojectPath, backupPath }: BackupPair): void {
-  if (!existsSync(backupPath)) return;
+  // A MISSING backup is not "nothing to do". `pyproject.toml` pre-existed (that is why a
+  // backup was taken), so whatever mutmut wrote into it is still there and nothing can put
+  // it back -- the caller must say so instead of returning as though the restore succeeded
+  // (review feasibility FC-01: this was a silent fail-open).
+  if (!existsSync(backupPath)) {
+    throw new Error(`backup ${backupPath} is gone, so ${pyprojectPath} cannot be restored`);
+  }
   // Each step is guarded on its own rather than wrapped in one try/catch, because they
   // fail differently and only the CALLER can report usefully (it knows the backup path):
   //
