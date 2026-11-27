@@ -369,8 +369,16 @@ const PSSCRIPTANALYZER_SECURITY_RULES = [
   'PSAvoidUsingWriteHost',
 ].join(',');
 
+/**
+ * The analyzer invocation, with every path single-quoted for PowerShell.
+ *
+ * A path is DATA and must stay data: a filename containing `'` closed the quote and let
+ * the rest of the name run as command text (review feasibility FC-01). PowerShell escapes
+ * a literal quote inside a single-quoted string by DOUBLING it -- the same rule as SQL --
+ * so `a'b.ps1` becomes `'a''b.ps1'`.
+ */
 function buildPSScriptAnalyzerCommand(psFiles: string[]): string {
-  const fileList = psFiles.map(f => `'${f}'`).join(',');
+  const fileList = psFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(',');
   return `Invoke-ScriptAnalyzer -Path ${fileList} -IncludeRule ${PSSCRIPTANALYZER_SECURITY_RULES} -ErrorAction SilentlyContinue | ConvertTo-Json`;
 }
 
