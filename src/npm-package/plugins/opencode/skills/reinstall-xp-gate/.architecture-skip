@@ -1,8 +1,0 @@
-# xp-gate Gate 6 exemption (documented mechanism: "To skip with warning, create .architecture-skip")
-#
-# WHY: this repository is a portable agent skill, not a layered application.
-# It contains SKILL.md plus flat Node ESM helper scripts under scripts/lib/.
-# There is no import graph to constrain, no layering to enforce, and therefore
-# no architecture.yaml that could be written honestly. Gate 6's own message
-# says it needs "explicit architecture constraints"; declaring none is the
-# truthful state, and the warning keeps that visible rather than hidden.
