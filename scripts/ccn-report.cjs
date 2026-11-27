@@ -39,8 +39,7 @@ const path = require('path');
 const { requireEmptyOutputIsReal, requireNotTruncated } = require('./ccn-report-guards.cjs');
 const fs = require('fs');
 
-// Test-file classification. Keep equivalent to the exclusion regex in
-// githooks/gate-3.sh: the gate grades exactly the population this writer
+// Test-file classification. Keep equivalent to the exclusion regex in githooks/gate-3.sh: the gate grades exactly the population this writer
 // records, so a divergence makes the ratchet report pre-existing code as new
 // (a false BLOCK that no repair can clear).
 //
@@ -69,7 +68,9 @@ const PLUGIN_BUNDLE_PREFIX = /^plugins\/[^/]+\/src\//;
 // for a function whose own logic is 108 NLOC, because the inner helpers are nested
 // inside the closure. That is a measurement artefact of the required shape, not a
 // function anyone can split -- so it is bucketed rather than refactored.
-const HOST_CLOSURE_PREFIX = /^plugins\/[^/]+\/client\//;
+// The reason -- a host loader requiring ONE closure, so lizard charges the whole file to
+// `factory` -- applies to that entry file, not everything under `client/` (review FC-06).
+const HOST_CLOSURE_PREFIX = /^plugins\/[^/]+\/client\/client\.js$/;
 const ANOMALY_MAX_MS = 2 * 3600 * 1000; // anything above a 2h gate run is poisoned bookkeeping
 
 // A lizard row whose reported span exceeds this is not a real function extent:
