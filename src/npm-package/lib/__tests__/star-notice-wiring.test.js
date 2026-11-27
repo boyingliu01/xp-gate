@@ -41,7 +41,15 @@ function cleanup(dir) {
  * must stay silent.
  */
 function runCli(args, { home, tty = false, env = {}, cwd, timeout = CLI_TIMEOUT_MS } = {}) {
-  const childEnv = { ...process.env, HOME: home, ...env };
+  // GitHub Actions injects `CI=true` into every job. The production code treats
+  // CI as "no human is reading this", so it correctly stays silent there -- and
+  // a test that merely inherits the runner's environment asks a TTY panel to
+  // print while telling it this is CI. Measured on the real runner: four cases
+  // failed with `expected 'xp-gate v0.38.126' to contain ...`.
+  //
+  // The TTY cases are about the interactive path, so they clear CI explicitly.
+  // A test that WANTS CI passes it in.
+  const childEnv = { ...process.env, CI: '', HOME: home, ...env };
   const cmd = process.execPath;
   if (!tty) {
     const r = spawnSync(cmd, [BIN, ...args], { env: childEnv, cwd, encoding: 'utf8', timeout });
