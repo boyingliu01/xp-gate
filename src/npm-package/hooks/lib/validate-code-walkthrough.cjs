@@ -1,0 +1,746 @@
+#!/usr/bin/env node
+'use strict';
+
+const { execFileSync } = require('child_process');
+
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+
+const REQUIRED_ROLES = ['architecture', 'technical', 'feasibility'];
+const VALIDITY_MS = 60 * 60 * 1000;
+
+/**
+ * Project-level Delphi seat configuration.
+ *
+ * Present => evidence is BOUND to it (#574): each expert's `requested_model`
+ * must be exactly the seat the config assigns to that expert's role.
+ * Absent  => evidence stays unbound (the #423 behaviour), so projects that
+ * review through another platform's channel are unaffected.
+ */
+const DELPHI_CONFIG_FILE = '.delphi-config.json';
+
+/**
+ * Allowed provenance values for an expert record.
+ *
+ * `channel` is an EXPLICIT whitelist. An absent field is rejected rather than
+ * defaulted: treating "missing" as `local` (or as anything else) would be a
+ * zero-cost bypass, since omitting one key would let evidence that never came
+ * from a real model call pass the gate. Only these exact strings are accepted;
+ * casing and whitespace are not normalised.
+ */
+const VALID_CHANNELS = ['external', 'local'];
+
+function fail(message) {
+  console.error(`Invalid code walkthrough evidence: ${message}`);
+  process.exit(1);
+}
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** A canonical UTC ISO-8601 instant, with an optional millisecond fraction. */
+const TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
+
+/**
+ * The date one timestamp match describes.
+ *
+ * Groups 1..6 are year through second; group 7 is the optional fraction, padded to
+ * milliseconds. Built from the parts rather than by handing the string to `Date`, so a
+ * non-canonical spelling cannot be silently accepted by the platform's parser.
+ */
+function buildUtcDate(match) {
+  const parts = match.slice(1, 7).map(Number);
+  const [year, month, day, hour, minute, second] = parts;
+  const milliseconds = Number((match[7] || '').padEnd(3, '0') || 0);
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, milliseconds);
+  return { date, expected: [...parts, milliseconds] };
+}
+
+/** The date's own fields, in the same order as `expected`. */
+function readBackFields(date) {
+  return [
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds(),
+    date.getUTCMilliseconds(),
+  ];
+}
+
+/**
+ * Read a canonical UTC timestamp, or fail naming the field.
+ *
+ * A date silently ROLLS OVER ("2026-02-30" becomes March 2), so the only way to know
+ * the input was a real calendar instant is to read it back and compare every field.
+ */
+function parseTimestamp(value, field) {
+  const match = typeof value === 'string' ? value.match(TIMESTAMP_RE) : null;
+  if (!match) fail(`${field} must be a canonical UTC ISO-8601 timestamp.`);
+
+  const { date, expected } = buildUtcDate(match);
+  if (!readBackFields(date).every((actual, i) => actual === expected[i])) {
+    fail(`${field} must contain a valid UTC calendar date and time.`);
+  }
+  return date.getTime();
+}
+
+/**
+ * Record one seat into `seats` if the entry carries a usable model id.
+ * Shared by both `experts` shapes so the acceptance rule lives in exactly one
+ * place (#599: the two branches were byte-for-byte copies, which is what pushed
+ * this function over the complexity block threshold).
+ *
+ * @param {Map<string, string>} seats role -> trimmed model id, mutated
+ * @param {string} role configured role name
+ * @param {unknown} entry candidate expert record
+ */
+function addSeat(seats, role, entry) {
+  if (!isPlainObject(entry)) return;
+  const model = entry.model ?? entry.requested_model;
+  if (typeof model === 'string' && model.trim() !== '') seats.set(role, model.trim());
+}
+
+/**
+ * Normalise the two `experts` shapes `.delphi-config.json` appears in — an
+ * object keyed by role (what xp-gate writes) and an array carrying `role` —
+ * into a plain role -> model map. Mirrors `normalizeExperts()` in
+ * `plugins/dsh/src/delphi-config.ts` and `iter_seats()` in
+ * `scripts/check_delphi_local_models.py`: one config shape, one reading.
+ *
+ * @param {unknown} experts raw `experts` value
+ * @returns {Map<string, string>} role -> trimmed model id
+ */
+function seatsFromExperts(experts) {
+  const seats = new Map();
+  if (Array.isArray(experts)) {
+    for (const entry of experts) {
+      if (isPlainObject(entry) && typeof entry.role === 'string') {
+        addSeat(seats, entry.role, entry);
+      }
+    }
+  } else if (isPlainObject(experts)) {
+    for (const [role, entry] of Object.entries(experts)) {
+      addSeat(seats, role, entry);
+    }
+  }
+  return seats;
+}
+
+/**
+ * Resolve the binding seats from a parsed `.delphi-config.json`.
+ *
+ * Only the ACTIVE profile binds, exactly like every other Delphi loader. A
+ * config that names profiles but leaves no resolvable active one is rejected
+ * rather than ignored: silently falling back to "unbound" would turn a broken
+ * config into a bypass.
+ *
+ * @param {unknown} config parsed config document
+ * @returns {Map<string, string>} role -> model id that evidence must match
+ */
+/** Whether this config uses the legacy FLAT shape, where experts sit at top level. */
+function isFlatConfig(profiles) {
+  return !isPlainObject(profiles) || Object.keys(profiles).length === 0;
+}
+
+/**
+ * The experts of the profile the gate should read.
+ *
+ * A config with no profiles is the LEGACY flat shape, not a broken one: older
+ * releases wrote experts at the top level, and rejecting them would fail every
+ * existing setup on upgrade.
+ */
+function expertsOf(config, profiles) {
+  if (isFlatConfig(profiles)) return config.experts;
+
+  const active = config.active_profile;
+  if (typeof active !== 'string' || !isPlainObject(profiles[active])) {
+    // Naming the available profiles is what makes this actionable: the reader can
+    // pick one instead of re-reading the config to find the right spelling.
+    const available = Object.keys(profiles).join(', ');
+    fail(
+      `${DELPHI_CONFIG_FILE} has no resolvable active_profile (active_profile=${JSON.stringify(active)}; `
+        + `available: ${available}). Set one so the gate knows which seats bind.`
+    );
+  }
+  return profiles[active].experts;
+}
+
+function resolveBindingSeats(config) {
+  if (!isPlainObject(config)) fail(`${DELPHI_CONFIG_FILE} must contain a JSON object.`);
+  return seatsFromExperts(expertsOf(config, config.profiles));
+}
+
+/**
+ * Machine-wide Delphi config path: `$XDG_CONFIG_HOME/xp-gate/` or
+ * `~/.config/xp-gate/`. Mirrors `defaultGlobalConfigPath()` in
+ * `plugins/dsh/src/delphi-config.ts` so the gate and the tool that produces the
+ * evidence agree on where seats come from. XDG_CONFIG_HOME is honoured because
+ * the plugin honours it — a gate reading a different file than the reviewer
+ * used would bind against seats nobody actually ran.
+ */
+function globalConfigPath(env = process.env) {
+  const base = env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(base, 'xp-gate', DELPHI_CONFIG_FILE);
+}
+
+/**
+ * Read the binding seats for the project rooted at `projectRoot`.
+ *
+ * The root is passed EXPLICITLY by the caller, never derived from
+ * `process.cwd()`. Deriving it from cwd made the binding depend on where the
+ * validator was launched from: running the test suite from inside xp-gate
+ * itself picked up xp-gate's own `.delphi-config.json` and re-bound every
+ * fixture to xp-gate's seats. The gate's subject is the repository being
+ * pushed, so that is what must be named.
+ *
+ * ## Global fallback (2026-10-27)
+ *
+ * A project file still WINS, so a repo can override seats deliberately. When
+ * the project has none, the machine-wide config is used instead of returning
+ * null — and this is load-bearing, not a convenience:
+ *
+ * Before this fallback existed, DELETING a project-level config silently
+ * disabled the entire #574 seat check, because `bindingSeats === null`
+ * short-circuits `validateRequestedModel`. The gate kept reporting PASS while
+ * any three distinct gateway models — including the expensive overseas ones
+ * #574 exists to catch — could satisfy it, with no message anywhere. A user
+ * consolidating onto one global config to stop maintaining a copy per repo
+ * would have unknowingly traded that protection away.
+ *
+ * Only ENOENT triggers the fallback: an unreadable project config
+ * (EACCES/EISDIR) must surface rather than silently routing this run to a
+ * different file. Same semantics as `loadDelphiConfig()` in the DSH plugin.
+ *
+ * ## No config anywhere is now FAIL-CLOSED (2026-10-27)
+ *
+ * Returning null when both locations are absent re-opened the exact hole #574
+ * closed: measured, `b-claude-4.8-opus` / `gpt-5.5` / `gemini-3-pro` pass the
+ * validator when no config exists. That was tolerable while a config shipped
+ * inside every repo (deleting one looked like opting out); once the machine-wide
+ * file is the single source of truth, "no config" becomes the normal state of a
+ * fresh machine or a bare CI runner — i.e. the bypass is the default path.
+ *
+ * The caller distinguishes two cases it already knows:
+ *   - no project context at all (no root argument) -> unbound, #423 behaviour;
+ *   - a real repo with evidence but no config anywhere -> refuse.
+ * This function therefore throws rather than returning null for the second
+ * case; `main()` only reaches it when a project root was named.
+ *
+ * @param {string} projectRoot repository root whose config binds the evidence
+ * @param {NodeJS.ProcessEnv} env environment for the global-path lookup
+ * @returns {Map<string, string>} seats; never null
+ * @throws exits via fail() when neither location has a config
+ */
+/**
+ * Read the config text from the project copy, or the machine-wide fallback.
+ *
+ * Both absent is a HARD failure that names both paths: a repo with walkthrough evidence
+ * and nothing binding it to seats cannot be verified, and "config not found" without
+ * the locations sends the reader to search.
+ *
+ * @returns the text and where it came from
+ */
+function readConfigText(projectPath, fallbackPath) {
+  try {
+    return { raw: fs.readFileSync(projectPath, 'utf8'), source: projectPath, fromProject: true };
+  } catch (projectError) {
+    if (!projectError || projectError.code !== 'ENOENT') {
+      fail(`cannot read ${DELPHI_CONFIG_FILE}: ${projectError && projectError.message ? projectError.message : String(projectError)}`);
+    }
+    return readFallbackConfig(fallbackPath, projectPath);
+  }
+}
+
+/** The machine-wide copy, used only when the project has none. */
+function readFallbackConfig(fallbackPath, projectPath) {
+  try {
+    return { raw: fs.readFileSync(fallbackPath, 'utf8'), source: fallbackPath, fromProject: false };
+  } catch (globalError) {
+    if (globalError && globalError.code === 'ENOENT') {
+      fail(
+        `no ${DELPHI_CONFIG_FILE} found, so the reviewer seats cannot be verified. `
+          + `Looked in: ${projectPath}, ${fallbackPath}. `
+          + `Create the machine-wide config or add one to the repository.`
+      );
+    }
+    fail(`cannot read ${DELPHI_CONFIG_FILE}: ${globalError && globalError.message ? globalError.message : String(globalError)}`);
+  }
+}
+
+/** Every required role must have a seat; the first missing one is named. */
+function assertAllRolesBound(seats) {
+  for (const role of REQUIRED_ROLES) {
+    if (!seats.has(role)) {
+      fail(`${DELPHI_CONFIG_FILE} declares no seat for the ${role} role; all three roles must be configured.`);
+    }
+  }
+}
+
+function loadBindingSeats(projectRoot, env = process.env) {
+  const projectPath = path.join(projectRoot, DELPHI_CONFIG_FILE);
+  const fallbackPath = globalConfigPath(env);
+  const { raw, source, fromProject } = readConfigText(projectPath, fallbackPath);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    fail(`${source} is not valid JSON: ${error.message}`);
+  }
+
+  const seats = resolveBindingSeats(parsed);
+  assertAllRolesBound(seats);
+  // A repo-local copy that disagrees with the machine-wide one is how the 2026-10-27
+  // incident happened: a stale per-repo file silently won and the review kept using a
+  // retired seat. Winning is still allowed (deliberate overrides exist), but it must
+  // never be silent.
+  if (fromProject) warnOnSeatDrift(projectPath, fallbackPath, seats);
+  return seats;
+}
+
+/**
+ * Warn (never block) when a repository-local config disagrees with the
+ * machine-wide one.
+ *
+ * 2026-10-27 incident: the machine-wide config had been updated to replace a
+ * flaky seat, but an older copy survived in the repo root. The project file
+ * won, the review kept calling the retired seat, and nothing anywhere said so —
+ * the only symptom was intermittent HTTP 500s that looked like a gateway
+ * problem. Silence is what made it expensive.
+ *
+ * Deliberate per-repo overrides are legitimate, so this is a WARN on stderr and
+ * never changes the exit code. Absence of either file is not drift.
+ *
+ * @param {string} projectPath repository config path
+ * @param {string} fallbackPath machine-wide config path
+ * @param {Map<string, string>} projectSeats seats actually in effect
+ */
+/**
+ * Resolve the machine-wide config's seats, or null when there is nothing to compare.
+ *
+ * Null covers both "no machine config" and "unparseable machine config": neither is
+ * this function's business, and an unparseable one is reported by its own path when it
+ * is actually used.
+ */
+function machineSeatsOrNull(fallbackPath) {
+  try {
+    return resolveBindingSeats(JSON.parse(fs.readFileSync(fallbackPath, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+/** A role whose repo seat differs from the machine-wide one. */
+function driftsFromMachine(role, projectSeats, machineSeats) {
+  return machineSeats.has(role) && projectSeats.get(role) !== machineSeats.get(role);
+}
+
+/** The drift announcement, one role per clause. */
+function driftWarning(drift, projectSeats, machineSeats) {
+  const detail = drift
+    .map((role) => `${role}: repo=${projectSeats.get(role)} machine=${machineSeats.get(role)}`)
+    .join('; ');
+  return `⚠️  ${DELPHI_CONFIG_FILE} in this repository overrides the machine-wide seats `
+    + `(${detail}). The repository copy wins. If the machine-wide config was updated `
+    + `to retire a seat, this repo is still calling the old one.\n`;
+}
+
+/**
+ * Warn when a repo-local config disagrees with the machine-wide one.
+ *
+ * Winning is allowed -- deliberate overrides exist -- but it must never be SILENT:
+ * a stale per-repo file silently outranking an updated machine config is how the
+ * 2026-10-27 incident kept a retired seat in use.
+ */
+function warnOnSeatDrift(projectPath, fallbackPath, projectSeats) {
+  const machineSeats = machineSeatsOrNull(fallbackPath);
+  if (!machineSeats) return;
+  const drift = REQUIRED_ROLES.filter((role) => driftsFromMachine(role, projectSeats, machineSeats));
+  if (drift.length > 0) process.stderr.write(driftWarning(drift, projectSeats, machineSeats));
+}
+
+/**
+ * Validate an expert's identity fields: shape, role, approval status, and
+ * channel provenance. Split out of `validateExpert`, which exceeded the
+ * complexity block threshold (#599).
+ *
+ * @param {object} expert expert record
+ * @param {number} index position in the experts array
+ * @param {Set<string>} roles roles seen so far; the role is added
+ */
+function validateExpertIdentity(expert, index, roles) {
+  if (!isPlainObject(expert)) fail(`experts[${index}] must be a plain object.`);
+  if (!REQUIRED_ROLES.includes(expert.role)) fail(`experts[${index}].role is invalid.`);
+  if (roles.has(expert.role)) fail(`expert role ${expert.role} is duplicated.`);
+  roles.add(expert.role);
+
+  if (expert.verdict !== 'APPROVED') fail(`expert ${expert.role} must be APPROVED.`);
+  if (expert.result_type !== 'delphi_expert_result') {
+    fail(`expert ${expert.role} must be a successful Delphi expert result.`);
+  }
+  if (expert.error !== undefined || expert.fallback !== undefined) {
+    fail(`expert ${expert.role} contains an error or fallback marker.`);
+  }
+
+  // Provenance is mandatory and must be an exact whitelist value (#423). Without
+  // this, three hand-written records with distinct model NAMES satisfied the old
+  // check while no model was ever called.
+  if (!VALID_CHANNELS.includes(expert.channel)) {
+    fail(
+      `expert ${expert.role} channel must be one of: ${VALID_CHANNELS.join(', ')}.`
+    );
+  }
+}
+
+/**
+ * Validate the requested model: non-empty, distinct across experts, and — when
+ * the project binds seats — exactly the model configured for this role.
+ *
+ * requested_model is compared EXACTLY (after trimming) while resolved_model is
+ * compared case-INSENSITIVELY. The asymmetry is intentional, not an oversight: a
+ * requested ID is a case-sensitive gateway identifier and AGENTS.md requires
+ * "three distinct trimmed requested model IDs", whereas resolved_model answers
+ * "did these actually run on one model?" -- and gateways do report the same model
+ * with different casing per call, which is how #423 slipped through. Pinned by
+ * scripts/__tests__/gate-mw-provenance.test.cjs (AC-423-08).
+ *
+ * #574: when the project ships a `.delphi-config.json`, the seat this role was
+ * configured with is the ONLY model allowed to report for it. Distinctness alone
+ * was satisfiable by any three of the gateway's ~138 models -- measured
+ * 2026-10-22, a walkthrough ran on s-deepseek-v4.1-flash / g-deepseek-v4-pro /
+ * doubao-seed-2.0-pro while the config named three local-* seats, and this
+ * validator passed it. Membership is checked per ROLE (not as a set) so a swapped
+ * pair is rejected too: the role attribution would otherwise be a lie.
+ *
+ * @param {object} expert expert record
+ * @param {Set<string>} models requested models seen so far; this one is added
+ * @param {Map<string, string>|null} bindingSeats configured seats, or null
+ */
+function validateRequestedModel(expert, models, bindingSeats) {
+  if (typeof expert.requested_model !== 'string' || expert.requested_model.trim() === '') {
+    fail(`expert ${expert.role} requested_model must be non-empty.`);
+  }
+  const model = expert.requested_model.trim();
+  if (models.has(model)) fail(`requested_model ${model} is duplicated.`);
+  models.add(model);
+
+  if (bindingSeats !== null) {
+    const configured = bindingSeats.get(expert.role);
+    if (model !== configured) {
+      fail(
+        `expert ${expert.role} requested_model ${model} does not match the configured seat `
+          + `${configured} from ${DELPHI_CONFIG_FILE}.`
+      );
+    }
+  }
+}
+
+/**
+ * Validate the resolved model: a non-empty string, distinct ignoring case.
+ *
+ * Previously null was allowed, so an expert that never resolved a model still
+ * counted as successful; and nothing compared resolved models, so all three could
+ * report the same one while `requested_model` differed.
+ *
+ * @param {object} expert expert record
+ * @param {Set<string>} resolvedModels resolved models seen so far; added here
+ */
+function validateResolvedModel(expert, resolvedModels) {
+  if (typeof expert.resolved_model !== 'string' || expert.resolved_model.trim() === '') {
+    fail(`expert ${expert.role} resolved_model must be a non-empty string.`);
+  }
+  const resolved = expert.resolved_model.trim().toLowerCase();
+  if (resolvedModels.has(resolved)) {
+    fail(`expert ${expert.role} resolved_model ${expert.resolved_model.trim()} is duplicated.`);
+  }
+  resolvedModels.add(resolved);
+}
+
+function validateExpert(expert, index, roles, models, resolvedModels, bindingSeats) {
+  validateExpertIdentity(expert, index, roles);
+  validateRequestedModel(expert, models, bindingSeats);
+  validateResolvedModel(expert, resolvedModels);
+}
+
+/**
+ * The review must have covered EVERY path this push actually changes.
+ *
+ * An ANCESTOR commit is accepted, which raises the question the reviewers put their
+ * finger on: evidence approved at commit A says nothing about the work added between A
+ * and HEAD. Without this check a stale approval could carry an arbitrary amount of
+ * unreviewed code into main -- the flat opposite of what the gate is for.
+ *
+ * `reviewed_paths` is the walkthrough's own record of what it was given. It is checked
+ * as a SUPERSET of the changed paths, so splitting one change across several reviews is
+ * fine as long as their union covers it. A missing field fails: "no record" cannot be
+ * read as "covered everything", which is the fail-open shape this repository keeps
+ * finding.
+ */
+function validateCoverage(evidence, changedPaths) {
+  // Null means git could not answer here; skipping beats inventing an empty set, which
+  // would pass every review on a repository this could not read.
+  if (!Array.isArray(changedPaths)) return;
+  const changed = changedPaths;
+  // Nothing changed between the reviewed commit and HEAD: there is no gap to cover, so
+  // the field is not required. Demanding it here would fail the exact-match case that
+  // worked before this check existed.
+  if (changed.length === 0) return;
+  // KNOWN LIMIT, measured and NOT fixed (review FC-01): this compares PATHS, so work done
+  // to an ALREADY-REVIEWED path between the review commit and HEAD is not detected. A
+  // review of `src/x.ts` at A, followed by more edits to `src/x.ts` before HEAD, passes.
+  //
+  // Closing it needs a content fingerprint per path -- `reviewed_digests` holding the blob
+  // each review saw -- and `git diff --name-only` cannot supply one. That is a schema
+  // change to the evidence format, which every existing evidence file would fail, so it is
+  // recorded as debt rather than half-built here. Until then this check is a real guard
+  // (it stops an unreviewed FILE) and not a proof.
+  const reviewed = evidence.reviewed_paths;
+  if (!Array.isArray(reviewed)) {
+    fail('reviewed_paths must be an array of the paths this walkthrough read.');
+  }
+  // BOTH sides normalised. Stripping `./` from `reviewed_paths` only meant a genuine
+  // `./src/x.ts` in the evidence failed to match git's `src/x.ts`, so a covered file was
+  // reported as missing and the push was blocked for nothing (review FC-03).
+  const normalise = (p) => String(p).replace(/^\.\//, '');
+  const seen = new Set(reviewed.map(normalise));
+  const missing = changed.map(normalise).filter((p) => !seen.has(p));
+  if (missing.length > 0) {
+    fail(
+      `the walkthrough did not cover ${missing.length} changed path(s): `
+        + `${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}. `
+        + 'Review them, or split the push.',
+    );
+  }
+}
+/**
+ * The diff to check coverage against, or null when there is nothing to compare.
+ *
+ * Null in two cases, for opposite reasons: an EXACT match means HEAD is the reviewed
+ * commit (no gap, and git may not be reachable at all -- unit tests build records in
+ * temporary directories on purpose), and a commit that is not an ancestor cannot be
+ * diffed against HEAD without failing inside git, which would mask the real finding.
+ */
+function comparablePaths(evidence, expectedCommit, coversHead, changedPathsOf) {
+  // Null here means ONE thing: there is no gap to compare. Two cases produce it -- the
+  // reviewed commit IS HEAD, or it is not an ancestor (which `validateEvidenceIdentity`
+  // rejects, so we never reach the coverage check). Neither can hide unread work.
+  //
+  // "Could not compute the diff" is NOT one of them: `changedPathsSince` calls `fail()`
+  // in that case rather than returning null (review technical CI-01 asked whether the
+  // two could be confused; the answer is that `fail` exits, so this cannot receive it).
+  if (evidence.commit === expectedCommit) return null;
+  if (typeof coversHead !== 'function' || !coversHead(evidence.commit)) return null;
+  return typeof changedPathsOf === 'function' ? changedPathsOf() : null;
+}
+
+function validateEvidence(evidence, expectedCommit, expectedBranch, now, bindingSeats, coversHead, changedPathsOf) {
+  if (!isPlainObject(evidence)) fail('top level must be a plain object.');
+  validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead);
+  // Lazy AND conditional: the diff is only meaningful when the reviewed commit is this
+  // branch's ancestor. A fake or foreign commit cannot be diffed against HEAD at all, and
+  // computing it would surface a git error in place of the real finding (that the evidence
+  // describes a different commit). Records built by unit tests use such commits on purpose.
+  validateCoverage(evidence, comparablePaths(evidence, expectedCommit, coversHead, changedPathsOf));
+  validateEvidenceTimestamps(evidence, now);
+  validateConsensusRatio(evidence.consensus_ratio);
+  validateExperts(evidence.experts, bindingSeats);
+}
+
+/** The document must describe this exact push, and must approve it. */
+/**
+ * The commit a walkthrough must cover: HEAD, or an ancestor of it.
+ *
+ * Evidence names the commit the review SAW. Requiring it to equal HEAD made every
+ * commit after a review invalidate it, so a branch that was worked on for a day could
+ * not be pushed without a fresh three-model sweep of everything -- and a branch that
+ * had never been pushed needed one sweep of its ENTIRE history, which does not fit in
+ * the 40 KB prompt budget. Batching was therefore not merely awkward but impossible.
+ *
+ * `coversHead` (set by the caller when it can resolve git) accepts evidence for an
+ * ANCESTOR, because that commit is inside the range being pushed: the review did see
+ * the code that is landing. The check still rejects a commit on another branch, and
+ * still rejects a hypothetical one, since neither is an ancestor of HEAD.
+ */
+function validateEvidenceIdentity(evidence, expectedCommit, expectedBranch, coversHead) {
+  const exact = evidence.commit === expectedCommit;
+  const ancestor = typeof coversHead === 'function' && coversHead(evidence.commit);
+  if (!exact && !ancestor) fail('commit does not match HEAD.');
+  if (evidence.branch !== expectedBranch) fail('branch does not match the current branch.');
+  if (evidence.verdict !== 'APPROVED') fail('top-level verdict must be APPROVED.');
+}
+
+/**
+ * The evidence must be recent and self-consistent: not from the future, not
+ * expired, and valid for exactly one hour from its own timestamp.
+ */
+function validateEvidenceTimestamps(evidence, now) {
+  const timestamp = parseTimestamp(evidence.timestamp, 'timestamp');
+  const expires = parseTimestamp(evidence.expires, 'expires');
+  if (timestamp > now) fail('timestamp is in the future.');
+  if (expires <= now) fail('evidence has expired.');
+  if (expires - timestamp !== VALIDITY_MS) {
+    fail('expires must be exactly one hour after timestamp.');
+  }
+}
+
+/** The three experts must have agreed at 90% or better. */
+function validateConsensusRatio(ratio) {
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0.90 || ratio > 1) {
+    fail('consensus_ratio must be a finite number from 0.90 through 1.');
+  }
+}
+
+/**
+ * Validate each of the three expert records, then confirm every required role
+ * appeared. `roles` accumulates across the records, so it is checked once after
+ * the loop rather than per expert.
+ */
+function validateExperts(experts, bindingSeats) {
+  if (!Array.isArray(experts) || experts.length !== 3) {
+    fail('experts must contain exactly three records.');
+  }
+  const roles = new Set();
+  const models = new Set();
+  // Scoped to this validation run, so one document's models cannot leak into the
+  // next (a long-lived process validating several pushes).
+  const resolvedModels = new Set();
+  experts.forEach((expert, index) => {
+    validateExpert(expert, index, roles, models, resolvedModels, bindingSeats);
+  });
+  if (roles.size !== REQUIRED_ROLES.length) fail('all required expert roles must be present.');
+}
+
+/**
+ * Read and parse the evidence document, failing with a readable message rather
+ * than letting a raw ENOENT/JSON.parse error escape.
+ *
+ * @param {string} file path to the evidence JSON
+ * @returns {unknown} parsed document
+ */
+function readEvidence(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fail('file must exist and contain valid JSON.');
+  }
+}
+
+/**
+ * Resolve the project root the caller named, if any.
+ *
+ * #574: the seats that bind are the ones configured in the repository being
+ * pushed. The caller names that root; a missing argument means "no project
+ * context", which keeps evidence unbound rather than guessing from cwd.
+ *
+ * @param {string|undefined} projectRoot raw argv value
+ * @returns {string|null} absolute root, or null for "no project context"
+ */
+function resolveProjectRoot(projectRoot) {
+  if (projectRoot === undefined || projectRoot === '') return null;
+  return path.resolve(projectRoot);
+}
+
+/**
+ * The paths changed between `commit` and HEAD, or null when git cannot answer.
+ *
+ * Null means "not measurable here", and the coverage check then SKIPS rather than
+ * inventing an empty set: reporting zero changed paths would pass every review on a
+ * repository this could not read, which is worse than not checking.
+ */
+function changedPathsSince(root, commit) {
+  // Not a string: `validateEvidenceIdentity` has already rejected this, so the value never
+  // reaches a caller that would treat null as "nothing to compare".
+  if (typeof commit !== 'string' || commit === '') return null;
+  // NOT wrapped in try/catch. An unanswerable diff means the gate cannot prove what this
+  // push contains, and "unable to prove coverage" must not read as "covered" -- that is
+  // the fail-open shape this repository keeps removing. The error propagates and BLOCKS.
+  const cwd = root === null ? process.cwd() : root;
+  try {
+    return execFileSync('git', ['diff', '--name-only', '-z', `${commit}..HEAD`], {
+      cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .split('\0')
+      .filter((p) => p !== '');
+  } catch (err) {
+    // Deliberately NOT "return null and skip": the gate cannot prove what this push
+    // contains, and that must block rather than pass. The message says which commit and
+    // why, so the operator knows whether the evidence is wrong or the repository is.
+    fail(
+      `cannot list what changed since ${commit}: ${err instanceof Error ? err.message : String(err)}. `
+        + 'Gate MW needs the diff to prove the review covers this push.',
+    );
+  }
+}
+
+
+function main() {
+  const args = parseArguments(process.argv.slice(2));
+  const evidence = readEvidence(args.file);
+  const root = resolveProjectRoot(args.projectRoot);
+  const bindingSeats = root === null ? null : loadBindingSeats(root);
+  // ORDER MATTERS: identity first, coverage second. Computing the diff for a commit that
+  // is not this branch's ancestor fails inside git, and reporting that would mask the real
+  // problem ("this evidence is about a different commit").
+  validateEvidence(
+    evidence,
+    args.expectedCommit,
+    args.expectedBranch,
+    args.now,
+    bindingSeats,
+    ancestorCheck(root),
+    () => changedPathsSince(root, evidence && evidence.commit),
+  );
+}
+
+/** The command line, or a usage failure. */
+function parseArguments(argv) {
+  const [file, expectedCommit, expectedBranch, nowValue, projectRoot] = argv;
+  if (!file || !expectedCommit || !expectedBranch) {
+    fail('usage: validate-code-walkthrough.cjs <file> <commit> <branch> [now] [project-root].');
+  }
+  return {
+    file,
+    expectedCommit,
+    expectedBranch,
+    projectRoot,
+    now: nowValue === undefined ? Date.now() : parseTimestamp(nowValue, 'current time'),
+  };
+}
+
+/**
+ * A predicate that answers "is `commit` an ancestor of HEAD in this repository?".
+ *
+ * Resolved HERE rather than in the validator's core, so the identity rule stays
+ * testable without a git repository. A missing repository, a missing git, or a commit
+ * object that does not exist all answer `false`: the exact-match path still works, and
+ * the gate never PASSES on a lookup it could not perform.
+ */
+function ancestorCheck(root) {
+  // `root` is null when the caller passed no project-root, which is normal for an
+  // ad-hoc invocation. Falling back to `cwd` keeps the ancestor rule WORKING instead of
+  // silently reverting to exact-match only -- a check that quietly disables itself is
+  // the failure shape this repository keeps finding.
+  const cwd = root === null ? process.cwd() : root;
+  return (commit) => {
+    if (typeof commit !== 'string' || commit === '') return false;
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+        cwd,
+        stdio: 'ignore',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+}
+
+main();

@@ -506,8 +506,12 @@ function validateCoverage(evidence, changedPaths) {
   if (!Array.isArray(reviewed)) {
     fail('reviewed_paths must be an array of the paths this walkthrough read.');
   }
-  const seen = new Set(reviewed.map((p) => String(p).replace(/^\.\//, '')));
-  const missing = changed.filter((p) => !seen.has(p));
+  // BOTH sides normalised. Stripping `./` from `reviewed_paths` only meant a genuine
+  // `./src/x.ts` in the evidence failed to match git's `src/x.ts`, so a covered file was
+  // reported as missing and the push was blocked for nothing (review FC-03).
+  const normalise = (p) => String(p).replace(/^\.\//, '');
+  const seen = new Set(reviewed.map(normalise));
+  const missing = changed.map(normalise).filter((p) => !seen.has(p));
   if (missing.length > 0) {
     fail(
       `the walkthrough did not cover ${missing.length} changed path(s): `
