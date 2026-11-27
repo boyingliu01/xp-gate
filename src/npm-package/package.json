@@ -1,6 +1,6 @@
 {
   "name": "@boyingliu01/xp-gate",
-  "version": "0.39.0",
+  "version": "0.39.1",
   "description": "Deterministic quality gates for AI-generated code: 15 gates, Delphi review, sprint flow. Works with Claude Code, OpenCode, Qoder.",
   "bin": {
     "xp-gate": "bin/xp-gate.js"
