@@ -50,12 +50,9 @@ export function runGate3(input: GateInput): GateOutput {
   const early = earlyVerdict(input, startMs, messages);
   if (early) return early;
 
-  // PowerShell project: use PSScriptAnalyzer as alternative
-  if (isPowerShellProject(input.projectLang)) {
-    return runPowerShellComplexity(input, startMs, messages);
-  }
-
-  // Standard path: lizard
+  // No second PowerShell check: `earlyVerdict` already returned for that project type, so
+  // a branch here could never run (review technical MC-01). It read as a fallback and was
+  // not one.
   return runLizardPath(input, startMs, messages);
 }
 
