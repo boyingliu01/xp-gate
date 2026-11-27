@@ -173,7 +173,13 @@ function verifyRowCcn({ srcLines, name, ccn, lineNo, endNo }) {
   const startLine = Number(lineNo) || 0;
   const reportedSpan = endNo > startLine ? endNo - startLine + 1 : 0;
   const out = { ccn, inflated: false, corrected: false };
-  if (!isVerifiable(srcLines, startLine, ccn)) return out;
+  if (!isVerifiable(srcLines, startLine, ccn)) {
+    // A row we could not READ must not pass as verified. Returning `out` unchanged made an
+    // unreadable file indistinguishable from a clean one, and a low CCN is exactly where a
+    // silent under-count hides (review technical CI-01).
+    if (!srcLines || startLine <= 0) out.unlocatable = true;
+    return out;
+  }
   const recomputed = recomputeRow(srcLines, { name, startLine, reportedSpan });
   if (recomputed === null) {
     out.unlocatable = true;
