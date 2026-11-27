@@ -55,6 +55,27 @@ setup() {
   }
 }
 
+@test "AC-584-03: the pinned lizard version matches the CCN baseline analyzer" {
+  local pinned recorded
+  pinned=$(tr -d ' \t\r\n' < "$PIN_FILE")
+  recorded=$(node -e 'const b=require(process.argv[1]);process.stdout.write(b.analyzer?.version||"")' "$REPO_ROOT/.ccn-baseline.json")
+  [ "$recorded" = "$pinned" ] || {
+    echo ".lizard-version pins $pinned but .ccn-baseline.json was written by $recorded"
+    return 1
+  }
+}
+
+@test "AC-584-04: an installed lizard matches the repository pin" {
+  command -v lizard >/dev/null 2>&1 || skip "lizard is not installed"
+  local pinned installed
+  pinned=$(tr -d ' \t\r\n' < "$PIN_FILE")
+  installed=$(lizard --version)
+  [ "$installed" = "$pinned" ] || {
+    echo "installed lizard $installed does not match .lizard-version $pinned"
+    return 1
+  }
+}
+
 @test "AC-584-02: CI installs the pinned lizard version, in the job that runs Gate 3" {
   local pinned
   pinned=$(tr -d ' \t\r\n' < "$PIN_FILE" 2>/dev/null)
